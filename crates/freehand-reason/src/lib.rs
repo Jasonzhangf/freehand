@@ -238,6 +238,7 @@ mod tests {
         TerminalStatus, TokenUsage, ToolArgument, ToolCallContract, ToolCallId,
     };
     use freehand_provider_core::ProviderAdapterEvent;
+    use serde_json::json;
 
     fn start_input() -> TurnStartInput {
         TurnStartInput {
@@ -387,7 +388,7 @@ mod tests {
                     tool_name: "search".to_owned(),
                     arguments: vec![ToolArgument {
                         name: "query".to_owned(),
-                        value: "rust".to_owned(),
+                        value: json!("rust"),
                     }],
                     arguments_complete: true,
                 }),
@@ -400,8 +401,11 @@ mod tests {
                 ProviderAdapterEvent::Usage(TokenUsage {
                     input_tokens: 10,
                     output_tokens: 5,
+                    total_tokens: Some(15),
+                    reasoning_tokens: Some(4),
                     cache_creation_tokens: 0,
                     cache_read_tokens: 0,
+                    finish_reason: Some("stop".to_owned()),
                 }),
             ),
         );

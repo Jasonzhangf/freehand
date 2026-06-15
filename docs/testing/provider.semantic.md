@@ -10,6 +10,7 @@
 - white-box plan:
   - event mapping, capability declaration, recovery classification, retention rules
   - OpenAI `responses` protocol mapping
+  - OpenAI `chat completions` protocol admission in semantic request layer
 - module black-box plan:
   - provider semantic boundary emits expected unified events for stream and single-shot flows
 - project black-box impact:

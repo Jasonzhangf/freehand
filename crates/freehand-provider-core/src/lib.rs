@@ -18,6 +18,7 @@ pub enum ProviderFamily {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderProtocol {
     OpenAiResponses,
+    OpenAiChatCompletions,
     AnthropicMessages,
 }
 
@@ -107,18 +108,28 @@ pub fn build_semantic_request(
     debug: bool,
 ) -> Result<ProviderSemanticRequest, ProviderSemanticError> {
     match descriptor.protocol {
-        ProviderProtocol::OpenAiResponses | ProviderProtocol::AnthropicMessages => {
-            Ok(ProviderSemanticRequest {
-                descriptor,
-                payload,
-                raw_retention: if debug {
-                    RawRetentionPolicy::DebugOnly
-                } else {
-                    RawRetentionPolicy::DoNotRetain
-                },
-            })
-        }
+        ProviderProtocol::OpenAiResponses
+        | ProviderProtocol::OpenAiChatCompletions
+        | ProviderProtocol::AnthropicMessages => Ok(ProviderSemanticRequest {
+            descriptor,
+            payload,
+            raw_retention: if debug {
+                RawRetentionPolicy::DebugOnly
+            } else {
+                RawRetentionPolicy::DoNotRetain
+            },
+        }),
     }
+}
+
+pub fn map_adapter_events(
+    ctx: &ProviderEventContext,
+    events: impl IntoIterator<Item = ProviderAdapterEvent>,
+) -> Vec<ProviderSemanticOutput> {
+    events
+        .into_iter()
+        .map(|event| map_adapter_event(ctx, event))
+        .collect()
 }
 
 pub fn classify_provider_error(hint: ProviderErrorHint) -> ErrorContract {
@@ -274,6 +285,18 @@ mod tests {
     }
 
     #[test]
+    fn builds_openai_chat_completions_semantic_request() {
+        let mut descriptor = descriptor();
+        descriptor.protocol = ProviderProtocol::OpenAiChatCompletions;
+        let request = build_semantic_request(descriptor, payload(), false).expect("build request");
+        assert_eq!(
+            request.descriptor.protocol,
+            ProviderProtocol::OpenAiChatCompletions
+        );
+        assert_eq!(request.raw_retention, RawRetentionPolicy::DoNotRetain);
+    }
+
+    #[test]
     fn maps_reasoning_and_text_events_into_semantic_output() {
         let mapped = map_adapter_event(
             &ctx(),
@@ -307,7 +330,7 @@ mod tests {
                 tool_name: "web_search".to_owned(),
                 arguments: vec![ToolArgument {
                     name: "query".to_owned(),
-                    value: "rust".to_owned(),
+                    value: serde_json::json!("rust"),
                 }],
                 arguments_complete: false,
             }),
@@ -345,13 +368,18 @@ mod tests {
             ProviderAdapterEvent::Usage(TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,
+                total_tokens: Some(150),
+                reasoning_tokens: Some(25),
                 cache_creation_tokens: 20,
                 cache_read_tokens: 80,
+                finish_reason: Some("stop".to_owned()),
             }),
         );
         match mapped {
             ProviderSemanticOutput::Usage(event) => {
                 assert!((event.usage.cache_hit_rate() - 0.8).abs() < f64::EPSILON);
+                assert_eq!(event.usage.resolved_total_tokens(), 150);
+                assert_eq!(event.usage.finish_reason.as_deref(), Some("stop"));
             }
             other => panic!("unexpected output: {other:?}"),
         }

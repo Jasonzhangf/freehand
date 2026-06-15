@@ -1,7 +1,9 @@
 //! Shared pure builders, parsers, validators, and projectors for Freehand.
 
-use freehand_contracts::TerminalStatus;
+use freehand_contracts::{TerminalStatus, ToolArgument};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompletionClaim {
@@ -42,6 +44,14 @@ pub enum CompletionValidationError {
     EmptyField(&'static str),
     MissingNextStep,
     MissingBlockedReason,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ToolArgumentsJsonError {
+    #[error("tool arguments json parse failed: {0}")]
+    InvalidJson(String),
+    #[error("tool arguments json must be an object at the top level")]
+    TopLevelMustBeObject,
 }
 
 pub fn validate_completion_submission(
@@ -91,9 +101,42 @@ fn required_text(
     Ok(trimmed.to_owned())
 }
 
+pub fn parse_tool_arguments_json(input: &str) -> Result<Vec<ToolArgument>, ToolArgumentsJsonError> {
+    let value: Value = serde_json::from_str(input)
+        .map_err(|err| ToolArgumentsJsonError::InvalidJson(err.to_string()))?;
+    parse_tool_arguments_value(&value)
+}
+
+pub fn parse_tool_arguments_value(
+    value: &Value,
+) -> Result<Vec<ToolArgument>, ToolArgumentsJsonError> {
+    let object = value
+        .as_object()
+        .ok_or(ToolArgumentsJsonError::TopLevelMustBeObject)?;
+    Ok(object
+        .iter()
+        .map(|(name, value)| ToolArgument {
+            name: name.clone(),
+            value: value.clone(),
+        })
+        .collect())
+}
+
+pub fn render_tool_arguments_json(
+    arguments: &[ToolArgument],
+) -> Result<String, ToolArgumentsJsonError> {
+    let mut object = Map::new();
+    for argument in arguments {
+        object.insert(argument.name.clone(), argument.value.clone());
+    }
+    serde_json::to_string(&Value::Object(object))
+        .map_err(|err| ToolArgumentsJsonError::InvalidJson(err.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn accepts_completed_submission_with_terminal_text() {
@@ -158,5 +201,59 @@ mod tests {
             }
             other => panic!("unexpected decision: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_tool_arguments_json_into_structured_arguments() {
+        let arguments = parse_tool_arguments_json(r#"{"query":"rust","limit":3,"strict":true}"#)
+            .expect("valid");
+        assert_eq!(arguments.len(), 3);
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument.name == "query" && argument.value == json!("rust"))
+        );
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument.name == "limit" && argument.value == json!(3))
+        );
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument.name == "strict" && argument.value == json!(true))
+        );
+    }
+
+    #[test]
+    fn renders_tool_arguments_json_from_contract_arguments() {
+        let rendered = render_tool_arguments_json(&[
+            ToolArgument {
+                name: "query".to_owned(),
+                value: json!("rust"),
+            },
+            ToolArgument {
+                name: "filters".to_owned(),
+                value: json!({"fresh": true}),
+            },
+        ])
+        .expect("rendered");
+
+        let round_trip = parse_tool_arguments_json(&rendered).expect("round trip");
+        assert_eq!(round_trip.len(), 2);
+        assert!(round_trip.iter().any(|argument| {
+            argument.name == "filters" && argument.value == json!({"fresh": true})
+        }));
+    }
+
+    #[test]
+    fn parses_tool_arguments_directly_from_json_value() {
+        let arguments =
+            parse_tool_arguments_value(&json!({"query":"rust","filters":{"fresh":true}}))
+                .expect("valid");
+        assert_eq!(arguments.len(), 2);
+        assert!(arguments.iter().any(|argument| {
+            argument.name == "filters" && argument.value == json!({"fresh": true})
+        }));
     }
 }

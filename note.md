@@ -119,3 +119,10 @@
   - current baseline is semantic websocket pairing intent, not real socket IO
   - node status writes through `UiProtocolState` instead of duplicate storage
   - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, direct-message guardrails
+- 2026-06-15: provider adapter baseline landed
+  - added local `openai-chat-completions` protocol snapshot and updated provider skill routing
+  - `freehand-provider-openai` now renders/parses `responses` and `chat completions`
+  - `freehand-provider-anthropic` now renders/parses Messages single-shot and SSE
+  - partial tool arguments accumulate in adapter state and emit `arguments_complete=false` until valid completion
+  - shared `freehand-blocks` now owns tool-arguments JSON parsing/rendering
+  - shared contracts now preserve structured tool arguments and richer usage metadata

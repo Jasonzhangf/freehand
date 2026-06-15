@@ -1,0 +1,24 @@
+# Test Design: `provider.openai-adapter`
+
+- feature_id: `provider.openai-adapter`
+- owner: `crates/freehand-provider-openai`
+- lifecycle path under test:
+  - semantic request renders into `responses` or `chat completions`
+  - single-shot and stream outputs normalize into shared semantic events
+  - partial tool-call chunks accumulate until arguments become complete
+- white-box plan:
+  - request renderer, response parser, stream parser, partial tool accumulator
+- module black-box plan:
+  - adapter emits provider-neutral text/tool/usage/terminal/error outputs for both OpenAI protocols
+- project black-box impact:
+  - reason layer can consume OpenAI semantic outputs without protocol leakage
+- fixtures / replay inputs / runtime evidence paths:
+  - OpenAI request/response fixtures
+  - `~/.freehand/ledgers/providers/openai`
+  - `~/.freehand/replays/providers/openai`
+- known gaps:
+  - live HTTP execution is intentionally out of scope
+- sync status between design and implementation:
+  - `OpenAiAdapter` baseline implemented
+  - request rendering covers `responses` and `chat completions`
+  - single-shot and stream parsing cover text, tool calls, usage, terminal, and error paths

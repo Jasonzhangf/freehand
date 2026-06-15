@@ -17,6 +17,7 @@ Use this directory family for durable design truth.
 - `docs/design/config-core-design.md`
 - `docs/design/contracts-core-design.md`
 - `docs/design/provider-semantic-design.md`
+- `docs/design/provider-adapter-design.md`
 - `docs/design/reason-turn-design.md`
 - `docs/design/node-master-slave-design.md`
 - `docs/design/ui-protocol-design.md`
@@ -57,3 +58,5 @@ Use this directory family for durable design truth.
   - shared semantic contracts, pipeline node chains, IDs, error contracts, serialization rules
 - `provider-semantic-design.md`
   - provider scope, unified provider semantics, capabilities, error recovery, raw-vs-semantic event policy
+- `provider-adapter-design.md`
+  - OpenAI responses/chat-completions and Anthropic messages adapter boundaries, request renderers, and stream parsers

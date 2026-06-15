@@ -7,6 +7,7 @@ This directory stores local protocol-reference snapshots for provider developmen
 Current first-version references cover:
 
 - OpenAI Responses API
+- OpenAI Chat Completions API
 - Anthropic Messages API
 - Anthropic streaming messages
 - Anthropic tool use
@@ -23,6 +24,8 @@ Current first-version references cover:
 
 - `openai-responses.md`
   - request model, items vs messages, tools, stateful context, migration notes
+- `openai-chat-completions.md`
+  - chat messages request shape, tool calls, stream chunks, finish reasons
 - `anthropic-messages.md`
   - messages API shape, statelessness, stop reasons, streaming, tool-use loop
 

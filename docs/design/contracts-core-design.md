@@ -15,6 +15,7 @@ Included:
 - shared semantic request chain types
 - shared semantic response/event chain types
 - shared semantic tool-call and tool-result re-entry types
+- structured JSON-capable tool arguments
 - shared semantic reasoning-process node types
 - shared cross-module error contracts
 - module-level error base contracts
@@ -81,6 +82,12 @@ The first version locks these shared IDs:
 - serializable
 - replayable
 - persistable
+
+### Current shared tool and usage boundary
+
+- tool arguments preserve structured JSON values instead of flattening everything to strings
+- usage contracts may carry provider-supplied `total_tokens`, `reasoning_tokens`, and `finish_reason`
+- cache counters remain explicit so replay and cache-hit calculations do not depend on provider-specific DTOs
 
 ## Open Questions / TBD
 

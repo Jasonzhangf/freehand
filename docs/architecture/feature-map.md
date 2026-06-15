@@ -133,6 +133,76 @@ Use order:
   - replay/debug lifecycle stays valid
   - debug and non-debug retention policies remain explicit
 
+### `provider.openai-adapter`
+
+- owner: `crates/freehand-provider-openai`
+- allowed_paths: `crates/freehand-provider-openai/**`, `crates/freehand-provider-core/**`, `crates/freehand-blocks/**`, `docs/design/**`, `docs/references/provider-protocols/**`
+- forbidden_paths: `crates/freehand-ui-protocol/**`, `apps/**` except wiring-only integration tests
+- required_checks:
+  - `cargo test -p freehand-provider-openai`
+- required_white_box_tests:
+  - responses request renderer tests
+  - chat-completions request renderer tests
+  - responses single-shot parser tests
+  - chat-completions stream parser tests
+  - partial tool-call accumulation tests
+- required_module_black_box_tests:
+  - openai adapter emits unified semantic outputs for responses
+  - openai adapter emits unified semantic outputs for chat completions
+- required_project_black_box_tests:
+  - openai adapter to reason integration smoke
+- test_design_doc: `docs/testing/provider.openai-adapter.md`
+- function_map_doc: `docs/function-maps/provider.openai-adapter.md`
+- debug_artifacts:
+  - openai raw payload fixtures
+  - openai stream replay fixtures
+- runtime_paths:
+  - `~/.freehand/ledgers/providers/openai`
+  - `~/.freehand/replays/providers/openai`
+- update_triggers:
+  - openai protocol support changes
+  - responses/chat-completions render rules change
+  - stream chunk accumulation changes
+  - tool argument mapping changes
+- lifecycle_checks:
+  - responses and chat-completions boundaries remain explicit
+  - partial tool-call lifecycle is explicit
+  - adapter-private DTO boundary remains intact
+
+### `provider.anthropic-adapter`
+
+- owner: `crates/freehand-provider-anthropic`
+- allowed_paths: `crates/freehand-provider-anthropic/**`, `crates/freehand-provider-core/**`, `crates/freehand-blocks/**`, `docs/design/**`, `docs/references/provider-protocols/**`
+- forbidden_paths: `crates/freehand-ui-protocol/**`, `apps/**` except wiring-only integration tests
+- required_checks:
+  - `cargo test -p freehand-provider-anthropic`
+- required_white_box_tests:
+  - messages request renderer tests
+  - messages single-shot parser tests
+  - SSE stream parser tests
+  - tool-use and fine-grained tool-stream accumulation tests
+  - stop-reason mapping tests
+- required_module_black_box_tests:
+  - anthropic adapter emits unified semantic outputs for messages
+- required_project_black_box_tests:
+  - anthropic adapter to reason integration smoke
+- test_design_doc: `docs/testing/provider.anthropic-adapter.md`
+- function_map_doc: `docs/function-maps/provider.anthropic-adapter.md`
+- debug_artifacts:
+  - anthropic raw payload fixtures
+  - anthropic stream replay fixtures
+- runtime_paths:
+  - `~/.freehand/ledgers/providers/anthropic`
+  - `~/.freehand/replays/providers/anthropic`
+- update_triggers:
+  - anthropic messages render rules change
+  - tool-use stream accumulation changes
+  - stop-reason mapping changes
+- lifecycle_checks:
+  - messages stateless request boundary remains explicit
+  - partial tool-call lifecycle is explicit
+  - adapter-private DTO boundary remains intact
+
 ### `contracts.core`
 
 - owner: `crates/freehand-contracts`

@@ -1,6 +1,7 @@
 //! Global semantic contracts and pipeline node types for Freehand.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 macro_rules! id_type {
@@ -68,7 +69,7 @@ pub struct ReasonReq03ProviderPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolArgument {
     pub name: String,
-    pub value: String,
+    pub value: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,8 +110,11 @@ pub struct ReasonReq05ToolResultReentry {
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub total_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
+    pub finish_reason: Option<String>,
 }
 
 impl TokenUsage {
@@ -121,6 +125,11 @@ impl TokenUsage {
         } else {
             self.cache_read_tokens as f64 / total as f64
         }
+    }
+
+    pub fn resolved_total_tokens(&self) -> u64 {
+        self.total_tokens
+            .unwrap_or(self.input_tokens.saturating_add(self.output_tokens))
     }
 }
 
@@ -239,6 +248,7 @@ pub fn validate_reason_req01(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn sample_ids() -> (AgentId, SessionId, TurnId, TraceId, FeatureId) {
         (
@@ -330,9 +340,37 @@ mod tests {
         let usage = TokenUsage {
             input_tokens: 100,
             output_tokens: 50,
+            total_tokens: Some(150),
+            reasoning_tokens: Some(12),
             cache_creation_tokens: 20,
             cache_read_tokens: 80,
+            finish_reason: Some("stop".to_owned()),
         };
         assert!((usage.cache_hit_rate() - 0.8).abs() < f64::EPSILON);
+        assert_eq!(usage.resolved_total_tokens(), 150);
+        assert_eq!(usage.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn tool_argument_round_trip_preserves_structured_json_values() {
+        let tool_call = ToolCallContract {
+            tool_call_id: ToolCallId::new("tool-1"),
+            tool_name: "search".to_owned(),
+            arguments: vec![
+                ToolArgument {
+                    name: "query".to_owned(),
+                    value: json!("rust"),
+                },
+                ToolArgument {
+                    name: "filters".to_owned(),
+                    value: json!({"fresh": true, "count": 3}),
+                },
+            ],
+            arguments_complete: true,
+        };
+
+        let json = serde_json::to_string(&tool_call).expect("serialize");
+        let decoded: ToolCallContract = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded, tool_call);
     }
 }

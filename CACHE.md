@@ -32,3 +32,8 @@
   - `freehand-node` now models local one-master/one-slave runtime semantics
   - pairing success/failure, slave input lock, pairing-loss relisten, progress query, and slave turn subscription are covered
   - `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass
+- 2026-06-15: provider adapter baseline landed
+  - `freehand-provider-openai` now supports `responses` and `chat completions` request rendering plus single-shot/stream parsing
+  - `freehand-provider-anthropic` now supports Messages request rendering plus single-shot/SSE parsing
+  - shared contracts now preserve structured tool arguments and richer usage metadata
+  - `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo run -p xtask -- gates check` pass

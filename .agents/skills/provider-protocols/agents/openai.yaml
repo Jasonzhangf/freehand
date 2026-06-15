@@ -1,3 +1,3 @@
 display_name: Provider Protocols
-short_description: Local official-provider protocol snapshots for OpenAI Responses and Anthropic Messages/streaming/tool-use work.
+short_description: Local official-provider protocol snapshots for OpenAI Responses, OpenAI Chat Completions, and Anthropic Messages/streaming/tool-use work.
 default_prompt: Use local provider protocol references first. Read docs/references/provider-protocols/README.md and the matching provider snapshot before implementing or debugging provider behavior. Keep wire DTOs adapter-private and map only unified semantic events outward.

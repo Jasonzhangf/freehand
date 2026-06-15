@@ -6,8 +6,11 @@
   - shared semantic types serialize
   - replay and persistence boundaries remain stable
   - IDs and error contracts remain cross-module safe
+  - structured tool arguments and extended usage fields survive round-trip
 - white-box plan:
   - serialization, IDs, error base and cross-module contracts
+  - structured tool argument round-trip
+  - usage total/reasoning/finish-reason round-trip
 - module black-box plan:
   - replay fixture decode and encode compatibility through public contract boundary
 - project black-box impact:

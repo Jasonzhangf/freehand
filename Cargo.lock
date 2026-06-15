@@ -14,6 +14,8 @@ version = "0.1.0"
 dependencies = [
  "freehand-contracts",
  "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -65,8 +67,12 @@ dependencies = [
 name = "freehand-provider-anthropic"
 version = "0.1.0"
 dependencies = [
+ "freehand-blocks",
  "freehand-contracts",
  "freehand-provider-core",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -76,6 +82,7 @@ dependencies = [
  "freehand-blocks",
  "freehand-contracts",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -83,8 +90,12 @@ dependencies = [
 name = "freehand-provider-openai"
 version = "0.1.0"
 dependencies = [
+ "freehand-blocks",
  "freehand-contracts",
  "freehand-provider-core",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -95,6 +106,7 @@ dependencies = [
  "freehand-contracts",
  "freehand-provider-core",
  "freehand-ui-protocol",
+ "serde_json",
  "thiserror",
 ]
 

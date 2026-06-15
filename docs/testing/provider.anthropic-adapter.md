@@ -1,0 +1,24 @@
+# Test Design: `provider.anthropic-adapter`
+
+- feature_id: `provider.anthropic-adapter`
+- owner: `crates/freehand-provider-anthropic`
+- lifecycle path under test:
+  - semantic request renders into Messages API request
+  - single-shot and SSE outputs normalize into shared semantic events
+  - partial tool-use input accumulates until arguments become complete
+- white-box plan:
+  - request renderer, response parser, SSE parser, partial tool accumulator
+- module black-box plan:
+  - adapter emits provider-neutral text/tool/usage/terminal/error outputs for Anthropic messages
+- project black-box impact:
+  - reason layer can consume Anthropic semantic outputs without protocol leakage
+- fixtures / replay inputs / runtime evidence paths:
+  - Anthropic request/response fixtures
+  - `~/.freehand/ledgers/providers/anthropic`
+  - `~/.freehand/replays/providers/anthropic`
+- known gaps:
+  - live HTTP execution is intentionally out of scope
+- sync status between design and implementation:
+  - `AnthropicAdapter` baseline implemented
+  - request rendering covers Messages API with explicit `max_tokens` adapter config
+  - single-shot and stream parsing cover text, tool use, usage, terminal, and error paths

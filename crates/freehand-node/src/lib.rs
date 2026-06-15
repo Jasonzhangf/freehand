@@ -410,8 +410,11 @@ mod tests {
                 usage: TokenUsage {
                     input_tokens: 10,
                     output_tokens: 4,
+                    total_tokens: Some(14),
+                    reasoning_tokens: Some(2),
                     cache_creation_tokens: 0,
                     cache_read_tokens: 0,
+                    finish_reason: Some("stop".to_owned()),
                 },
             }],
             terminal_event: Some(ReasonResp03TerminalEvent {

@@ -12,6 +12,7 @@
   - `ReasonReq01UserRawInput`
   - `ReasonReq02ContextComposedInput`
   - `ReasonReq03ProviderPayload`
+  - `ToolArgument`
   - `ReasonResp01SemanticEvent`
   - `ErrorErr01RuntimeClassified`
   - `validate_reason_req01`
@@ -44,9 +45,10 @@
 | 01 | `ReasonReq01UserRawInput` | `crates/freehand-contracts/src/lib.rs` | define raw request node | request node spec | serializable request contract | all owner crates | contract module | bound |
 | 02 | `ReasonReq02ContextComposedInput` | `crates/freehand-contracts/src/lib.rs` | define composed request node | context-composed request spec | serializable request contract | reason/provider crates | contract module | bound |
 | 03 | `ReasonReq03ProviderPayload` | `crates/freehand-contracts/src/lib.rs` | define provider payload semantic node | provider payload spec | serializable request contract | reason/provider crates | contract module | bound |
-| 04 | `ReasonResp01SemanticEvent` | `crates/freehand-contracts/src/lib.rs` | define semantic response node | semantic event spec | serializable response contract | reason/ui/node crates | contract module | bound |
-| 05 | `ErrorErr01RuntimeClassified` | `crates/freehand-contracts/src/lib.rs` | define classified error node | error policy spec | serializable error contract | all owner crates | contract module | bound |
-| 06 | `validate_reason_req01` | `crates/freehand-contracts/src/lib.rs` | validate non-empty user input | raw request contract | validated request contract | request builders | shared validator | bound |
+| 04 | `ToolArgument` | `crates/freehand-contracts/src/lib.rs` | define shared structured tool-argument node | tool argument spec | serializable JSON-capable argument contract | provider/reason/ui crates | contract module | bound |
+| 05 | `ReasonResp01SemanticEvent` | `crates/freehand-contracts/src/lib.rs` | define semantic response node | semantic event spec | serializable response contract | reason/ui/node crates | contract module | bound |
+| 06 | `ErrorErr01RuntimeClassified` | `crates/freehand-contracts/src/lib.rs` | define classified error node | error policy spec | serializable error contract | all owner crates | contract module | bound |
+| 07 | `validate_reason_req01` | `crates/freehand-contracts/src/lib.rs` | validate non-empty user input | raw request contract | validated request contract | request builders | shared validator | bound |
 
 ## Sync Status Against Code
 

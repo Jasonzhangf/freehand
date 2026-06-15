@@ -12,6 +12,7 @@ Use this skill when implementing or debugging provider protocol behavior in Free
 1. Read `docs/references/provider-protocols/README.md`.
 2. Choose the matching local reference:
    - OpenAI Responses: `docs/references/provider-protocols/openai-responses.md`
+   - OpenAI Chat Completions: `docs/references/provider-protocols/openai-chat-completions.md`
    - Anthropic Messages: `docs/references/provider-protocols/anthropic-messages.md`
 3. Compare implementation against the local snapshot before inventing protocol behavior.
 4. If behavior is still ambiguous, verify against the official source URL listed in the snapshot.

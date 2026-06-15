@@ -16,6 +16,7 @@ First version formally supports:
 OpenAI-compatible first-version protocol support must explicitly include:
 
 - `responses`
+- `chat completions`
 
 ### Provider interface shape
 
