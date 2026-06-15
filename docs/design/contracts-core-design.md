@@ -84,8 +84,7 @@ The first version locks these shared IDs:
 
 ## Open Questions / TBD
 
-- exact node names and numbering for each chain
-- exact field sets for each chain node
+- exact field expansion beyond the current minimal shared request/response/error/tool contracts
 - exact relationship between semantic error nodes and module error base contracts
 - exact serialization format policy
 - exact compatibility/versioning policy for contract evolution
@@ -99,4 +98,3 @@ Update this doc when:
 - ID system changes
 - error contract policy changes
 - serialization requirements change
-

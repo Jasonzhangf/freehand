@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 freehand-contracts = { path = "../freehand-contracts" }
 freehand-blocks = { path = "../freehand-blocks" }
-
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"

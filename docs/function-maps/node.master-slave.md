@@ -2,39 +2,57 @@
 
 - feature_id: `node.master-slave`
 - owner crate: `crates/freehand-node`
-- owner module: `TBD until implementation lands`
+- owner module: `crates/freehand-node/src/lib.rs`
 - owner entry symbols:
-  - `TBD until implementation lands`
+  - `LocalNodeRuntime::new`
+  - `LocalNodeRuntime::pair_slave`
+  - `LocalNodeRuntime::lose_slave_pairing`
+  - `LocalNodeRuntime::delegate_task`
+  - `LocalNodeRuntime::send_direct_message`
+  - `LocalNodeRuntime::publish_slave_turn`
+  - `LocalNodeRuntime::query_node_status`
+  - `LocalNodeRuntime::query_task_progress`
 
 ## Request Mainline
 
 - local master accepts user input or task delegation intent
-- master may dispatch to the paired slave through WebSocket handshake topology
+- master may dispatch to the paired slave only after `LocalNodeRuntime::pair_slave`
+- slave accepts task/projection/message input only from the active paired source node
 
 ## Response Mainline
 
 - slave returns progress, status, direct conversation, or turn stream updates
-- master may subscribe to slave output while preserving node/source identity
+- `UiProtocolState` stores node status, progress, and latest slave turn
+- master may subscribe to slave output while preserving node/source identity through `UiProjection`
 
 ## Error Mainline
 
 - pairing failure, health failure, or unauthorized input to slave return explicit node errors
+- pairing rejection materializes node status as `rejected`
+- pairing loss materializes node status as `listening`
 - slave continues listening after pairing loss
 
 ## Shared Multi-Reference Functions
 
-- pending until implementation lands
+- `UiProtocolState::set_node_status`
+  - reused so node runtime writes status through UI protocol truth instead of duplicate caches
+- `UiProtocolState::set_progress`
+  - reused so progress query stays aligned with UI protocol query surface
+- `UiProtocolState::apply_turn_projection`
+  - reused so slave turn subscription and latest-turn query share one stored projection truth
 
 ## Function Call Table
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `TBD` | `TBD` | start agent node runtime | selected agent config | node runtime state | CLI/server | node bootstrap | binding pending |
-| 02 | `TBD` | `TBD` | perform websocket pairing | pairing intent | paired or rejected state | node bootstrap | handshake runtime | binding pending |
-| 03 | `TBD` | `TBD` | dispatch master task | task request | slave work request | master runtime | slave channel | binding pending |
-| 04 | `TBD` | `TBD` | return slave progress/status | slave state | node projection | slave runtime | query/subscription surface | binding pending |
+| 01 | `LocalNodeRuntime::new` | `crates/freehand-node/src/lib.rs` | validate local one-master/one-slave bootstrap and seed listening state | master/slave runtime config | node runtime with listening status | CLI/server wiring | node runtime bootstrap | bound |
+| 02 | `LocalNodeRuntime::pair_slave` | `crates/freehand-node/src/lib.rs` | validate websocket pairing source/ip/token and materialize paired or rejected status | pairing request | paired or rejected node status | master runtime | slave runtime state | bound |
+| 03 | `LocalNodeRuntime::delegate_task` | `crates/freehand-node/src/lib.rs` | accept master delegated task and materialize progress snapshot | delegated task intent | progress projection | master runtime | slave progress truth | bound |
+| 04 | `LocalNodeRuntime::publish_slave_turn` | `crates/freehand-node/src/lib.rs` | accept authorized slave turn projection and publish to subscribers | slave turn projection | UI turn projection stream | slave runtime | subscribed master/UI surfaces | bound |
+| 05 | `LocalNodeRuntime::query_node_status` | `crates/freehand-node/src/lib.rs` | expose latest slave node status snapshot | node id | node status snapshot | query surface | `UiProtocolState` | bound |
+| 06 | `LocalNodeRuntime::query_task_progress` | `crates/freehand-node/src/lib.rs` | expose latest delegated task progress snapshot | turn id | progress snapshot | query surface | `UiProtocolState` | bound |
 
 ## Sync Status Against Code
 
-- design stub only
-- implementation binding pending
+- function-map bindings now match `LocalNodeRuntime` baseline
+- real websocket IO adapter remains intentionally out of scope for this first runtime semantic layer

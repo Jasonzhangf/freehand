@@ -2,7 +2,14 @@
 
 ## Status
 
-Confirmed discussion only. Unconfirmed details remain `TBD`.
+First baseline is now implemented as a local in-memory runtime model.
+
+Important boundary:
+
+- implemented: node lifecycle semantics, pairing validation, permission lock, status/progress/turn projection
+- not implemented yet: real socket IO adapter and finalized wire schema
+
+This keeps first-version truth explicit without inventing transport details that are still `TBD`.
 
 ## Confirmed
 
@@ -17,7 +24,9 @@ Remote multi-slave topology is not part of current first version.
 
 ### Pairing transport
 
-- `master` and `slave` pair through WebSocket handshake
+- `master` and `slave` pair through WebSocket handshake semantics
+- current code models this as `PairingTransport::WebSocket`
+- real websocket server/client wiring is a later transport-layer step
 
 ### Pairing source rule
 
@@ -43,12 +52,11 @@ Confirmed interaction modes:
 
 ### Delegation granularity
 
-Confirmed so far:
+Current code baseline:
 
-- master sends delegated tasks to slave
-- progress is visible during execution
-
-Exact task granularity boundary remains `TBD`.
+- master sends delegated task intent with `session_id`, `turn_id`, and progress text
+- slave records progress snapshot keyed by `turn_id`
+- exact task payload schema beyond that remains `TBD`
 
 ### Node state visibility
 
@@ -63,14 +71,26 @@ At minimum, node state must support:
 
 Suggested state family is not final yet, but status must cover those concerns.
 
+## Implemented Runtime Binding
+
+- owner crate: `crates/freehand-node`
+- owner type: `LocalNodeRuntime`
+- bound symbols:
+  - `LocalNodeRuntime::new`
+  - `LocalNodeRuntime::pair_slave`
+  - `LocalNodeRuntime::lose_slave_pairing`
+  - `LocalNodeRuntime::delegate_task`
+  - `LocalNodeRuntime::send_direct_message`
+  - `LocalNodeRuntime::publish_slave_turn`
+  - `LocalNodeRuntime::query_node_status`
+  - `LocalNodeRuntime::query_task_progress`
+
 ## Open Questions / TBD
 
-- exact WebSocket handshake schema
-- exact delegated task granularity
-- exact state enum names
-- exact progress query protocol
-- exact turn-subscription wire shape between master and slave
-- exact reconnect semantics after pairing loss
+- exact real WebSocket wire schema
+- exact delegated task payload beyond current baseline
+- exact reconnect/heartbeat timing policy
+- exact remote multi-node topology after local first version
 
 ## Update trigger
 
@@ -81,4 +101,3 @@ Update this doc when:
 - pairing source rules change
 - node state model changes
 - task delegation model changes
-

@@ -9,4 +9,4 @@ freehand-contracts = { path = "../freehand-contracts" }
 freehand-blocks = { path = "../freehand-blocks" }
 freehand-provider-core = { path = "../freehand-provider-core" }
 freehand-ui-protocol = { path = "../freehand-ui-protocol" }
-
+thiserror = "2"

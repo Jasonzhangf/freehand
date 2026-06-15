@@ -13,6 +13,10 @@ First version formally supports:
 - OpenAI-compatible providers
 - Anthropic providers
 
+OpenAI-compatible first-version protocol support must explicitly include:
+
+- `responses`
+
 ### Provider interface shape
 
 First version requires both:
@@ -118,6 +122,7 @@ First version must explicitly declare these capabilities:
 
 - provider payload wire DTOs stay private to provider adapters
 - `contracts.core` holds semantic request nodes, not provider wire payload structs
+- `responses` protocol wire events and DTOs remain adapter-private even when their semantic output is supported system-wide
 
 ### Provider registration
 
@@ -143,4 +148,3 @@ Update this doc when:
 - error recovery policy changes
 - raw retention policy changes
 - provider registration model changes
-

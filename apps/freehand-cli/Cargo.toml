@@ -8,4 +8,3 @@ license.workspace = true
 freehand-config = { path = "../../crates/freehand-config" }
 freehand-reason = { path = "../../crates/freehand-reason" }
 freehand-node = { path = "../../crates/freehand-node" }
-

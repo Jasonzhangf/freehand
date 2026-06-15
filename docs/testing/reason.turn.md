@@ -20,4 +20,4 @@
 - known gaps:
   - completion schema fixture format not yet defined
 - sync status between design and implementation:
-  - design stub prepared; implementation pending
+  - turn truth, completion validation, tool-result re-entry, and non-blocking broadcast baseline landed

@@ -54,6 +54,7 @@ Use this skill for any non-trivial work in this repo.
   - runtime docs: `docs/runtime/`
   - config docs: `docs/config/`
   - design docs: `docs/design/`
+  - provider protocol references: `docs/references/provider-protocols/`
 - Config source:
   - `~/.freehand/config.toml`
   - multi-agent layout uses `[agents.<name>]`
@@ -99,6 +100,7 @@ Use this skill for any non-trivial work in this repo.
 - function-call tables must bind to code symbols or explicitly say implementation binding is still pending.
 - New features and bug fixes both require lifecycle thinking, not just local code patches.
 - In provider work, preserve raw provider events in debug mode and rely on unified semantic events for normal operation.
+- In provider work, read local official protocol snapshots under `docs/references/provider-protocols/` before inventing wire behavior.
 - In reason-turn work, provider `finish_reason=stop/end_turn` is not enough to stop. Completion schema decides stop.
 - In UI protocol work, query and subscribe must stay separate, and source identity fields must remain explicit.
 - Shared contract types should default to serializable, replayable, and persistable unless a higher-priority truth source says otherwise.

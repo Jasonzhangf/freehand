@@ -17,6 +17,6 @@
   - config fixtures under crate test fixtures
   - runtime evidence under `~/.freehand/state/config`
 - known gaps:
-  - implementation not landed yet
+  - project black-box harness is still minimal
 - sync status between design and implementation:
-  - design stub prepared; implementation pending
+  - white-box, module black-box, and project black-box baseline landed

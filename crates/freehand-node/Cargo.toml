@@ -8,4 +8,4 @@ license.workspace = true
 freehand-contracts = { path = "../freehand-contracts" }
 freehand-reason = { path = "../freehand-reason" }
 freehand-ui-protocol = { path = "../freehand-ui-protocol" }
-
+thiserror = "2.0.17"

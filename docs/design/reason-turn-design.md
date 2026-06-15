@@ -47,6 +47,7 @@ First version terminal classes are explicitly distinct:
 
 - success
 - tool_pending / needs_tool_result
+- blocked
 - interrupted
 - failed
 - cancelled
@@ -86,7 +87,6 @@ Confirmed terminal evaluation rules:
 ## Open Questions / TBD
 
 - exact per-turn storage schema
-- exact completion schema field names and validation rules
 - exact format for terminal text composition from summary and evidence
 - exact retry/reprompt limit for invalid completion schema
 - exact mapping between terminal classes and persisted turn outcome records
@@ -100,4 +100,3 @@ Update this doc when:
 - subscriber policy changes
 - stop/completion schema rules change
 - terminal class policy changes
-

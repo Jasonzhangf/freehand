@@ -2,13 +2,16 @@
 
 - feature_id: `provider.semantic`
 - owner crate: `crates/freehand-provider-core`
-- owner module: `TBD until implementation lands`
+- owner module: `crates/freehand-provider-core/src/lib.rs`
 - owner entry symbols:
-  - `TBD until implementation lands`
+  - `build_semantic_request`
+  - `map_adapter_event`
+  - `classify_provider_error`
 
 ## Request Mainline
 
 - normalized provider request enters provider semantic boundary
+- OpenAI-compatible request path explicitly supports `responses`
 - provider-specific adapters render wire payloads without leaking adapter DTOs outside adapter crates
 
 ## Response Mainline
@@ -24,19 +27,21 @@
 
 ## Shared Multi-Reference Functions
 
-- pending until implementation lands
+- `classify_provider_error`
+  - owner: `crates/freehand-provider-core/src/lib.rs`
+  - purpose: unify provider failures into shared recovery/error contract
+  - allowed callers: provider adapters, tests
+  - related tests: periodic recovery classification tests
+  - why shared: keeps recovery policy centralized instead of duplicated per adapter
 
 ## Function Call Table
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `TBD` | `TBD` | accept normalized provider request | semantic request | adapter-ready request | reason/orchestrator | provider core boundary | binding pending |
-| 02 | `TBD` | `TBD` | render provider wire payload | adapter-ready request | provider payload | provider core | adapter block | binding pending |
-| 03 | `TBD` | `TBD` | parse provider event stream | provider raw events | raw adapter events | adapter runtime | adapter parser | binding pending |
-| 04 | `TBD` | `TBD` | unify semantic event | raw adapter events | semantic events | adapter parser | semantic mapper | binding pending |
-| 05 | `TBD` | `TBD` | classify provider error | provider failure | unified error contract | adapter/runtime | error classifier | binding pending |
+| 01 | `build_semantic_request` | `crates/freehand-provider-core/src/lib.rs` | build semantic provider request and retention policy | semantic request + debug flag | provider semantic request | reason/orchestrator | provider core boundary | bound |
+| 02 | `map_adapter_event` | `crates/freehand-provider-core/src/lib.rs` | map normalized adapter event into shared semantic output | normalized adapter event | semantic output | adapter runtime | semantic mapper | bound |
+| 03 | `classify_provider_error` | `crates/freehand-provider-core/src/lib.rs` | classify provider failure into shared error contract | provider error hint | unified error contract | adapter/runtime | error classifier | bound |
 
 ## Sync Status Against Code
 
-- design stub only
-- implementation binding pending
+- semantic request builder, event mapper, and error classifier are bound in code

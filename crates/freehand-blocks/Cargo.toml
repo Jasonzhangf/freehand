@@ -6,4 +6,4 @@ license.workspace = true
 
 [dependencies]
 freehand-contracts = { path = "../freehand-contracts" }
-
+serde = { version = "1", features = ["derive"] }

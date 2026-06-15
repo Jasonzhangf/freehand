@@ -19,6 +19,6 @@
   - node status snapshots
   - `~/.freehand/replays/ui`
 - known gaps:
-  - concrete command/projection schema not yet landed
+  - command surface is baseline only; transport binding not yet landed
 - sync status between design and implementation:
-  - design stub prepared; implementation pending
+  - command/query/subscribe/projection baseline landed

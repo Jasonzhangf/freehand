@@ -57,6 +57,9 @@ Confirmed discussion only. Unconfirmed details remain `TBD`.
 - whether `name` is duplicated inside `[agents.<name>]` or derived from table key
 - whether `pair_token` is required for `master`, `slave`, or both
 - config validation error projection format
+- `name` is validated against the `[agents.<name>]` table key
+- `pair_token` is required for both `master` and `slave`
+- `pair_token` is the environment variable name, resolved at startup selection time
 
 ## Update trigger
 
@@ -66,4 +69,3 @@ Update this doc when:
 - agent table layout changes
 - required field set changes
 - startup/restart semantics change
-

@@ -2,9 +2,14 @@
 
 - feature_id: `config.core`
 - owner crate: `crates/freehand-config`
-- owner module: `TBD until implementation lands`
+- owner module: `crates/freehand-config/src/lib.rs`
 - owner entry symbols:
-  - `TBD until implementation lands`
+  - `default_config_path`
+  - `load_default_config`
+  - `load_config_from_path`
+  - `LoadedConfig::select_agent`
+  - `parse_config`
+  - `validate_config`
 
 ## Request Mainline
 
@@ -24,18 +29,19 @@
 
 ## Shared Multi-Reference Functions
 
-- pending until implementation lands
+- none
 
 ## Function Call Table
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `TBD` | `TBD` | load config file | config path | raw config text | CLI/server startup | config loader | binding pending |
-| 02 | `TBD` | `TBD` | parse config | raw config text | parsed config tree | config loader | parser | binding pending |
-| 03 | `TBD` | `TBD` | select named agent | parsed config tree + agent name | one agent config | startup orchestration | selector | binding pending |
-| 04 | `TBD` | `TBD` | validate startup config | one agent config | validated runtime config | selector | validator | binding pending |
+| 01 | `default_config_path` | `crates/freehand-config/src/lib.rs` | resolve default config path | HOME env | config path | startup orchestration | path resolver | bound |
+| 02 | `load_default_config` | `crates/freehand-config/src/lib.rs` | load default config file | default path | loaded config | CLI/server startup | file loader | bound |
+| 03 | `load_config_from_path` | `crates/freehand-config/src/lib.rs` | read config file | explicit path | loaded config | CLI/tests | parser entry | bound |
+| 04 | `parse_config` | `crates/freehand-config/src/lib.rs` | parse raw TOML into typed config | raw config text | raw parsed config | file loader | TOML parser | bound |
+| 05 | `validate_config` | `crates/freehand-config/src/lib.rs` | validate config invariants | raw parsed config | validated loaded config | parser | validator | bound |
+| 06 | `LoadedConfig::select_agent` | `crates/freehand-config/src/lib.rs` | select and resolve one agent | agent name + env | selected agent config | CLI/server startup | env resolver | bound |
 
 ## Sync Status Against Code
 
-- design stub only
-- implementation binding pending
+- code binding landed for config loader, parser, validator, and agent selector

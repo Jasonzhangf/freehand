@@ -2,9 +2,12 @@
 
 - feature_id: `reason.turn`
 - owner crate: `crates/freehand-reason`
-- owner module: `TBD until implementation lands`
+- owner module: `crates/freehand-reason/src/lib.rs`
 - owner entry symbols:
-  - `TBD until implementation lands`
+  - `ReasonTurnEngine::start_turn`
+  - `ReasonTurnEngine::apply_provider_output`
+  - `ReasonTurnEngine::submit_completion`
+  - `ReasonTurnEngine::project_session`
 
 ## Request Mainline
 
@@ -25,19 +28,23 @@
 
 ## Shared Multi-Reference Functions
 
-- pending until implementation lands
+- `validate_completion_submission`
+  - owner: `crates/freehand-blocks/src/lib.rs`
+  - purpose: shared pure completion-schema validator for terminal acceptance
+  - allowed callers: reason orchestrator, tests
+  - related tests: completion acceptance, invalid schema rejection, blocked terminal tests
+  - why shared: keeps terminal validation semantics out of orchestrator glue
 
 ## Function Call Table
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `TBD` | `TBD` | create turn context | user input + session state | rendered turn input | CLI/server/node | reason orchestrator | binding pending |
-| 02 | `TBD` | `TBD` | dispatch provider request | rendered turn input | provider semantic stream | reason orchestrator | provider boundary | binding pending |
-| 03 | `TBD` | `TBD` | materialize turn truth | semantic events | persisted turn state | provider boundary | turn state writer | binding pending |
-| 04 | `TBD` | `TBD` | validate terminal schema | candidate terminal payload | accepted terminal outcome or rejection | turn state writer | terminal validator | binding pending |
-| 05 | `TBD` | `TBD` | broadcast semantic event | turn truth delta | subscriber events | turn state writer | event bus | binding pending |
+| 01 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create per-turn truth container and provider payload | user input + session state | initialized turn record | CLI/server/node | reason orchestrator | bound |
+| 02 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | materialize provider semantic output into turn truth | provider semantic output | updated turn state | provider boundary | turn state writer | bound |
+| 03 | `validate_completion_submission` | `crates/freehand-blocks/src/lib.rs` | validate completion schema | completion submission | completion decision or rejection | turn state writer | terminal validator | bound |
+| 04 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | accept or reject terminal outcome | candidate completion payload | terminal event or rejection | turn state writer | terminal validator | bound |
+| 05 | `ReasonTurnEngine::project_session` | `crates/freehand-reason/src/lib.rs` | project conversation view from turns | turn records | projected session view | UI/session consumers | projector | bound |
 
 ## Sync Status Against Code
 
-- design stub only
-- implementation binding pending
+- turn startup, provider-output materialization, completion validation, and session projection are bound in code

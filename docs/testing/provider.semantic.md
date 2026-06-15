@@ -9,6 +9,7 @@
   - recovery classification remains explicit
 - white-box plan:
   - event mapping, capability declaration, recovery classification, retention rules
+  - OpenAI `responses` protocol mapping
 - module black-box plan:
   - provider semantic boundary emits expected unified events for stream and single-shot flows
 - project black-box impact:
@@ -20,4 +21,4 @@
 - known gaps:
   - adapter-specific fixture catalog not yet defined
 - sync status between design and implementation:
-  - design stub prepared; implementation pending
+  - semantic request builder, event mapping, and error classification baseline landed

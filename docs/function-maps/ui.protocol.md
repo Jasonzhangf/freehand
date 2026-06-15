@@ -2,9 +2,14 @@
 
 - feature_id: `ui.protocol`
 - owner crate: `crates/freehand-ui-protocol`
-- owner module: `TBD until implementation lands`
+- owner module: `crates/freehand-ui-protocol/src/lib.rs`
 - owner entry symbols:
-  - `TBD until implementation lands`
+  - `validate_command`
+  - `subscription_selector`
+  - `subscription_matches`
+  - `turn_projection_from_events`
+  - `terminal_text_projection`
+  - `UiProtocolState::query`
 
 ## Request Mainline
 
@@ -26,18 +31,24 @@
 
 ## Shared Multi-Reference Functions
 
-- pending until implementation lands
+- `terminal_text_projection`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: collapse terminal event to final user-visible text
+  - allowed callers: query handlers, stream handlers, CLI/WebUI adapters
+  - related tests: terminal result projection smoke
+  - why shared: ensures CLI and WebUI project the same terminal text truth
 
 ## Function Call Table
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `TBD` | `TBD` | accept UI command | command payload | protocol command object | CLI/WebUI | protocol boundary | binding pending |
-| 02 | `TBD` | `TBD` | execute query path | query command | snapshot projection | protocol boundary | query handler | binding pending |
-| 03 | `TBD` | `TBD` | execute subscribe path | subscribe command | incremental stream | protocol boundary | stream handler | binding pending |
-| 04 | `TBD` | `TBD` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector | binding pending |
+| 01 | `validate_command` | `crates/freehand-ui-protocol/src/lib.rs` | accept and validate UI command payload | UI command | validated command | CLI/WebUI | protocol boundary | bound |
+| 02 | `UiProtocolState::query` | `crates/freehand-ui-protocol/src/lib.rs` | execute query path | query command | snapshot projection | protocol boundary | query handler | bound |
+| 03 | `subscription_selector` | `crates/freehand-ui-protocol/src/lib.rs` | build subscribe selector | subscribe command | subscription selector | protocol boundary | stream handler | bound |
+| 04 | `subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route incremental projection to matching subscription | subscription selector + projection | delivery decision | stream handler | selector matcher | bound |
+| 05 | `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | project turn state into UI snapshot | semantic/tool/usage/terminal/error inputs | UI turn projection | query/stream handler | projector | bound |
+| 06 | `terminal_text_projection` | `crates/freehand-ui-protocol/src/lib.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector | bound |
 
 ## Sync Status Against Code
 
-- design stub only
-- implementation binding pending
+- command validation, query selection, subscription routing, and turn projection are bound in code

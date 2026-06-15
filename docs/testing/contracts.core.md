@@ -18,4 +18,4 @@
 - known gaps:
   - versioning policy tests not yet defined
 - sync status between design and implementation:
-  - design stub prepared; implementation pending
+  - shared IDs, request/response/error contracts, and serialization baseline landed

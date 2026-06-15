@@ -90,3 +90,32 @@
   - `function-map` owns code-bound request/response/error mainlines and call tables
   - multi-reference shared functions must be described once with owner and caller constraints
   - function-map docs must evolve with code and may not fake symbol bindings before implementation exists
+- 2026-06-15: config.core implementation landed
+  - `freehand-config` now loads only `~/.freehand/config.toml`
+  - validates `[agents.<name>]`, requires `name`, `mode`, `pair_token`
+  - `name` must match table key
+  - `pair_token` is env-var name and resolves during agent selection
+  - `freehand-cli --agent <name>` now exercises default config-path startup selection
+  - white-box, module black-box, and project black-box baseline tests pass
+- 2026-06-15: contracts.core implementation landed
+  - shared ID newtypes added for `agent/session/turn/trace/feature`
+  - first shared request nodes, semantic response node, usage, terminal, tool call/result, and error contracts added
+  - serialization baseline and request validation landed in `freehand-contracts`
+  - function-map bindings updated from pending to concrete symbols
+- 2026-06-15: provider.semantic baseline landed
+  - OpenAI-compatible side explicitly locked to `responses`
+  - provider-core now defines provider family/protocol/capabilities/raw-retention and semantic request builder
+  - normalized adapter events map into shared semantic outputs
+  - provider recovery classification baseline landed
+  - local provider protocol reference snapshots and query skill added
+- 2026-06-15: reason.turn baseline landed
+  - turn truth now materializes per turn in `freehand-reason`
+  - completion schema validation moved to `freehand-blocks`
+  - provider terminal events no longer auto-stop turns
+  - valid completion emits terminal, blocked emits blocked terminal, invalid schema rejects, next-step requests continue
+  - non-blocking broadcast path for reasoning/text/tool/usage/terminal/error is covered by tests
+- 2026-06-15: node.master-slave baseline landed
+  - `freehand-node` now has `LocalNodeRuntime` as first code-bound owner
+  - current baseline is semantic websocket pairing intent, not real socket IO
+  - node status writes through `UiProtocolState` instead of duplicate storage
+  - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, direct-message guardrails

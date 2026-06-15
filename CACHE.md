@@ -14,3 +14,21 @@
   - feature map now points to per-feature `function_map_doc`
   - `docs/function-maps/` holds code-bound mainline docs and call-table stubs
   - `xtask` gate requires function-map routing and policy snippets
+- 2026-06-15: config.core first implementation landed
+  - `freehand-config` implemented with parse/validate/select flow
+  - `freehand-cli --agent <name>` added as startup smoke for default config path
+  - full `make ci` passes with config white-box + module black-box + project black-box baseline
+- 2026-06-15: contracts.core first implementation landed
+  - `freehand-contracts` now has shared IDs, request/response/error/tool contracts
+  - targeted contract tests and full `make ci` pass
+- 2026-06-15: provider.semantic first baseline landed
+  - `freehand-provider-core` now models responses/messages semantic mapping and recovery policy
+  - local provider protocol snapshots + skill added
+  - full `make ci` passes
+- 2026-06-15: reason.turn first baseline landed
+  - `freehand-reason` now owns turn truth, completion handling, and non-blocking broadcast
+  - full `make ci` passes
+- 2026-06-15: node.master-slave first baseline landed
+  - `freehand-node` now models local one-master/one-slave runtime semantics
+  - pairing success/failure, slave input lock, pairing-loss relisten, progress query, and slave turn subscription are covered
+  - `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass

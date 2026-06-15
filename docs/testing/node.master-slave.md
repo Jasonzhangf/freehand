@@ -9,8 +9,11 @@
   - status and progress query remain available
 - white-box plan:
   - pairing state transitions, permission checks, handshake validation, relisten behavior
+  - config bootstrap validation for master/slave ownership fields
+  - direct-message permission validation
 - module black-box plan:
   - status snapshot and progress query through node boundary
+  - slave turn publication visible through subscription surface
 - project black-box impact:
   - master can delegate work and subscribe to slave turn stream through runtime wiring
 - fixtures / replay inputs / runtime evidence paths:
@@ -19,6 +22,8 @@
   - `~/.freehand/state/nodes`
   - `~/.freehand/replays/nodes`
 - known gaps:
+  - real websocket transport IO is not implemented yet
   - transport heartbeat and reconnect timing policy not yet defined
 - sync status between design and implementation:
-  - design stub prepared; implementation pending
+  - `LocalNodeRuntime` baseline implemented
+  - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, and direct-message guardrails
