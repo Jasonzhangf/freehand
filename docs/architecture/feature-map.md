@@ -622,6 +622,38 @@ Use order:
   - CLI/WebUI divergence remains protocol-safe
   - terminal text projection remains closed-loop
 
+### `app.webui-smoke`
+
+- owner: `apps/freehand-server`
+- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/goals/**`
+- forbidden_paths: `crates/freehand-provider-*/**`, `crates/freehand-reason/**`, `crates/freehand-node/**` except consuming already-owned UI protocol projections
+- required_checks:
+  - `cargo test -p freehand-server`
+- required_white_box_tests:
+  - none beyond app boundary rendering helpers
+- required_module_black_box_tests:
+  - WebUI query projection smoke
+  - WebUI slave-card render smoke
+  - CLI/WebUI divergence smoke via protocol projection
+- required_project_black_box_tests:
+  - app boundary WebUI consumes `freehand-ui-protocol` projection truth without provider/reason imports
+- test_design_doc: `docs/testing/app.webui-smoke.md`
+- function_map_doc: `docs/function-maps/app.webui-smoke.md`
+- debug_artifacts:
+  - WebUI smoke stdout fixture
+- runtime_paths:
+  - `~/.freehand/state/ui`
+  - `~/.freehand/replays/ui`
+- update_triggers:
+  - WebUI command shape changes
+  - WebUI projection shape changes
+  - UI protocol projection rules change
+- lifecycle_checks:
+  - WebUI remains app/render boundary only
+  - WebUI consumes `freehand-ui-protocol` truth
+  - query and subscribe remain protocol-owned
+  - slave-card divergence remains protocol-safe
+
 ### `node.master-slave`
 
 - owner: `crates/freehand-node`

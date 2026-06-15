@@ -1,0 +1,25 @@
+# Test Design: `app.webui-smoke`
+
+- feature_id: `app.webui-smoke`
+- owner: `apps/freehand-server`
+- lifecycle path under test:
+  - app boundary receives protocol-owned query/projection truth
+  - app boundary renders terminal text projection
+  - app boundary renders slave-card visibility only for WebUI
+  - CLI and WebUI divergences stay protocol-safe
+- white-box plan:
+  - minimal render helper and protocol-ownership glue
+- module black-box plan:
+  - WebUI query projection smoke
+  - WebUI slave-card render smoke
+  - CLI/WebUI divergence smoke via protocol projection
+- project black-box impact:
+  - app boundary proves WebUI can consume `freehand-ui-protocol` without owning reason/provider semantics
+- fixtures / replay inputs / runtime evidence paths:
+  - `~/.freehand/state/ui`
+  - `~/.freehand/replays/ui`
+  - WebUI smoke stdout fixture
+- known gaps:
+  - transport binding is intentionally minimal for first step
+- sync status between design and implementation:
+  - design is newly locked before app implementation

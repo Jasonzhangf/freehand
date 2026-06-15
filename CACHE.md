@@ -128,3 +128,8 @@
   - `freehand-cli reason-live` now supports runtime-home persistence, optional `--session`, tool execution summary, and restore status reporting
   - `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass with `137` tests
   - real provider smoke on configured Anthropic-compatible `minimonth` passed for new session and restored-existing session
+- 2026-06-16: app.webui-smoke baseline landed
+  - `freehand-server webui-smoke` now renders a minimal HTML smoke from `freehand-ui-protocol` truth
+  - WebUI projection shows latest active turn terminal text and slave card; CLI projection hides slave card through `turn_projection_for_client`
+  - `ui.protocol` and `app.webui-smoke` function maps/test designs are synced
+  - `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass with `138` tests

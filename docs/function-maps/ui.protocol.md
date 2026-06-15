@@ -10,6 +10,7 @@
   - `turn_projection_from_events`
   - `terminal_text_projection`
   - `UiProtocolState::query`
+  - `turn_projection_for_client`
 
 ## Request Mainline
 
@@ -23,6 +24,7 @@
 - subscribe returns incremental projections
 - terminal completion shows only final projected text
 - slave turn may surface as WebUI-only separate card while staying in one protocol truth
+- client-specific projection gating stays inside the protocol owner, not in apps
 
 ## Error Mainline
 
@@ -37,6 +39,12 @@
   - allowed callers: query handlers, stream handlers, CLI/WebUI adapters
   - related tests: terminal result projection smoke
   - why shared: ensures CLI and WebUI project the same terminal text truth
+- `turn_projection_for_client`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: gate slave substream visibility by UI client kind without changing turn truth
+  - allowed callers: CLI/WebUI adapters, query handlers
+  - related tests: slave turn subscription smoke
+  - why shared: keeps client-specific projection rules centralized and protocol-owned
 
 ## Function Call Table
 
@@ -48,7 +56,9 @@
 | 04 | `subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route incremental projection to matching subscription | subscription selector + projection | delivery decision | stream handler | selector matcher | bound |
 | 05 | `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | project turn state into UI snapshot | semantic/tool/usage/terminal/error inputs | UI turn projection | query/stream handler | projector | bound |
 | 06 | `terminal_text_projection` | `crates/freehand-ui-protocol/src/lib.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector | bound |
+| 07 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate client-specific slave substream visibility | turn projection + client kind | client-specific turn projection | CLI/WebUI adapter | projector | bound |
 
 ## Sync Status Against Code
 
 - command validation, query selection, subscription routing, and turn projection are bound in code
+- client-specific projection gating is now also bound in code

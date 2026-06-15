@@ -255,3 +255,8 @@
   - workspace verification passed: `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
   - real provider `master -> minimonth` passed on `real-smoke-1`: first run `tool_executions=1`, `rounds=3`, `schema_rejections=1`, `restore_status=created_new`
   - second run on same `session_id=real-smoke-1` passed with `restore_status=restored_existing` and `restored_closed_turns=1`
+- 2026-06-16: UI next-step decision
+  - `ui.protocol` already owns query/subscribe/projection truth; WebUI must consume it instead of inventing its own semantics
+  - repo already had `apps/freehand-server`; using it as the minimal WebUI smoke boundary avoids a second UI app boundary
+  - `turn_projection_for_client` is the protocol-owned client-specific gate for slave-card visibility
+  - the first UI milestone is a protocol-consumer smoke, not a full transport stack or polished browser app

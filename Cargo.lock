@@ -198,6 +198,7 @@ name = "freehand-server"
 version = "0.1.0"
 dependencies = [
  "freehand-config",
+ "freehand-contracts",
  "freehand-node",
  "freehand-ui-protocol",
 ]

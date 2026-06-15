@@ -8,17 +8,22 @@
   - subscribe returns incremental truth
   - source identity and stream kind stay explicit
   - slave turn presentation divergence remains protocol-safe
+  - client-specific projection gating keeps slave card visible only for WebUI
 - white-box plan:
   - command/projection mapping, status query, terminal projection, slave subscription semantics
+  - client-specific projection gating
 - module black-box plan:
   - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
+  - CLI hides slave card while WebUI may render it
 - project black-box impact:
   - CLI and WebUI consume one protocol truth while rendering different views
+  - protocol truth can back a minimal service boundary without duplicating projection logic in apps
 - fixtures / replay inputs / runtime evidence paths:
   - UI protocol stream fixtures
   - node status snapshots
   - `~/.freehand/replays/ui`
 - known gaps:
-  - command surface is baseline only; transport binding not yet landed
+  - transport binding still not landed
 - sync status between design and implementation:
   - command/query/subscribe/projection baseline landed
+  - client-specific projection gating remains protocol-owned
