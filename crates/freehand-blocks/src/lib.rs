@@ -64,13 +64,13 @@ pub enum CompletionValidationError {
     MissingBlockedReason,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletionSchemaIssue {
     pub field: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletionSchemaRejection {
     pub issues: Vec<CompletionSchemaIssue>,
 }

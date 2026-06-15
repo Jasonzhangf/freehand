@@ -286,6 +286,59 @@ provider = "mini27"
 }
 
 #[test]
+fn cli_runs_reason_persist_smoke() {
+    let home = unique_home_dir();
+    let freehand_dir = home.join(".freehand");
+    fs::create_dir_all(&freehand_dir).expect("create runtime home");
+    fs::write(
+        freehand_dir.join("config.toml"),
+        r#"
+[providers.mini27]
+id = "mini27"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "http://guizhouyun.site:2080"
+default_model = "MiniMax-M2.7"
+
+[providers.mini27.auth]
+type = "apikey"
+api_key = "sk-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+pair_token = "FREEHAND_CLI_TOKEN"
+provider = "mini27"
+"#,
+    )
+    .expect("write config");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .env("HOME", &home)
+        .env("FREEHAND_CLI_TOKEN", "cli-secret")
+        .arg("reason-persist-smoke")
+        .arg("--agent")
+        .arg("master")
+        .output()
+        .expect("run cli");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("agent=master"));
+    assert!(stdout.contains("restored_terminal=persisted smoke terminal"));
+    assert!(stdout.contains("reason_seq=3"));
+    assert!(stdout.contains("ui_sidecar_exists=true"));
+    assert!(stdout.contains("session_index_entries=1"));
+
+    fs::remove_dir_all(home).expect("cleanup");
+}
+
+#[test]
 fn cli_runs_reason_live_single_shot_mock() {
     let (base_url, rx, handle) =
         spawn_mock_server(200, "application/json", complete_single_response("pong"));

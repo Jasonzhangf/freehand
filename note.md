@@ -235,3 +235,8 @@
   - Reasonix evidence: `internal/agent/cache_shape.go` persists cache diagnostics around system hash, tool hash, prefix hash, and rewrite version so cache misses are explainable
   - Reasonix evidence: `desktop/sessions.go` treats transcript JSONL as the durable artifact and keeps titles/display/trash metadata as separate sidecars
   - provisional Freehand recommendation: split persistence into authoritative session-truth snapshot, append-only replay/debug ledger, and derived projection/index sidecars; keep only `freehand-reason` as truth writer and keep provider raw events out of session truth
+- 2026-06-15: reason.persistence baseline implementation landed
+  - added `crates/freehand-reason/src/persistence.rs`
+  - persisted truth now includes `session-history.json`, `session-cursor.json`, `active-turn.json`, per-turn terminal files, reason JSONL ledger, UI sidecar, and agent session-index cache
+  - recovery covers both snapshot-plus-ledger-tail and ledger-only rebuild
+  - provider raw debug files are explicitly ignored by restore tests

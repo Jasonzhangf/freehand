@@ -240,12 +240,16 @@ Rules:
 ## Implementation Binding Status
 
 - current code baseline already has session-history JSON/file round-trip helpers in `crates/freehand-reason/src/session_history.rs`
+- current code baseline now has:
+  - runtime snapshot coordinator in `crates/freehand-reason/src/persistence.rs`
+  - reason-ledger append writer in `crates/freehand-reason/src/persistence.rs`
+  - terminal turn materialization under `~/.freehand/state/turns/<agent>/<session>/turns/`
+  - snapshot-plus-tail recovery and ledger-only rebuild in `ReasonPersistence::restore`
+  - shared harness smoke in `crates/freehand-testkit`
+  - CLI persistence restore smoke in `apps/freehand-cli`
 - current code baseline does not yet have:
-  - runtime snapshot coordinator
-  - reason-ledger append writer
-  - terminal turn file materializer
-  - ledger-only rebuild path
-  - CLI restart/resume recovery smoke
+  - live provider path persistence wiring
+  - provider raw debug-ledger writer ownership in adapter runtime loops
 
 ## Update Trigger
 

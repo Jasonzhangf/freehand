@@ -24,8 +24,8 @@
   - snapshot-missing recovery smoke
   - derived-sidecar rebuild smoke
 - project black-box impact:
-  - CLI session resume-after-restart smoke
-  - live-turn recovery audit through shared runtime harness
+  - CLI persistence restore smoke
+  - shared runtime harness persistence smoke
   - replay/debug consumer can inspect persisted reason history without using provider raw payloads as truth
 - fixtures / replay inputs / runtime evidence paths:
   - persisted session snapshot fixture path
@@ -37,11 +37,9 @@
   - `~/.freehand/ledgers/providers`
   - `~/.freehand/cache/session-index`
 - known gaps:
-  - runtime snapshot coordinator is not yet implemented
-  - reason-ledger append writer is not yet implemented
-  - terminal turn materializer is not yet implemented
-  - CLI restart/resume black-box smoke is not yet implemented
+  - real live-provider execution path does not yet persist automatically turn-by-turn
+  - provider raw debug-ledger writer is not yet wired in the adapter runtime loop
 - sync status between design and implementation:
   - design is locked
-  - current implementation covers only session-history JSON/file round-trip as a persistence baseline
-  - full snapshot, ledger, sidecar, and recovery lifecycle tests remain to be implemented with the owner runtime path
+  - session snapshot, active-turn snapshot, reason-ledger append, terminal turn materialization, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
+  - shared harness and CLI smoke are implemented

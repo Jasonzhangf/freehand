@@ -1,5 +1,6 @@
 //! Reasoning turn orchestration and event emission for Freehand.
 
+mod persistence;
 mod rewrite_runtime;
 mod session_history;
 
@@ -17,8 +18,14 @@ use freehand_contracts::{
     ReasonResp03TerminalEvent, SessionId, TerminalStatus, TraceId, TurnId, validate_reason_req02,
 };
 use freehand_provider_core::ProviderSemanticOutput;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use persistence::{
+    ActiveTurnSnapshot, PersistedSessionIndexEntry, PersistedSessionView, ReasonLedgerPayload,
+    ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor, ReasonPersistenceError,
+    RestoredReasonSession,
+};
 pub use rewrite_runtime::{
     CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,
     ReasonRewriteRuntime, RecoveryPolicyOutcome, RecoveryPolicyRequest, ResumeRebuildPayload,
@@ -28,7 +35,7 @@ pub use session_history::{
     RewriteDiagnosticsSnapshot, SessionHistory, SessionHistoryError, SessionRewriteRecord,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnStartInput {
     pub session_id: SessionId,
     pub turn_id: TurnId,
@@ -40,7 +47,7 @@ pub struct TurnStartInput {
     pub model: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReasonBroadcastEvent {
     Semantic(ReasonResp01SemanticEvent),
     Tool(ReasonReq04ToolCall),
@@ -49,14 +56,14 @@ pub enum ReasonBroadcastEvent {
     Error(ErrorErr01RuntimeClassified),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnProjection {
     pub turn_id: TurnId,
     pub user_text: String,
     pub terminal_summary: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnRecord {
     pub request: ReasonReq02ContextComposedInput,
     pub provider_payload: ReasonReq03ProviderPayload,

@@ -1,5 +1,6 @@
 //! Shared mocks, fixtures, runtime harnesses, and replay helpers for Freehand tests.
 
+use std::path::Path;
 use std::sync::mpsc::Receiver;
 
 use freehand_blocks::{
@@ -25,9 +26,9 @@ use freehand_provider_core::{
 };
 use freehand_reason::{
     CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,
-    ReasonBroadcastEvent, ReasonRewriteRuntime, ReasonTurnEngine, RecoveryPolicyOutcome,
-    RecoveryPolicyRequest, ResumeRebuildPayload, RewriteRuntimeError, RewriteRuntimeState,
-    SessionHistory, TurnRecord, TurnStartInput,
+    ReasonBroadcastEvent, ReasonPersistence, ReasonRewriteRuntime, ReasonTurnEngine,
+    RecoveryPolicyOutcome, RecoveryPolicyRequest, ResumeRebuildPayload, RewriteRuntimeError,
+    RewriteRuntimeState, SessionHistory, TurnRecord, TurnStartInput,
 };
 use thiserror::Error;
 
@@ -117,6 +118,14 @@ pub struct ReasonRuntimeSmokeReport {
     pub blocked: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReasonPersistenceSmokeReport {
+    pub restored_terminal_summary: String,
+    pub reason_seq: u64,
+    pub ui_sidecar_exists: bool,
+    pub session_index_entries: usize,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ReasonRuntimeHarnessError {
     #[error("turn start failed: {0}")]
@@ -129,6 +138,8 @@ pub enum ReasonRuntimeHarnessError {
     ProviderRequestBuildFailed(String),
     #[error("anthropic live executor failed: {0}")]
     AnthropicExecutorFailed(String),
+    #[error("reason persistence failed: {0}")]
+    ReasonPersistenceFailed(String),
 }
 
 impl ReasonRuntimeHarness {
@@ -314,6 +325,108 @@ pub fn run_reason_runtime_smoke(
             })
         }
     }
+}
+
+pub fn run_reason_persistence_smoke(
+    agent_name: &str,
+    runtime_home: impl AsRef<Path>,
+) -> Result<ReasonPersistenceSmokeReport, ReasonRuntimeHarnessError> {
+    let runtime_home = runtime_home.as_ref();
+    let agent_id = AgentId::new(agent_name);
+    let session_id = SessionId::new("session-persist-smoke");
+    let turn_id = TurnId::new("turn-persist-smoke-1");
+    let trace_id = TraceId::new("trace-persist-smoke-1");
+    let feature_id = FeatureId::new("reason.persistence");
+    let mut history = SessionHistory::new(
+        session_id.clone(),
+        vec![stable_test_segment(
+            "memory-persist-smoke",
+            ContextSegmentKind::SessionMemory,
+            "remember persisted smoke state",
+        )],
+    )
+    .map_err(|err| ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string()))?;
+    let persistence = ReasonPersistence::new(runtime_home, agent_id.clone());
+    let engine = ReasonTurnEngine::new();
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: trace_id.clone(),
+                feature_id: feature_id.clone(),
+                agent_id: agent_id.clone(),
+                user_text: "persist the latest terminal summary".to_owned(),
+                planned_context_segments: Vec::new(),
+                model: "smoke-model".to_owned(),
+            },
+        )
+        .map_err(|err| ReasonRuntimeHarnessError::TurnStartFailed(err.to_string()))?;
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .map_err(|err| ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string()))?;
+
+    let output =
+        ProviderSemanticOutput::SemanticEvent(freehand_contracts::ReasonResp01SemanticEvent {
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            trace_id: trace_id.clone(),
+            feature_id: feature_id.clone(),
+            agent_id: agent_id.clone(),
+            kind: freehand_contracts::SemanticEventKind::Text,
+            content: "persisted smoke output".to_owned(),
+        });
+    engine.apply_provider_output(&mut turn, output.clone());
+    persistence
+        .record_provider_output_applied(&history, &turn, &output, 0)
+        .map_err(|err| ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string()))?;
+
+    turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: session_id.clone(),
+        turn_id: turn_id.clone(),
+        trace_id,
+        feature_id,
+        agent_id,
+        status: freehand_contracts::TerminalStatus::Success,
+        summary: "persisted smoke terminal".to_owned(),
+    });
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .map_err(|err| ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string()))?;
+
+    let restored = persistence
+        .restore(&session_id)
+        .map_err(|err| ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string()))?;
+    let index_path = runtime_home
+        .join("cache")
+        .join("session-index")
+        .join(format!("{agent_name}.json"));
+    let index_entries: Vec<freehand_reason::PersistedSessionIndexEntry> =
+        std::fs::read_to_string(&index_path)
+            .map_err(|err| ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string()))
+            .and_then(|payload| {
+                serde_json::from_str(&payload).map_err(|err| {
+                    ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string())
+                })
+            })?;
+
+    Ok(ReasonPersistenceSmokeReport {
+        restored_terminal_summary: restored.closed_turns[0]
+            .terminal_event
+            .as_ref()
+            .expect("terminal")
+            .summary
+            .clone(),
+        reason_seq: restored.cursor.last_applied_reason_seq,
+        ui_sidecar_exists: runtime_home
+            .join("state")
+            .join("ui")
+            .join(agent_name)
+            .join("session-persist-smoke.json")
+            .is_file(),
+        session_index_entries: index_entries.len(),
+    })
 }
 
 pub fn run_live_reason_turn(
@@ -677,9 +790,22 @@ mod tests {
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_runtime_home() -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let counter = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("freehand-testkit-runtime-{stamp}-{counter}"))
+    }
 
     fn harness() -> ReasonRuntimeHarness {
         ReasonRuntimeHarness::new(
@@ -1361,5 +1487,19 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             ReasonRuntimeHarnessError::UnsupportedLiveProvider { provider, protocol }
                 if provider == "openai" && protocol == "chat_completions"
         ));
+    }
+
+    #[test]
+    fn reason_persistence_smoke_recovers_terminal_turn() {
+        let runtime_home = temp_runtime_home();
+        let report =
+            run_reason_persistence_smoke("agent-1", &runtime_home).expect("persistence smoke");
+
+        assert_eq!(report.restored_terminal_summary, "persisted smoke terminal");
+        assert_eq!(report.reason_seq, 3);
+        assert!(report.ui_sidecar_exists);
+        assert_eq!(report.session_index_entries, 1);
+
+        std::fs::remove_dir_all(runtime_home).expect("cleanup");
     }
 }

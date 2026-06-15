@@ -117,3 +117,7 @@
   - added `docs/function-maps/reason.persistence.md`
   - added `docs/testing/reason.persistence.md`
   - feature-map, runtime/debug directory docs, local skill, and xtask gate now all point at the three-layer persistence split
+- 2026-06-15: reason.persistence baseline landed
+  - `freehand-reason` now has `ReasonPersistence` for authoritative snapshot writes, append-only reason ledger rows, terminal turn materialization, UI/index sidecar rebuild, and restore from snapshot-plus-tail or ledger-only rebuild
+  - `freehand-testkit` now has persistence smoke
+  - `freehand-cli reason-persist-smoke --agent <name>` now exists as app-boundary persistence restore smoke

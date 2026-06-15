@@ -1,9 +1,9 @@
 use freehand_blocks::strip_completion_submission_block;
-use freehand_config::{AgentMode, load_default_config};
+use freehand_config::{AgentMode, default_config_path, load_default_config};
 use freehand_contracts::{SemanticEventKind, SessionId, TraceId, TurnId};
 use freehand_testkit::{
     LiveReasonTurnRequest, ReasonRuntimeSmokeScenario, run_live_reason_turn,
-    run_reason_runtime_smoke,
+    run_reason_persistence_smoke, run_reason_runtime_smoke,
 };
 
 fn main() {
@@ -24,12 +24,15 @@ fn run() -> Result<String, String> {
     if flag == "reason-e2e" {
         return run_reason_e2e_smoke(args.collect());
     }
+    if flag == "reason-persist-smoke" {
+        return run_reason_persist_smoke(args.collect());
+    }
     if flag == "reason-live" {
         return run_reason_live(args.collect());
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]"
                 .to_owned(),
         );
     }
@@ -134,6 +137,31 @@ fn run_reason_live(args: Vec<String>) -> Result<String, String> {
             .as_ref()
             .map(|event| event.summary.as_str())
             .unwrap_or("none")
+    ))
+}
+
+fn run_reason_persist_smoke(args: Vec<String>) -> Result<String, String> {
+    if args.len() != 2 || args[0] != "--agent" {
+        return Err("usage: freehand-cli reason-persist-smoke --agent <name>".to_owned());
+    }
+    let config = load_default_config().map_err(|err| err.to_string())?;
+    let selected = config
+        .select_agent(&args[1])
+        .map_err(|err| err.to_string())?;
+    let runtime_home = default_config_path()
+        .map_err(|err| err.to_string())?
+        .parent()
+        .ok_or_else(|| "default config path has no runtime home parent".to_owned())?
+        .to_path_buf();
+    let report = run_reason_persistence_smoke(&selected.name, &runtime_home)
+        .map_err(|err| err.to_string())?;
+    Ok(format!(
+        "agent={} restored_terminal={} reason_seq={} ui_sidecar_exists={} session_index_entries={}",
+        selected.name,
+        report.restored_terminal_summary,
+        report.reason_seq,
+        report.ui_sidecar_exists,
+        report.session_index_entries
     ))
 }
 

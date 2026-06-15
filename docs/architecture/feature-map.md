@@ -468,8 +468,7 @@ Use order:
   - recovery from snapshot-plus-ledger-tail smoke
   - derived-sidecar rebuild smoke
 - required_project_black_box_tests:
-  - CLI session resume-after-restart smoke
-  - live-turn recovery audit smoke
+  - CLI persistence restore smoke
 - test_design_doc: `docs/testing/reason.persistence.md`
 - function_map_doc: `docs/function-maps/reason.persistence.md`
 - debug_artifacts:
