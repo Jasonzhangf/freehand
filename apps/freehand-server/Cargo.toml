@@ -1,0 +1,11 @@
+[package]
+name = "freehand-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+freehand-config = { path = "../../crates/freehand-config" }
+freehand-node = { path = "../../crates/freehand-node" }
+freehand-ui-protocol = { path = "../../crates/freehand-ui-protocol" }
+

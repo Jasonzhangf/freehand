@@ -1,0 +1,22 @@
+# Test Design: `config.core`
+
+- feature_id: `config.core`
+- owner: `crates/freehand-config`
+- lifecycle path under test:
+  - load `~/.freehand/config.toml`
+  - resolve `[agents.<name>]`
+  - select one agent per process
+  - validate restart-only config activation
+- white-box plan:
+  - parse and validate config schema and invariants
+- module black-box plan:
+  - load config file and select named agent through public config boundary
+- project black-box impact:
+  - CLI startup path consumes one named agent configuration correctly
+- fixtures / replay inputs / runtime evidence paths:
+  - config fixtures under crate test fixtures
+  - runtime evidence under `~/.freehand/state/config`
+- known gaps:
+  - implementation not landed yet
+- sync status between design and implementation:
+  - design stub prepared; implementation pending

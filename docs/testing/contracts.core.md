@@ -1,0 +1,21 @@
+# Test Design: `contracts.core`
+
+- feature_id: `contracts.core`
+- owner: `crates/freehand-contracts`
+- lifecycle path under test:
+  - shared semantic types serialize
+  - replay and persistence boundaries remain stable
+  - IDs and error contracts remain cross-module safe
+- white-box plan:
+  - serialization, IDs, error base and cross-module contracts
+- module black-box plan:
+  - replay fixture decode and encode compatibility through public contract boundary
+- project black-box impact:
+  - contracts remain compatible across owner crates that depend on them
+- fixtures / replay inputs / runtime evidence paths:
+  - replay fixtures under contract fixtures
+  - `~/.freehand/replays/contracts`
+- known gaps:
+  - versioning policy tests not yet defined
+- sync status between design and implementation:
+  - design stub prepared; implementation pending

@@ -1,0 +1,23 @@
+# Test Design: `provider.semantic`
+
+- feature_id: `provider.semantic`
+- owner: `crates/freehand-provider-core`
+- lifecycle path under test:
+  - provider request enters semantic adapter
+  - stream or single-shot output becomes unified semantic events
+  - debug/raw retention policy stays separated from normal path
+  - recovery classification remains explicit
+- white-box plan:
+  - event mapping, capability declaration, recovery classification, retention rules
+- module black-box plan:
+  - provider semantic boundary emits expected unified events for stream and single-shot flows
+- project black-box impact:
+  - reason layer can consume provider semantic output without provider-specific leakage
+- fixtures / replay inputs / runtime evidence paths:
+  - provider payload fixtures
+  - `~/.freehand/ledgers/providers`
+  - `~/.freehand/replays/providers`
+- known gaps:
+  - adapter-specific fixture catalog not yet defined
+- sync status between design and implementation:
+  - design stub prepared; implementation pending

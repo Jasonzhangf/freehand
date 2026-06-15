@@ -1,0 +1,23 @@
+# Test Design: `reason.turn`
+
+- feature_id: `reason.turn`
+- owner: `crates/freehand-reason`
+- lifecycle path under test:
+  - per-turn truth is written
+  - semantic events broadcast
+  - tool result re-entry returns to the owning turn
+  - completion schema controls terminal acceptance
+- white-box plan:
+  - turn projection, schema validation, rejection path, non-blocking subscriber behavior
+- module black-box plan:
+  - reason turn boundary emits semantic stream and handles rejection/retry behavior
+- project black-box impact:
+  - terminal projection reaches UI boundary correctly
+- fixtures / replay inputs / runtime evidence paths:
+  - turn replay fixtures
+  - `~/.freehand/ledgers/reason`
+  - `~/.freehand/replays/reason`
+- known gaps:
+  - completion schema fixture format not yet defined
+- sync status between design and implementation:
+  - design stub prepared; implementation pending

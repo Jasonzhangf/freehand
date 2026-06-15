@@ -1,0 +1,3 @@
+display_name: Freehand Dev
+short_description: Freehand repo workflow, function-map-first dev/debug, architecture locks, and replay-first debugging.
+default_prompt: Use the Freehand project workflow. Read project AGENTS, feature map, and architecture docs first. Start from feature owner and debug artifacts, respect contracts-plus-blocks-plus-orchestrators boundaries, use ~/.freehand runtime paths, and run required validation gates.

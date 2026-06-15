@@ -1,0 +1,24 @@
+# Test Design: `ui.protocol`
+
+- feature_id: `ui.protocol`
+- owner: `crates/freehand-ui-protocol`
+- lifecycle path under test:
+  - commands enter protocol boundary
+  - query returns snapshot truth
+  - subscribe returns incremental truth
+  - source identity and stream kind stay explicit
+  - slave turn presentation divergence remains protocol-safe
+- white-box plan:
+  - command/projection mapping, status query, terminal projection, slave subscription semantics
+- module black-box plan:
+  - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
+- project black-box impact:
+  - CLI and WebUI consume one protocol truth while rendering different views
+- fixtures / replay inputs / runtime evidence paths:
+  - UI protocol stream fixtures
+  - node status snapshots
+  - `~/.freehand/replays/ui`
+- known gaps:
+  - concrete command/projection schema not yet landed
+- sync status between design and implementation:
+  - design stub prepared; implementation pending

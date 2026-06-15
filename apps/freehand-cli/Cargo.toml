@@ -1,0 +1,11 @@
+[package]
+name = "freehand-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+freehand-config = { path = "../../crates/freehand-config" }
+freehand-reason = { path = "../../crates/freehand-reason" }
+freehand-node = { path = "../../crates/freehand-node" }
+

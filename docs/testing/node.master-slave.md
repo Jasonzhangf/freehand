@@ -1,0 +1,24 @@
+# Test Design: `node.master-slave`
+
+- feature_id: `node.master-slave`
+- owner: `crates/freehand-node`
+- lifecycle path under test:
+  - local master/slave pair handshakes
+  - slave input permission locks to paired source
+  - pairing loss returns slave to listening state
+  - status and progress query remain available
+- white-box plan:
+  - pairing state transitions, permission checks, handshake validation, relisten behavior
+- module black-box plan:
+  - status snapshot and progress query through node boundary
+- project black-box impact:
+  - master can delegate work and subscribe to slave turn stream through runtime wiring
+- fixtures / replay inputs / runtime evidence paths:
+  - websocket handshake replays
+  - pairing ledgers
+  - `~/.freehand/state/nodes`
+  - `~/.freehand/replays/nodes`
+- known gaps:
+  - transport heartbeat and reconnect timing policy not yet defined
+- sync status between design and implementation:
+  - design stub prepared; implementation pending

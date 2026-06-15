@@ -1,0 +1,10 @@
+[package]
+name = "freehand-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+freehand-contracts = { path = "../freehand-contracts" }
+freehand-provider-core = { path = "../freehand-provider-core" }
+

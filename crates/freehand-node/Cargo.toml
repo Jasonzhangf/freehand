@@ -1,0 +1,11 @@
+[package]
+name = "freehand-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+freehand-contracts = { path = "../freehand-contracts" }
+freehand-reason = { path = "../freehand-reason" }
+freehand-ui-protocol = { path = "../freehand-ui-protocol" }
+

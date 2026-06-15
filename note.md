@@ -1,0 +1,92 @@
+# note
+
+- 2026-06-15: initial scaffold task
+  - create workspace skeleton
+  - lock project AGENTS
+  - add local freehand-dev skill
+  - add architecture entry docs
+- 2026-06-15: user locked extra architecture rule
+  - write new functions only after checking existing function libraries
+  - no temporary helper functions in orchestrator crates
+  - blocks own helper/semantic logic; orchestrators stay pure
+- 2026-06-15: user locked workflow truth
+  - runtime home `~/.freehand`
+  - dev/debug path starts from function map and owner
+  - if feature truth changes, update docs + skill + memory in same task
+- 2026-06-15: design docs grounded from confirmed discussion only
+  - overview
+  - provider and reasoning
+  - debug and observability
+  - UI and runtime topology
+  - unknown details left as TBD, not invented
+- 2026-06-15: master/slave semantics clarified
+  - master = main user-facing dispatcher
+  - slave = paired task receiver
+  - paired slave only accepts master input
+- 2026-06-15: master/slave semantics refined
+  - this is input-permission configuration
+  - master = whichever side accepts user input
+  - slave accepts paired source only
+  - paired source may be user or master
+- 2026-06-15: startup config clarified
+  - each agent has startup config file
+  - startup config decides mode
+  - slave config includes interface + allowed IP + pairing token
+- 2026-06-15: workflow rule added
+  - features and bugs both need lifecycle management
+  - self-check information / logic / lifecycle before coding or closing
+  - read-only trace first, ask user only if local truth cannot answer
+- 2026-06-15: config truth clarified
+  - local multiple agents managed by `config.toml`
+  - one config may define multiple agents
+- 2026-06-15: config.core module answers locked
+  - only `~/.freehand/config.toml`
+  - `[agents.<name>]`
+  - one process starts one agent
+  - restart-only config activation
+  - `allowed_pair_ip` optional
+  - `pair_token` by env-var reference
+- 2026-06-15: contracts.core module answers locked
+  - shared semantic types only
+  - includes IDs and error contracts
+  - excludes config schema, UI projection, debug envelope
+  - request/response chains split into explicit nodes
+  - types default to serializable + replayable + persistable
+- 2026-06-15: provider.semantic module answers locked
+  - support OpenAI-compatible + Anthropic
+  - require request/response + stream
+  - raw reasoning/events preserved in debug, semantic layer always present
+  - capabilities include web search, multimodal, vision, reasoning
+  - periodic recovery unit is seconds
+  - periodic default windows: half hour, five hours, daily midnight
+- 2026-06-15: reason.turn module answers locked
+  - per-turn truth, projected conversation
+  - only freehand-reason writes truth
+  - semantic broadcast: reasoning/text/tool/usage/terminal/error
+  - slow subscribers may drop, no back-pressure
+  - provider raw events go to debug ledger, not session truth
+  - stop decided by completion schema, not provider finish_reason
+- 2026-06-15: node.master-slave module answers locked
+  - local only one master one slave
+  - websocket handshake pairing
+  - slave fixed pairing source, restart to change
+  - pairing loss -> keep listening
+  - master can delegate, query progress, talk, subscribe slave turn
+- 2026-06-15: ui.protocol module answers locked
+  - first version CLI + WebUI
+  - display surface all-in
+  - completion result only as final projected text
+  - slave turn is WebUI separate card, CLI omitted
+  - query and subscribe separated
+  - explicit source identity fields
+  - black-box targets locked
+- 2026-06-15: test workflow truth locked
+  - every feature maps white-box tests, module black-box tests, and project black-box tests
+  - compile/regression gate must run workspace build/lint plus mapped tests
+  - `cargo test --workspace` is the umbrella for all three test layers as coverage lands
+  - `xtask` gate now checks that these rules stay present in docs and skill
+- 2026-06-15: function-map truth expanded
+  - `feature-map` owns feature owner and validation entry
+  - `function-map` owns code-bound request/response/error mainlines and call tables
+  - multi-reference shared functions must be described once with owner and caller constraints
+  - function-map docs must evolve with code and may not fake symbol bindings before implementation exists

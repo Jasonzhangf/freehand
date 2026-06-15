@@ -1,0 +1,21 @@
+# Test Design: `foundation.workspace`
+
+- feature_id: `foundation.workspace`
+- owner: `xtask`, workspace root
+- lifecycle path under test:
+  - workspace scaffold exists
+  - required architecture docs exist
+  - required hooks and CI files exist
+  - gate command can validate policy locks
+- white-box plan:
+  - xtask rule-check logic
+- module black-box plan:
+  - `xtask gates check` smoke from repo root
+- project black-box impact:
+  - full workspace `make ci` gate smoke
+- fixtures / replay inputs / runtime evidence paths:
+  - repo filesystem layout
+- known gaps:
+  - no diff-aware gate yet for changed-feature-only optimization
+- sync status between design and implementation:
+  - baseline aligned with current harness

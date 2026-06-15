@@ -1,0 +1,10 @@
+[package]
+name = "freehand-provider-anthropic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+freehand-provider-core = { path = "../freehand-provider-core" }
+freehand-contracts = { path = "../freehand-contracts" }
+

@@ -1,0 +1,25 @@
+[workspace]
+members = [
+  "crates/freehand-contracts",
+  "crates/freehand-blocks",
+  "crates/freehand-config",
+  "crates/freehand-provider-core",
+  "crates/freehand-provider-openai",
+  "crates/freehand-provider-anthropic",
+  "crates/freehand-reason",
+  "crates/freehand-node",
+  "crates/freehand-ui-protocol",
+  "crates/freehand-gates",
+  "crates/freehand-testkit",
+  "apps/freehand-cli",
+  "apps/freehand-server",
+  "xtask",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.dependencies]

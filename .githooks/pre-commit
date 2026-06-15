@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[freehand] pre-commit: fmt + gates"
+cargo fmt --check
+cargo run -p xtask -- gates check
+
