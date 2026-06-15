@@ -30,6 +30,35 @@ First version semantic broadcast includes:
 
 - `freehand-reason` writes tool result re-entry back into turn truth
 
+### Context orchestration and cache direction
+
+Freehand context orchestration direction is now locked. Planner baseline is landed.
+
+Locked behavior:
+
+- stable context material should remain stable across turns to improve provider cache reuse
+- volatile per-turn user input should be isolated from stable system/developer/context segments
+- tool results and learned material should enter explicitly named context segments
+- context composition must expose segment boundaries for debug and cache analysis
+- provider-specific renderers may map segments to protocol wire shape, but cannot own context orchestration truth
+- preferred context expansion path is subagent search final answer, not raw child transcript injection
+- subagent transcript truth remains outside parent request context
+- only explicit rewrite events may change stable-prefix history layout
+
+Current implementation baseline:
+
+- `ReasonTurnEngine::start_turn` now delegates request-content planning to `freehand-blocks::plan_context`
+- typed segment ordering and admission rules are enforced before provider payload is built
+- planner diagnostics are stored separately from request content
+- `reason.session-history` now owns base context, rewrite mode, rewrite version, rewrite ledger, and persisted session-history snapshots
+- ordinary turns read rewrite state from session truth without bumping rewrite version
+- explicit compaction / rollback / resume rebuild paths are now staged through dedicated session-history gate methods
+
+Current implementation gap:
+
+- final CLI/server runtime loop wiring for `reason.rewrite-policy` remains outside this baseline
+- tool-schema fingerprint is still not wired into planner diagnostics
+
 ### Multi-subscriber policy
 
 - slow subscribers may drop frames
@@ -59,7 +88,21 @@ First version terminal classes are explicitly distinct:
 
 ### Completion schema rule
 
-The system prompt requires a completion schema.
+The system prompt requires a completion schema wrapped in a fixed tagged JSON block:
+
+```text
+<freehand_completion>
+{
+  "claim": "complete" | "continue" | "blocked",
+  "completion_reason": "...",
+  "evidence": "...",
+  "summary": "...",
+  "learned": "...",
+  "next_step": "...",
+  "blocked_reason": "..."
+}
+</freehand_completion>
+```
 
 Confirmed terminal evaluation rules:
 
@@ -74,7 +117,7 @@ Confirmed terminal evaluation rules:
    - if completion is claimed but required completion schema is missing or invalid, Freehand rejects it and asks again
 
 2. not completed with next step
-   - if not completed and `next_step` is present, Freehand requires execution of the next step instead of stopping
+   - if not completed and `next_step` is present, Freehand uses `next_step` as the next execution signal and enters the next round instead of stopping
 
 3. blocked
    - if not completed and blocked, `blocked_reason` must be present
@@ -82,14 +125,16 @@ Confirmed terminal evaluation rules:
 
 4. invalid or missing schema
    - if schema is missing, invalid, or conditions are not satisfied, Freehand rejects it
-   - Freehand must explain what is wrong and how the schema should be provided
+   - Freehand must explain the exact invalid schema entries and how the schema should be provided
+   - invalid schema is rejected within the same turn
+   - invalid schema retry limit is 3
+   - after 3 invalid schema retries, Freehand marks the turn as failed
 
 ## Open Questions / TBD
 
 - exact per-turn storage schema
-- exact format for terminal text composition from summary and evidence
-- exact retry/reprompt limit for invalid completion schema
 - exact mapping between terminal classes and persisted turn outcome records
+- exact cache-boundary debug fields
 
 ## Update trigger
 

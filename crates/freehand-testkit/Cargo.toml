@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+freehand-blocks = { path = "../freehand-blocks" }
+freehand-config = { path = "../freehand-config" }
 freehand-contracts = { path = "../freehand-contracts" }
+freehand-provider-anthropic = { path = "../freehand-provider-anthropic" }
 freehand-provider-core = { path = "../freehand-provider-core" }
-
+freehand-reason = { path = "../freehand-reason" }
+thiserror = "2"

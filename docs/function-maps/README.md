@@ -16,6 +16,8 @@ This directory answers:
 - how error mainline runs
 - which shared functions are reused from multiple sites
 - how function calls bind back to code
+- where metadata and request data remain type-isolated when a mainline crosses modules
+- where context segment admission is locked when a feature adds model-visible context
 
 ## Required Per-Feature Sections
 
@@ -31,6 +33,7 @@ Every feature function-map doc must contain:
 - shared multi-reference functions
 - function call table
 - sync status against code
+- metadata/request isolation notes when feature crosses module boundaries
 
 ## Code Binding Rule
 
@@ -65,5 +68,6 @@ When code changes:
 - update request/response/error mainlines
 - update shared-function descriptions
 - update sync status
+- update metadata/request isolation notes for cross-module paths
 
 If these are not updated, the feature is not closed.

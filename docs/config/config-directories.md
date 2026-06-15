@@ -16,11 +16,14 @@
 
 - local multi-agent management is handled by `config.toml`
 - one `config.toml` may define multiple local agents
+- one `config.toml` may define multiple providers
 - config source path is only `~/.freehand/config.toml`
 - multi-agent layout uses `[agents.<name>]`
+- provider layout uses `[providers.<id>]`
 - each agent has a startup configuration file
 - startup configuration decides how the agent starts
 - all agents, including `master`, are configured there
+- each agent binds to exactly one provider id from the provider registry
 - if configured as `slave`, startup configuration must include at least:
   - `name`
   - `mode`
@@ -28,6 +31,7 @@
 - `allowed_pair_ip` is optional
 - when `allowed_pair_ip` is omitted, pairing source IP is not filtered
 - `pair_token` is an environment variable reference
+- provider auth supports `api_key` or `api_key_env`, but the selected runtime projection must never print the resolved secret
 - one process starts one agent, selected by CLI agent name
 - config changes take effect only after restart
 

@@ -1,8 +1,11 @@
 //! Anthropic provider adapter for Freehand.
 
 use std::collections::BTreeMap;
+use std::io::{self, BufRead, BufReader};
 
-use freehand_blocks::{parse_tool_arguments_json, parse_tool_arguments_value};
+use freehand_blocks::{
+    parse_tool_arguments_json, parse_tool_arguments_value, render_context_segments_as_text,
+};
 use freehand_contracts::{ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId};
 use freehand_provider_core::{
     ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderProtocol,
@@ -14,6 +17,14 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnthropicAdapterConfig {
     pub max_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnthropicExecutorConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub anthropic_version: String,
+    pub adapter: AnthropicAdapterConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +61,124 @@ pub enum AnthropicAdapterError {
     InvalidToolArguments(String),
 }
 
+#[derive(Debug, Error)]
+pub enum AnthropicExecutorError {
+    #[error("anthropic executor base_url, api_key, and anthropic_version must be non-empty")]
+    InvalidConfig,
+    #[error(transparent)]
+    Adapter(#[from] AnthropicAdapterError),
+    #[error("anthropic http request failed: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("anthropic http status `{status}` returned body `{body}`")]
+    HttpStatus { status: u16, body: String },
+    #[error("anthropic stream read failed: {0}")]
+    StreamRead(#[from] io::Error),
+}
+
+pub struct AnthropicExecutor {
+    config: AnthropicExecutorConfig,
+    client: reqwest::blocking::Client,
+    adapter: AnthropicAdapter,
+}
+
+impl AnthropicExecutor {
+    pub fn new(config: AnthropicExecutorConfig) -> Result<Self, AnthropicExecutorError> {
+        if config.base_url.trim().is_empty()
+            || config.api_key.trim().is_empty()
+            || config.anthropic_version.trim().is_empty()
+        {
+            return Err(AnthropicExecutorError::InvalidConfig);
+        }
+        Ok(Self {
+            adapter: AnthropicAdapter::new(config.adapter.clone())?,
+            client: reqwest::blocking::Client::new(),
+            config,
+        })
+    }
+
+    pub fn execute_once(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+    ) -> Result<Vec<ProviderSemanticOutput>, AnthropicExecutorError> {
+        let rendered = self.adapter.render_request(request, false)?;
+        let body = self.send_rendered_request(&rendered)?.text()?;
+        Ok(self
+            .adapter
+            .parse_response(ctx, request.descriptor.protocol, &body)?)
+    }
+
+    pub fn execute_stream(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+    ) -> Result<Vec<ProviderSemanticOutput>, AnthropicExecutorError> {
+        self.execute_stream_with(ctx, request, |_| Ok(()))
+    }
+
+    pub fn execute_stream_with<F>(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        mut on_outputs: F,
+    ) -> Result<Vec<ProviderSemanticOutput>, AnthropicExecutorError>
+    where
+        F: FnMut(&[ProviderSemanticOutput]) -> Result<(), AnthropicExecutorError>,
+    {
+        let rendered = self.adapter.render_request(request, true)?;
+        let response = self.send_rendered_request(&rendered)?;
+        let mut reader = BufReader::new(response);
+        let mut outputs = Vec::new();
+        let mut collector = SseEventCollector::default();
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if reader.read_line(&mut line)? == 0 {
+                break;
+            }
+            let Some(event_body) = collector.push_line(&line) else {
+                continue;
+            };
+            let batch =
+                self.adapter
+                    .parse_stream_event(ctx, request.descriptor.protocol, &event_body)?;
+            on_outputs(&batch)?;
+            outputs.extend(batch);
+        }
+        if let Some(event_body) = collector.finish() {
+            let batch =
+                self.adapter
+                    .parse_stream_event(ctx, request.descriptor.protocol, &event_body)?;
+            on_outputs(&batch)?;
+            outputs.extend(batch);
+        }
+        Ok(outputs)
+    }
+
+    fn send_rendered_request(
+        &self,
+        rendered: &AnthropicRenderedRequest,
+    ) -> Result<reqwest::blocking::Response, AnthropicExecutorError> {
+        let response = self
+            .client
+            .post(join_base_url_path(&self.config.base_url, rendered.path))
+            .header("x-api-key", &self.config.api_key)
+            .header("anthropic-version", &self.config.anthropic_version)
+            .header("content-type", "application/json")
+            .body(rendered.body.clone())
+            .send()?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text()?;
+            return Err(AnthropicExecutorError::HttpStatus {
+                status: status.as_u16(),
+                body,
+            });
+        }
+        Ok(response)
+    }
+}
+
 impl AnthropicAdapter {
     pub fn new(config: AnthropicAdapterConfig) -> Result<Self, AnthropicAdapterError> {
         if config.max_tokens == 0 {
@@ -66,6 +195,7 @@ impl AnthropicAdapter {
         request: &ProviderSemanticRequest,
         stream: bool,
     ) -> Result<AnthropicRenderedRequest, AnthropicAdapterError> {
+        let rendered_input = render_context_segments_as_text(&request.payload.input_segments);
         if request.descriptor.protocol != ProviderProtocol::AnthropicMessages {
             return Err(AnthropicAdapterError::UnsupportedProtocol(
                 request.descriptor.protocol,
@@ -83,7 +213,7 @@ impl AnthropicAdapter {
                         "content": [
                             {
                                 "type": "text",
-                                "text": request.payload.rendered_input,
+                                "text": rendered_input,
                             }
                         ]
                     }
@@ -351,6 +481,55 @@ impl AnthropicAdapter {
     }
 }
 
+fn join_base_url_path(base_url: &str, path: &str) -> String {
+    format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
+}
+
+#[derive(Debug, Default)]
+struct SseEventCollector {
+    data_lines: Vec<String>,
+}
+
+impl SseEventCollector {
+    fn push_line(&mut self, raw_line: &str) -> Option<String> {
+        let line = raw_line.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            return self.finish();
+        }
+        if let Some(data) = line.strip_prefix("data:") {
+            self.data_lines
+                .push(data.strip_prefix(' ').unwrap_or(data).to_owned());
+        }
+        None
+    }
+
+    fn finish(&mut self) -> Option<String> {
+        if self.data_lines.is_empty() {
+            return None;
+        }
+        Some(std::mem::take(&mut self.data_lines).join("\n"))
+    }
+}
+
+#[cfg(test)]
+fn sse_data_events(raw_sse: &str) -> Vec<String> {
+    let mut collector = SseEventCollector::default();
+    let mut events = Vec::new();
+    for line in raw_sse.lines() {
+        if let Some(event) = collector.push_line(line) {
+            events.push(event);
+        }
+    }
+    if let Some(event) = collector.finish() {
+        events.push(event);
+    }
+    events
+}
+
 fn parse_anthropic_usage(usage: Option<&Value>, finish_reason: Option<&str>) -> Option<TokenUsage> {
     let usage = usage?;
     Some(TokenUsage {
@@ -428,6 +607,11 @@ mod tests {
     use freehand_provider_core::{
         ProviderCapabilities, ProviderDescriptor, ProviderFamily, build_semantic_request,
     };
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
 
     fn ctx() -> ProviderEventContext {
         ProviderEventContext {
@@ -460,7 +644,19 @@ mod tests {
                 feature_id: FeatureId::new("provider.anthropic-adapter"),
                 agent_id: AgentId::new("agent-1"),
                 model: "claude-test".to_owned(),
-                rendered_input: "hello".to_owned(),
+                input_segments: vec![freehand_contracts::ContextSegment {
+                    segment_id: freehand_contracts::ContextSegmentId::new("segment-user"),
+                    kind: freehand_contracts::ContextSegmentKind::UserTurnInput,
+                    stability: freehand_contracts::ContextStability::TurnVolatile,
+                    cache_policy: freehand_contracts::ContextCachePolicy::NoCache,
+                    role: freehand_contracts::ContextRole::User,
+                    content: "hello".to_owned(),
+                    token_budget: 64,
+                    provenance: freehand_contracts::ContextProvenance {
+                        source: "turn_input".to_owned(),
+                        reference: None,
+                    },
+                }],
             },
             false,
         )
@@ -469,6 +665,128 @@ mod tests {
 
     fn adapter() -> AnthropicAdapter {
         AnthropicAdapter::new(AnthropicAdapterConfig { max_tokens: 512 }).expect("adapter")
+    }
+
+    fn executor(base_url: String) -> AnthropicExecutor {
+        AnthropicExecutor::new(AnthropicExecutorConfig {
+            base_url,
+            api_key: "test-api-key".to_owned(),
+            anthropic_version: "2023-06-01".to_owned(),
+            adapter: AnthropicAdapterConfig { max_tokens: 512 },
+        })
+        .expect("executor")
+    }
+
+    fn spawn_mock_server(
+        status: u16,
+        content_type: &'static str,
+        response_body: &'static str,
+    ) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+        let base_url = format!("http://{}", listener.local_addr().expect("addr"));
+        let (tx, rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("timeout");
+            let mut raw = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            loop {
+                let read = stream.read(&mut buffer).expect("read request");
+                if read == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&buffer[..read]);
+                if request_is_complete(&raw) {
+                    break;
+                }
+            }
+            let request = String::from_utf8(raw).expect("request utf8");
+            tx.send(request).expect("send request");
+            let response = format!(
+                "HTTP/1.1 {status} OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\n\r\n{response_body}",
+                response_body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        (base_url, rx, handle)
+    }
+
+    fn spawn_incremental_stream_server(
+        first_chunk: &'static str,
+        remaining_chunks: &'static str,
+    ) -> (
+        String,
+        mpsc::Receiver<String>,
+        mpsc::Receiver<bool>,
+        mpsc::Sender<()>,
+        thread::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind incremental mock server");
+        let base_url = format!("http://{}", listener.local_addr().expect("addr"));
+        let (request_tx, request_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (continue_tx, continue_rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("timeout");
+            let mut raw = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            loop {
+                let read = stream.read(&mut buffer).expect("read request");
+                if read == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&buffer[..read]);
+                if request_is_complete(&raw) {
+                    break;
+                }
+            }
+            request_tx
+                .send(String::from_utf8(raw).expect("request utf8"))
+                .expect("send request");
+
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+                )
+                .expect("write headers");
+            stream
+                .write_all(first_chunk.as_bytes())
+                .expect("write first chunk");
+            stream.flush().expect("flush first chunk");
+
+            let released = continue_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+            release_tx.send(released).expect("send released");
+            if released {
+                stream
+                    .write_all(remaining_chunks.as_bytes())
+                    .expect("write remaining chunks");
+                stream.flush().expect("flush remaining chunks");
+            }
+        });
+        (base_url, request_rx, release_rx, continue_tx, handle)
+    }
+
+    fn request_is_complete(raw: &[u8]) -> bool {
+        let text = String::from_utf8_lossy(raw);
+        let Some(header_end) = text.find("\r\n\r\n") else {
+            return false;
+        };
+        let content_length = text[..header_end]
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("content-length: ")
+                    .or_else(|| line.strip_prefix("Content-Length: "))
+            })
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        raw.len() >= header_end + 4 + content_length
     }
 
     #[test]
@@ -499,6 +817,252 @@ mod tests {
             )
             .expect("parsed");
         assert_eq!(outputs.len(), 4);
+    }
+
+    #[test]
+    fn replays_minimonth_single_shot_fixture() {
+        let mut adapter = adapter();
+        let outputs = adapter
+            .parse_response(
+                &ctx(),
+                ProviderProtocol::AnthropicMessages,
+                include_str!("../fixtures/minimonth_messages_single.json"),
+            )
+            .expect("parsed");
+
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::SemanticEvent(event)
+                    if event.kind == freehand_contracts::SemanticEventKind::Reasoning
+                        && event.content.contains("reply exactly pong")
+            )
+        }));
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::SemanticEvent(event)
+                    if event.kind == freehand_contracts::SemanticEventKind::Text
+                        && event.content == "pong"
+            )
+        }));
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::Usage(usage)
+                    if usage.usage.input_tokens == 14
+                        && usage.usage.output_tokens == 82
+                        && usage.usage.cache_read_tokens == 32
+                        && usage.usage.finish_reason.as_deref() == Some("end_turn")
+            )
+        }));
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::Terminal(terminal)
+                    if terminal.status == TerminalStatus::Success
+                        && terminal.summary == "end_turn"
+            )
+        }));
+    }
+
+    #[test]
+    fn replays_minimonth_stream_fixture() {
+        let mut adapter = adapter();
+        let mut outputs = Vec::new();
+        for event_body in sse_data_events(include_str!("../fixtures/minimonth_messages_stream.sse"))
+        {
+            outputs.extend(
+                adapter
+                    .parse_stream_event(&ctx(), ProviderProtocol::AnthropicMessages, &event_body)
+                    .expect("parsed stream event"),
+            );
+        }
+
+        let reasoning = outputs
+            .iter()
+            .filter_map(|output| match output {
+                ProviderSemanticOutput::SemanticEvent(event)
+                    if event.kind == freehand_contracts::SemanticEventKind::Reasoning =>
+                {
+                    Some(event.content.as_str())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        let text = outputs
+            .iter()
+            .filter_map(|output| match output {
+                ProviderSemanticOutput::SemanticEvent(event)
+                    if event.kind == freehand_contracts::SemanticEventKind::Text =>
+                {
+                    Some(event.content.as_str())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert!(reasoning.contains("reply exactly pong"));
+        assert_eq!(text.trim(), "pong");
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::Usage(usage)
+                    if usage.usage.input_tokens == 14
+                        && usage.usage.output_tokens == 82
+                        && usage.usage.cache_read_tokens == 32
+                        && usage.usage.finish_reason.as_deref() == Some("end_turn")
+            )
+        }));
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::Terminal(terminal)
+                    if terminal.status == TerminalStatus::Success
+                        && terminal.summary == "end_turn"
+            )
+        }));
+    }
+
+    #[test]
+    fn executor_posts_single_shot_request_and_parses_response() {
+        let (base_url, rx, handle) = spawn_mock_server(
+            200,
+            "application/json",
+            include_str!("../fixtures/minimonth_messages_single.json"),
+        );
+        let mut executor = executor(base_url);
+
+        let outputs = executor
+            .execute_once(&ctx(), &request())
+            .expect("execute once");
+        let raw_request = rx.recv().expect("request");
+        handle.join().expect("server thread");
+
+        assert!(raw_request.starts_with("POST /v1/messages HTTP/1.1"));
+        assert!(raw_request.contains("x-api-key: test-api-key"));
+        assert!(raw_request.contains("anthropic-version: 2023-06-01"));
+        assert!(raw_request.contains("\"stream\":false"));
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::SemanticEvent(event)
+                    if event.kind == freehand_contracts::SemanticEventKind::Text
+                        && event.content == "pong"
+            )
+        }));
+    }
+
+    #[test]
+    fn executor_posts_stream_request_and_parses_sse_response() {
+        let (base_url, rx, handle) = spawn_mock_server(
+            200,
+            "text/event-stream",
+            include_str!("../fixtures/minimonth_messages_stream.sse"),
+        );
+        let mut executor = executor(base_url);
+
+        let outputs = executor
+            .execute_stream(&ctx(), &request())
+            .expect("execute stream");
+        let raw_request = rx.recv().expect("request");
+        handle.join().expect("server thread");
+
+        assert!(raw_request.starts_with("POST /v1/messages HTTP/1.1"));
+        assert!(raw_request.contains("\"stream\":true"));
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::Usage(usage)
+                    if usage.usage.finish_reason.as_deref() == Some("end_turn")
+            )
+        }));
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::Terminal(terminal)
+                    if terminal.status == TerminalStatus::Success
+            )
+        }));
+    }
+
+    #[test]
+    fn executor_stream_callback_runs_before_response_finishes() {
+        let first_chunk = concat!(
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"pong\"}}\n\n"
+        );
+        let remaining_chunks = concat!(
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"pong\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":14,\"output_tokens\":82}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let (base_url, rx, released_rx, continue_tx, handle) =
+            spawn_incremental_stream_server(first_chunk, remaining_chunks);
+        let mut executor = executor(base_url);
+
+        let outputs = executor
+            .execute_stream_with(&ctx(), &request(), |batch| {
+                if batch.iter().any(|output| {
+                    matches!(
+                        output,
+                        ProviderSemanticOutput::SemanticEvent(event)
+                            if event.kind == freehand_contracts::SemanticEventKind::Reasoning
+                    )
+                }) {
+                    let _ = continue_tx.send(());
+                }
+                Ok(())
+            })
+            .expect("execute stream with callback");
+        let raw_request = rx.recv().expect("request");
+        let released = released_rx.recv().expect("release status");
+        handle.join().expect("server thread");
+
+        assert!(raw_request.starts_with("POST /v1/messages HTTP/1.1"));
+        assert!(
+            released,
+            "callback did not fire before stream completion gate"
+        );
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::Usage(usage)
+                    if usage.usage.finish_reason.as_deref() == Some("end_turn")
+            )
+        }));
+    }
+
+    #[test]
+    fn executor_rejects_non_success_http_status() {
+        let (base_url, rx, handle) = spawn_mock_server(
+            401,
+            "application/json",
+            r#"{"error":{"message":"expired"}}"#,
+        );
+        let mut executor = executor(base_url);
+
+        let err = executor
+            .execute_once(&ctx(), &request())
+            .expect_err("must fail");
+        let raw_request = rx.recv().expect("request");
+        handle.join().expect("server thread");
+
+        assert!(raw_request.contains("POST /v1/messages"));
+        assert!(matches!(
+            err,
+            AnthropicExecutorError::HttpStatus { status: 401, body }
+                if body.contains("expired")
+        ));
     }
 
     #[test]

@@ -7,10 +7,13 @@
   - replay and persistence boundaries remain stable
   - IDs and error contracts remain cross-module safe
   - structured tool arguments and extended usage fields survive round-trip
+  - typed context segment and provider-input segment contracts remain stable
 - white-box plan:
   - serialization, IDs, error base and cross-module contracts
   - structured tool argument round-trip
   - usage total/reasoning/finish-reason round-trip
+  - context-composed request validation
+  - provider payload segment validation
 - module black-box plan:
   - replay fixture decode and encode compatibility through public contract boundary
 - project black-box impact:
@@ -21,4 +24,4 @@
 - known gaps:
   - versioning policy tests not yet defined
 - sync status between design and implementation:
-  - shared IDs, request/response/error contracts, and serialization baseline landed
+  - shared IDs, typed context segments, request/response/error contracts, and serialization baseline landed

@@ -1,0 +1,29 @@
+# Test Design: `app.cli-runtime-smoke`
+
+- feature_id: `app.cli-runtime-smoke`
+- owner: `apps/freehand-cli`
+- lifecycle path under test:
+  - CLI loads default config
+  - CLI selects one named agent
+  - CLI resolves selected provider truth and prints safe provider metadata
+  - CLI runs scripted reason E2E smoke from app boundary
+  - provider semantic outputs reach reason turn truth and rewrite runtime through the shared harness
+  - CLI prints explicit rewrite outcome or explicit blocked recovery outcome
+- white-box plan:
+  - none in app crate beyond argument dispatch helpers
+- module black-box plan:
+  - CLI startup config smoke
+  - CLI reason compaction smoke
+  - CLI recovery block smoke
+- project black-box impact:
+  - one app entrypoint can now drive config + provider selection plus reason runtime E2E smoke
+  - provider usage and recovery policy remain wired through the shared harness path
+- fixtures / replay inputs / runtime evidence paths:
+  - temp `HOME` with `~/.freehand/config.toml`
+  - scripted provider semantic outputs in CLI tests
+  - `~/.freehand/state/config`
+  - `~/.freehand/state/turns`
+- known gaps:
+  - production non-smoke CLI/server runtime loop is still pending
+- sync status between design and implementation:
+  - CLI smoke baseline is implemented in integration tests

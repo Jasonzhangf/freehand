@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use freehand_blocks::parse_tool_arguments_json;
+use freehand_blocks::{parse_tool_arguments_json, render_context_segments_as_text};
 use freehand_contracts::{ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId};
 use freehand_provider_core::{
     ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderProtocol,
@@ -54,12 +54,13 @@ impl OpenAiAdapter {
         request: &ProviderSemanticRequest,
         stream: bool,
     ) -> Result<OpenAiRenderedRequest, OpenAiAdapterError> {
+        let rendered_input = render_context_segments_as_text(&request.payload.input_segments);
         match request.descriptor.protocol {
             ProviderProtocol::OpenAiResponses => Ok(OpenAiRenderedRequest {
                 path: "/responses",
                 body: json!({
                     "model": request.descriptor.model,
-                    "input": request.payload.rendered_input,
+                    "input": rendered_input,
                     "stream": stream,
                 })
                 .to_string(),
@@ -71,7 +72,7 @@ impl OpenAiAdapter {
                     "messages": [
                         {
                             "role": "user",
-                            "content": request.payload.rendered_input,
+                            "content": rendered_input,
                         }
                     ],
                     "stream": stream,
@@ -545,7 +546,19 @@ mod tests {
                 feature_id: FeatureId::new("provider.openai-adapter"),
                 agent_id: AgentId::new("agent-1"),
                 model: "gpt-test".to_owned(),
-                rendered_input: "hello".to_owned(),
+                input_segments: vec![freehand_contracts::ContextSegment {
+                    segment_id: freehand_contracts::ContextSegmentId::new("segment-user"),
+                    kind: freehand_contracts::ContextSegmentKind::UserTurnInput,
+                    stability: freehand_contracts::ContextStability::TurnVolatile,
+                    cache_policy: freehand_contracts::ContextCachePolicy::NoCache,
+                    role: freehand_contracts::ContextRole::User,
+                    content: "hello".to_owned(),
+                    token_budget: 64,
+                    provenance: freehand_contracts::ContextProvenance {
+                        source: "turn_input".to_owned(),
+                        reference: None,
+                    },
+                }],
             },
             true,
         )
@@ -560,7 +573,9 @@ mod tests {
             .expect("render");
         assert_eq!(rendered.path, "/responses");
         let body: Value = serde_json::from_str(&rendered.body).expect("json");
-        assert_eq!(body.get("input").and_then(Value::as_str), Some("hello"));
+        let input = body.get("input").and_then(Value::as_str).expect("input");
+        assert!(input.contains("kind=\"user_turn_input\""));
+        assert!(input.contains("\nhello\n"));
         assert_eq!(body.get("stream").and_then(Value::as_bool), Some(true));
     }
 
@@ -582,6 +597,14 @@ mod tests {
                 .and_then(|message| message.get("role"))
                 .and_then(Value::as_str),
             Some("user")
+        );
+        assert!(
+            body.get("messages")
+                .and_then(Value::as_array)
+                .and_then(|messages| messages.first())
+                .and_then(|message| message.get("content"))
+                .and_then(Value::as_str)
+                .is_some_and(|content| content.contains("kind=\"user_turn_input\""))
         );
     }
 

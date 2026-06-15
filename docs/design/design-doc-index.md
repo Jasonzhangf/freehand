@@ -19,6 +19,8 @@ Use this directory family for durable design truth.
 - `docs/design/provider-semantic-design.md`
 - `docs/design/provider-adapter-design.md`
 - `docs/design/reason-turn-design.md`
+- `docs/design/reason-context-planner-design.md`
+- `docs/design/reason-rewrite-policy-design.md`
 - `docs/design/node-master-slave-design.md`
 - `docs/design/ui-protocol-design.md`
 
@@ -37,6 +39,10 @@ Use this directory family for durable design truth.
   - provider scope, unified outputs, capability model, recovery model
 - `reason-turn-design.md`
   - turn truth, event broadcast, tool re-entry, subscriber policy, terminal schema
+- `reason-context-planner-design.md`
+  - typed context segments, cache-stable prefix rules, subagent conclusion admission, metadata/request isolation
+- `reason-rewrite-policy-design.md`
+  - compaction thresholds, rollback/resume-rebuild triggers, and unexpected-case rewrite strategy
 - `node-master-slave-design.md`
   - local master/slave topology, pairing, node states, task delegation, turn subscription
 - `ui-protocol-design.md`

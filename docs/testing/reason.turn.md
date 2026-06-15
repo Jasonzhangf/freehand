@@ -7,10 +7,17 @@
   - semantic events broadcast
   - tool result re-entry returns to the owning turn
   - completion schema controls terminal acceptance
+  - completion schema is extracted from tagged JSON in model text
+  - invalid completion schema feedback identifies exact invalid entries
+  - invalid schema retry exhaustion writes failed terminal outcome
+  - start-turn request payload preserves typed context segments through provider payload contract
+  - start-turn rewrite mode/version are sourced from session history truth
 - white-box plan:
-  - turn projection, schema validation, rejection path, non-blocking subscriber behavior
+  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability
 - module black-box plan:
   - reason turn boundary emits semantic stream and handles rejection/retry behavior
+  - completion parser rejects missing tag, malformed JSON, invalid claim, missing required field, and empty required field
+  - reason turn boundary propagates explicit rewrite gate diagnostics
 - project black-box impact:
   - terminal projection reaches UI boundary correctly
 - fixtures / replay inputs / runtime evidence paths:
@@ -18,6 +25,8 @@
   - `~/.freehand/ledgers/reason`
   - `~/.freehand/replays/reason`
 - known gaps:
-  - completion schema fixture format not yet defined
+  - production CLI/server persistence of schema retry ledger remains outside this module baseline
 - sync status between design and implementation:
-  - turn truth, completion validation, tool-result re-entry, and non-blocking broadcast baseline landed
+  - turn truth, typed request payload baseline, completion parsing/validation, tool-result re-entry, non-blocking broadcast baseline, and session-history rewrite-state sourcing landed
+  - rewrite trigger policy exists in `freehand-blocks`, and `ReasonRewriteRuntime` now wires policy-approved rewrite gates into session history
+  - provider usage can feed rewrite policy through shared prompt-token conversion

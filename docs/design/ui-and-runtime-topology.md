@@ -30,10 +30,13 @@ Confirmed discussion only. Unconfirmed details remain `TBD`.
 - master/slave is an input-permission configuration
 - local multiple agents are managed by `config.toml`
 - one `config.toml` may define multiple local agents
+- one `config.toml` may define multiple providers
 - config source path is `~/.freehand/config.toml`
 - multi-agent layout uses `[agents.<name>]`
+- provider layout uses `[providers.<id>]`
 - each agent has a startup configuration entry
 - startup configuration decides runtime mode
+- each agent binds to one configured provider id
 - whichever side is configured as `master` accepts user input
 - configured `master` may dispatch tasks to:
   - local sub-agents
@@ -68,7 +71,6 @@ Confirmed discussion only. Unconfirmed details remain `TBD`.
 - whether first multi-UI transport is SSE, WebSocket, HTTP polling, or mixed
 - exact command flow from UI to truth source
 - exact master/slave registration and heartbeat design
-- exact `config.toml` schema and search order
 - exact access control model beyond source IP + pairing token
 - exact session/topic isolation model for multiple UIs
 

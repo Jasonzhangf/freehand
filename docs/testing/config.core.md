@@ -5,18 +5,21 @@
 - lifecycle path under test:
   - load `~/.freehand/config.toml`
   - resolve `[agents.<name>]`
+  - resolve `[providers.<id>]`
   - select one agent per process
+  - select one enabled provider per agent
+  - resolve provider auth source without leaking secret projection
   - validate restart-only config activation
 - white-box plan:
-  - parse and validate config schema and invariants
+  - parse and validate agent/provider schema, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
 - module black-box plan:
-  - load config file and select named agent through public config boundary
+  - load config file and select named agent with full provider runtime selection through public config boundary
 - project black-box impact:
-  - CLI startup path consumes one named agent configuration correctly
+  - CLI startup path consumes one named agent configuration and projects selected provider metadata without exposing API key
 - fixtures / replay inputs / runtime evidence paths:
   - config fixtures under crate test fixtures
   - runtime evidence under `~/.freehand/state/config`
 - known gaps:
-  - project black-box harness is still minimal
+  - provider runtime execution support is still outside `config.core`; current project black-box scope stops at safe projection of selection truth
 - sync status between design and implementation:
-  - white-box, module black-box, and project black-box baseline landed
+  - white-box, module black-box, and project black-box baseline cover multi-provider registry and selected-provider projection

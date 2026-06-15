@@ -5,6 +5,7 @@ use freehand_contracts::{
     ReasonReq03ProviderPayload, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
     ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent, RecoveryPolicy,
     SemanticEventKind, SessionId, TerminalStatus, TokenUsage, ToolCallContract, TraceId, TurnId,
+    validate_reason_req03,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -100,6 +101,8 @@ pub enum ProviderSemanticError {
         provider: String,
         protocol: ProviderProtocol,
     },
+    #[error("provider semantic request contract is invalid: {0}")]
+    InvalidRequestContract(String),
 }
 
 pub fn build_semantic_request(
@@ -107,6 +110,11 @@ pub fn build_semantic_request(
     payload: ReasonReq03ProviderPayload,
     debug: bool,
 ) -> Result<ProviderSemanticRequest, ProviderSemanticError> {
+    if let Err(err) = validate_reason_req03(&payload) {
+        return Err(ProviderSemanticError::InvalidRequestContract(
+            err.to_string(),
+        ));
+    }
     match descriptor.protocol {
         ProviderProtocol::OpenAiResponses
         | ProviderProtocol::OpenAiChatCompletions
@@ -260,7 +268,19 @@ mod tests {
             feature_id: FeatureId::new("provider.semantic"),
             agent_id: AgentId::new("agent-1"),
             model: "gpt-test".to_owned(),
-            rendered_input: "hello".to_owned(),
+            input_segments: vec![freehand_contracts::ContextSegment {
+                segment_id: freehand_contracts::ContextSegmentId::new("segment-user"),
+                kind: freehand_contracts::ContextSegmentKind::UserTurnInput,
+                stability: freehand_contracts::ContextStability::TurnVolatile,
+                cache_policy: freehand_contracts::ContextCachePolicy::NoCache,
+                role: freehand_contracts::ContextRole::User,
+                content: "hello".to_owned(),
+                token_budget: 64,
+                provenance: freehand_contracts::ContextProvenance {
+                    source: "turn_input".to_owned(),
+                    reference: None,
+                },
+            }],
         }
     }
 

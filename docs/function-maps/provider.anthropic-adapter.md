@@ -8,20 +8,30 @@
   - `AnthropicAdapter::render_request`
   - `AnthropicAdapter::parse_response`
   - `AnthropicAdapter::parse_stream_event`
+  - `AnthropicExecutor::new`
+  - `AnthropicExecutor::execute_once`
+  - `AnthropicExecutor::execute_stream`
+  - `AnthropicExecutor::execute_stream_with`
 
 ## Request Mainline
 
 - provider-neutral semantic request enters Anthropic adapter
 - adapter renders Messages API request body with stateless conversation input
+- adapter consumes typed `input_segments` and renders them to Anthropic wire text without owning segment admission truth
+- executor posts rendered requests to configured Anthropic-compatible base URL with explicit `x-api-key`, `anthropic-version`, and JSON headers
 
 ## Response Mainline
 
 - Anthropic single-shot body or SSE event becomes provider-neutral semantic output
 - partial tool-use input stays adapter-local until enough JSON exists to emit structured arguments
+- live `minimonth` single-shot and SSE fixtures replay through the same parser entrypoints as synthetic tests
+- executor single-shot path parses response body through `AnthropicAdapter::parse_response`
+- executor stream path reads SSE event boundaries incrementally, parses `data:` payloads through `AnthropicAdapter::parse_stream_event`, and can notify callers before the HTTP response finishes
 
 ## Error Mainline
 
 - unsupported protocol, invalid JSON body, invalid tool-use input, and stream-shape violations are explicit adapter errors
+- HTTP transport failures and non-success HTTP statuses are explicit executor errors
 - Anthropic stop reasons are semantic metadata, not Freehand completion truth
 
 ## Shared Multi-Reference Functions
@@ -40,7 +50,14 @@
 | 01 | `AnthropicAdapter::render_request` | `crates/freehand-provider-anthropic/src/lib.rs` | render semantic request to Anthropic messages wire request | provider semantic request | Anthropic path + JSON body | runtime/provider caller | adapter renderer | bound |
 | 02 | `AnthropicAdapter::parse_response` | `crates/freehand-provider-anthropic/src/lib.rs` | parse single-shot Anthropic response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser | bound |
 | 03 | `AnthropicAdapter::parse_stream_event` | `crates/freehand-provider-anthropic/src/lib.rs` | parse one Anthropic SSE event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser | bound |
+| 04 | `AnthropicExecutor::execute_once` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic messages HTTP request | semantic request + auth/base URL | provider semantic outputs | runtime/provider caller | HTTP executor + adapter parser | bound |
+| 05 | `AnthropicExecutor::execute_stream` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic SSE request and return accumulated semantic outputs | semantic request + auth/base URL | provider semantic outputs | runtime/provider caller | `execute_stream_with` + adapter stream parser | bound |
+| 06 | `AnthropicExecutor::execute_stream_with` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic SSE request and call back for each parsed semantic batch before stream completion | semantic request + auth/base URL + callback | incremental provider semantic output batches plus final accumulated outputs | runtime/provider caller | HTTP executor + adapter stream parser | bound |
 
 ## Sync Status Against Code
 
 - renderer and parser bindings now match `AnthropicAdapter`
+- fixture replay bindings now cover `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
+- fixture replay bindings now cover `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
+- HTTP executor bindings now cover single-shot and incremental-SSE execution against local mock servers
+- incremental stream regression proves callback delivery can happen before the provider response completes

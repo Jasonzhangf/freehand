@@ -13,6 +13,7 @@
 
 - provider-neutral semantic request enters OpenAI adapter
 - adapter renders either `responses` or `chat completions` request body based on selected protocol
+- adapter consumes typed `input_segments` and renders them to OpenAI wire text without owning segment admission truth
 
 ## Response Mainline
 

@@ -54,6 +54,7 @@ Minimum binding fields for each function-call-table row:
 - output semantic
 - caller / callee relationship
 - notes on adjacent-node boundary
+- metadata/request isolation notes for cross-module calls
 
 If implementation is not landed yet, the row must say binding is pending. Do not pretend symbols exist.
 
@@ -96,3 +97,5 @@ serialization = ["serializable", "replayable", "persistable"]
 - request/response/error mainlines must be described even when they cross multiple crates
 - multi-reference functions must be documented once and reused by reference, not redescribed ad hoc in each caller
 - shared contract features should state ID and serialization guarantees explicitly
+- metadata/debug/provider/cache fields must not be mixed into request-chain data fields
+- if a feature crosses module boundaries, its function map must identify the allowed envelope builder that combines metadata and request data for transport, ledger, or debug output

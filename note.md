@@ -126,3 +126,104 @@
   - partial tool arguments accumulate in adapter state and emit `arguments_complete=false` until valid completion
   - shared `freehand-blocks` now owns tool-arguments JSON parsing/rendering
   - shared contracts now preserve structured tool arguments and richer usage metadata
+- 2026-06-15: reason/provider architecture correction
+  - current reason baseline has not yet been fully aligned with `../Deepseek-reasonix`
+  - real context planner must inspect reasonix first and preserve stable/volatile segment boundaries for cache improvement
+  - `freehand-reason` and provider adapters must remain implementation-independent
+  - metadata/debug/provider/cache fields must be hard-isolated from request-chain content fields
+  - this is now documented in design docs, feature map, function maps, and local skill
+- 2026-06-15: read-only reference analysis for context planner design
+  - Reasonix evidence: `internal/agent/agent.go` keeps cache-friendly bits stable; plan-mode/gate toggles happen at execute time, not by mutating system prompt or tool schema.
+  - Reasonix evidence: `internal/agent/cache_shape.go` hashes system prompt, normalized tools, and rewrite version to explain cache misses.
+  - Reasonix evidence: `internal/agent/coordinator.go` runs planner and executor in separate sessions; planner session grows append-only and does not mix into executor prefix except as explicit handoff.
+  - Reasonix evidence: `internal/agent/compact.go` treats compaction as low-frequency cache reset, preserves system head and bounded recent tail, archives folded originals, and prunes stale tool results before summarizing.
+  - Codex evidence: `context-fragments/src/fragment.rs` defines typed `ContextualUserFragment` with markers and rendering; injected model-visible context is recognizable later.
+  - Codex evidence: `context-fragments/src/additional_context.rs` caps additional context values to 1000 tokens before rendering.
+  - Codex evidence: `core/src/client_common.rs` keeps model-visible `Prompt.input` separate from tools, base instructions, output schema, and request options.
+  - Codex evidence: `core/src/client.rs` builds Responses payload from `Prompt` while telemetry, headers, trace, auth, and transport options are separate inputs, not hidden inside `input`.
+  - Codex evidence: `core/src/context_manager/history.rs` owns normalized history, `history_version`, call/output invariants, token estimates, and rollback trimming of contextual pre-turn fragments.
+- 2026-06-15: context-planner design locked from references
+  - Freehand adds `reason.context-planner` as a semantic feature owned by `freehand-blocks` with `freehand-reason` orchestration wiring
+  - context lock model is four-part: stable-prefix lock, append-only-tail lock, rewrite-gate lock, subagent-conclusion-only lock
+  - parent context expansion prefers Reasonix-style subagent search final reports; child transcript truth stays separate in runtime/debug storage
+- 2026-06-15: contracts baseline moved toward locked planner design
+  - `freehand-contracts` now defines typed context segments and request validators for context-composed input and provider payload
+  - `freehand-reason` start-turn path now emits typed user-turn segment into provider payload
+  - `freehand-provider-openai` and `freehand-provider-anthropic` now render from typed `input_segments` through shared block rendering logic
+- 2026-06-15: reason.context-planner baseline implemented
+  - `freehand-blocks` now owns `plan_context` and planner-side cache diagnostics
+  - planner enforces segment ordering, segment-contract validation, token-budget rejection, and raw subagent transcript rejection by provenance
+  - `freehand-reason` now delegates turn-start request planning to the planner and stores diagnostics off the request content path
+  - remaining gap is runtime-owned rewrite mode/version and explicit compaction/rollback/resume rewrite orchestration
+- 2026-06-15: reason.session-history / rewrite-gate baseline implemented
+  - `freehand-reason` now owns `SessionHistory` with `base_context_segments`, `rewrite_version`, `current_rewrite_mode`, and `rewrite_ledger`
+  - `ReasonTurnEngine::start_turn` now reads rewrite mode/version from session history instead of hardcoding ordinary-turn mode with version `0`
+  - explicit `stage_compaction`, `stage_rollback`, and `stage_resume_rebuild` gates now exist and are the only owner paths that bump rewrite version
+  - session history is persistable via JSON and filesystem round-trip helpers
+  - planner diagnostics now include `rewrite_mode` as well as `rewrite_version`
+- 2026-06-15: reason.rewrite-policy baseline implemented
+  - `freehand-blocks` now owns pure trigger policy for compaction, rollback, and resume rebuild
+  - Reasonix evidence was used only for compaction thresholds and stuck-loop behavior
+  - rollback and resume-rebuild trigger policy is explicitly Freehand-owned because the reference project has no matching persisted session-history gate
+  - unexpected cases now have typed policy outcomes: hold, prune-stale-only, compact, rollback, resume rebuild, or explicit block
+  - `ReasonRewriteRuntime` now consumes policy decisions before calling `SessionHistory::stage_*`
+  - provider `TokenUsage.input_tokens` now enters rewrite policy only through `prompt_tokens_from_usage`
+  - `freehand-testkit::ReasonRuntimeHarness` now provides project black-box coverage from provider semantic output to turn truth to usage-driven rewrite policy
+  - production CLI/server runtime loop wiring with real provider usage events and persisted recovery payloads is still pending
+- 2026-06-15: app.cli-runtime-smoke baseline implemented
+  - `freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>` now exists as app-boundary E2E smoke
+  - CLI loads real `~/.freehand/config.toml`, selects one agent, then routes into shared testkit/runtime harness instead of duplicating reason semantics
+  - app integration tests now prove config selection + reason rewrite policy from the binary boundary
+- 2026-06-15: config.core provider registry expansion
+  - user required provider config example support plus multi-provider switching
+  - locked config shape to `[providers.<id>]` + per-agent `provider` binding, not app-side ad hoc provider selection
+  - accepted user-style aliases `baseURL/defaultModel/apiKey/apiKeyEnv` at parse edge while keeping snake_case canonical doc truth
+  - provider auth is explicit union: `api_key` xor `api_key_env`
+  - workspace test failure after first pass was env-var race between config tests; fixed by generating unique env names per test instead of shared names
+- 2026-06-15: config.core correction after user protocol review
+  - user clarified `mini27` is OpenAI chat protocol, not Responses
+  - removed implicit protocol guessing entirely
+  - `protocol` is now mandatory for every provider entry
+  - added negative test to reject provider entries without explicit protocol
+- 2026-06-15: live provider probe for `mini27`
+  - `http://guizhouyun.site:2080` root returns One API HTML panel
+  - OpenAI-compatible API path is under `/v1/...`, not root
+  - `/v1/models` and `/v1/chat/completions` both accept auth header shape but return `401`
+  - response body says token expired: `该令牌已过期`
+  - current blocker is credential validity, not protocol path mismatch
+- 2026-06-15: config.core field cleanup after user review
+  - removed unused `transport_backend` / `transportBackend` from provider config truth
+  - provider raw tables now deny unknown fields
+  - added red test proving `transportBackend` is rejected instead of silently accepted
+  - local runtime config now uses `minimonth` with Anthropic `messages` and no transport field
+- 2026-06-15: provider.anthropic-adapter live fixture replay
+  - live single-shot `minimonth` response saved as `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
+  - live SSE `minimonth` stream saved as `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
+  - tests replay fixture bodies through real `AnthropicAdapter` parser entrypoints
+  - locked semantics: thinking -> reasoning event, text -> text event, usage cache counters, `end_turn` terminal success
+- 2026-06-15: provider.anthropic-adapter executor baseline
+  - added `AnthropicExecutorConfig` and `AnthropicExecutor`
+  - executor posts rendered Messages request to `base_url + /v1/messages`
+  - executor sends `x-api-key`, `anthropic-version`, and `content-type: application/json`
+  - single-shot path parses response through `AnthropicAdapter::parse_response`
+  - stream path currently collects SSE response, extracts `data:` lines, then parses each via `AnthropicAdapter::parse_stream_event`
+  - local mock-server tests cover single-shot success, SSE success, and non-2xx error
+- 2026-06-15: provider.reason-live-bridge and CLI live-turn
+  - added feature docs for `provider.reason-live-bridge` owner `freehand-testkit`
+  - added `run_live_reason_turn(selected, request)` for Anthropic `messages` only
+  - bridge starts one reason turn, builds provider semantic request, executes live provider path, applies outputs into turn truth, and captures broadcasts
+  - current bridge sets executor `anthropic-version` to `2023-06-01` and `max_tokens` to `512`
+  - current bridge does not submit completion schema, so provider terminal metadata does not become final turn terminal truth
+  - added `freehand-cli reason-live --agent <name> --prompt <text> [--stream]`
+  - CLI tests use local mock server with selected config, not live credentials
+- 2026-06-15: provider/live-stream incremental closeout in progress
+  - owner targets: freehand-provider-anthropic, freehand-testkit
+  - goal: replace collected-SSE runtime path with true incremental callback/apply path
+- 2026-06-15: completion schema loop requirement confirmed
+  - must guide schema in prompt/context
+  - must validate schema structurally and semantically
+  - invalid schema feedback must identify exact offending fields/items
+- 2026-06-15: completion loop implementation started
+  - schema format locked to tagged block: <freehand_completion>{...}</freehand_completion>
+  - claim=continue auto-continues next round
+  - invalid schema auto-rejected up to 3 retries then terminal failed

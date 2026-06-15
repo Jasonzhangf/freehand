@@ -4,6 +4,7 @@
 - owner: `crates/freehand-provider-core`
 - lifecycle path under test:
   - provider request enters semantic adapter
+  - typed provider payload is validated before adapter rendering
   - stream or single-shot output becomes unified semantic events
   - debug/raw retention policy stays separated from normal path
   - recovery classification remains explicit
@@ -22,4 +23,4 @@
 - known gaps:
   - adapter-specific fixture catalog not yet defined
 - sync status between design and implementation:
-  - semantic request builder, event mapping, and error classification baseline landed
+  - semantic request builder, typed payload validation, event mapping, and error classification baseline landed

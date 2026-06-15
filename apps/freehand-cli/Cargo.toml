@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+freehand-blocks = { path = "../../crates/freehand-blocks" }
 freehand-config = { path = "../../crates/freehand-config" }
+freehand-contracts = { path = "../../crates/freehand-contracts" }
 freehand-reason = { path = "../../crates/freehand-reason" }
 freehand-node = { path = "../../crates/freehand-node" }
+freehand-testkit = { path = "../../crates/freehand-testkit" }

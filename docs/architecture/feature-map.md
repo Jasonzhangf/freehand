@@ -72,12 +72,17 @@ Use order:
   - startup mode config tests
   - slave startup permission config tests
   - multi-agent named-table config tests
+  - multi-provider named-table config tests
+  - provider auth source resolution tests
+  - provider protocol declaration tests
+  - provider unknown-field rejection tests
   - restart-only config activation tests
 - required_module_black_box_tests:
   - config file load smoke
   - named agent selection smoke
+  - named provider selection smoke
 - required_project_black_box_tests:
-  - CLI agent-start config smoke
+  - CLI agent-start config + provider projection smoke
 - test_design_doc: `docs/testing/config.core.md`
 - function_map_doc: `docs/function-maps/config.core.md`
 - debug_artifacts:
@@ -87,14 +92,84 @@ Use order:
   - `~/.freehand/logs/config`
 - update_triggers:
   - config schema changes
+  - provider registry schema changes
+  - provider selection rules change
   - config resolution order changes
   - runtime home layout changes
   - startup file contract changes
 - lifecycle_checks:
   - multi-agent config ownership remains single-source
+  - multi-provider config ownership remains single-source
   - startup mode lifecycle is fully covered
+  - provider selection lifecycle is fully covered
   - config update path is closed-loop
   - one-process-one-agent startup rule remains explicit
+
+### `app.cli-runtime-smoke`
+
+- owner: `apps/freehand-cli`
+- allowed_paths: `apps/freehand-cli/**`, `crates/freehand-testkit/**`, `crates/freehand-reason/**`, `crates/freehand-config/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`
+- forbidden_paths: `crates/freehand-provider-*/**` except consumed semantic outputs only
+- required_checks:
+  - `cargo test -p freehand-cli`
+- required_white_box_tests:
+  - none beyond dispatch helper coverage
+- required_module_black_box_tests:
+  - CLI startup config smoke
+  - CLI reason compaction smoke
+  - CLI recovery block smoke
+- required_project_black_box_tests:
+  - app boundary config -> harness-backed reason E2E smoke
+- test_design_doc: `docs/testing/app.cli-runtime-smoke.md`
+- function_map_doc: `docs/function-maps/app.cli-runtime-smoke.md`
+- debug_artifacts:
+  - CLI smoke stdout fixtures
+- runtime_paths:
+  - `~/.freehand/state/config`
+  - `~/.freehand/state/turns`
+  - `~/.freehand/ledgers/reason`
+- update_triggers:
+  - CLI command shape changes
+  - smoke scenario changes
+  - harness boundary changes
+- lifecycle_checks:
+  - CLI remains a true app boundary, not direct crate test glue
+  - config selection still has one-process-one-agent truth
+  - reason smoke path still routes through shared harness and rewrite policy owner paths
+
+### `app.cli-live-turn`
+
+- owner: `apps/freehand-cli`
+- allowed_paths: `apps/freehand-cli/**`, `crates/freehand-testkit/**`, `crates/freehand-config/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-provider-core/**`, `crates/freehand-reason/**`, `docs/function-maps/**`, `docs/testing/**`
+- forbidden_paths: `crates/freehand-reason/**` semantic-owner changes unrelated to provider-neutral consumption
+- required_checks:
+  - `cargo test -p freehand-cli`
+- required_white_box_tests:
+  - none beyond argument dispatch helpers
+- required_module_black_box_tests:
+  - CLI live-turn single-shot mock smoke
+  - CLI live-turn stream mock smoke
+  - CLI live-turn invalid-schema retry smoke
+  - CLI live-turn unsupported-provider smoke
+- required_project_black_box_tests:
+  - app boundary config-selected anthropic provider drives one real turn through live bridge
+- test_design_doc: `docs/testing/app.cli-live-turn.md`
+- function_map_doc: `docs/function-maps/app.cli-live-turn.md`
+- debug_artifacts:
+  - CLI live-turn stdout fixtures
+- runtime_paths:
+  - `~/.freehand/state/config`
+  - `~/.freehand/ledgers/providers/anthropic`
+  - `~/.freehand/ledgers/reason`
+- update_triggers:
+  - CLI live-turn command shape changes
+  - live bridge summary projection changes
+  - config-selected anthropic path changes
+- lifecycle_checks:
+  - CLI remains app boundary only
+  - live turn still routes through `freehand-testkit` bridge instead of duplicating provider/runtime semantics
+  - config-selected anthropic path remains closed-loop
+  - completion loop projections stay on the app boundary and do not leak tagged schema text
 
 ### `provider.semantic`
 
@@ -132,6 +207,8 @@ Use order:
   - provider failure path is explicit
   - replay/debug lifecycle stays valid
   - debug and non-debug retention policies remain explicit
+  - provider semantic layer remains independent from `freehand-reason`
+  - metadata and request-chain data remain type-isolated
 
 ### `provider.openai-adapter`
 
@@ -168,6 +245,8 @@ Use order:
   - responses and chat-completions boundaries remain explicit
   - partial tool-call lifecycle is explicit
   - adapter-private DTO boundary remains intact
+  - adapter does not depend on `freehand-reason`
+  - metadata does not become prompt/request content implicitly
 
 ### `provider.anthropic-adapter`
 
@@ -180,10 +259,13 @@ Use order:
   - messages request renderer tests
   - messages single-shot parser tests
   - SSE stream parser tests
+  - messages HTTP executor tests
+  - incremental SSE callback delivery tests
   - tool-use and fine-grained tool-stream accumulation tests
   - stop-reason mapping tests
 - required_module_black_box_tests:
   - anthropic adapter emits unified semantic outputs for messages
+  - anthropic executor emits unified semantic outputs for local single-shot and SSE mock servers
 - required_project_black_box_tests:
   - anthropic adapter to reason integration smoke
 - test_design_doc: `docs/testing/provider.anthropic-adapter.md`
@@ -202,6 +284,49 @@ Use order:
   - messages stateless request boundary remains explicit
   - partial tool-call lifecycle is explicit
   - adapter-private DTO boundary remains intact
+  - adapter does not depend on `freehand-reason`
+  - metadata does not become prompt/request content implicitly
+
+### `provider.reason-live-bridge`
+
+- owner: `crates/freehand-testkit`
+- allowed_paths: `crates/freehand-testkit/**`, `crates/freehand-config/**`, `crates/freehand-provider-core/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-reason/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
+- forbidden_paths: `crates/freehand-reason/**` semantic-owner changes unrelated to provider-neutral consumption, `crates/freehand-provider-openai/**`
+- required_checks:
+  - `cargo test -p freehand-testkit`
+- required_white_box_tests:
+  - live bridge request build tests
+  - live bridge anthropic single-shot mock tests
+  - live bridge anthropic SSE mock tests
+  - live bridge broadcast capture tests
+  - live bridge incremental stream broadcast tests
+  - live bridge invalid-schema retry tests
+  - live bridge continue-next-round tests
+  - live bridge retry-exhausted failed-terminal tests
+  - unsupported provider selection tests
+- required_module_black_box_tests:
+  - config-selected anthropic provider can drive one reason turn through live bridge
+- required_project_black_box_tests:
+  - CLI live-turn smoke against local anthropic-compatible mock server
+- test_design_doc: `docs/testing/provider.reason-live-bridge.md`
+- function_map_doc: `docs/function-maps/provider.reason-live-bridge.md`
+- debug_artifacts:
+  - live bridge replay fixture path
+  - local mock transcript fixtures
+- runtime_paths:
+  - `~/.freehand/ledgers/providers/anthropic`
+  - `~/.freehand/ledgers/reason`
+  - `~/.freehand/replays/providers/anthropic`
+- update_triggers:
+  - config-to-provider bridge rules change
+  - anthropic executor boundary changes
+  - reason turn live ingestion path changes
+  - CLI live-turn command shape changes
+- lifecycle_checks:
+  - reason remains provider-implementation independent
+  - live bridge owns runtime composition without duplicating adapter semantics
+  - anthropic live path is closed-loop from config selection to turn truth
+  - completion schema loop remains bridge composition, not provider or app semantics
 
 ### `contracts.core`
 
@@ -246,7 +371,9 @@ Use order:
   - per-turn truth projection tests
   - tool re-entry ownership tests
   - terminal schema validation tests
+  - tagged completion parser integration tests
   - invalid completion schema rejection tests
+  - failed terminal write tests
   - slow subscriber non-blocking tests
 - required_module_black_box_tests:
   - turn semantic stream smoke
@@ -267,11 +394,141 @@ Use order:
   - terminal schema changes
   - subscriber delivery policy changes
   - raw-event retention policy changes
+  - session-history ownership changes
 - lifecycle_checks:
   - turn truth write path remains single-owner
   - terminal decision path is closed-loop
   - schema rejection and retry path are explicit
   - debug ledger and session truth boundaries remain explicit
+  - context orchestration truth remains inside `freehand-reason`
+  - turn startup rewrite state remains sourced from `reason.session-history`
+  - provider adapter crates remain independent from `freehand-reason`
+  - metadata and request-chain data remain type-isolated
+
+### `reason.session-history`
+
+- owner: `crates/freehand-reason`
+- allowed_paths: `crates/freehand-reason/**`, `crates/freehand-contracts/**`, `crates/freehand-blocks/**`, `docs/architecture/**`, `docs/design/**`
+- forbidden_paths: `crates/freehand-provider-*/**`, `crates/freehand-ui-protocol/**` except projection-only consumers
+- required_checks:
+  - `cargo test -p freehand-reason`
+- required_white_box_tests:
+  - rewrite version persistence tests
+  - explicit compaction rewrite tests
+  - explicit rollback rewrite tests
+  - explicit resume-rebuild rewrite tests
+  - persisted json/file round-trip tests
+  - ordinary-turn no-rewrite-version-bump tests
+- required_module_black_box_tests:
+  - session-history to start-turn rewrite propagation smoke
+  - rewrite-gate consumption smoke
+- required_project_black_box_tests:
+  - reason-to-provider rewrite-version propagation smoke
+- test_design_doc: `docs/testing/reason.session-history.md`
+- function_map_doc: `docs/function-maps/reason.session-history.md`
+- debug_artifacts:
+  - session-history persisted fixture path
+  - rewrite-ledger fixture path
+- runtime_paths:
+  - `~/.freehand/state/turns`
+  - `~/.freehand/ledgers/reason`
+  - `~/.freehand/replays/reason`
+- update_triggers:
+  - rewrite gate semantics change
+  - persisted session truth format changes
+  - turn-start rewrite sourcing changes
+  - compaction/rollback/resume lifecycle changes
+- lifecycle_checks:
+  - rewrite version is single-owned by `freehand-reason`
+  - non-ordinary rewrite modes enter planner only through explicit session-history gate methods
+  - ordinary turns do not bump rewrite version
+  - rewrite ledger retains diagnostics and applied-turn evidence
+  - persisted session truth remains serializable and reloadable
+
+### `reason.rewrite-policy`
+
+- owner: `crates/freehand-blocks`
+- allowed_paths: `crates/freehand-blocks/**`, `crates/freehand-contracts/**`, `crates/freehand-reason/**`, `docs/architecture/**`, `docs/design/**`
+- forbidden_paths: `crates/freehand-provider-*/**`, `crates/freehand-ui-protocol/**`
+- required_checks:
+  - `cargo test -p freehand-blocks`
+- required_white_box_tests:
+  - compaction threshold tests
+  - stale-prune-preferred tests
+  - paused-auto-compaction tests
+  - rollback-vs-rebuild recovery tests
+  - insufficient-recovery-truth block tests
+- required_module_black_box_tests:
+  - rewrite policy decision smoke
+  - restore recovery decision smoke
+- required_project_black_box_tests:
+  - provider usage event reaches rewrite policy through runtime harness
+  - reason runtime reaches session-history rewrite gates only through policy-approved paths
+  - missing recovery source blocks without mutating session truth
+- test_design_doc: `docs/testing/reason.rewrite-policy.md`
+- function_map_doc: `docs/function-maps/reason.rewrite-policy.md`
+- debug_artifacts:
+  - rewrite-policy replay fixture path
+- runtime_paths:
+  - `~/.freehand/ledgers/context`
+  - `~/.freehand/replays/context`
+  - `~/.freehand/state/turns`
+- update_triggers:
+  - compaction threshold changes
+  - rewrite recovery classification changes
+  - rollback or rebuild trigger policy changes
+  - auto-compaction pause policy changes
+- lifecycle_checks:
+  - rewrite trigger policy remains separate from session-history mutation
+  - missing runtime truth does not silently compact or recover
+  - rollback, resume rebuild, and explicit block all remain distinct outcomes
+  - runtime still may not invent rewrite modes outside the policy owner
+
+### `reason.context-planner`
+
+- owner: `crates/freehand-blocks`
+- allowed_paths: `crates/freehand-blocks/**`, `crates/freehand-contracts/**`, `crates/freehand-reason/**`, `docs/architecture/**`, `docs/design/**`
+- forbidden_paths: `crates/freehand-provider-*/**` except explicit request-consumer interfaces, `crates/freehand-ui-protocol/**`
+- required_checks:
+  - `cargo test -p freehand-blocks`
+- required_white_box_tests:
+  - context segment classification tests
+  - context segment ordering tests
+  - token-cap admission tests
+  - subagent conclusion admission tests
+  - raw subagent transcript rejection tests
+  - cache-shape drift tests
+  - rewrite-version bump tests
+- required_module_black_box_tests:
+  - planned request-content build smoke
+  - metadata/request isolation smoke
+  - subagent final-report enrichment smoke
+- required_project_black_box_tests:
+  - reason-to-provider stable-prefix smoke
+  - compaction/rollback-only rewrite smoke
+- test_design_doc: `docs/testing/reason.context-planner.md`
+- function_map_doc: `docs/function-maps/reason.context-planner.md`
+- debug_artifacts:
+  - context planner replay fixture path
+  - cache-shape drift fixture path
+  - subagent final-report fixture path
+- runtime_paths:
+  - `~/.freehand/ledgers/context`
+  - `~/.freehand/replays/context`
+  - `~/.freehand/state/turns`
+- update_triggers:
+  - context segment class changes
+  - context ordering changes
+  - cache-shape policy changes
+  - subagent context-admission changes
+  - metadata/request boundary changes
+- lifecycle_checks:
+  - stable-prefix lock remains explicit
+  - append-only tail lock remains explicit
+  - rewrite-gate lock remains explicit
+  - subagent conclusion-only admission remains explicit
+  - provider renderers still do not own context planning
+  - metadata and request-chain data remain type-isolated
 
 ### `ui.protocol`
 

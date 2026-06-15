@@ -1,0 +1,38 @@
+# Test Design: `reason.session-history`
+
+- feature_id: `reason.session-history`
+- owner: `crates/freehand-reason`
+- lifecycle path under test:
+  - session truth is initialized from stable/session-stable base context
+  - ordinary turns read rewrite version from session truth without bumping it
+  - compaction/rollback/resume rebuild are the only explicit rewrite gates
+  - rewrite gate emits ledger diagnostics and is consumed by the next started turn
+  - session truth can be serialized and restored without losing rewrite state
+- white-box plan:
+  - session initialization validation tests
+  - compaction version-bump tests
+  - rollback version-bump tests
+  - resume-rebuild version-bump tests
+  - rewrite gate consumption tests
+  - ordinary-turn no-version-bump tests
+  - persisted json round-trip tests
+  - persisted file round-trip tests
+- module black-box plan:
+  - `SessionHistory` rewrite state reaches `ReasonTurnEngine::start_turn` diagnostics
+  - non-ordinary rewrite modes are one-shot and return to ordinary mode after successful startup
+- project black-box impact:
+  - reason-to-provider request planning carries session-owned rewrite version and rewrite mode
+  - replay/debug consumers can inspect rewrite ledger snapshots without reading provider request content
+- fixtures / replay inputs / runtime evidence paths:
+  - persisted session-history fixture path
+  - rewrite-ledger fixture path
+  - `~/.freehand/state/turns`
+  - `~/.freehand/ledgers/reason`
+  - `~/.freehand/replays/reason`
+- known gaps:
+  - final CLI/server runtime loop still needs to supply real usage metrics and persisted recovery payloads
+  - final on-disk filename convention under `~/.freehand/state/turns` is not yet wired
+- sync status between design and implementation:
+  - session-history rewrite baseline landed
+  - ordinary-turn stability and rewrite-gate bump behavior are covered in crate tests
+  - persisted JSON/file round-trip baseline is covered in crate tests

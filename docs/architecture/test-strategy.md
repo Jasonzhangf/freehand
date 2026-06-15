@@ -40,6 +40,7 @@ Required fields:
 - project black-box
   - typical user-visible or operator-visible behavior across crate and app boundaries
   - proves runtime wiring, command flow, query flow, subscribe flow, and terminal projection
+  - may use `freehand-testkit` runtime harnesses before production CLI/server loops exist
 
 ## Placement Rules
 

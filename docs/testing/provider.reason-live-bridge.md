@@ -1,0 +1,36 @@
+# Test Design: `provider.reason-live-bridge`
+
+- feature_id: `provider.reason-live-bridge`
+- owner: `crates/freehand-testkit`
+- lifecycle path under test:
+  - selected config resolves one anthropic provider
+  - one or more reason rounds start and build provider payloads
+  - provider semantic request is built from round truth
+  - anthropic executor runs single-shot or SSE request
+  - provider-neutral outputs are written back into the active round and broadcast
+  - completion schema is parsed from tagged text and either accepted, rejected, or continued
+- white-box plan:
+  - provider descriptor derivation
+  - unsupported provider rejection
+  - single-shot live-bridge mock path
+  - SSE live-bridge mock path
+  - broadcast capture path
+  - incremental stream apply path proving broadcast can happen before stream completion
+  - invalid-schema rejection then success path
+  - `claim=continue` next-round path
+  - retry-exhausted failed terminal path
+- module black-box plan:
+  - one selected anthropic provider drives text/reasoning/usage into turn truth through the bridge and closes via accepted completion schema
+- project black-box impact:
+  - CLI can reuse the bridge for a live-turn smoke path without importing provider DTOs into app code
+- fixtures / replay inputs / runtime evidence paths:
+  - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
+  - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
+  - local mock transcript fixtures when added
+  - `~/.freehand/ledgers/providers/anthropic`
+  - `~/.freehand/ledgers/reason`
+- sync status between design and implementation:
+  - anthropic-only bridge baseline is implemented
+  - local mock-based single-shot/SSE bridge tests exist
+  - stream path now applies outputs incrementally from `AnthropicExecutor::execute_stream_with`
+  - completion schema loop now covers tagged parse, field-level rejection, `continue` next-round execution, and failed terminal closeout after 3 invalid retries

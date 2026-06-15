@@ -3,7 +3,7 @@
 - feature_id: `provider.openai-adapter`
 - owner: `crates/freehand-provider-openai`
 - lifecycle path under test:
-  - semantic request renders into `responses` or `chat completions`
+  - semantic request renders typed input segments into `responses` or `chat completions`
   - single-shot and stream outputs normalize into shared semantic events
   - partial tool-call chunks accumulate until arguments become complete
 - white-box plan:
@@ -20,5 +20,5 @@
   - live HTTP execution is intentionally out of scope
 - sync status between design and implementation:
   - `OpenAiAdapter` baseline implemented
-  - request rendering covers `responses` and `chat completions`
+  - request rendering covers `responses` and `chat completions` from typed input segments
   - single-shot and stream parsing cover text, tool calls, usage, terminal, and error paths

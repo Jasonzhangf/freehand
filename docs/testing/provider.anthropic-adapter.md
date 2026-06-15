@@ -3,22 +3,30 @@
 - feature_id: `provider.anthropic-adapter`
 - owner: `crates/freehand-provider-anthropic`
 - lifecycle path under test:
-  - semantic request renders into Messages API request
+  - semantic request renders typed input segments into Messages API request
+  - executor posts rendered Messages API request with explicit auth/version/content headers
   - single-shot and SSE outputs normalize into shared semantic events
   - partial tool-use input accumulates until arguments become complete
 - white-box plan:
   - request renderer, response parser, SSE parser, partial tool accumulator
+  - executor URL joining, header emission, non-success status handling, SSE event-boundary parsing, and incremental callback delivery
 - module black-box plan:
   - adapter emits provider-neutral text/tool/usage/terminal/error outputs for Anthropic messages
+  - adapter replays live `minimonth` Anthropic-compatible single-shot response fixture
+  - adapter replays live `minimonth` Anthropic-compatible SSE stream fixture
+  - executor emits provider-neutral outputs from local single-shot and SSE mock servers
+  - executor proves first semantic batch can be observed before the stream is released to completion
 - project black-box impact:
   - reason layer can consume Anthropic semantic outputs without protocol leakage
 - fixtures / replay inputs / runtime evidence paths:
-  - Anthropic request/response fixtures
+  - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
+  - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
   - `~/.freehand/ledgers/providers/anthropic`
   - `~/.freehand/replays/providers/anthropic`
-- known gaps:
-  - live HTTP execution is intentionally out of scope
 - sync status between design and implementation:
   - `AnthropicAdapter` baseline implemented
-  - request rendering covers Messages API with explicit `max_tokens` adapter config
+  - request rendering covers Messages API with explicit `max_tokens` adapter config and typed input segments
   - single-shot and stream parsing cover text, tool use, usage, terminal, and error paths
+  - live `minimonth` fixtures now cover thinking/text/usage/cache/terminal replay for single-shot and SSE
+  - HTTP executor now supports incremental SSE callback delivery via `AnthropicExecutor::execute_stream_with`
+  - HTTP executor tests use local mock servers and do not require live provider credentials

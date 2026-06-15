@@ -1,20 +1,32 @@
 //! Reasoning turn orchestration and event emission for Freehand.
 
+mod rewrite_runtime;
+mod session_history;
+
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 
 use freehand_blocks::{
-    CompletionDecision, CompletionSubmission, CompletionValidationError,
-    validate_completion_submission,
+    CompletionDecision, CompletionSubmission, CompletionValidationError, ContextPlannerInput,
+    PlannedContext, plan_context, validate_completion_submission,
 };
 use freehand_contracts::{
-    AgentId, ErrorErr01RuntimeClassified, FeatureId, ReasonReq02ContextComposedInput,
-    ReasonReq03ProviderPayload, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
-    ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent,
-    RequestContextItem, SessionId, TraceId, TurnId,
+    AgentId, ContextProvenance, ContextSegment, ContextSegmentId, ErrorErr01RuntimeClassified,
+    FeatureId, ReasonReq02ContextComposedInput, ReasonReq03ProviderPayload, ReasonReq04ToolCall,
+    ReasonReq05ToolResultReentry, ReasonResp01SemanticEvent, ReasonResp02UsageEvent,
+    ReasonResp03TerminalEvent, SessionId, TerminalStatus, TraceId, TurnId, validate_reason_req02,
 };
 use freehand_provider_core::ProviderSemanticOutput;
 use thiserror::Error;
+
+pub use rewrite_runtime::{
+    CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,
+    ReasonRewriteRuntime, RecoveryPolicyOutcome, RecoveryPolicyRequest, ResumeRebuildPayload,
+    RewriteRuntimeError, RewriteRuntimeState, RollbackRewritePayload,
+};
+pub use session_history::{
+    RewriteDiagnosticsSnapshot, SessionHistory, SessionHistoryError, SessionRewriteRecord,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnStartInput {
@@ -24,7 +36,7 @@ pub struct TurnStartInput {
     pub feature_id: FeatureId,
     pub agent_id: AgentId,
     pub user_text: String,
-    pub context_items: Vec<RequestContextItem>,
+    pub planned_context_segments: Vec<ContextSegment>,
     pub model: String,
 }
 
@@ -48,6 +60,7 @@ pub struct TurnProjection {
 pub struct TurnRecord {
     pub request: ReasonReq02ContextComposedInput,
     pub provider_payload: ReasonReq03ProviderPayload,
+    pub planned_context: PlannedContext,
     pub semantic_events: Vec<ReasonResp01SemanticEvent>,
     pub tool_calls: Vec<ReasonReq04ToolCall>,
     pub tool_results: Vec<ReasonReq05ToolResultReentry>,
@@ -64,6 +77,10 @@ pub struct ReasonTurnEngine {
 pub enum ReasonTurnError {
     #[error("turn input text must not be empty")]
     EmptyUserText,
+    #[error("session history does not match turn session `{0}`")]
+    SessionMismatch(String),
+    #[error("context planning failed: {0}")]
+    ContextPlanningFailed(String),
     #[error("completion rejected: {0}")]
     CompletionRejected(String),
     #[error("completion requires next step: {0}")]
@@ -92,10 +109,35 @@ impl ReasonTurnEngine {
         receiver
     }
 
-    pub fn start_turn(&self, input: TurnStartInput) -> Result<TurnRecord, ReasonTurnError> {
+    pub fn start_turn(
+        &self,
+        history: &mut SessionHistory,
+        input: TurnStartInput,
+    ) -> Result<TurnRecord, ReasonTurnError> {
         if input.user_text.trim().is_empty() {
             return Err(ReasonTurnError::EmptyUserText);
         }
+        if history.session_id() != &input.session_id {
+            return Err(ReasonTurnError::SessionMismatch(
+                input.session_id.as_str().to_owned(),
+            ));
+        }
+        let mut candidate_segments = history.base_context_segments().to_vec();
+        candidate_segments.extend(input.planned_context_segments);
+        let planned_context = plan_context(ContextPlannerInput {
+            candidate_segments,
+            current_user_text: input.user_text.clone(),
+            user_segment_id: ContextSegmentId::new(format!("{}-user", input.turn_id.as_str())),
+            user_provenance: ContextProvenance {
+                source: "turn_input".to_owned(),
+                reference: None,
+            },
+            rewrite_mode: history.current_rewrite_mode(),
+            rewrite_version: history.rewrite_version(),
+            tool_schema_fingerprint: None,
+        })
+        .map_err(|err| ReasonTurnError::ContextPlanningFailed(err.to_string()))?;
+        history.commit_turn_start(&input.turn_id);
         let request = ReasonReq02ContextComposedInput {
             session_id: input.session_id.clone(),
             turn_id: input.turn_id.clone(),
@@ -103,8 +145,9 @@ impl ReasonTurnEngine {
             feature_id: input.feature_id.clone(),
             agent_id: input.agent_id.clone(),
             user_text: input.user_text.clone(),
-            context_items: input.context_items,
+            context_segments: planned_context.ordered_segments.clone(),
         };
+        validate_reason_req02(&request).map_err(|_| ReasonTurnError::EmptyUserText)?;
         let provider_payload = ReasonReq03ProviderPayload {
             session_id: input.session_id,
             turn_id: input.turn_id,
@@ -112,11 +155,12 @@ impl ReasonTurnEngine {
             feature_id: input.feature_id,
             agent_id: input.agent_id,
             model: input.model,
-            rendered_input: request.user_text.clone(),
+            input_segments: planned_context.ordered_segments.clone(),
         };
         Ok(TurnRecord {
             request,
             provider_payload,
+            planned_context,
             semantic_events: Vec::new(),
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
@@ -189,6 +233,25 @@ impl ReasonTurnEngine {
         }
     }
 
+    pub fn fail_turn(
+        &self,
+        turn: &mut TurnRecord,
+        summary: impl Into<String>,
+    ) -> ReasonResp03TerminalEvent {
+        let event = ReasonResp03TerminalEvent {
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+            agent_id: turn.request.agent_id.clone(),
+            status: TerminalStatus::Failed,
+            summary: summary.into(),
+        };
+        turn.terminal_event = Some(event.clone());
+        self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
+        event
+    }
+
     pub fn project_session(&self, turns: &[TurnRecord]) -> Vec<TurnProjection> {
         turns
             .iter()
@@ -235,10 +298,31 @@ mod tests {
     use super::*;
     use freehand_blocks::CompletionClaim;
     use freehand_contracts::{
+        ContextCachePolicy, ContextRewriteMode, ContextRole, ContextSegmentKind, ContextStability,
         TerminalStatus, TokenUsage, ToolArgument, ToolCallContract, ToolCallId,
     };
     use freehand_provider_core::ProviderAdapterEvent;
     use serde_json::json;
+
+    fn session_history() -> SessionHistory {
+        SessionHistory::new(
+            SessionId::new("session-1"),
+            vec![ContextSegment {
+                segment_id: ContextSegmentId::new("segment-memory"),
+                kind: ContextSegmentKind::SessionMemory,
+                stability: ContextStability::SessionStable,
+                cache_policy: ContextCachePolicy::Cacheable,
+                role: ContextRole::Developer,
+                content: "ctx".to_owned(),
+                token_budget: 64,
+                provenance: ContextProvenance {
+                    source: "memory".to_owned(),
+                    reference: None,
+                },
+            }],
+        )
+        .expect("history")
+    }
 
     fn start_input() -> TurnStartInput {
         TurnStartInput {
@@ -248,10 +332,7 @@ mod tests {
             feature_id: FeatureId::new("reason.turn"),
             agent_id: AgentId::new("agent-1"),
             user_text: "hello".to_owned(),
-            context_items: vec![RequestContextItem {
-                source: "memory".to_owned(),
-                content: "ctx".to_owned(),
-            }],
+            planned_context_segments: Vec::new(),
             model: "gpt-test".to_owned(),
         }
     }
@@ -259,7 +340,10 @@ mod tests {
     #[test]
     fn projects_session_from_per_turn_truth() {
         let engine = ReasonTurnEngine::new();
-        let turn = engine.start_turn(start_input()).expect("turn");
+        let mut history = session_history();
+        let turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
         let projected = engine.project_session(&[turn]);
         assert_eq!(projected.len(), 1);
         assert_eq!(projected[0].user_text, "hello");
@@ -269,7 +353,10 @@ mod tests {
     #[test]
     fn writes_tool_result_reentry_back_to_owning_turn() {
         let engine = ReasonTurnEngine::new();
-        let mut turn = engine.start_turn(start_input()).expect("turn");
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
         let result = ReasonReq05ToolResultReentry {
             session_id: turn.request.session_id.clone(),
             turn_id: turn.request.turn_id.clone(),
@@ -292,7 +379,10 @@ mod tests {
     fn accepts_valid_completion_schema_and_emits_terminal() {
         let engine = ReasonTurnEngine::new();
         let receiver = engine.subscribe(4);
-        let mut turn = engine.start_turn(start_input()).expect("turn");
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
         let terminal = engine
             .submit_completion(
                 &mut turn,
@@ -320,7 +410,10 @@ mod tests {
     #[test]
     fn rejects_invalid_completion_schema() {
         let engine = ReasonTurnEngine::new();
-        let mut turn = engine.start_turn(start_input()).expect("turn");
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
         let err = engine
             .submit_completion(
                 &mut turn,
@@ -339,10 +432,33 @@ mod tests {
     }
 
     #[test]
+    fn writes_failed_terminal_when_requested() {
+        let engine = ReasonTurnEngine::new();
+        let receiver = engine.subscribe(4);
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let terminal = engine.fail_turn(&mut turn, "schema retry limit exhausted");
+        assert_eq!(terminal.status, TerminalStatus::Failed);
+        let broadcast = receiver.recv().expect("broadcast");
+        match broadcast {
+            ReasonBroadcastEvent::Terminal(event) => {
+                assert_eq!(event.status, TerminalStatus::Failed);
+                assert!(event.summary.contains("schema retry limit exhausted"));
+            }
+            other => panic!("unexpected broadcast: {other:?}"),
+        }
+    }
+
+    #[test]
     fn slow_subscriber_does_not_block_main_path() {
         let engine = ReasonTurnEngine::new();
         let _receiver = engine.subscribe(1);
-        let mut turn = engine.start_turn(start_input()).expect("turn");
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
         let ctx = freehand_provider_core::ProviderEventContext {
             agent_id: turn.request.agent_id.clone(),
             session_id: turn.request.session_id.clone(),
@@ -371,7 +487,10 @@ mod tests {
     fn broadcasts_semantic_and_usage_events() {
         let engine = ReasonTurnEngine::new();
         let receiver = engine.subscribe(4);
-        let mut turn = engine.start_turn(start_input()).expect("turn");
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
         let ctx = freehand_provider_core::ProviderEventContext {
             agent_id: turn.request.agent_id.clone(),
             session_id: turn.request.session_id.clone(),
@@ -414,5 +533,105 @@ mod tests {
         let second = receiver.recv().expect("second");
         assert!(matches!(first, ReasonBroadcastEvent::Tool(_)));
         assert!(matches!(second, ReasonBroadcastEvent::Usage(_)));
+    }
+
+    #[test]
+    fn ordinary_turn_keeps_rewrite_version_and_mode_from_session_truth() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let turn_a = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn a");
+        let turn_b = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    turn_id: TurnId::new("turn-2"),
+                    trace_id: TraceId::new("trace-2"),
+                    user_text: "hello again".to_owned(),
+                    ..start_input()
+                },
+            )
+            .expect("turn b");
+
+        assert_eq!(
+            turn_a.planned_context.diagnostics.rewrite_mode,
+            ContextRewriteMode::OrdinaryTurn
+        );
+        assert_eq!(turn_a.planned_context.diagnostics.rewrite_version, 0);
+        assert_eq!(
+            turn_a.planned_context.diagnostics.stable_prefix_hash,
+            turn_b.planned_context.diagnostics.stable_prefix_hash
+        );
+        assert_eq!(history.rewrite_version(), 0);
+        assert_eq!(
+            history.current_rewrite_mode(),
+            ContextRewriteMode::OrdinaryTurn
+        );
+    }
+
+    #[test]
+    fn explicit_rewrite_gate_bumps_version_and_is_consumed_by_next_turn() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        history
+            .stage_compaction(
+                vec![ContextSegment {
+                    segment_id: ContextSegmentId::new("segment-summary"),
+                    kind: ContextSegmentKind::SessionSummary,
+                    stability: ContextStability::SessionStable,
+                    cache_policy: ContextCachePolicy::Cacheable,
+                    role: ContextRole::Developer,
+                    content: "compacted".to_owned(),
+                    token_budget: 64,
+                    provenance: ContextProvenance {
+                        source: "compaction".to_owned(),
+                        reference: None,
+                    },
+                }],
+                "compact stale context",
+            )
+            .expect("rewrite");
+
+        let turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        assert_eq!(
+            turn.planned_context.diagnostics.rewrite_mode,
+            ContextRewriteMode::Compaction
+        );
+        assert_eq!(turn.planned_context.diagnostics.rewrite_version, 1);
+        assert_eq!(
+            history.current_rewrite_mode(),
+            ContextRewriteMode::OrdinaryTurn
+        );
+        assert_eq!(history.rewrite_version(), 1);
+        assert_eq!(
+            history
+                .rewrite_ledger()
+                .last()
+                .and_then(|record| record.applied_turn_id.clone()),
+            Some(TurnId::new("turn-1"))
+        );
+
+        let ordinary_after = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    turn_id: TurnId::new("turn-2"),
+                    trace_id: TraceId::new("trace-2"),
+                    user_text: "ordinary again".to_owned(),
+                    ..start_input()
+                },
+            )
+            .expect("turn");
+        assert_eq!(
+            ordinary_after.planned_context.diagnostics.rewrite_mode,
+            ContextRewriteMode::OrdinaryTurn
+        );
+        assert_eq!(
+            ordinary_after.planned_context.diagnostics.rewrite_version,
+            1
+        );
     }
 }

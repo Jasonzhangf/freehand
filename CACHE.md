@@ -37,3 +37,78 @@
   - `freehand-provider-anthropic` now supports Messages request rendering plus single-shot/SSE parsing
   - shared contracts now preserve structured tool arguments and richer usage metadata
   - `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo run -p xtask -- gates check` pass
+- 2026-06-15: reason/provider correction locked
+  - reasonix context orchestration alignment is not yet implemented
+  - inspect `../Deepseek-reasonix` before context planner changes
+  - reason/provider implementation independence and metadata/request hard isolation are now documented architecture truth
+- 2026-06-15: reason.context-planner design locked
+  - stable-prefix / append-only-tail / rewrite-gate / subagent-conclusion-only locks are now durable design truth
+  - preferred context expansion path is Reasonix-style subagent search final report, not raw transcript injection
+- 2026-06-15: contracts/provider/request baseline upgraded
+  - shared contracts now expose typed context segments and provider payload `input_segments`
+  - reason start-turn path and provider adapters now consume typed request content instead of `context_items` + `rendered_input`
+- 2026-06-15: reason.context-planner baseline landed
+  - `freehand-blocks` now owns typed context planning and cache diagnostics
+  - `freehand-reason` start-turn now routes through planner instead of appending user context inline
+  - full `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass
+  - remaining gap at that milestone was session-owned rewrite sourcing and explicit rewrite gating, which is now closed by `reason.session-history`
+- 2026-06-15: reason.session-history / rewrite-gate baseline landed
+  - `freehand-reason` now owns `SessionHistory` as the session/runtime truth for base context, rewrite mode/version, and rewrite ledger
+  - `ReasonTurnEngine::start_turn` now reads rewrite mode/version from session history instead of turn-local constants
+  - explicit compaction / rollback / resume rebuild gate methods now exist and are the only rewrite-version bump path
+  - session history JSON and file round-trip baseline landed
+  - `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass
+- 2026-06-15: reason.rewrite-policy baseline landed
+  - new feature `reason.rewrite-policy` is owned by `freehand-blocks`
+  - pure strategy functions now classify compaction trigger, compaction follow-up, and recovery rewrite decisions
+  - Reasonix-derived compaction thresholds are locked at 50% / 80% / 90% with 50% tail cap and 16384 token max tail
+  - repeated ineffective compaction now has an explicit pause policy after two consecutive failures
+  - rollback and resume-rebuild trigger policy is now durable repo truth instead of pending chat context
+  - `ReasonRewriteRuntime` now calls this policy before `SessionHistory::stage_*`
+  - provider `TokenUsage.input_tokens` now enters rewrite policy only through `prompt_tokens_from_usage`
+  - `freehand-testkit::ReasonRuntimeHarness` now covers provider semantic output -> turn truth -> usage-driven rewrite policy
+  - production CLI/server runtime loop wiring with real provider usage events and persisted recovery payloads remains pending
+- 2026-06-15: app.cli-runtime-smoke baseline landed
+  - `freehand-cli` now exposes `reason-e2e` smoke scenarios for usage-compaction and recovery-block
+  - app-boundary integration tests now verify config selection plus harness-backed reason runtime E2E behavior
+  - workspace umbrella now includes app E2E smoke; `cargo test --workspace` passes with 98 tests
+- 2026-06-15: config.core provider registry baseline landed
+  - `freehand-config` now owns `[agents.<name>]` plus `[providers.<id>]` in `~/.freehand/config.toml`
+  - each agent binds one provider id; provider selection resolves protocol, transport backend, and auth source in one path
+  - config projection supports user-facing camelCase aliases while keeping canonical snake_case fields
+  - CLI config smoke now prints safe provider metadata and never prints resolved API keys
+- 2026-06-15: config.core protocol correction landed
+  - OpenAI-compatible providers no longer default to `responses`
+  - provider `protocol` must be explicit to avoid misrouting `chat_completions` providers such as `mini27`
+- 2026-06-15: live probe status for `mini27`
+  - base URL serves One API panel
+  - `/v1/models` and `/v1/chat/completions` return `401` with expired-token error
+  - live success-path wiring is blocked until a fresh token is provided
+- 2026-06-15: config.core field cleanup landed
+  - unused `transport_backend` was removed from provider config truth
+  - provider config now rejects unknown fields instead of silently accepting unimplemented knobs
+  - local `~/.freehand/config.toml` now points `master` to `minimonth` using Anthropic `messages`
+- 2026-06-15: provider.anthropic-adapter live fixture replay landed
+  - live `minimonth` single-shot and SSE responses are stored under `crates/freehand-provider-anthropic/fixtures/`
+  - adapter tests now replay thinking/text/usage/cache/terminal semantics from real provider samples
+- 2026-06-15: provider.anthropic-adapter executor baseline landed
+  - `AnthropicExecutor` now posts Messages requests with `x-api-key`, `anthropic-version`, and JSON headers
+  - executor single-shot and collected-SSE paths are covered by local mock-server tests
+  - full workspace gate passes with 108 tests
+- 2026-06-15: provider.reason-live-bridge + app.cli-live-turn landed
+  - `freehand-testkit::run_live_reason_turn` now bridges selected Anthropic config into one reason turn
+  - `freehand-cli reason-live --agent <name> --prompt <text> [--stream]` now exists
+  - local mock-server tests cover bridge single-shot/SSE plus CLI single-shot/SSE/unsupported-provider flows
+  - full workspace gate passes with 114 tests
+- 2026-06-15: anthropic live stream path upgraded to true incremental delivery
+  - `AnthropicExecutor::execute_stream_with` now reads SSE incrementally and emits semantic batches before HTTP response completion
+  - `freehand-testkit` live bridge now applies stream batches into `ReasonTurnEngine` as they arrive instead of replaying a collected body afterward
+  - regression tests now prove callback/broadcast delivery happens before the stream is released to completion
+  - `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass
+- 2026-06-15: completion schema loop baseline landed for live reason
+  - completion schema format is fixed to `<freehand_completion>...</freehand_completion>` tagged JSON
+  - `freehand-blocks` now owns completion guidance text, tagged schema parsing, visible-text stripping, and field-level schema rejection feedback
+  - `freehand-testkit` live bridge now loops on accepted `continue`, retries invalid schema up to 3 times, and closes with failed terminal on retry exhaustion
+  - `freehand-reason` now owns explicit failed terminal writing through `ReasonTurnEngine::fail_turn`
+  - CLI live-turn now prints visible text plus `rounds`, `schema_rejections`, and final terminal projection
+  - `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass with `126` tests

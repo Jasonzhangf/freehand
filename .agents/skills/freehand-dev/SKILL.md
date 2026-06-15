@@ -102,6 +102,20 @@ Use this skill for any non-trivial work in this repo.
 - In provider work, preserve raw provider events in debug mode and rely on unified semantic events for normal operation.
 - In provider work, read local official protocol snapshots under `docs/references/provider-protocols/` before inventing wire behavior.
 - In reason-turn work, provider `finish_reason=stop/end_turn` is not enough to stop. Completion schema decides stop.
+- Reason context planning follows locked Reasonix/Codex direction:
+  - stable prefix stays stable across ordinary turns
+  - only explicit rewrite events may change prefix layout
+  - prefer subagent search final-report enrichment over injecting raw exploration transcripts
+  - admit subagent context into parent turns only as typed final conclusion segments
+- `reason.rewrite-policy` in `freehand-blocks` owns when compaction / rollback / resume rebuild should trigger; `freehand-reason` only owns `SessionHistory` mutation after that decision
+- `ReasonRewriteRuntime` in `freehand-reason` is the baseline consumer that may call `SessionHistory::stage_*` from policy-approved decisions
+- Provider `TokenUsage` enters rewrite policy only through `freehand-blocks::prompt_tokens_from_usage`; do not hand-roll provider usage interpretation in runtime or UI
+- `freehand-testkit` may host project black-box runtime harnesses before production CLI/server loops exist; keep harness behavior aligned with function maps and test design
+- `reason.session-history` inside `freehand-reason` owns base context, rewrite mode/version, rewrite ledger, and persisted session-history snapshots.
+- Non-ordinary rewrite modes may enter planner only through explicit session-history gate methods for compaction, rollback, or resume rebuild.
+- `freehand-reason` and provider adapter crates must remain independent; neither side may depend on the other's implementation crate.
+- Metadata/debug/provider/cache fields and request-chain content fields must stay hard-isolated by type and builder ownership.
+- Metadata must not be smuggled into request text, and request content must not be recovered from metadata/debug fields.
 - In UI protocol work, query and subscribe must stay separate, and source identity fields must remain explicit.
 - Shared contract types should default to serializable, replayable, and persistable unless a higher-priority truth source says otherwise.
 
@@ -145,6 +159,7 @@ Use this skill for any non-trivial work in this repo.
 - `cargo test --workspace` is the regression umbrella and must carry white-box plus module/project black-box coverage as those tests are added.
 - When tests are added, changed, or found incomplete, update the module's test-design record in the same change set.
 - When request/response/error mainlines or shared function usage change, update the function-map doc in the same change set.
+- When context-segment admission, cache-shape policy, or subagent context flow changes, update `reason.context-planner` design, test design, function map, and memory in the same task.
 
 ## Memory Workflow
 
@@ -162,6 +177,7 @@ Use this checklist for both new features and bug fixes:
 - lifecycle management complete
 - owner and function map updated if truth changed
 - function-map call table and symbol binding still match code
+- metadata/request isolation still holds for cross-module calls
 - test-design record updated and still matches implementation
 - runtime/debug evidence path still valid
 

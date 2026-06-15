@@ -124,6 +124,25 @@ First version must explicitly declare these capabilities:
 - provider payload wire DTOs stay private to provider adapters
 - `contracts.core` holds semantic request nodes, not provider wire payload structs
 - `responses` protocol wire events and DTOs remain adapter-private even when their semantic output is supported system-wide
+- provider semantic request now consumes typed `input_segments` from `contracts.core` rather than a pre-mixed rendered prompt string
+
+### Provider / reason independence boundary
+
+- provider core owns provider-neutral semantic request/output contracts
+- provider adapters own protocol rendering/parsing only
+- provider adapters must not depend on `freehand-reason`
+- `freehand-reason` must not depend on provider adapter crates
+- provider adapters must not write turn truth, session truth, completion truth, or UI projection truth
+- provider stop reasons and finish reasons are metadata/usage signals, not Freehand terminal decision truth
+
+### Metadata/request hard isolation
+
+- provider metadata belongs in explicit provider descriptor, config, event context, usage, or debug envelope types
+- request content belongs in request-chain nodes only
+- provider renderers must not infer user/task content from metadata
+- provider renderers must not write provider/model/debug metadata into prompt text unless an explicit context builder produced that text as request data
+- raw provider events are debug ledger material, not request-chain material
+- adapter renderers may render typed context segments into provider-specific wire text, but they do not own segment admission or ordering truth
 
 ### Provider registration
 
@@ -138,6 +157,7 @@ First version target direction is:
 - exact raw-event retention trigger and storage policy
 - exact mapping from provider-specific recovery hints into periodic-recoverable defaults
 - exact runtime plugin loading protocol and trust boundary
+- exact provider metadata envelope type names
 
 ## Update trigger
 

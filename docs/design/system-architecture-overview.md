@@ -23,10 +23,11 @@ Unknown details stay `TBD`.
   - global semantic type truth
 - `freehand-blocks`
   - reusable pure builders, parsers, validators, projectors
+  - includes the semantic owner paths for `reason.context-planner` and `reason.rewrite-policy`
 - `freehand-provider-*`
   - provider adapters and provider wire DTOs only
 - `freehand-reason`
-  - turn orchestration and reasoning event emission
+  - turn orchestration, session-history / rewrite-gate truth, and reasoning event emission
 - `freehand-node`
   - master/slave runtime and node protocol
 - `freehand-ui-protocol`
@@ -44,6 +45,10 @@ Unknown details stay `TBD`.
 - UI must not depend directly on provider crates
 - provider-specific wire DTOs must not leak outside provider crates
 - no fallback, no silent downgrade
+- reasoning and provider adapters are independent modules; they may only meet through contracts and provider-core semantic outputs
+- metadata and request data pipelines must be hard-isolated by type and builder ownership
+- debug/provider/model/cache metadata must not become hidden prompt/request content
+- subagent search/enrichment enters parent context only through a typed final-conclusion projection, never by replaying the child transcript into the parent prompt
 
 ### Source-of-truth routing
 
@@ -55,8 +60,8 @@ Unknown details stay `TBD`.
 ## Open Questions / TBD
 
 - exact master/slave transport protocol
-- exact multi-agent `config.toml` schema
 - exact persistence format for session truth
+- exact final CLI/server runtime loop wiring for `reason.rewrite-policy` facts
 - exact API surface for multi-UI command submission
 - exact crate-level public API boundaries beyond current scaffold
 
@@ -65,10 +70,13 @@ Unknown details stay `TBD`.
 - master/slave is an input-permission configuration problem
 - local agents are managed through `config.toml`
 - one `config.toml` may define multiple local agents
+- one `config.toml` may define multiple providers
 - each agent has its own startup configuration entry
 - config source path is `~/.freehand/config.toml`
 - multi-agent layout uses `[agents.<name>]`
+- provider layout uses `[providers.<id>]`
 - startup configuration decides how that agent starts
+- each agent binds to one configured provider id
 - whichever side is configured as `master` is the side that receives user input and dispatches work
 - `master` dispatches work to:
   - local sub-agents

@@ -27,11 +27,66 @@ id_type!(TurnId);
 id_type!(TraceId);
 id_type!(FeatureId);
 id_type!(ToolCallId);
+id_type!(ContextSegmentId);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContextSegmentKind {
+    SystemAnchor,
+    DeveloperPolicy,
+    SessionMemory,
+    SessionSummary,
+    SubagentConclusion,
+    ToolResultEvidence,
+    UserTurnInput,
+    CompletionContract,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContextStability {
+    Stable,
+    SessionStable,
+    TurnVolatile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContextCachePolicy {
+    CacheAnchor,
+    Cacheable,
+    NoCache,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContextRewriteMode {
+    OrdinaryTurn,
+    Compaction,
+    Rollback,
+    ResumeRebuild,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContextRole {
+    System,
+    Developer,
+    User,
+    Tool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RequestContextItem {
+pub struct ContextProvenance {
     pub source: String,
+    pub reference: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextSegment {
+    pub segment_id: ContextSegmentId,
+    pub kind: ContextSegmentKind,
+    pub stability: ContextStability,
+    pub cache_policy: ContextCachePolicy,
+    pub role: ContextRole,
     pub content: String,
+    pub token_budget: u32,
+    pub provenance: ContextProvenance,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,7 +107,7 @@ pub struct ReasonReq02ContextComposedInput {
     pub feature_id: FeatureId,
     pub agent_id: AgentId,
     pub user_text: String,
-    pub context_items: Vec<RequestContextItem>,
+    pub context_segments: Vec<ContextSegment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,7 +118,7 @@ pub struct ReasonReq03ProviderPayload {
     pub feature_id: FeatureId,
     pub agent_id: AgentId,
     pub model: String,
-    pub rendered_input: String,
+    pub input_segments: Vec<ContextSegment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -230,10 +285,14 @@ pub struct ErrorErr01RuntimeClassified {
     pub error: ErrorContract,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum ContractValidationError {
     #[error("required string field `{field}` must not be empty")]
     EmptyField { field: &'static str },
+    #[error("required collection `{field}` must not be empty")]
+    EmptyCollection { field: &'static str },
+    #[error("context-composed request must include a user-turn-input segment")]
+    MissingUserTurnInputSegment,
 }
 
 pub fn validate_reason_req01(
@@ -241,6 +300,59 @@ pub fn validate_reason_req01(
 ) -> Result<(), ContractValidationError> {
     if input.text.trim().is_empty() {
         return Err(ContractValidationError::EmptyField { field: "text" });
+    }
+    Ok(())
+}
+
+pub fn validate_reason_req02(
+    input: &ReasonReq02ContextComposedInput,
+) -> Result<(), ContractValidationError> {
+    if input.user_text.trim().is_empty() {
+        return Err(ContractValidationError::EmptyField { field: "user_text" });
+    }
+    if input.context_segments.is_empty() {
+        return Err(ContractValidationError::EmptyCollection {
+            field: "context_segments",
+        });
+    }
+    if input
+        .context_segments
+        .iter()
+        .any(|segment| segment.content.trim().is_empty())
+    {
+        return Err(ContractValidationError::EmptyField {
+            field: "context_segments.content",
+        });
+    }
+    if !input
+        .context_segments
+        .iter()
+        .any(|segment| segment.kind == ContextSegmentKind::UserTurnInput)
+    {
+        return Err(ContractValidationError::MissingUserTurnInputSegment);
+    }
+    Ok(())
+}
+
+pub fn validate_reason_req03(
+    payload: &ReasonReq03ProviderPayload,
+) -> Result<(), ContractValidationError> {
+    if payload.model.trim().is_empty() {
+        return Err(ContractValidationError::EmptyField { field: "model" });
+    }
+    if payload.input_segments.is_empty() {
+        return Err(ContractValidationError::EmptyCollection {
+            field: "input_segments",
+        });
+    }
+    if payload
+        .input_segments
+        .iter()
+        .any(|segment| segment.content.trim().is_empty())
+    {
+        return Err(ContractValidationError::EmptyField {
+            field: "input_segments.content",
+        });
     }
     Ok(())
 }
@@ -270,10 +382,34 @@ mod tests {
             feature_id,
             agent_id,
             user_text: "hello".to_owned(),
-            context_items: vec![RequestContextItem {
-                source: "memory".to_owned(),
-                content: "context".to_owned(),
-            }],
+            context_segments: vec![
+                ContextSegment {
+                    segment_id: ContextSegmentId::new("segment-memory"),
+                    kind: ContextSegmentKind::SessionMemory,
+                    stability: ContextStability::SessionStable,
+                    cache_policy: ContextCachePolicy::Cacheable,
+                    role: ContextRole::Developer,
+                    content: "context".to_owned(),
+                    token_budget: 128,
+                    provenance: ContextProvenance {
+                        source: "memory".to_owned(),
+                        reference: Some("memory:1".to_owned()),
+                    },
+                },
+                ContextSegment {
+                    segment_id: ContextSegmentId::new("segment-user"),
+                    kind: ContextSegmentKind::UserTurnInput,
+                    stability: ContextStability::TurnVolatile,
+                    cache_policy: ContextCachePolicy::NoCache,
+                    role: ContextRole::User,
+                    content: "hello".to_owned(),
+                    token_budget: 64,
+                    provenance: ContextProvenance {
+                        source: "turn_input".to_owned(),
+                        reference: None,
+                    },
+                },
+            ],
         };
 
         let json = serde_json::to_string(&contract).expect("serialize");
@@ -333,6 +469,63 @@ mod tests {
             err,
             ContractValidationError::EmptyField { field } if field == "text"
         ));
+    }
+
+    #[test]
+    fn validates_context_composed_request_has_user_segment() {
+        let (agent_id, session_id, turn_id, trace_id, feature_id) = sample_ids();
+        let input = ReasonReq02ContextComposedInput {
+            session_id,
+            turn_id,
+            trace_id,
+            feature_id,
+            agent_id,
+            user_text: "hello".to_owned(),
+            context_segments: vec![ContextSegment {
+                segment_id: ContextSegmentId::new("segment-memory"),
+                kind: ContextSegmentKind::SessionMemory,
+                stability: ContextStability::SessionStable,
+                cache_policy: ContextCachePolicy::Cacheable,
+                role: ContextRole::Developer,
+                content: "context".to_owned(),
+                token_budget: 128,
+                provenance: ContextProvenance {
+                    source: "memory".to_owned(),
+                    reference: None,
+                },
+            }],
+        };
+
+        let err = validate_reason_req02(&input).expect_err("should fail");
+        assert_eq!(err, ContractValidationError::MissingUserTurnInputSegment);
+    }
+
+    #[test]
+    fn validates_provider_payload_has_segments() {
+        let (agent_id, session_id, turn_id, trace_id, feature_id) = sample_ids();
+        let payload = ReasonReq03ProviderPayload {
+            session_id,
+            turn_id,
+            trace_id,
+            feature_id,
+            agent_id,
+            model: "gpt-test".to_owned(),
+            input_segments: vec![ContextSegment {
+                segment_id: ContextSegmentId::new("segment-user"),
+                kind: ContextSegmentKind::UserTurnInput,
+                stability: ContextStability::TurnVolatile,
+                cache_policy: ContextCachePolicy::NoCache,
+                role: ContextRole::User,
+                content: "hello".to_owned(),
+                token_budget: 64,
+                provenance: ContextProvenance {
+                    source: "turn_input".to_owned(),
+                    reference: None,
+                },
+            }],
+        };
+
+        validate_reason_req03(&payload).expect("valid payload");
     }
 
     #[test]

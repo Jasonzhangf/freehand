@@ -1,0 +1,39 @@
+# Test Design: `reason.context-planner`
+
+- feature_id: `reason.context-planner`
+- owner: `crates/freehand-blocks`
+- lifecycle path under test:
+  - stable prefix is classified and held stable
+  - volatile tail is appended without mutating stable prefix
+  - subagent search returns one final conclusion admitted as parent context
+  - metadata and request payload stay hard-isolated
+  - explicit rewrite events are the only path that changes rewrite version and rewrite mode in planner diagnostics
+- white-box plan:
+  - segment classification tests
+  - segment ordering tests
+  - segment token-cap rejection tests
+  - subagent conclusion admission tests
+  - raw subagent transcript rejection tests
+  - cache-shape hash drift tests
+  - rewrite-version bump tests
+  - rewrite-base validation tests
+- module black-box plan:
+  - planner builds provider-neutral request content from stable + volatile inputs
+  - planner rejects metadata/request mixed inputs
+  - planner emits cache diagnostics without changing request content
+- project black-box impact:
+  - reason-to-provider request build keeps stable cache head across ordinary turns
+  - subagent search enriches parent turn by final report only
+  - compaction/rollback remain the only context rewrite gates
+- fixtures / replay inputs / runtime evidence paths:
+  - context planner replay fixtures
+  - subagent final-report fixtures
+  - `~/.freehand/ledgers/context`
+  - `~/.freehand/replays/context`
+- known gaps:
+  - exact compaction summary payload format is still pending implementation binding
+- sync status between design and implementation:
+  - design locked
+  - planner baseline implemented in `freehand-blocks`
+  - session-history rewrite-mode/version wiring is landed
+  - runtime tool-schema fingerprint wiring is still pending

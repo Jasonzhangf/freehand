@@ -12,19 +12,30 @@
 ## Request Mainline
 
 - user input and context material enter the turn orchestration path
-- turn orchestration renders provider-ready input and manages tool re-entry
+- `reason.session-history` provides stable base context plus the current turn's `rewrite_mode` and `rewrite_version`
+- `reason.rewrite-policy` owns the decision of whether runtime should stay append-only or call a rewrite gate before turn startup
+- provider `TokenUsage` is converted into compaction prompt pressure through `prompt_tokens_from_usage`
+- turn orchestration manages tool re-entry and delegates context planning to `reason.context-planner`
+- current code baseline now calls `plan_context`, carries typed `context_segments`, stores planner diagnostics separately, and derives provider payload from `input_segments`
+- stable-prefix and volatile-tail separation now exists at planner baseline level, and rewrite sourcing now comes from `SessionHistory`
+- metadata and request-chain content must stay separate types; `freehand-reason` owns request-content composition truth
 
 ## Response Mainline
 
 - provider semantic events become turn truth updates
 - turn truth broadcasts semantic events for reasoning, text, tool, usage, terminal, and error
 - terminal result is projected from validated completion schema, not raw provider finish reason
+- completion schema is extracted from `<freehand_completion>...</freehand_completion>` tagged JSON before validation
+- invalid completion schema feedback identifies concrete invalid schema entries
+- provider metadata signals may influence orchestration decisions only through explicit typed fields, never by hidden prompt mutation
 
 ## Error Mainline
 
-- invalid completion schema is rejected and reprompted
+- invalid completion schema is rejected and reprompted with field-level feedback
+- invalid completion schema retries are capped at 3 before a failed terminal outcome is written
 - provider `finish_reason=stop` or `finish_reason=end_turn` does not end the turn by itself
 - raw provider events go to debug ledger, not session truth
+- metadata/request boundary violations must be treated as architecture errors, not silently tolerated
 
 ## Shared Multi-Reference Functions
 
@@ -34,17 +45,32 @@
   - allowed callers: reason orchestrator, tests
   - related tests: completion acceptance, invalid schema rejection, blocked terminal tests
   - why shared: keeps terminal validation semantics out of orchestrator glue
+- `parse_completion_submission_block`
+  - owner: `crates/freehand-blocks/src/lib.rs`
+  - purpose: extract and parse tagged completion JSON into a typed submission or itemized schema errors
+  - allowed callers: reason orchestrator, live bridge, tests
+  - related tests: tagged schema extraction, missing tag rejection, invalid JSON rejection, invalid claim rejection
+  - why shared: keeps completion schema parsing out of live/provider/app orchestration
 
 ## Function Call Table
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create per-turn truth container and provider payload | user input + session state | initialized turn record | CLI/server/node | reason orchestrator | bound |
+| 01 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create per-turn truth container and provider payload from session-owned rewrite state | session history + user input + turn-scoped additions | initialized turn record | CLI/server/node | reason orchestrator | bound |
+| 01 note | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | current startup path reads rewrite mode/version and base context from `SessionHistory`, invokes planner-owned segment admission, and stores planner diagnostics while keeping them off request content | request-chain content + session metadata inputs | provider-ready typed request content + metadata-side cache diagnostics | reason orchestrator | `plan_context` | bound |
 | 02 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | materialize provider semantic output into turn truth | provider semantic output | updated turn state | provider boundary | turn state writer | bound |
-| 03 | `validate_completion_submission` | `crates/freehand-blocks/src/lib.rs` | validate completion schema | completion submission | completion decision or rejection | turn state writer | terminal validator | bound |
-| 04 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | accept or reject terminal outcome | candidate completion payload | terminal event or rejection | turn state writer | terminal validator | bound |
-| 05 | `ReasonTurnEngine::project_session` | `crates/freehand-reason/src/lib.rs` | project conversation view from turns | turn records | projected session view | UI/session consumers | projector | bound |
+| 03 | `parse_completion_submission_block` | `crates/freehand-blocks/src/lib.rs` | parse tagged completion schema from model text | model text with tagged JSON | typed completion submission or itemized parse errors | turn/live runtime | completion parser | bound |
+| 04 | `validate_completion_submission` | `crates/freehand-blocks/src/lib.rs` | validate completion schema | completion submission | completion decision or rejection | turn state writer | terminal validator | bound |
+| 05 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | accept or reject terminal outcome | candidate completion payload | terminal event or rejection | turn state writer | terminal validator | bound |
+| 06 | `ReasonTurnEngine::fail_turn` | `crates/freehand-reason/src/lib.rs` | write explicit failed terminal outcome after retry exhaustion | failure reason | failed terminal event | turn/live runtime | turn state writer | bound |
+| 07 | `ReasonTurnEngine::project_session` | `crates/freehand-reason/src/lib.rs` | project conversation view from turns | turn records | projected session view | UI/session consumers | projector | bound |
 
 ## Sync Status Against Code
 
-- turn startup, provider-output materialization, completion validation, and session projection are bound in code
+- turn startup, provider-output materialization, completion parsing/validation, failed terminal writing, and session projection are bound in code
+- planner baseline is implemented and called from turn startup
+- `reason.session-history` now owns rewrite version and explicit rewrite-gate orchestration for turn startup
+- `ReasonRewriteRuntime` now provides the baseline consumer path for calling `reason.rewrite-policy` and then triggering compaction/rollback/resume gates
+- provider usage conversion into rewrite policy is bound
+- remaining gap is final CLI/server runtime loop integration with real provider usage events and persisted recovery payloads
+- metadata/request hard isolation is now reflected in request content vs planner diagnostics split, but not yet enforced by a dedicated static gate or separate envelope types

@@ -1,0 +1,48 @@
+# Test Design: `reason.rewrite-policy`
+
+- feature_id: `reason.rewrite-policy`
+- owner: `crates/freehand-blocks`
+- lifecycle path under test:
+  - ordinary-turn usage pressure is classified before any rewrite gate is called
+  - compaction is preferred only after threshold and guard checks
+  - stale volatile reclaim may suppress a rewrite when it is enough to clear pressure
+  - repeated ineffective compaction pauses auto compaction
+  - restore/recovery paths resolve to rollback, resume rebuild, or explicit block
+- white-box plan:
+  - below-soft-threshold hold tests
+  - soft-notice threshold tests
+  - auto-compaction threshold tests
+  - force-compaction threshold tests
+  - stale-prune-preferred tests
+  - pending-rewrite hold tests
+  - provider usage to prompt-token conversion tests
+  - conflicting usage source rejection tests
+  - compaction follow-up pause tests
+  - rollback-preferred recovery tests
+  - resume-rebuild recovery tests
+  - insufficient-recovery-truth block tests
+- module black-box plan:
+  - pure compaction decision smoke
+  - pure recovery decision smoke
+  - provider usage driven compaction decision smoke
+  - runtime consumer stages session-history rewrite only after policy approval
+  - runtime consumer blocks without mutating session history when recovery truth is insufficient
+- project black-box impact:
+  - provider usage event reaches rewrite policy through `freehand-testkit::ReasonRuntimeHarness`
+  - runtime reason orchestration only reaches session-history rewrite gates through policy-approved paths
+  - repeated compaction loops must eventually pause instead of thrashing every turn
+  - recovery without rebuild source blocks without mutating session truth
+- fixtures / replay inputs / runtime evidence paths:
+  - rewrite-policy replay fixtures
+  - `~/.freehand/ledgers/context`
+  - `~/.freehand/replays/context`
+  - `~/.freehand/state/turns`
+- known gaps:
+  - stale volatile evidence pruning executor is still pending outside the pure policy owner
+  - production CLI/server runtime loop is still pending outside the baseline harness
+- sync status between design and implementation:
+  - pure policy baseline is implemented in `freehand-blocks`
+  - provider `TokenUsage` conversion is implemented in `freehand-blocks`
+  - white-box coverage lives in the owner crate tests
+  - runtime consumer coverage lives in `freehand-reason` tests
+  - project black-box harness coverage lives in `freehand-testkit` tests
