@@ -5,16 +5,19 @@
 - lifecycle path under test:
   - CLI loads default config
   - CLI selects one named anthropic provider
+  - CLI derives runtime home from `~/.freehand/config.toml`
   - CLI routes live turn through `freehand-testkit::run_live_reason_turn`
-  - CLI prints safe summary of visible text/usage/broadcast counts plus completion loop projection
+  - CLI prints safe summary of visible text/usage/broadcast counts plus completion loop, tool count, restore status, and persistence projection
 - white-box plan:
   - none in app crate beyond argument dispatch helpers
 - module black-box plan:
   - CLI live-turn single-shot mock smoke
   - CLI live-turn stream mock smoke
+  - CLI live-turn tool-call mock smoke
+  - CLI live-turn restore/resume mock smoke
   - CLI live-turn unsupported-provider smoke
 - project black-box impact:
-  - one app entrypoint can now drive config-selected provider execution into one real reason turn
+  - one app entrypoint can now drive config-selected provider execution into a persisted tool-capable live reason request
 - fixtures / replay inputs / runtime evidence paths:
   - temp `HOME` with `~/.freehand/config.toml`
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
@@ -24,3 +27,4 @@
 - sync status between design and implementation:
   - CLI live-turn baseline is implemented against local mock servers
   - CLI output now strips tagged completion JSON from visible text and reports `rounds`, `schema_rejections`, and final terminal projection
+  - live tool-call and restore/resume CLI smoke coverage is now implemented

@@ -2,9 +2,10 @@ use freehand_blocks::strip_completion_submission_block;
 use freehand_config::{AgentMode, default_config_path, load_default_config};
 use freehand_contracts::{SemanticEventKind, SessionId, TraceId, TurnId};
 use freehand_testkit::{
-    LiveReasonTurnRequest, ReasonRuntimeSmokeScenario, run_live_reason_turn,
-    run_reason_persistence_smoke, run_reason_runtime_smoke,
+    LiveReasonRestoreStatus, LiveReasonTurnRequest, ReasonRuntimeSmokeScenario,
+    run_live_reason_turn, run_reason_persistence_smoke, run_reason_runtime_smoke,
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     match run() {
@@ -69,29 +70,53 @@ fn run() -> Result<String, String> {
 
 fn run_reason_live(args: Vec<String>) -> Result<String, String> {
     let usage =
-        "usage: freehand-cli reason-live --agent <name> --prompt <text> [--stream]".to_owned();
-    if args.len() != 4 && args.len() != 5 {
+        "usage: freehand-cli reason-live --agent <name> --prompt <text> [--stream] [--session <id>]"
+            .to_owned();
+    if args.len() < 4 {
         return Err(usage);
     }
     if args[0] != "--agent" || args[2] != "--prompt" {
         return Err(usage);
     }
-    let stream = match args.get(4) {
-        None => false,
-        Some(flag) if flag == "--stream" => true,
-        Some(_) => return Err(usage),
-    };
+    let mut stream = false;
+    let mut session_id = None::<String>;
+    let mut index = 4;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--stream" => {
+                stream = true;
+                index += 1;
+            }
+            "--session" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(usage);
+                };
+                session_id = Some(value.clone());
+                index += 2;
+            }
+            _ => return Err(usage),
+        }
+    }
 
     let config = load_default_config().map_err(|err| err.to_string())?;
     let selected = config
         .select_agent(&args[1])
         .map_err(|err| err.to_string())?;
+    let runtime_home = default_config_path()
+        .map_err(|err| err.to_string())?
+        .parent()
+        .ok_or_else(|| "default config path has no runtime home parent".to_owned())?
+        .to_path_buf();
+    let session_id =
+        SessionId::new(session_id.unwrap_or_else(|| format!("cli-live-{}", selected.name)));
+    let stamp = live_id_stamp()?;
     let outcome = run_live_reason_turn(
         &selected,
         LiveReasonTurnRequest {
-            session_id: SessionId::new("cli-live-session"),
-            turn_id: TurnId::new("cli-live-turn-1"),
-            trace_id: TraceId::new("cli-live-trace-1"),
+            runtime_home,
+            session_id,
+            turn_id: TurnId::new(format!("cli-live-turn-{stamp}")),
+            trace_id: TraceId::new(format!("cli-live-trace-{stamp}")),
             prompt: args[3].clone(),
             stream,
         },
@@ -116,7 +141,7 @@ fn run_reason_live(args: Vec<String>) -> Result<String, String> {
     let latest_usage = outcome.turn.usage_events.last().map(|event| &event.usage);
 
     Ok(format!(
-        "agent={} provider={} stream={} text={} reasoning_events={} usage_input_tokens={} usage_output_tokens={} broadcasts={} rounds={} schema_rejections={} terminal={}",
+        "agent={} provider={} stream={} text={} reasoning_events={} usage_input_tokens={} usage_output_tokens={} broadcasts={} rounds={} schema_rejections={} tool_executions={} restore_status={} restored_closed_turns={} terminal={}",
         selected.name,
         selected.provider.id,
         stream,
@@ -131,6 +156,9 @@ fn run_reason_live(args: Vec<String>) -> Result<String, String> {
         outcome.broadcasts.len(),
         outcome.rounds,
         outcome.schema_rejections.len(),
+        outcome.tool_executions,
+        live_restore_status_label(outcome.restore_status),
+        outcome.restored_closed_turns,
         outcome
             .turn
             .terminal_event
@@ -138,6 +166,13 @@ fn run_reason_live(args: Vec<String>) -> Result<String, String> {
             .map(|event| event.summary.as_str())
             .unwrap_or("none")
     ))
+}
+
+fn live_id_stamp() -> Result<u128, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .map_err(|err| err.to_string())
 }
 
 fn run_reason_persist_smoke(args: Vec<String>) -> Result<String, String> {
@@ -214,4 +249,11 @@ fn provider_protocol_label(protocol: freehand_config::ProviderProtocol) -> &'sta
 
 fn provider_auth_label(auth_type: freehand_config::ProviderAuthType) -> &'static str {
     auth_type.as_str()
+}
+
+fn live_restore_status_label(status: LiveReasonRestoreStatus) -> &'static str {
+    match status {
+        LiveReasonRestoreStatus::CreatedNew => "created_new",
+        LiveReasonRestoreStatus::RestoredExisting => "restored_existing",
+    }
 }

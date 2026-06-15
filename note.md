@@ -240,3 +240,18 @@
   - persisted truth now includes `session-history.json`, `session-cursor.json`, `active-turn.json`, per-turn terminal files, reason JSONL ledger, UI sidecar, and agent session-index cache
   - recovery covers both snapshot-plus-ledger-tail and ledger-only rebuild
   - provider raw debug files are explicitly ignored by restore tests
+- 2026-06-15: live-provider readiness audit after persistence baseline
+  - current real HTTP live path exists only for Anthropic Messages-compatible providers through `freehand-testkit::run_live_reason_turn` -> `run_live_anthropic_reason_turn_with_hook`
+  - OpenAI-compatible adapters have render/parse only; no HTTP executor or live bridge exists yet
+  - current live Anthropic path still constructs fresh `SessionHistory` in-memory per CLI invocation and does not read/write `ReasonPersistence`
+  - current CLI `reason-live` uses fixed `session_id`, `turn_id`, and `trace_id`, so it is smoke-grade and not a resumable session runtime yet
+  - current live path does not append provider raw ledgers, reason ledgers, active-turn snapshots, or terminal-turn snapshots during real streamed execution
+- 2026-06-15: live E2E tool-loop implementation strategy
+  - target remains Anthropic Messages only for this milestone
+  - provider-core needs provider-neutral tool request metadata so adapter wire DTOs stay private
+  - Anthropic request rendering must use official `tools`, assistant `tool_use`, and user `tool_result` message shape instead of hiding tool results in metadata
+  - live bridge must restore/create session through `ReasonPersistence`, persist start/output/rejection/terminal events, execute deterministic `echo_json`, and re-enter tool result before final completion schema
+- 2026-06-15: live E2E tool-loop closed with real smoke
+  - workspace verification passed: `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
+  - real provider `master -> minimonth` passed on `real-smoke-1`: first run `tool_executions=1`, `rounds=3`, `schema_rejections=1`, `restore_status=created_new`
+  - second run on same `session_id=real-smoke-1` passed with `restore_status=restored_existing` and `restored_closed_turns=1`

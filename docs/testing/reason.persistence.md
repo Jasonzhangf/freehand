@@ -37,9 +37,9 @@
   - `~/.freehand/ledgers/providers`
   - `~/.freehand/cache/session-index`
 - known gaps:
-  - real live-provider execution path does not yet persist automatically turn-by-turn
   - provider raw debug-ledger writer is not yet wired in the adapter runtime loop
 - sync status between design and implementation:
   - design is locked
   - session snapshot, active-turn snapshot, reason-ledger append, terminal turn materialization, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
   - shared harness and CLI smoke are implemented
+  - live Anthropic `reason-live` path now persists start/output/rejection/terminal events through `ReasonPersistence`

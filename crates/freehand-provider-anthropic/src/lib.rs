@@ -5,11 +5,13 @@ use std::io::{self, BufRead, BufReader};
 
 use freehand_blocks::{
     parse_tool_arguments_json, parse_tool_arguments_value, render_context_segments_as_text,
+    render_tool_arguments_json,
 };
 use freehand_contracts::{ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId};
 use freehand_provider_core::{
     ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderProtocol,
-    ProviderSemanticOutput, ProviderSemanticRequest, map_adapter_events,
+    ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange,
+    map_adapter_events,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -73,6 +75,8 @@ pub enum AnthropicExecutorError {
     HttpStatus { status: u16, body: String },
     #[error("anthropic stream read failed: {0}")]
     StreamRead(#[from] io::Error),
+    #[error("anthropic stream callback failed: {0}")]
+    Callback(String),
 }
 
 pub struct AnthropicExecutor {
@@ -201,25 +205,36 @@ impl AnthropicAdapter {
                 request.descriptor.protocol,
             ));
         }
+        let mut body = json!({
+            "model": request.descriptor.model,
+            "max_tokens": self.config.max_tokens,
+            "stream": stream,
+            "messages": render_messages(&rendered_input, &request.tool_exchanges)?,
+        });
+        if !request.tools.is_empty() {
+            body["tools"] = Value::Array(
+                request
+                    .tools
+                    .iter()
+                    .map(|tool| {
+                        json!({
+                            "name": tool.name,
+                            "description": tool.description,
+                            "input_schema": tool.input_schema,
+                        })
+                    })
+                    .collect(),
+            );
+        }
+        if let Some(choice) = &request.tool_choice {
+            body["tool_choice"] = match choice {
+                ProviderToolChoice::Auto => json!({"type":"auto"}),
+                ProviderToolChoice::Required { name } => json!({"type":"tool","name":name}),
+            };
+        }
         Ok(AnthropicRenderedRequest {
             path: "/v1/messages",
-            body: json!({
-                "model": request.descriptor.model,
-                "max_tokens": self.config.max_tokens,
-                "stream": stream,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": rendered_input,
-                            }
-                        ]
-                    }
-                ]
-            })
-            .to_string(),
+            body: body.to_string(),
         })
     }
 
@@ -489,6 +504,59 @@ fn join_base_url_path(base_url: &str, path: &str) -> String {
     )
 }
 
+fn render_messages(
+    rendered_input: &str,
+    tool_exchanges: &[ProviderToolExchange],
+) -> Result<Value, AnthropicAdapterError> {
+    let mut messages = vec![json!({
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": rendered_input,
+            }
+        ]
+    })];
+    if !tool_exchanges.is_empty() {
+        messages.push(json!({
+            "role": "assistant",
+            "content": tool_exchanges
+                .iter()
+                .map(|exchange| {
+                    let input_json =
+                        render_tool_arguments_json(&exchange.tool_call.tool_call.arguments)
+                            .map_err(|err| {
+                                AnthropicAdapterError::InvalidToolArguments(err.to_string())
+                            })?;
+                    let input: Value = serde_json::from_str(&input_json).map_err(|err| {
+                        AnthropicAdapterError::InvalidToolArguments(err.to_string())
+                    })?;
+                    Ok(json!({
+                        "type": "tool_use",
+                        "id": exchange.tool_call.tool_call.tool_call_id.as_str(),
+                        "name": exchange.tool_call.tool_call.tool_name,
+                        "input": input,
+                    }))
+                })
+                .collect::<Result<Vec<_>, AnthropicAdapterError>>()?,
+        }));
+        messages.push(json!({
+            "role": "user",
+            "content": tool_exchanges
+                .iter()
+                .map(|exchange| {
+                    json!({
+                        "type": "tool_result",
+                        "tool_use_id": exchange.tool_result.tool_result.tool_call_id.as_str(),
+                        "content": exchange.tool_result.tool_result.output,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        }));
+    }
+    Ok(Value::Array(messages))
+}
+
 #[derive(Debug, Default)]
 struct SseEventCollector {
     data_lines: Vec<String>,
@@ -602,10 +670,12 @@ fn error_hint_from_value(value: &Value) -> ProviderErrorHint {
 mod tests {
     use super::*;
     use freehand_contracts::{
-        AgentId, FeatureId, ReasonReq03ProviderPayload, SessionId, TraceId, TurnId,
+        AgentId, FeatureId, ReasonReq03ProviderPayload, ReasonReq04ToolCall,
+        ReasonReq05ToolResultReentry, SessionId, ToolArgument, ToolResultContract, TraceId, TurnId,
     };
     use freehand_provider_core::{
-        ProviderCapabilities, ProviderDescriptor, ProviderFamily, build_semantic_request,
+        ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderToolChoice,
+        ProviderToolDefinition, ProviderToolExchange, build_semantic_request,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -797,6 +867,67 @@ mod tests {
         let body: Value = serde_json::from_str(&rendered.body).expect("json");
         assert_eq!(body.get("max_tokens").and_then(Value::as_u64), Some(512));
         assert_eq!(body.get("stream").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn renders_tool_schema_and_tool_result_exchange_as_messages_protocol() {
+        let adapter = adapter();
+        let mut request = request();
+        request.tools = vec![ProviderToolDefinition {
+            name: "echo_json".to_owned(),
+            description: "echo input".to_owned(),
+            input_schema: json!({"type":"object"}),
+        }];
+        request.tool_choice = Some(ProviderToolChoice::Required {
+            name: "echo_json".to_owned(),
+        });
+        request.tool_exchanges = vec![ProviderToolExchange {
+            tool_call: ReasonReq04ToolCall {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("provider.anthropic-adapter"),
+                agent_id: AgentId::new("agent-1"),
+                tool_call: ToolCallContract {
+                    tool_call_id: ToolCallId::new("toolu_1"),
+                    tool_name: "echo_json".to_owned(),
+                    arguments: vec![ToolArgument {
+                        name: "message".to_owned(),
+                        value: json!("pong"),
+                    }],
+                    arguments_complete: true,
+                },
+            },
+            tool_result: ReasonReq05ToolResultReentry {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("provider.anthropic-adapter"),
+                agent_id: AgentId::new("agent-1"),
+                tool_result: ToolResultContract {
+                    tool_call_id: ToolCallId::new("toolu_1"),
+                    output: r#"{"status":"ok"}"#.to_owned(),
+                },
+            },
+        }];
+
+        let rendered = adapter.render_request(&request, false).expect("rendered");
+        let body: Value = serde_json::from_str(&rendered.body).expect("json");
+
+        assert_eq!(body["tools"][0]["name"], "echo_json");
+        assert_eq!(
+            body["tool_choice"],
+            json!({"type":"tool","name":"echo_json"})
+        );
+        assert_eq!(body["messages"][1]["role"], "assistant");
+        assert_eq!(body["messages"][1]["content"][0]["type"], "tool_use");
+        assert_eq!(
+            body["messages"][1]["content"][0]["input"]["message"],
+            "pong"
+        );
+        assert_eq!(body["messages"][2]["role"], "user");
+        assert_eq!(body["messages"][2]["content"][0]["type"], "tool_result");
+        assert_eq!(body["messages"][2]["content"][0]["tool_use_id"], "toolu_1");
     }
 
     #[test]

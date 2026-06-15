@@ -18,6 +18,8 @@
 - provider-neutral semantic request enters Anthropic adapter
 - adapter renders Messages API request body with stateless conversation input
 - adapter consumes typed `input_segments` and renders them to Anthropic wire text without owning segment admission truth
+- adapter renders provider-neutral tool schema metadata into Anthropic `tools` and `tool_choice`
+- adapter renders provider-neutral tool call/result exchanges into Anthropic assistant `tool_use` and user `tool_result` message content
 - executor posts rendered requests to configured Anthropic-compatible base URL with explicit `x-api-key`, `anthropic-version`, and JSON headers
 
 ## Response Mainline
@@ -42,6 +44,12 @@
   - allowed callers: provider adapters, tests
   - related tests: OpenAI tool-call parser tests, Anthropic tool-use parser tests
   - why shared: keeps tool-argument parsing centralized instead of duplicated per adapter
+- `render_tool_arguments_json`
+  - owner: `crates/freehand-blocks/src/lib.rs`
+  - purpose: render shared structured tool arguments back to JSON for provider wire requests
+  - allowed callers: provider adapters, tests
+  - related tests: Anthropic tool_result exchange renderer tests
+  - why shared: avoids adapter-local second implementations of shared tool argument JSON
 
 ## Function Call Table
 
@@ -61,3 +69,4 @@
 - fixture replay bindings now cover `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
 - HTTP executor bindings now cover single-shot and incremental-SSE execution against local mock servers
 - incremental stream regression proves callback delivery can happen before the provider response completes
+- request renderer now binds Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result` message rendering from provider-neutral metadata

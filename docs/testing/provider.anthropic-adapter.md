@@ -4,11 +4,13 @@
 - owner: `crates/freehand-provider-anthropic`
 - lifecycle path under test:
   - semantic request renders typed input segments into Messages API request
+  - semantic request renders provider-neutral tool schema/choice/exchange into Anthropic tool wire shape
   - executor posts rendered Messages API request with explicit auth/version/content headers
   - single-shot and SSE outputs normalize into shared semantic events
   - partial tool-use input accumulates until arguments become complete
 - white-box plan:
   - request renderer, response parser, SSE parser, partial tool accumulator
+  - Anthropic `tools` / `tool_choice` / `tool_result` request rendering
   - executor URL joining, header emission, non-success status handling, SSE event-boundary parsing, and incremental callback delivery
 - module black-box plan:
   - adapter emits provider-neutral text/tool/usage/terminal/error outputs for Anthropic messages
@@ -26,6 +28,7 @@
 - sync status between design and implementation:
   - `AnthropicAdapter` baseline implemented
   - request rendering covers Messages API with explicit `max_tokens` adapter config and typed input segments
+  - request rendering now covers Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result`
   - single-shot and stream parsing cover text, tool use, usage, terminal, and error paths
   - live `minimonth` fixtures now cover thinking/text/usage/cache/terminal replay for single-shot and SSE
   - HTTP executor now supports incremental SSE callback delivery via `AnthropicExecutor::execute_stream_with`

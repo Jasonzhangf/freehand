@@ -1,6 +1,6 @@
 //! Shared mocks, fixtures, runtime harnesses, and replay helpers for Freehand tests.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 
 use freehand_blocks::{
@@ -14,22 +14,24 @@ use freehand_config::{
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
-    ContextSegmentKind, ContextStability, FeatureId, SessionId, TokenUsage, TraceId, TurnId,
+    ContextSegmentKind, ContextStability, FeatureId, ReasonReq04ToolCall,
+    ReasonReq05ToolResultReentry, SessionId, TokenUsage, ToolResultContract, TraceId, TurnId,
 };
 use freehand_provider_anthropic::{
     AnthropicAdapterConfig, AnthropicExecutor, AnthropicExecutorConfig, AnthropicExecutorError,
 };
 use freehand_provider_core::ProviderSemanticOutput;
 use freehand_provider_core::{
-    ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderProtocol,
-    build_semantic_request,
+    ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderProtocol, ProviderToolChoice,
+    ProviderToolDefinition, ProviderToolExchange, build_semantic_request,
 };
 use freehand_reason::{
     CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,
-    ReasonBroadcastEvent, ReasonPersistence, ReasonRewriteRuntime, ReasonTurnEngine,
-    RecoveryPolicyOutcome, RecoveryPolicyRequest, ResumeRebuildPayload, RewriteRuntimeError,
-    RewriteRuntimeState, SessionHistory, TurnRecord, TurnStartInput,
+    ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError, ReasonRewriteRuntime,
+    ReasonTurnEngine, RecoveryPolicyOutcome, RecoveryPolicyRequest, ResumeRebuildPayload,
+    RewriteRuntimeError, RewriteRuntimeState, SessionHistory, TurnRecord, TurnStartInput,
 };
+use serde_json::{Value, json};
 use thiserror::Error;
 
 pub struct ReasonRuntimeHarness {
@@ -41,6 +43,7 @@ pub struct ReasonRuntimeHarness {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveReasonTurnRequest {
+    pub runtime_home: PathBuf,
     pub session_id: SessionId,
     pub turn_id: TurnId,
     pub trace_id: TraceId,
@@ -51,9 +54,19 @@ pub struct LiveReasonTurnRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveReasonTurnOutcome {
     pub turn: TurnRecord,
+    pub turns: Vec<TurnRecord>,
     pub broadcasts: Vec<ReasonBroadcastEvent>,
     pub rounds: usize,
     pub schema_rejections: Vec<CompletionSchemaRejection>,
+    pub tool_executions: usize,
+    pub restore_status: LiveReasonRestoreStatus,
+    pub restored_closed_turns: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveReasonRestoreStatus {
+    CreatedNew,
+    RestoredExisting,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +153,8 @@ pub enum ReasonRuntimeHarnessError {
     AnthropicExecutorFailed(String),
     #[error("reason persistence failed: {0}")]
     ReasonPersistenceFailed(String),
+    #[error("live tool execution failed: {0}")]
+    ToolExecutionFailed(String),
 }
 
 impl ReasonRuntimeHarness {
@@ -497,8 +512,31 @@ fn run_live_anthropic_reason_turn_with_hook<F>(
 where
     F: FnMut(&ReasonBroadcastEvent),
 {
-    let mut history = SessionHistory::new(request.session_id.clone(), Vec::new())
-        .map_err(|err| ReasonRuntimeHarnessError::RewriteRuntimeFailed(err.to_string()))?;
+    let agent_id = AgentId::new(selected.name.clone());
+    let persistence = ReasonPersistence::new(request.runtime_home.clone(), agent_id.clone());
+    let (mut history, restore_status, restored_closed_turns) = match persistence
+        .restore(&request.session_id)
+    {
+        Ok(restored) => {
+            let count = restored.closed_turns.len();
+            (
+                restored.history,
+                LiveReasonRestoreStatus::RestoredExisting,
+                count,
+            )
+        }
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => (
+            SessionHistory::new(request.session_id.clone(), Vec::new())
+                .map_err(|err| ReasonRuntimeHarnessError::RewriteRuntimeFailed(err.to_string()))?,
+            LiveReasonRestoreStatus::CreatedNew,
+            0,
+        ),
+        Err(err) => {
+            return Err(ReasonRuntimeHarnessError::ReasonPersistenceFailed(
+                err.to_string(),
+            ));
+        }
+    };
     let engine = ReasonTurnEngine::new();
     let receiver = engine.subscribe(64);
     let mut executor = AnthropicExecutor::new(AnthropicExecutorConfig {
@@ -511,12 +549,17 @@ where
 
     let mut broadcasts = Vec::new();
     let mut schema_rejections = Vec::new();
+    let mut turns = Vec::new();
     let mut round = 0usize;
+    let mut tool_executions = 0usize;
     let mut next_prompt = request.prompt.clone();
     let mut carryover_segments = vec![
         completion_contract_segment(),
+        echo_json_tool_guidance_segment(),
         original_task_segment(&request.prompt),
     ];
+    let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
+    let mut executed_tool_call_ids = Vec::<String>::new();
 
     loop {
         round = round.saturating_add(1);
@@ -530,49 +573,112 @@ where
                     turn_id,
                     trace_id,
                     feature_id: FeatureId::new("provider.reason-live-bridge"),
-                    agent_id: AgentId::new(selected.name.clone()),
+                    agent_id: agent_id.clone(),
                     user_text: next_prompt.clone(),
                     planned_context_segments: carryover_segments.clone(),
                     model: selected.provider.default_model.clone(),
                 },
             )
             .map_err(|err| ReasonRuntimeHarnessError::TurnStartFailed(err.to_string()))?;
+        persistence
+            .record_turn_started(&history, &turn, schema_rejections.len() as u32)
+            .map_err(|err| ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string()))?;
 
-        let semantic_request = build_semantic_request(
+        let mut semantic_request = build_semantic_request(
             provider_descriptor(selected),
             turn.provider_payload.clone(),
             false,
         )
         .map_err(|err| ReasonRuntimeHarnessError::ProviderRequestBuildFailed(err.to_string()))?;
+        semantic_request.tools = vec![echo_json_tool_definition()];
+        semantic_request.tool_choice = if tool_executions == 0 {
+            Some(ProviderToolChoice::Required {
+                name: "echo_json".to_owned(),
+            })
+        } else {
+            None
+        };
+        semantic_request.tool_exchanges = tool_exchanges.clone();
 
         if request.stream {
+            let mut stream_persistence_error = None::<ReasonRuntimeHarnessError>;
             executor
                 .execute_stream_with(&provider_ctx(&turn), &semantic_request, |batch| {
-                    apply_provider_outputs_and_capture_broadcasts(
-                        &engine,
+                    let mut apply_ctx = LiveApplyContext {
+                        engine: &engine,
+                        persistence: &persistence,
+                        history: &history,
+                        receiver: &receiver,
+                        broadcasts: &mut broadcasts,
+                        on_broadcast: &mut on_broadcast,
+                    };
+                    if let Err(err) = apply_provider_outputs_persist_and_capture_broadcasts(
+                        &mut apply_ctx,
                         &mut turn,
-                        &receiver,
-                        &mut broadcasts,
                         batch,
-                        &mut on_broadcast,
-                    );
+                        schema_rejections.len() as u32,
+                    ) {
+                        stream_persistence_error = Some(err);
+                        return Err(AnthropicExecutorError::Callback(
+                            "live bridge failed while persisting stream output".to_owned(),
+                        ));
+                    }
                     Ok(())
                 })
                 .map_err(map_anthropic_executor_error)?;
+            if let Some(err) = stream_persistence_error {
+                return Err(err);
+            }
         } else {
             let outputs = executor
                 .execute_once(&provider_ctx(&turn), &semantic_request)
                 .map_err(map_anthropic_executor_error)?;
-            apply_provider_outputs_and_capture_broadcasts(
-                &engine,
+            let mut apply_ctx = LiveApplyContext {
+                engine: &engine,
+                persistence: &persistence,
+                history: &history,
+                receiver: &receiver,
+                broadcasts: &mut broadcasts,
+                on_broadcast: &mut on_broadcast,
+            };
+            apply_provider_outputs_persist_and_capture_broadcasts(
+                &mut apply_ctx,
                 &mut turn,
-                &receiver,
-                &mut broadcasts,
                 &outputs,
-                &mut on_broadcast,
-            );
+                schema_rejections.len() as u32,
+            )?;
         }
         drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+
+        let completed_tool_calls = pending_completed_tool_calls(&turn, &executed_tool_call_ids);
+        if !completed_tool_calls.is_empty() {
+            for tool_call in completed_tool_calls {
+                let tool_result = execute_echo_json_tool_call(&turn, &tool_call)?;
+                let output = ProviderSemanticOutput::ToolResultReentry(tool_result.clone());
+                engine.apply_provider_output(&mut turn, output.clone());
+                persistence
+                    .record_provider_output_applied(
+                        &history,
+                        &turn,
+                        &output,
+                        schema_rejections.len() as u32,
+                    )
+                    .map_err(|err| {
+                        ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string())
+                    })?;
+                executed_tool_call_ids.push(tool_call.tool_call.tool_call_id.as_str().to_owned());
+                tool_exchanges.push(ProviderToolExchange {
+                    tool_call,
+                    tool_result,
+                });
+                tool_executions = tool_executions.saturating_add(1);
+            }
+            next_prompt = "The tool result has been returned. Use it to continue the task, then provide the required Freehand completion schema when done.".to_owned();
+            carryover_segments =
+                next_round_segments(&request.prompt, &collect_turn_text(&turn), None);
+            turns.push(turn);
+            continue;
+        }
 
         let provider_text = collect_turn_text(&turn);
         let visible_text = strip_completion_submission_block(&provider_text);
@@ -587,21 +693,42 @@ where
                             ReasonRuntimeHarnessError::TurnStartFailed(err.to_string())
                         })?;
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                    persistence
+                        .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                        .map_err(|err| {
+                            ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string())
+                        })?;
+                    turns.push(turn.clone());
                     return Ok(LiveReasonTurnOutcome {
                         turn,
+                        turns,
                         broadcasts,
                         rounds: round,
                         schema_rejections,
+                        tool_executions,
+                        restore_status,
+                        restored_closed_turns,
                     });
                 }
                 CompletionDecision::ContinueWithNextStep { next_step } => {
                     next_prompt = next_step;
                     carryover_segments = next_round_segments(&request.prompt, &visible_text, None);
+                    turns.push(turn);
                 }
             },
             Err(rejection) => {
                 let feedback = completion_schema_rejection_feedback(&rejection);
                 schema_rejections.push(rejection.clone());
+                persistence
+                    .record_completion_rejected(
+                        &history,
+                        &turn,
+                        &rejection,
+                        schema_rejections.len() as u32,
+                    )
+                    .map_err(|err| {
+                        ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string())
+                    })?;
                 if schema_rejections.len() >= 3 {
                     engine.fail_turn(
                         &mut turn,
@@ -611,16 +738,27 @@ where
                         ),
                     );
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                    persistence
+                        .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                        .map_err(|err| {
+                            ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string())
+                        })?;
+                    turns.push(turn.clone());
                     return Ok(LiveReasonTurnOutcome {
                         turn,
+                        turns,
                         broadcasts,
                         rounds: round,
                         schema_rejections,
+                        tool_executions,
+                        restore_status,
+                        restored_closed_turns,
                     });
                 }
                 next_prompt = feedback.clone();
                 carryover_segments =
                     next_round_segments(&request.prompt, &visible_text, Some(feedback.as_str()));
+                turns.push(turn);
             }
         }
     }
@@ -684,6 +822,45 @@ fn completion_contract_segment() -> ContextSegment {
             source: "freehand_testkit".to_owned(),
             reference: Some("completion_schema_guidance".to_owned()),
         },
+    }
+}
+
+fn echo_json_tool_guidance_segment() -> ContextSegment {
+    ContextSegment {
+        segment_id: ContextSegmentId::new("echo-json-tool-guidance"),
+        kind: ContextSegmentKind::DeveloperPolicy,
+        stability: ContextStability::Stable,
+        cache_policy: ContextCachePolicy::CacheAnchor,
+        role: ContextRole::Developer,
+        content: "Use the `echo_json` tool exactly once before final completion when it is available. After receiving the tool result, continue from the returned JSON and then provide the required Freehand completion schema.".to_owned(),
+        token_budget: 128,
+        provenance: ContextProvenance {
+            source: "freehand_testkit".to_owned(),
+            reference: Some("echo_json_tool_guidance".to_owned()),
+        },
+    }
+}
+
+fn echo_json_tool_definition() -> ProviderToolDefinition {
+    ProviderToolDefinition {
+        name: "echo_json".to_owned(),
+        description:
+            "Return the provided JSON object with deterministic Freehand E2E wrapper metadata."
+                .to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Short message to echo."
+                },
+                "step": {
+                    "type": "string",
+                    "description": "Current reasoning step name."
+                }
+            },
+            "additionalProperties": true
+        }),
     }
 }
 
@@ -751,20 +928,89 @@ fn collect_turn_text(turn: &TurnRecord) -> String {
         .join("")
 }
 
-fn apply_provider_outputs_and_capture_broadcasts<F>(
-    engine: &ReasonTurnEngine,
-    turn: &mut TurnRecord,
-    receiver: &Receiver<ReasonBroadcastEvent>,
-    broadcasts: &mut Vec<ReasonBroadcastEvent>,
-    outputs: &[ProviderSemanticOutput],
-    on_broadcast: &mut F,
-) where
+fn pending_completed_tool_calls(
+    turn: &TurnRecord,
+    executed_tool_call_ids: &[String],
+) -> Vec<ReasonReq04ToolCall> {
+    turn.tool_calls
+        .iter()
+        .filter(|call| {
+            call.tool_call.arguments_complete
+                && !executed_tool_call_ids
+                    .iter()
+                    .any(|id| id == call.tool_call.tool_call_id.as_str())
+        })
+        .cloned()
+        .collect()
+}
+
+fn execute_echo_json_tool_call(
+    turn: &TurnRecord,
+    tool_call: &ReasonReq04ToolCall,
+) -> Result<ReasonReq05ToolResultReentry, ReasonRuntimeHarnessError> {
+    if tool_call.tool_call.tool_name != "echo_json" {
+        return Err(ReasonRuntimeHarnessError::ToolExecutionFailed(format!(
+            "unsupported tool `{}`",
+            tool_call.tool_call.tool_name
+        )));
+    }
+    if !tool_call.tool_call.arguments_complete {
+        return Err(ReasonRuntimeHarnessError::ToolExecutionFailed(
+            "cannot execute incomplete tool arguments".to_owned(),
+        ));
+    }
+    let mut input = serde_json::Map::new();
+    for argument in &tool_call.tool_call.arguments {
+        input.insert(argument.name.clone(), argument.value.clone());
+    }
+    let output = json!({
+        "tool": "echo_json",
+        "status": "ok",
+        "input": Value::Object(input),
+    })
+    .to_string();
+    Ok(ReasonReq05ToolResultReentry {
+        session_id: turn.request.session_id.clone(),
+        turn_id: turn.request.turn_id.clone(),
+        trace_id: turn.request.trace_id.clone(),
+        feature_id: turn.request.feature_id.clone(),
+        agent_id: turn.request.agent_id.clone(),
+        tool_result: ToolResultContract {
+            tool_call_id: tool_call.tool_call.tool_call_id.clone(),
+            output,
+        },
+    })
+}
+
+struct LiveApplyContext<'a, F>
+where
     F: FnMut(&ReasonBroadcastEvent),
 {
-    for output in outputs.iter().cloned() {
-        engine.apply_provider_output(turn, output);
+    engine: &'a ReasonTurnEngine,
+    persistence: &'a ReasonPersistence,
+    history: &'a SessionHistory,
+    receiver: &'a Receiver<ReasonBroadcastEvent>,
+    broadcasts: &'a mut Vec<ReasonBroadcastEvent>,
+    on_broadcast: &'a mut F,
+}
+
+fn apply_provider_outputs_persist_and_capture_broadcasts<F>(
+    ctx: &mut LiveApplyContext<'_, F>,
+    turn: &mut TurnRecord,
+    outputs: &[ProviderSemanticOutput],
+    schema_rejections: u32,
+) -> Result<(), ReasonRuntimeHarnessError>
+where
+    F: FnMut(&ReasonBroadcastEvent),
+{
+    for output in outputs {
+        ctx.engine.apply_provider_output(turn, output.clone());
+        ctx.persistence
+            .record_provider_output_applied(ctx.history, turn, output, schema_rejections)
+            .map_err(|err| ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string()))?;
     }
-    drain_broadcasts(receiver, broadcasts, on_broadcast);
+    drain_broadcasts(ctx.receiver, ctx.broadcasts, ctx.on_broadcast);
+    Ok(())
 }
 
 fn drain_broadcasts<F>(
@@ -874,6 +1120,7 @@ mod tests {
 
     fn live_request(stream: bool) -> LiveReasonTurnRequest {
         LiveReasonTurnRequest {
+            runtime_home: temp_runtime_home(),
             session_id: SessionId::new("session-live"),
             turn_id: TurnId::new("turn-live"),
             trace_id: TraceId::new("trace-live"),
@@ -1059,6 +1306,10 @@ mod tests {
             r#"{{"content":[{{"type":"text","text":"draft\n{tagged}"}}],"usage":{{"input_tokens":14,"output_tokens":40}},"stop_reason":"end_turn"}}"#,
             tagged = tagged.replace('\n', "\\n").replace('"', "\\\""),
         )
+    }
+
+    fn tool_use_single_response() -> String {
+        r#"{"content":[{"type":"tool_use","id":"toolu_echo_1","name":"echo_json","input":{"message":"pong","step":"tool-loop"}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
     }
 
     fn complete_stream_response(visible_text: &str) -> String {
@@ -1442,6 +1693,66 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 .map(|event| event.status.clone()),
             Some(TerminalStatus::Success)
         );
+    }
+
+    #[test]
+    fn live_bridge_executes_tool_reenters_result_and_persists_terminal_turn() {
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_single_response(),
+                complete_single_response("tool done"),
+            ],
+        );
+        let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, ProviderType::Anthropic),
+            request,
+        )
+        .expect("live bridge");
+        let first_request = rx.recv().expect("first request");
+        let second_request = rx.recv().expect("second request");
+        handle.join().expect("join");
+
+        assert!(first_request.contains("\"tools\""));
+        assert!(
+            first_request.contains("\"tool_choice\":{\"name\":\"echo_json\",\"type\":\"tool\"}")
+        );
+        assert!(second_request.contains("\"type\":\"tool_result\""));
+        assert!(second_request.contains("toolu_echo_1"));
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(outcome.tool_executions, 1);
+        assert_eq!(outcome.restore_status, LiveReasonRestoreStatus::CreatedNew);
+        assert!(
+            outcome
+                .turns
+                .iter()
+                .any(|turn| !turn.tool_results.is_empty())
+        );
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&session_id)
+            .expect("restore persisted live session");
+        assert_eq!(
+            restored
+                .closed_turns
+                .last()
+                .and_then(|turn| turn.terminal_event.as_ref())
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+        assert!(restored.cursor.last_applied_reason_seq >= 4);
     }
 
     #[test]

@@ -4,11 +4,15 @@
 - owner: `crates/freehand-testkit`
 - lifecycle path under test:
   - selected config resolves one anthropic provider
+  - live bridge restores existing session truth or explicitly creates a new session when recovery truth is missing
   - one or more reason rounds start and build provider payloads
   - provider semantic request is built from round truth
+  - first tool-capable request advertises the deterministic `echo_json` tool schema
   - anthropic executor runs single-shot or SSE request
   - provider-neutral outputs are written back into the active round and broadcast
+  - completed `echo_json` tool calls are executed, written as tool-result re-entry, persisted, and passed to the next provider request
   - completion schema is parsed from tagged text and either accepted, rejected, or continued
+  - terminal live turns are materialized through `ReasonPersistence`
 - white-box plan:
   - provider descriptor derivation
   - unsupported provider rejection
@@ -19,10 +23,16 @@
   - invalid-schema rejection then success path
   - `claim=continue` next-round path
   - retry-exhausted failed terminal path
+  - restore-before-turn path
+  - live turn start/provider-output/schema-rejection/terminal persistence writes
+  - deterministic `echo_json` tool execution path
+  - tool-result re-entry passed to Anthropic as `tool_result`
 - module black-box plan:
   - one selected anthropic provider drives text/reasoning/usage into turn truth through the bridge and closes via accepted completion schema
+  - one selected anthropic provider emits `echo_json`, receives tool result, then closes via accepted completion schema
 - project black-box impact:
   - CLI can reuse the bridge for a live-turn smoke path without importing provider DTOs into app code
+  - CLI can prove real provider -> reason -> tool -> reason -> persistence from the app boundary
 - fixtures / replay inputs / runtime evidence paths:
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
@@ -34,3 +44,4 @@
   - local mock-based single-shot/SSE bridge tests exist
   - stream path now applies outputs incrementally from `AnthropicExecutor::execute_stream_with`
   - completion schema loop now covers tagged parse, field-level rejection, `continue` next-round execution, and failed terminal closeout after 3 invalid retries
+  - live persistence and `echo_json` tool-loop coverage are now implemented

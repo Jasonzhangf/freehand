@@ -5,6 +5,7 @@
 - lifecycle path under test:
   - provider request enters semantic adapter
   - typed provider payload is validated before adapter rendering
+  - provider-neutral tool schema/choice/exchange metadata stays outside request text
   - stream or single-shot output becomes unified semantic events
   - debug/raw retention policy stays separated from normal path
   - recovery classification remains explicit
@@ -12,6 +13,7 @@
   - event mapping, capability declaration, recovery classification, retention rules
   - OpenAI `responses` protocol mapping
   - OpenAI `chat completions` protocol admission in semantic request layer
+  - provider-neutral tool metadata round trip on the semantic request object
 - module black-box plan:
   - provider semantic boundary emits expected unified events for stream and single-shot flows
 - project black-box impact:
@@ -24,3 +26,4 @@
   - adapter-specific fixture catalog not yet defined
 - sync status between design and implementation:
   - semantic request builder, typed payload validation, event mapping, and error classification baseline landed
+  - provider-neutral tool metadata is now part of the request contract

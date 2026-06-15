@@ -8,6 +8,7 @@ use freehand_contracts::{
     validate_reason_req03,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +52,28 @@ pub struct ProviderSemanticRequest {
     pub descriptor: ProviderDescriptor,
     pub payload: ReasonReq03ProviderPayload,
     pub raw_retention: RawRetentionPolicy,
+    pub tools: Vec<ProviderToolDefinition>,
+    pub tool_choice: Option<ProviderToolChoice>,
+    pub tool_exchanges: Vec<ProviderToolExchange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderToolChoice {
+    Auto,
+    Required { name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderToolExchange {
+    pub tool_call: ReasonReq04ToolCall,
+    pub tool_result: ReasonReq05ToolResultReentry,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +149,9 @@ pub fn build_semantic_request(
             } else {
                 RawRetentionPolicy::DoNotRetain
             },
+            tools: Vec::new(),
+            tool_choice: None,
+            tool_exchanges: Vec::new(),
         }),
     }
 }

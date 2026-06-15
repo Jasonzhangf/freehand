@@ -55,6 +55,43 @@ fn spawn_mock_server(
     (base_url, rx, handle)
 }
 
+fn spawn_sequence_server(
+    content_type: &'static str,
+    response_bodies: Vec<String>,
+) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let base_url = format!("http://{}", listener.local_addr().expect("addr"));
+    let (tx, rx) = mpsc::channel();
+    let handle = thread::spawn(move || {
+        for response_body in response_bodies {
+            let (mut stream, _) = listener.accept().expect("accept");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("timeout");
+            let mut raw = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            loop {
+                let read = stream.read(&mut buffer).expect("read");
+                if read == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&buffer[..read]);
+                if request_is_complete(&raw) {
+                    break;
+                }
+            }
+            tx.send(String::from_utf8(raw).expect("utf8"))
+                .expect("send");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\n\r\n{response_body}",
+                response_body.len()
+            );
+            stream.write_all(response.as_bytes()).expect("write");
+        }
+    });
+    (base_url, rx, handle)
+}
+
 fn tagged_completion_json(body: &str) -> String {
     format!("<freehand_completion>\n{body}\n</freehand_completion>")
 }
@@ -68,6 +105,10 @@ fn complete_single_response(visible_text: &str) -> String {
         visible = visible_text,
         tagged = tagged.replace('\n', "\\n").replace('"', "\\\""),
     )
+}
+
+fn tool_use_single_response() -> String {
+    r#"{"content":[{"type":"tool_use","id":"toolu_echo_1","name":"echo_json","input":{"message":"pong","step":"cli-tool-loop"}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
 }
 
 fn complete_stream_response(visible_text: &str) -> String {
@@ -467,6 +508,96 @@ provider = "minimonth"
     assert!(stdout.contains("rounds=1"));
     assert!(stdout.contains("schema_rejections=0"));
     assert!(stdout.contains("terminal=Summary: pong"));
+
+    fs::remove_dir_all(home).expect("cleanup");
+}
+
+#[test]
+fn cli_runs_reason_live_tool_call_mock_and_persists() {
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            tool_use_single_response(),
+            complete_single_response("tool done"),
+        ],
+    );
+    let home = unique_home_dir();
+    let freehand_dir = home.join(".freehand");
+    fs::create_dir_all(&freehand_dir).expect("create runtime home");
+    fs::write(
+        freehand_dir.join("config.toml"),
+        format!(
+            r#"
+[providers.minimonth]
+id = "minimonth"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "{base_url}"
+default_model = "MiniMax-M2.7"
+
+[providers.minimonth.auth]
+type = "apikey"
+api_key = "sk-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+pair_token = "FREEHAND_CLI_TOKEN"
+provider = "minimonth"
+"#
+        ),
+    )
+    .expect("write config");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .env("HOME", &home)
+        .env("FREEHAND_CLI_TOKEN", "cli-secret")
+        .arg("reason-live")
+        .arg("--agent")
+        .arg("master")
+        .arg("--prompt")
+        .arg("call echo_json then finish")
+        .arg("--session")
+        .arg("cli-tool-session")
+        .output()
+        .expect("run cli");
+
+    let first_request = rx.recv().expect("first request");
+    let second_request = rx.recv().expect("second request");
+    handle.join().expect("join");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(first_request.contains("\"tools\""));
+    assert!(first_request.contains("\"tool_choice\":{\"name\":\"echo_json\",\"type\":\"tool\"}"));
+    assert!(second_request.contains("\"type\":\"tool_result\""));
+    assert!(stdout.contains("text=tool done"));
+    assert!(stdout.contains("rounds=2"));
+    assert!(stdout.contains("tool_executions=1"));
+    assert!(stdout.contains("restore_status=created_new"));
+    assert!(stdout.contains("terminal=Summary: pong"));
+    assert!(
+        freehand_dir
+            .join("state")
+            .join("turns")
+            .join("master")
+            .join("cli-tool-session")
+            .join("session-history.json")
+            .is_file()
+    );
+    assert!(
+        freehand_dir
+            .join("ledgers")
+            .join("reason")
+            .join("master")
+            .join("cli-tool-session.jsonl")
+            .is_file()
+    );
 
     fs::remove_dir_all(home).expect("cleanup");
 }

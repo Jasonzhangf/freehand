@@ -121,3 +121,10 @@
   - `freehand-reason` now has `ReasonPersistence` for authoritative snapshot writes, append-only reason ledger rows, terminal turn materialization, UI/index sidecar rebuild, and restore from snapshot-plus-tail or ledger-only rebuild
   - `freehand-testkit` now has persistence smoke
   - `freehand-cli reason-persist-smoke --agent <name>` now exists as app-boundary persistence restore smoke
+- 2026-06-15: live reason E2E tool baseline landed
+  - `freehand-provider-core` now carries provider-neutral tool schema, tool choice, and tool exchange metadata on semantic requests
+  - `freehand-provider-anthropic` now renders Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result` from provider-neutral metadata
+  - `freehand-testkit::run_live_reason_turn` now restores/persists through `ReasonPersistence`, executes deterministic `echo_json`, re-enters tool results, and closes via completion schema
+  - `freehand-cli reason-live` now supports runtime-home persistence, optional `--session`, tool execution summary, and restore status reporting
+  - `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass with `137` tests
+  - real provider smoke on configured Anthropic-compatible `minimonth` passed for new session and restored-existing session
