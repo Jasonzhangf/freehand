@@ -22,10 +22,15 @@
 ## Runtime Home
 
 - `~/.freehand/state`: node state, session state, durable local runtime data
+- `~/.freehand/state/turns`: authoritative session-history snapshots, active-turn snapshots, terminal turn truth
+- `~/.freehand/state/ui`: derived UI/session sidecars
 - `~/.freehand/logs`: logs by subsystem
 - `~/.freehand/ledgers`: append-only event, debug, and audit ledgers
+- `~/.freehand/ledgers/reason`: append-only semantic turn and rewrite evidence
+- `~/.freehand/ledgers/providers`: provider-family raw/debug evidence
 - `~/.freehand/replays`: captured runtime exchanges for replay/debug
 - `~/.freehand/cache`: runtime cache
+- `~/.freehand/cache/session-index`: rebuildable session list and index caches
 - `~/.freehand/tmp`: explicit temp workspace
 
 ## Rule
@@ -52,3 +57,4 @@
 - Metadata/debug/provider/cache fields and request-chain content fields must use separate types and separate builders.
 - Metadata must not be embedded into request text unless an explicit context builder converted it into request data.
 - subagent transcript truth stays outside parent prompt history; only typed final conclusion segments may be admitted into parent context.
+- authoritative persistence is `freehand-reason` truth only; UI sidecars and provider raw ledgers are rebuildable derivatives

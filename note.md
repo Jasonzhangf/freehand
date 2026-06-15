@@ -227,3 +227,11 @@
   - schema format locked to tagged block: <freehand_completion>{...}</freehand_completion>
   - claim=continue auto-continues next round
   - invalid schema auto-rejected up to 3 retries then terminal failed
+- 2026-06-15: persistence audit against Codex and Reasonix
+  - Codex evidence: `codex-rs/core/src/context_manager/history.rs` separates normalized model-visible history from broader session runtime state and bumps `history_version` only on rewrite-style mutations
+  - Codex evidence: `codex-rs/core/src/state/session.rs` keeps session-scoped mutable runtime fields adjacent to history but not mixed into prompt-visible truth
+  - Codex evidence: `codex-rs/core/src/session/rollout_reconstruction.rs` rebuilds effective history and resume metadata from replay/rollout artifacts instead of trusting UI-side projections
+  - Reasonix evidence: `internal/agent/session.go` keeps persisted session core intentionally small: message log + rewrite version, with single-writer discipline and snapshot-safe reads
+  - Reasonix evidence: `internal/agent/cache_shape.go` persists cache diagnostics around system hash, tool hash, prefix hash, and rewrite version so cache misses are explainable
+  - Reasonix evidence: `desktop/sessions.go` treats transcript JSONL as the durable artifact and keeps titles/display/trash metadata as separate sidecars
+  - provisional Freehand recommendation: split persistence into authoritative session-truth snapshot, append-only replay/debug ledger, and derived projection/index sidecars; keep only `freehand-reason` as truth writer and keep provider raw events out of session truth

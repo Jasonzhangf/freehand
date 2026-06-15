@@ -112,3 +112,8 @@
   - `freehand-reason` now owns explicit failed terminal writing through `ReasonTurnEngine::fail_turn`
   - CLI live-turn now prints visible text plus `rounds`, `schema_rejections`, and final terminal projection
   - `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass with `126` tests
+- 2026-06-15: reason.persistence design and gates locked
+  - added `docs/design/reason-persistence-design.md`
+  - added `docs/function-maps/reason.persistence.md`
+  - added `docs/testing/reason.persistence.md`
+  - feature-map, runtime/debug directory docs, local skill, and xtask gate now all point at the three-layer persistence split

@@ -99,12 +99,22 @@ Hard rule:
 - only adjacent pipeline builders may combine metadata with request data for envelope emission or debug ledger writes
 - provider wire renderers must receive an explicit request node plus explicit metadata/config, not a mixed catch-all DTO
 
+### Persistence boundary
+
+- `freehand-reason` owns authoritative turn and session persistence
+- persistence is split into:
+  - authoritative snapshots under `~/.freehand/state/turns`
+  - append-only semantic/debug ledgers under `~/.freehand/ledgers`
+  - derived UI/index sidecars under `~/.freehand/state/ui` and `~/.freehand/cache/session-index`
+- restart recovery must rebuild from authoritative snapshot plus reason ledger tail, or from reason ledger alone when snapshots are missing or invalid
+- provider raw payloads are debug-only artifacts and must not be reinterpreted as session truth
+- UI projections and session indexes are rebuildable consumers, not recovery truth
+
 ## Open Questions / TBD
 
 - exact `ReasonRequest` type shape
 - exact event enum and field names
 - exact tool-call semantic model
-- exact turn/session persistence model
 - exact provider capability negotiation model
 - exact metadata/request envelope type names and builder ownership
 

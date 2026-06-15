@@ -443,7 +443,61 @@ Use order:
   - non-ordinary rewrite modes enter planner only through explicit session-history gate methods
   - ordinary turns do not bump rewrite version
   - rewrite ledger retains diagnostics and applied-turn evidence
-  - persisted session truth remains serializable and reloadable
+- persisted session truth remains serializable and reloadable
+
+### `reason.persistence`
+
+- owner: `crates/freehand-reason`
+- allowed_paths: `crates/freehand-reason/**`, `crates/freehand-testkit/**`, `apps/freehand-cli/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/runtime/**`, `docs/debug/**`
+- forbidden_paths: `crates/freehand-provider-*/**` except debug raw-ledger consumers at adapter boundaries, `crates/freehand-ui-protocol/**` except projection-only consumers
+- required_checks:
+  - `cargo test -p freehand-reason`
+  - `cargo test -p freehand-testkit`
+  - `cargo test -p freehand-cli`
+- required_white_box_tests:
+  - session snapshot render/load tests
+  - persistence cursor serialization tests
+  - reason-ledger sequence ordering tests
+  - snapshot-plus-tail recovery tests
+  - ledger-only rebuild tests
+  - provider-raw-ledger exclusion-from-session-truth tests
+  - atomic snapshot replace tests
+- required_module_black_box_tests:
+  - persistence save/reload smoke
+  - terminal turn materialization smoke
+  - recovery from snapshot-plus-ledger-tail smoke
+  - derived-sidecar rebuild smoke
+- required_project_black_box_tests:
+  - CLI session resume-after-restart smoke
+  - live-turn recovery audit smoke
+- test_design_doc: `docs/testing/reason.persistence.md`
+- function_map_doc: `docs/function-maps/reason.persistence.md`
+- debug_artifacts:
+  - persisted session snapshot fixture path
+  - reason ledger fixture path
+  - corrupted persistence fixture path
+  - provider raw debug fixture path
+- runtime_paths:
+  - `~/.freehand/state/turns`
+  - `~/.freehand/state/ui`
+  - `~/.freehand/ledgers/reason`
+  - `~/.freehand/ledgers/providers`
+  - `~/.freehand/cache/session-index`
+  - `~/.freehand/replays/reason`
+- update_triggers:
+  - snapshot file shape changes
+  - reason ledger schema changes
+  - recovery ordering changes
+  - derived sidecar boundaries change
+  - restart/resume flow changes
+  - runtime home subdirectory changes
+- lifecycle_checks:
+  - only `freehand-reason` writes authoritative session/turn persistence
+  - snapshot and reason-ledger ordering remains explicit and recoverable
+  - provider raw debug data never becomes session truth
+  - UI and index sidecars remain derived and rebuildable
+  - recovery never depends on UI projections or provider raw payloads
+  - metadata and request-chain data remain type-isolated across persisted artifacts
 
 ### `reason.rewrite-policy`
 

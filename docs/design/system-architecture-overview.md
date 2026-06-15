@@ -50,6 +50,14 @@ Unknown details stay `TBD`.
 - debug/provider/model/cache metadata must not become hidden prompt/request content
 - subagent search/enrichment enters parent context only through a typed final-conclusion projection, never by replaying the child transcript into the parent prompt
 
+### Persistence layering
+
+- authoritative reason state lives under `~/.freehand/state/turns`
+- append-only semantic and debug ledgers live under `~/.freehand/ledgers`
+- derived UI and index sidecars live under `~/.freehand/state/ui` and `~/.freehand/cache/session-index`
+- only `freehand-reason` writes authoritative session and turn persistence
+- provider raw payloads may be retained in debug ledgers only and never become session truth
+
 ### Source-of-truth routing
 
 - project entry router: `AGENTS.md`
@@ -60,7 +68,6 @@ Unknown details stay `TBD`.
 ## Open Questions / TBD
 
 - exact master/slave transport protocol
-- exact persistence format for session truth
 - exact final CLI/server runtime loop wiring for `reason.rewrite-policy` facts
 - exact API surface for multi-UI command submission
 - exact crate-level public API boundaries beyond current scaffold

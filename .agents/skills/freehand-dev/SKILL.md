@@ -43,10 +43,15 @@ Use this skill for any non-trivial work in this repo.
 - Use standard runtime paths:
   - `~/.freehand/state`
   - `~/.freehand/state/config`
+  - `~/.freehand/state/turns`
+  - `~/.freehand/state/ui`
   - `~/.freehand/logs`
   - `~/.freehand/ledgers`
+  - `~/.freehand/ledgers/reason`
+  - `~/.freehand/ledgers/providers`
   - `~/.freehand/replays`
   - `~/.freehand/cache`
+  - `~/.freehand/cache/session-index`
   - `~/.freehand/tmp`
 - Runtime evidence belongs there, not in random ad hoc paths.
 - Directory routes:
@@ -112,10 +117,12 @@ Use this skill for any non-trivial work in this repo.
 - Provider `TokenUsage` enters rewrite policy only through `freehand-blocks::prompt_tokens_from_usage`; do not hand-roll provider usage interpretation in runtime or UI
 - `freehand-testkit` may host project black-box runtime harnesses before production CLI/server loops exist; keep harness behavior aligned with function maps and test design
 - `reason.session-history` inside `freehand-reason` owns base context, rewrite mode/version, rewrite ledger, and persisted session-history snapshots.
+- `reason.persistence` inside `freehand-reason` owns authoritative snapshot and reason-ledger persistence; UI sidecars and provider raw ledgers remain derived or debug-only.
 - Non-ordinary rewrite modes may enter planner only through explicit session-history gate methods for compaction, rollback, or resume rebuild.
 - `freehand-reason` and provider adapter crates must remain independent; neither side may depend on the other's implementation crate.
 - Metadata/debug/provider/cache fields and request-chain content fields must stay hard-isolated by type and builder ownership.
 - Metadata must not be smuggled into request text, and request content must not be recovered from metadata/debug fields.
+- Restart recovery must use authoritative snapshots plus reason-ledger replay; UI sidecars and provider raw ledgers are never recovery truth.
 - In UI protocol work, query and subscribe must stay separate, and source identity fields must remain explicit.
 - Shared contract types should default to serializable, replayable, and persistable unless a higher-priority truth source says otherwise.
 

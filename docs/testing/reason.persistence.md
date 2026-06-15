@@ -1,0 +1,47 @@
+# Test Design: `reason.persistence`
+
+- feature_id: `reason.persistence`
+- owner: `crates/freehand-reason`
+- lifecycle path under test:
+  - authoritative session rewrite truth is snapshotted under `~/.freehand/state/turns`
+  - active turn truth is refreshed after durable reason-ledger append
+  - terminal turn truth is materialized as immutable per-turn files
+  - restart recovery restores from snapshot plus reason-ledger tail, or from reason-ledger-only rebuild when snapshots are missing or invalid
+  - derived UI and index sidecars rebuild from authoritative truth and are never recovery truth
+  - provider raw ledgers remain debug-only and never become session truth
+- white-box plan:
+  - session snapshot render/load tests
+  - invalid snapshot coherence rejection tests
+  - persistence cursor serialization tests
+  - reason-ledger sequence monotonicity tests
+  - snapshot-plus-tail replay tests
+  - ledger-only rebuild tests
+  - atomic snapshot replace tests
+  - provider-raw-ledger exclusion tests
+- module black-box plan:
+  - persistence save/reload smoke at the `freehand-reason` boundary
+  - active-turn update then terminal materialization smoke
+  - snapshot-missing recovery smoke
+  - derived-sidecar rebuild smoke
+- project black-box impact:
+  - CLI session resume-after-restart smoke
+  - live-turn recovery audit through shared runtime harness
+  - replay/debug consumer can inspect persisted reason history without using provider raw payloads as truth
+- fixtures / replay inputs / runtime evidence paths:
+  - persisted session snapshot fixture path
+  - reason-ledger fixture path
+  - corrupted persistence fixture path
+  - `~/.freehand/state/turns`
+  - `~/.freehand/state/ui`
+  - `~/.freehand/ledgers/reason`
+  - `~/.freehand/ledgers/providers`
+  - `~/.freehand/cache/session-index`
+- known gaps:
+  - runtime snapshot coordinator is not yet implemented
+  - reason-ledger append writer is not yet implemented
+  - terminal turn materializer is not yet implemented
+  - CLI restart/resume black-box smoke is not yet implemented
+- sync status between design and implementation:
+  - design is locked
+  - current implementation covers only session-history JSON/file round-trip as a persistence baseline
+  - full snapshot, ledger, sidecar, and recovery lifecycle tests remain to be implemented with the owner runtime path

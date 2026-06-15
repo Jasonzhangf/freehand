@@ -38,6 +38,7 @@ fn run_gates_check() -> Result<(), String> {
             "docs/function-maps/provider.anthropic-adapter.md",
             "docs/function-maps/contracts.core.md",
             "docs/function-maps/reason.turn.md",
+            "docs/function-maps/reason.persistence.md",
             "docs/function-maps/ui.protocol.md",
             "docs/function-maps/node.master-slave.md",
             "docs/architecture/debug-and-trace.md",
@@ -51,6 +52,7 @@ fn run_gates_check() -> Result<(), String> {
             "docs/testing/provider.anthropic-adapter.md",
             "docs/testing/contracts.core.md",
             "docs/testing/reason.turn.md",
+            "docs/testing/reason.persistence.md",
             "docs/testing/ui.protocol.md",
             "docs/testing/node.master-slave.md",
             "docs/debug/README.md",
@@ -65,6 +67,7 @@ fn run_gates_check() -> Result<(), String> {
             "docs/design/provider-semantic-design.md",
             "docs/design/provider-adapter-design.md",
             "docs/design/reason-turn-design.md",
+            "docs/design/reason-persistence-design.md",
             "docs/design/node-master-slave-design.md",
             "docs/design/ui-protocol-design.md",
             "docs/references/provider-protocols/README.md",
@@ -232,7 +235,19 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
         ),
         (
             root.join("docs/design/design-doc-index.md"),
-            &["chat discussion is not durable design truth"],
+            &[
+                "chat discussion is not durable design truth",
+                "reason-persistence-design.md",
+            ],
+        ),
+        (
+            root.join("docs/design/reason-persistence-design.md"),
+            &[
+                "authoritative snapshots",
+                "append-only ledgers",
+                "derived UI and index sidecars",
+                "provider raw payloads are debug-only artifacts",
+            ],
         ),
         (
             root.join("docs/design/config-core-design.md"),

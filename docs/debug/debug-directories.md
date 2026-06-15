@@ -7,9 +7,14 @@
 
 ## Runtime Debug Directories
 
+- `~/.freehand/state/turns`
+- `~/.freehand/state/ui`
 - `~/.freehand/logs`
 - `~/.freehand/ledgers`
+- `~/.freehand/ledgers/reason`
+- `~/.freehand/ledgers/providers`
 - `~/.freehand/replays`
+- `~/.freehand/cache/session-index`
 - `~/.freehand/tmp`
 
 ## Rule
@@ -17,4 +22,3 @@
 - repo docs describe debug method and ownership
 - runtime directories hold local scene evidence
 - new debug path must be documented before use
-
