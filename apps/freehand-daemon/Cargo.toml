@@ -1,0 +1,16 @@
+[package]
+name = "freehand-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+freehand-contracts = { path = "../../crates/freehand-contracts" }
+freehand-runtime = { path = "../../crates/freehand-runtime" }
+freehand-server = { path = "../freehand-server" }
+freehand-ui-protocol = { path = "../../crates/freehand-ui-protocol" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync"] }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serial_test = "3"

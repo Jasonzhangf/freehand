@@ -108,7 +108,7 @@ fn complete_single_response(visible_text: &str) -> String {
 }
 
 fn tool_use_single_response() -> String {
-    r#"{"content":[{"type":"tool_use","id":"toolu_echo_1","name":"echo_json","input":{"message":"pong","step":"cli-tool-loop"}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
+    r#"{"content":[{"type":"tool_use","id":"toolu_read_1","name":"read_file","input":{"path":"Cargo.toml","offset":0,"limit":2}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
 }
 
 fn complete_stream_response(visible_text: &str) -> String {
@@ -179,7 +179,17 @@ apiKey = "sk-inline"
 [agents.master]
 name = "master"
 mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
 pair_token = "FREEHAND_CLI_TOKEN"
+provider = "mini27"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "FREEHAND_WORKER_TOKEN"
 provider = "mini27"
 "#,
     )
@@ -237,7 +247,17 @@ api_key = "sk-inline"
 [agents.master]
 name = "master"
 mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
 pair_token = "FREEHAND_CLI_TOKEN"
+provider = "mini27"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "FREEHAND_WORKER_TOKEN"
 provider = "mini27"
 "#,
     )
@@ -246,6 +266,7 @@ provider = "mini27"
     let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
         .env("HOME", &home)
         .env("FREEHAND_CLI_TOKEN", "cli-secret")
+        .env("FREEHAND_WORKER_TOKEN", "worker-secret")
         .arg("reason-e2e")
         .arg("--agent")
         .arg("master")
@@ -293,7 +314,17 @@ api_key = "sk-inline"
 [agents.master]
 name = "master"
 mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
 pair_token = "FREEHAND_CLI_TOKEN"
+provider = "mini27"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "FREEHAND_WORKER_TOKEN"
 provider = "mini27"
 "#,
     )
@@ -302,6 +333,7 @@ provider = "mini27"
     let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
         .env("HOME", &home)
         .env("FREEHAND_CLI_TOKEN", "cli-secret")
+        .env("FREEHAND_WORKER_TOKEN", "worker-secret")
         .arg("reason-e2e")
         .arg("--agent")
         .arg("master")
@@ -349,7 +381,17 @@ api_key = "sk-inline"
 [agents.master]
 name = "master"
 mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
 pair_token = "FREEHAND_CLI_TOKEN"
+provider = "mini27"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "FREEHAND_WORKER_TOKEN"
 provider = "mini27"
 "#,
     )
@@ -358,6 +400,7 @@ provider = "mini27"
     let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
         .env("HOME", &home)
         .env("FREEHAND_CLI_TOKEN", "cli-secret")
+        .env("FREEHAND_WORKER_TOKEN", "worker-secret")
         .arg("reason-persist-smoke")
         .arg("--agent")
         .arg("master")
@@ -405,7 +448,17 @@ api_key = "sk-inline"
 [agents.master]
 name = "master"
 mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
 pair_token = "FREEHAND_CLI_TOKEN"
+provider = "minimonth"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "FREEHAND_WORKER_TOKEN"
 provider = "minimonth"
 "#
         ),
@@ -415,6 +468,7 @@ provider = "minimonth"
     let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
         .env("HOME", &home)
         .env("FREEHAND_CLI_TOKEN", "cli-secret")
+        .env("FREEHAND_WORKER_TOKEN", "worker-secret")
         .arg("reason-live")
         .arg("--agent")
         .arg("master")
@@ -472,7 +526,17 @@ api_key = "sk-inline"
 [agents.master]
 name = "master"
 mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
 pair_token = "FREEHAND_CLI_TOKEN"
+provider = "minimonth"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "FREEHAND_WORKER_TOKEN"
 provider = "minimonth"
 "#
         ),
@@ -482,6 +546,7 @@ provider = "minimonth"
     let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
         .env("HOME", &home)
         .env("FREEHAND_CLI_TOKEN", "cli-secret")
+        .env("FREEHAND_WORKER_TOKEN", "worker-secret")
         .arg("reason-live")
         .arg("--agent")
         .arg("master")
@@ -543,7 +608,17 @@ api_key = "sk-inline"
 [agents.master]
 name = "master"
 mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
 pair_token = "FREEHAND_CLI_TOKEN"
+provider = "minimonth"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "FREEHAND_WORKER_TOKEN"
 provider = "minimonth"
 "#
         ),
@@ -553,11 +628,12 @@ provider = "minimonth"
     let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
         .env("HOME", &home)
         .env("FREEHAND_CLI_TOKEN", "cli-secret")
+        .env("FREEHAND_WORKER_TOKEN", "worker-secret")
         .arg("reason-live")
         .arg("--agent")
         .arg("master")
         .arg("--prompt")
-        .arg("call echo_json then finish")
+        .arg("call read_file then finish")
         .arg("--session")
         .arg("cli-tool-session")
         .output()
@@ -574,8 +650,11 @@ provider = "minimonth"
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
     assert!(first_request.contains("\"tools\""));
-    assert!(first_request.contains("\"tool_choice\":{\"name\":\"echo_json\",\"type\":\"tool\"}"));
+    assert!(first_request.contains("\"name\":\"read_file\""));
+    assert!(!first_request.contains("\"tool_choice\""));
     assert!(second_request.contains("\"type\":\"tool_result\""));
+    assert!(second_request.contains("toolu_read_1"));
+    assert!(second_request.contains("Cargo.toml"));
     assert!(stdout.contains("text=tool done"));
     assert!(stdout.contains("rounds=2"));
     assert!(stdout.contains("tool_executions=1"));
@@ -625,7 +704,17 @@ api_key = "sk-inline"
 [agents.master]
 name = "master"
 mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
 pair_token = "FREEHAND_CLI_TOKEN"
+provider = "mini27"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "FREEHAND_WORKER_TOKEN"
 provider = "mini27"
 "#,
     )
@@ -634,6 +723,7 @@ provider = "mini27"
     let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
         .env("HOME", &home)
         .env("FREEHAND_CLI_TOKEN", "cli-secret")
+        .env("FREEHAND_WORKER_TOKEN", "worker-secret")
         .arg("reason-live")
         .arg("--agent")
         .arg("master")

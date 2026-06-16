@@ -7,6 +7,7 @@ This directory is the durable truth for code-bound feature mainlines.
 - who owns the feature
 - where it may change
 - how it is validated
+- which problem area routes to which `feature_id`
 
 This directory answers:
 
@@ -18,6 +19,24 @@ This directory answers:
 - how function calls bind back to code
 - where metadata and request data remain type-isolated when a mainline crosses modules
 - where context segment admission is locked when a feature adds model-visible context
+- where the test orchestration document lives through the paired `test_design_doc`
+- where the machine-readable mainline call source lives for migrated features
+- where the generated wiki artifact lives for migrated features
+
+## Owner Routing Rule
+
+Problem location is not grep-first.
+
+Use this exact chain:
+
+1. `docs/architecture/feature-map.md` `Owner Routing Index`
+2. one `feature_id`
+3. one owner module/crate
+4. one `docs/function-maps/<feature-id>.md`
+5. one `docs/testing/<feature-id>.md`
+6. mapped white-box, module black-box, and project black-box tests
+
+If a function map cannot identify the owner symbol or mainline, the feature is not ready for implementation or closure.
 
 ## Required Per-Feature Sections
 
@@ -34,6 +53,9 @@ Every feature function-map doc must contain:
 - function call table
 - sync status against code
 - metadata/request isolation notes when feature crosses module boundaries
+- paired `test_design_doc` awareness through the feature map
+- for migrated features, the machine-readable mainline call source path
+- for migrated features, the generated wiki path
 
 ## Code Binding Rule
 
@@ -69,5 +91,16 @@ When code changes:
 - update shared-function descriptions
 - update sync status
 - update metadata/request isolation notes for cross-module paths
+- if the feature is migrated, update the machine-readable mainline call source and regenerate wiki
 
 If these are not updated, the feature is not closed.
+
+## Generated Wiki Rule
+
+For migrated features:
+
+- `docs/mainline-calls/<feature-id>.json` is the machine-readable mainline call source
+- `docs/wiki/<feature-id>.md` is the generated wiki artifact
+- generate with `cargo run -p xtask -- mainlines generate`
+- validate with `cargo run -p xtask -- mainlines check`
+- do not edit generated wiki files by hand

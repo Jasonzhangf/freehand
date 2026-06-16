@@ -4,26 +4,60 @@
 - owner: `crates/freehand-ui-protocol`
 - lifecycle path under test:
   - commands enter protocol boundary
+  - commands act as ingress only and do not make UI a truth writer
+  - command ingress accepts only mutation-intent commands and rejects query-route misuse explicitly
+  - accepted command ingress is routed to declared owner feature/module before transport dispatch
   - query returns snapshot truth
-  - subscribe returns incremental truth
+  - debug query returns per-turn read-only debug snapshot truth
+  - subscribe returns an initial snapshot plus continuous incremental truth
+  - debug subscribe returns per-turn read-only debug projections
+  - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
+  - debug receiver drain ingests observation-only debug events into protocol state
   - source identity and stream kind stay explicit
   - slave turn presentation divergence remains protocol-safe
   - client-specific projection gating keeps slave card visible only for WebUI
+  - public conversation projection hides reasoning, usage, debug details, and raw completion schema blocks from the main user-visible stream
 - white-box plan:
   - command/projection mapping, status query, terminal projection, slave subscription semantics
+  - command ingress acceptance and rejection mapping
+  - command dispatch routing mapping
   - client-specific projection gating
+  - debug-state query and subscription routing
+  - protocol-owned subscription channel fanout
+  - incremental turn projection updates from shared contracts
+  - debug-event ingestion and receiver-drain behavior
 - module black-box plan:
+  - command ingress accept/reject smoke
+  - command dispatch envelope owner-routing smoke
   - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
+  - debug-state snapshot/query by `turn_id`
+  - debug-state subscription by `turn_id`
+  - protocol subscription receiver gets turn/debug updates after state mutation
+  - debug-core receiver to queryable protocol-state smoke
   - CLI hides slave card while WebUI may render it
+  - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries
 - project black-box impact:
   - CLI and WebUI consume one protocol truth while rendering different views
   - protocol truth can back a minimal service boundary without duplicating projection logic in apps
+  - any UI remains decoupled from reason/debug truth ownership while still acting as the user input port
+  - protocol state can back HTTP query and SSE subscribe adapters without app-owned projection duplication
+- mainline/wiki sync:
+  - wiki generated from mainline call must stay in sync with protocol owner code and function map updates
 - fixtures / replay inputs / runtime evidence paths:
   - UI protocol stream fixtures
   - node status snapshots
   - `~/.freehand/replays/ui`
 - known gaps:
-  - transport binding still not landed
+  - transport-facing app injection into a real runtime-owned dispatch port is still not landed
+  - debug-state contract is minimal and per-turn only for now
 - sync status between design and implementation:
   - command/query/subscribe/projection baseline landed
+  - command ingress ack/rejection baseline landed
+  - command dispatch envelope routing baseline landed
+  - protocol-owned continuous subscription channel landed
+  - incremental turn projection update methods from shared contracts landed
+  - minimal per-turn debug-state query/subscribe baseline landed
+  - debug receiver-drain bridge from `debug.core` into protocol state landed
+  - debug-state snapshot shape now comes from `freehand-debug`
   - client-specific projection gating remains protocol-owned
+  - public turn projection is protocol-owned

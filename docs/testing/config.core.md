@@ -5,15 +5,18 @@
 - lifecycle path under test:
   - load `~/.freehand/config.toml`
   - resolve `[agents.<name>]`
+  - validate reciprocal peer-topology fields
   - resolve `[providers.<id>]`
   - select one agent per process
   - select one enabled provider per agent
   - resolve provider auth source without leaking secret projection
   - validate restart-only config activation
 - white-box plan:
-  - parse and validate agent/provider schema, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
+  - parse and validate agent/provider schema, reciprocal peer-topology invariants, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
+  - positive peer-topology coverage locks selected-agent projection of local node id, paired agent name, paired mode, paired node id, paired allowed IP, and paired pair-token env
+  - negative peer-topology coverage locks self-pairing, missing paired agent, same-mode paired agents, and non-reciprocal paired agents
 - module black-box plan:
-  - load config file and select named agent with full provider runtime selection through public config boundary
+  - load config file and select named agent with full provider runtime selection plus paired-topology projection through public config boundary
 - project black-box impact:
   - CLI startup path consumes one named agent configuration and projects selected provider metadata without exposing API key
 - fixtures / replay inputs / runtime evidence paths:
@@ -22,4 +25,4 @@
 - known gaps:
   - provider runtime execution support is still outside `config.core`; current project black-box scope stops at safe projection of selection truth
 - sync status between design and implementation:
-  - white-box, module black-box, and project black-box baseline cover multi-provider registry and selected-provider projection
+  - white-box, module black-box, and project black-box baseline cover multi-provider registry, reciprocal peer topology, and selected-provider projection

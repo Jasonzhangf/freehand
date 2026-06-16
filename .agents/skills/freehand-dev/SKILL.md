@@ -11,31 +11,54 @@ Use this skill for any non-trivial work in this repo.
 
 1. Read `AGENTS.md`, `CACHE.md`, `MEMORY.md`, `note.md`.
 2. Read `docs/architecture/feature-map.md`.
-3. Read the feature's bound function-map doc before non-trivial implementation or debug.
-4. Identify the target `feature_id`, owning crate, allowed paths, forbidden paths, required checks, debug artifacts, runtime paths, `test_design_doc`, `function_map_doc`, and `lifecycle_checks`.
-5. If ownership is unclear, fix the map first or stop and ask.
-6. Before coding, ask three questions:
+3. Use `Owner Routing Index` to map the problem area to exactly one `feature_id`.
+4. Read the feature's bound function-map doc before non-trivial implementation or debug.
+5. Read the feature's bound test-design doc before non-trivial implementation or debug.
+6. Identify the target `feature_id`, owning crate, allowed paths, forbidden paths, required checks, debug artifacts, runtime paths, `test_design_doc`, `function_map_doc`, and `lifecycle_checks`.
+7. If ownership is unclear, fix the map first or stop and ask.
+8. Before coding, ask three questions:
    - is the information sufficient
    - is the logic closed-loop
    - is lifecycle management complete
-7. If any answer is no, do read-only tracing and source search first. Ask the user only after read-only search cannot close the gap.
-8. Before implementation for each module feature, write or update its test-design record first.
-9. Test-design record must capture:
+9. If any answer is no, do read-only tracing and source search first. Ask the user only after read-only search cannot close the gap.
+10. Before implementation for each module feature, write or update its test-design record first.
+11. Test-design record must capture:
    - target feature and owner
    - lifecycle and logic path
    - white-box coverage plan
    - module black-box coverage plan
    - project black-box coverage impact
    - known gaps and non-goals
-10. Function-map record must capture:
+12. Function-map record must capture:
    - owner crate and owner module
    - code-bound entry symbols
    - request mainline
    - response mainline
    - error mainline
+   - mainline call source when the feature is migrated
+   - generated wiki path when the feature is migrated
    - shared multi-reference functions and why they are reused
    - call table bound to code paths
-11. If another worker cannot read the test design and function map and understand where coverage lives, where the mainline runs, and what remains risky, the design is incomplete.
+13. Tool-owning features must also capture:
+   - tool spec owner
+   - implemented vs unimplemented state
+   - runtime exposure gate
+   - execution owner symbol
+   - side-effect and permission notes when relevant
+14. If another worker cannot read the test design and function map and understand where coverage lives, where the mainline runs, and what remains risky, the design is incomplete.
+
+## Problem Routing
+
+- Do not locate ownership by grep first.
+- Locate by `Owner Routing Index` -> `feature_id` -> owner -> function map -> test-design doc.
+- `docs/architecture/feature-map.md` is the feature owner registry.
+- `docs/function-maps/<feature-id>.md` is the code-bound mainline and symbol registry.
+- `docs/mainline-calls/<feature-id>.json` is the machine-readable mainline call source when that feature has migrated.
+- `docs/wiki/<feature-id>.md` is the generated wiki artifact for migrated features.
+- `docs/testing/<feature-id>.md` is the test orchestration registry.
+- If the problem does not map to one owner, update the owner routing docs before code changes.
+- If a touched function is not in the function map call table, update the function map in the same change.
+- If a touched behavior changes coverage, update the test-design doc in the same change.
 
 ## Runtime Home
 
@@ -84,6 +107,9 @@ Use this skill for any non-trivial work in this repo.
 - local multiple agents are managed by `config.toml`, and one `config.toml` may define multiple local agents.
 - config source path is only `~/.freehand/config.toml`.
 - one process starts one agent, chosen by CLI agent name.
+- each configured agent must have explicit `node_id` and `paired_agent`.
+- peer topology is config-owned: paired agents must be reciprocal and opposite mode in the first local topology version.
+- runtime/daemon code must consume selected peer topology from `freehand-config`; it must not derive synthetic master/slave node ids.
 - current first version master/slave scope is local one-master one-slave only.
 - pairing transport is WebSocket handshake.
 - each agent has a startup configuration file that decides its startup mode.
@@ -96,13 +122,22 @@ Use this skill for any non-trivial work in this repo.
 - if slave loses pairing, it keeps listening for later re-pairing.
 - master may send task, query progress, directly talk, and subscribe to slave turn stream.
 - UI code must consume `crates/freehand-ui-protocol`, never provider crates directly.
+- UI app boundaries must stay protocol-only: they may render `freehand-ui-protocol` truth and shared contracts, but must not import `freehand-reason`, provider crates, node semantics, or config semantics for UI behavior.
+- Any UI is an input ingress plus a read-only consumer of turn/debug state. UI may submit commands, but UI must not directly mutate reason truth, debug truth, or session truth.
 - First version UI scope is CLI plus WebUI.
+- First WebUI transport baseline is HTTP query plus SSE subscribe. Do not mix this UI transport with node WebSocket pairing semantics.
+- Command ingress must stay split from query/subscribe routes. Query/subscribe commands are not valid command-ingress payloads and must be rejected explicitly.
+- Before a UI command leaves `freehand-ui-protocol`, it must be wrapped in a protocol-owned owner-routing envelope; app boundaries must not invent their own command-to-owner routing.
+- Runtime-backed command execution belongs in `freehand-runtime` or another explicit runtime owner crate, not in UI app crates.
+- Protocol-only async transports must still respect runtime execution boundaries: if injected runtime dispatch performs synchronous provider/live work, call it through an explicit blocking boundary such as `tokio::task::spawn_blocking` instead of executing it inline on the async handler thread.
+- Config-selected runtime host bootstrap should also prefer `freehand-runtime`; host apps should stay thin and must not reimplement config-selection-to-runtime wiring.
 - CLI and WebUI may render different views, but they must share one `freehand-ui-protocol` truth.
 - No fallback, no silent downgrade, no duplicate semantic logic in orchestrators.
 - Start development and debugging from the function map owner, never from random grep alone.
 - Request/response/error mainlines must have logic descriptions in the function map, not only crate names.
 - Any function used from multiple call sites must have one shared semantic description in the function map.
 - function-call tables must bind to code symbols or explicitly say implementation binding is still pending.
+- generated wiki must come from the machine-readable mainline call source; do not hand-edit generated wiki files.
 - New features and bug fixes both require lifecycle thinking, not just local code patches.
 - In provider work, preserve raw provider events in debug mode and rely on unified semantic events for normal operation.
 - In provider work, read local official protocol snapshots under `docs/references/provider-protocols/` before inventing wire behavior.
@@ -116,6 +151,10 @@ Use this skill for any non-trivial work in this repo.
 - `ReasonRewriteRuntime` in `freehand-reason` is the baseline consumer that may call `SessionHistory::stage_*` from policy-approved decisions
 - Provider `TokenUsage` enters rewrite policy only through `freehand-blocks::prompt_tokens_from_usage`; do not hand-roll provider usage interpretation in runtime or UI
 - `freehand-testkit` may host project black-box runtime harnesses before production CLI/server loops exist; keep harness behavior aligned with function maps and test design
+- built-in tool specs and execution ownership live in `crates/freehand-tools`
+- runtime must not hardcode demo tool schemas or demo tool execution outside `crates/freehand-tools`
+- every new built-in tool must first land as a spec in the tool owner with explicit `implemented` state
+- no tool may be exposed on the live provider path until its function map and test-design docs are updated in the same change set
 - `reason.session-history` inside `freehand-reason` owns base context, rewrite mode/version, rewrite ledger, and persisted session-history snapshots.
 - `reason.persistence` inside `freehand-reason` owns authoritative snapshot and reason-ledger persistence; UI sidecars and provider raw ledgers remain derived or debug-only.
 - Non-ordinary rewrite modes may enter planner only through explicit session-history gate methods for compaction, rollback, or resume rebuild.
@@ -166,6 +205,8 @@ Use this skill for any non-trivial work in this repo.
 - `cargo test --workspace` is the regression umbrella and must carry white-box plus module/project black-box coverage as those tests are added.
 - When tests are added, changed, or found incomplete, update the module's test-design record in the same change set.
 - When request/response/error mainlines or shared function usage change, update the function-map doc in the same change set.
+- When migrated mainline-call truth changes, update `docs/mainline-calls/**` and regenerate `docs/wiki/**` in the same change set.
+- When tool surface or tool execution truth changes, update tool design, function map, test design, and runtime exposure checks in the same change set.
 - When context-segment admission, cache-shape policy, or subagent context flow changes, update `reason.context-planner` design, test design, function map, and memory in the same task.
 
 ## Memory Workflow

@@ -1,18 +1,19 @@
 # Test Design: `provider.reason-live-bridge`
 
 - feature_id: `provider.reason-live-bridge`
-- owner: `crates/freehand-testkit`
+- owner: `crates/freehand-runtime`
 - lifecycle path under test:
   - selected config resolves one anthropic provider
-  - live bridge restores existing session truth or explicitly creates a new session when recovery truth is missing
+  - runtime-owned live bridge restores existing session truth or explicitly creates a new session when recovery truth is missing
   - one or more reason rounds start and build provider payloads
   - provider semantic request is built from round truth
-  - first tool-capable request advertises the deterministic `echo_json` tool schema
+  - first tool-capable request advertises implemented schemas from the Reasonix-aligned tool registry
   - anthropic executor runs single-shot or SSE request
   - provider-neutral outputs are written back into the active round and broadcast
-  - completed `echo_json` tool calls are executed, written as tool-result re-entry, persisted, and passed to the next provider request
+  - completed implemented registry tool calls are executed, written as tool-result re-entry, persisted, and passed to the next provider request
   - completion schema is parsed from tagged text and either accepted, rejected, or continued
   - terminal live turns are materialized through `ReasonPersistence`
+  - runtime dispatch projects the final turn into shared `UiProtocolState`
 - white-box plan:
   - provider descriptor derivation
   - unsupported provider rejection
@@ -25,14 +26,20 @@
   - retry-exhausted failed terminal path
   - restore-before-turn path
   - live turn start/provider-output/schema-rejection/terminal persistence writes
-  - deterministic `echo_json` tool execution path
+  - registry-backed tool schema export path
+  - implemented registry read-only tool execution path
   - tool-result re-entry passed to Anthropic as `tool_result`
+  - runtime dispatch submit-user-input path invokes the live bridge and updates UI projection
 - module black-box plan:
   - one selected anthropic provider drives text/reasoning/usage into turn truth through the bridge and closes via accepted completion schema
-  - one selected anthropic provider emits `echo_json`, receives tool result, then closes via accepted completion schema
+  - one selected anthropic provider emits an implemented registered tool call, receives tool result, then closes via accepted completion schema
+  - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
+  - invalid completion schema retries exactly 3 times and closes failed terminal without early success
+  - provider HTTP failure returns explicit dispatch failure and does not project a successful terminal
 - project black-box impact:
-  - CLI can reuse the bridge for a live-turn smoke path without importing provider DTOs into app code
+  - CLI can reuse the runtime-owned bridge for a live-turn smoke path without importing provider DTOs into app code
   - CLI can prove real provider -> reason -> tool -> reason -> persistence from the app boundary
+  - daemon can prove HTTP command ingress -> runtime live bridge -> provider -> reason -> persistence -> UI query/SSE projection
 - fixtures / replay inputs / runtime evidence paths:
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
@@ -40,8 +47,6 @@
   - `~/.freehand/ledgers/providers/anthropic`
   - `~/.freehand/ledgers/reason`
 - sync status between design and implementation:
-  - anthropic-only bridge baseline is implemented
-  - local mock-based single-shot/SSE bridge tests exist
-  - stream path now applies outputs incrementally from `AnthropicExecutor::execute_stream_with`
-  - completion schema loop now covers tagged parse, field-level rejection, `continue` next-round execution, and failed terminal closeout after 3 invalid retries
-  - live persistence and `echo_json` tool-loop coverage are now implemented
+  - anthropic-only live bridge owner is now `freehand-runtime`
+  - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, and persistence restore
+  - runtime dispatch and daemon black-box coverage are landed against local mock providers

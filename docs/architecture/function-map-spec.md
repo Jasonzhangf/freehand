@@ -2,10 +2,14 @@
 
 Each feature owner crate should eventually add its own machine-readable function map file.
 
+For features that have migrated mainline documentation, the machine-readable mainline call source is a separate truth from the human-readable function map and generated wiki.
+
 Suggested filename:
 
 - `function-map.toml`
 - durable human-readable companion doc under `docs/function-maps/<feature-id>.md`
+- migrated machine-readable mainline call source under `docs/mainline-calls/<feature-id>.json`
+- generated wiki under `docs/wiki/<feature-id>.md`
 
 ## Required Keys
 
@@ -22,6 +26,8 @@ required_module_black_box_tests = ["provider_stream_contract_smoke"]
 required_project_black_box_tests = ["reason_provider_end_to_end_smoke"]
 test_design_doc = "docs/testing/provider.semantic.md"
 function_map_doc = "docs/function-maps/provider.semantic.md"
+mainline_call_doc = "docs/mainline-calls/provider.semantic.json"
+generated_wiki_doc = "docs/wiki/provider.semantic.md"
 debug_artifacts = ["fixtures/providers/openai/*.json"]
 lifecycle_checks = ["information sufficient", "logic closed-loop", "lifecycle management complete"]
 ```
@@ -39,6 +45,16 @@ Each feature must also keep a durable function-map doc with at least:
 - shared multi-reference function registry
 - function call table
 - sync status against code
+- when migrated, one `mainline call source` reference
+- when migrated, one `generated wiki` reference
+
+Tool-owning features must also document:
+
+- tool spec owner
+- spec-to-runtime exposure rule
+- explicit implemented vs unimplemented state
+- execution entry symbol
+- permission or side-effect notes when applicable
 
 ## Code Binding Rule
 
@@ -91,9 +107,14 @@ serialization = ["serializable", "replayable", "persistable"]
 - each feature map entry should classify tests into white-box, module black-box, and project black-box
 - each feature map entry should point to one durable `test_design_doc`
 - each feature map entry should point to one durable `function_map_doc`
+- migrated features should point to one `mainline_call_doc`
+- migrated features should point to one `generated_wiki_doc`
 - test design must describe the logic path and lifecycle path being covered, not only test names
 - test design and test implementation must be updated together when feature truth changes
 - function-map logic descriptions and function-call tables must be updated together with code changes
+- generated wiki must be produced from the machine-readable mainline call source, not manually edited
+- tool-facing features must not expose a new tool before the function map binds that tool surface and its execution path
+- tool-facing features must describe which symbols own spec declaration, implemented-state gating, runtime exposure, and execution
 - request/response/error mainlines must be described even when they cross multiple crates
 - multi-reference functions must be documented once and reused by reference, not redescribed ad hoc in each caller
 - shared contract features should state ID and serialization guarantees explicitly

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Freehand Settings Proposal</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="theme-light">
+    <div class="app-shell">
+      <aside class="rail">
+        <div class="brand">FH</div>
+        <div class="rail-group">
+          <a class="rail-button" href="./index.html">WS</a>
+          <a class="rail-button" href="#">ND</a>
+          <a class="rail-button" href="#">RP</a>
+          <a class="rail-button" href="#">DG</a>
+        </div>
+        <div class="rail-group rail-bottom">
+          <a class="rail-button active" href="./settings.html">ST</a>
+        </div>
+      </aside>
+
+      <aside class="sidebar">
+        <div class="eyebrow">settings / low frequency only</div>
+        <h1 class="page-title">Categories</h1>
+        <p class="page-copy">
+          所有低频、配置、维护、目录和策略设置都集中到这里分类管理，不进入 Workspace 页。
+        </p>
+
+        <div class="stack" style="margin-top: 18px">
+          <div class="session-item active">
+            <div class="meta-label">selected</div>
+            <div class="session-title">Providers</div>
+            <div class="session-copy">protocol, model, auth source</div>
+          </div>
+          <div class="session-item">
+            <div class="meta-label">category</div>
+            <div class="session-title">Agents</div>
+            <div class="session-copy">mode, node id, paired agent</div>
+          </div>
+          <div class="session-item">
+            <div class="meta-label">category</div>
+            <div class="session-title">Pairing & Network</div>
+            <div class="session-copy">allowed IP, pair token env, listen interface</div>
+          </div>
+          <div class="session-item">
+            <div class="meta-label">category</div>
+            <div class="session-title">Debug & Replay</div>
+            <div class="session-copy">sinks, ledgers, retention</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-header">
+          <div>
+            <div class="eyebrow">settings</div>
+            <h1 class="page-title">Separated Low-Frequency Operations</h1>
+            <p class="page-copy">
+              这是分类设置页，不展示当前 turn 主流。OpenCode 风格的重点是：工作区和配置区彻底分层。
+            </p>
+          </div>
+          <div class="header-actions">
+            <div class="theme-toggle" aria-label="Theme switch">
+              <button class="theme-button is-active" data-theme="light" type="button">White</button>
+              <button class="theme-button" data-theme="dark" type="button">Black</button>
+            </div>
+            <a class="nav-link" href="./index.html">Workspace</a>
+            <a class="nav-link active" href="./settings.html">Settings</a>
+          </div>
+        </header>
+
+        <div class="settings-grid">
+          <section class="setting-group">
+            <div class="meta-label">providers</div>
+            <div class="setting-title">Protocol and Model</div>
+            <div class="setting-copy">
+              provider id, protocol, default model, auth source, enabled state
+            </div>
+          </section>
+
+          <section class="setting-group">
+            <div class="meta-label">agents</div>
+            <div class="setting-title">Mode and Ownership</div>
+            <div class="setting-copy">
+              agent name, master/slave mode, bound provider, node id, paired agent
+            </div>
+          </section>
+
+          <section class="setting-group">
+            <div class="meta-label">pairing</div>
+            <div class="setting-title">Network Policy</div>
+            <div class="setting-copy">
+              allowed_pair_ip, pair_token env ref, listen interface, relisten notes
+            </div>
+          </section>
+
+          <section class="setting-group">
+            <div class="meta-label">debug</div>
+            <div class="setting-title">Replay and Sinks</div>
+            <div class="setting-copy">
+              debug sink switches, replay retention, ledger retention, file output policy
+            </div>
+          </section>
+
+          <section class="setting-group">
+            <div class="meta-label">ui</div>
+            <div class="setting-title">UI Preferences</div>
+            <div class="setting-copy">
+              default landing page, default inspector tab, density mode, mobile preference
+            </div>
+          </section>
+
+          <section class="setting-group">
+            <div class="meta-label">runtime</div>
+            <div class="setting-title">Runtime Home</div>
+            <div class="setting-copy">
+              `~/.freehand`, state, ledgers, cache, replays, logs
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <aside class="inspector">
+        <div class="eyebrow">phone version</div>
+        <h2 class="inspector-title">Mobile Direction</h2>
+        <div class="stack" style="margin-top: 16px">
+          <section class="inspector-block">
+            <div class="meta-label">navigation</div>
+            <div class="inspector-copy">
+              桌面左 rail 变成手机底部 tab。Settings 仍然独立，不藏进 workspace 右侧。
+            </div>
+          </section>
+          <section class="inspector-block">
+            <div class="meta-label">settings layout</div>
+            <div class="inspector-copy">
+              分类保持分组，手机端改为纵向堆叠和可折叠 section，避免横向多列。
+            </div>
+          </section>
+          <section class="inspector-block">
+            <div class="meta-label">future mobile app</div>
+            <div class="inspector-copy">
+              这版原型已经按“后续有独立手机版”来组织，而不是单纯 desktop 页面挤压。
+            </div>
+          </section>
+        </div>
+      </aside>
+    </div>
+
+    <nav class="mobile-nav">
+      <a href="./index.html">Work</a>
+      <a href="#">Node</a>
+      <a href="#">Replay</a>
+      <a class="active" href="./settings.html">Set</a>
+    </nav>
+    <script src="./theme.js"></script>
+  </body>
+</html>

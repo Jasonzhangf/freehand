@@ -24,10 +24,42 @@ Use order:
 - `required_project_black_box_tests`
 - `test_design_doc`
 - `function_map_doc`
+- `mainline_call_doc` for migrated features
+- `generated_wiki_doc` for migrated features
 - `debug_artifacts`
 - `runtime_paths`
 - `update_triggers`
 - `lifecycle_checks`
+
+## Owner Routing Index
+
+Use this table before grep or implementation. Every bug or feature request must first map to one `feature_id`, then follow that feature's `function_map_doc` and `test_design_doc`.
+
+| problem area | feature_id | owner module / crate | function map | test orchestration |
+| --- | --- | --- | --- | --- |
+| workspace gates, CI/CD, repo rules | `foundation.workspace` | `xtask`, workspace root | `docs/function-maps/foundation.workspace.md` | `docs/testing/foundation.workspace.md` |
+| config load, agents, providers, startup selection | `config.core` | `crates/freehand-config` | `docs/function-maps/config.core.md` | `docs/testing/config.core.md` |
+| shared IDs, cross-module contracts, request/response/error contracts | `contracts.core` | `crates/freehand-contracts` | `docs/function-maps/contracts.core.md` | `docs/testing/contracts.core.md` |
+| provider-neutral semantics and recovery policy | `provider.semantic` | `crates/freehand-provider-core` | `docs/function-maps/provider.semantic.md` | `docs/testing/provider.semantic.md` |
+| OpenAI-compatible wire rendering/parsing | `provider.openai-adapter` | `crates/freehand-provider-openai` | `docs/function-maps/provider.openai-adapter.md` | `docs/testing/provider.openai-adapter.md` |
+| Anthropic Messages wire rendering/parsing/executor | `provider.anthropic-adapter` | `crates/freehand-provider-anthropic` | `docs/function-maps/provider.anthropic-adapter.md` | `docs/testing/provider.anthropic-adapter.md` |
+| provider-selected live bridge into runtime-owned live reason turn | `provider.reason-live-bridge` | `crates/freehand-runtime` | `docs/function-maps/provider.reason-live-bridge.md` | `docs/testing/provider.reason-live-bridge.md` |
+| built-in tool registry, Reasonix-aligned tool schemas, tool execution ownership | `tool.registry` | `crates/freehand-tools` | `docs/function-maps/tool.registry.md` | `docs/testing/tool.registry.md` |
+| turn truth, provider-output application, terminal schema | `reason.turn` | `crates/freehand-reason` | `docs/function-maps/reason.turn.md` | `docs/testing/reason.turn.md` |
+| session-history rewrite state and rewrite gates | `reason.session-history` | `crates/freehand-reason` | `docs/function-maps/reason.session-history.md` | `docs/testing/reason.session-history.md` |
+| reason persistence, ledgers, restore, derived sidecars | `reason.persistence` | `crates/freehand-reason` | `docs/function-maps/reason.persistence.md` | `docs/testing/reason.persistence.md` |
+| context planning, cache shape, segment admission | `reason.context-planner` | `crates/freehand-blocks` | `docs/function-maps/reason.context-planner.md` | `docs/testing/reason.context-planner.md` |
+| compaction/rewrite/recovery trigger policy | `reason.rewrite-policy` | `crates/freehand-blocks` | `docs/function-maps/reason.rewrite-policy.md` | `docs/testing/reason.rewrite-policy.md` |
+| independent debug/trace contracts, snapshots, hub/sinks | `debug.core` | `crates/freehand-debug` | `docs/function-maps/debug.core.md` | `docs/testing/debug.core.md` |
+| master/slave pairing, node status, delegation, slave turn publication | `node.master-slave` | `crates/freehand-node` | `docs/function-maps/node.master-slave.md` | `docs/testing/node.master-slave.md` |
+| UI commands, query/subscribe, UI projections | `ui.protocol` | `crates/freehand-ui-protocol` | `docs/function-maps/ui.protocol.md` | `docs/testing/ui.protocol.md` |
+| runtime wiring for UI command dispatch into owner modules | `runtime.ui-command-dispatch` | `crates/freehand-runtime` | `docs/function-maps/runtime.ui-command-dispatch.md` | `docs/testing/runtime.ui-command-dispatch.md` |
+| CLI reason smoke and config-selected runtime harness | `app.cli-runtime-smoke` | `apps/freehand-cli` | `docs/function-maps/app.cli-runtime-smoke.md` | `docs/testing/app.cli-runtime-smoke.md` |
+| CLI live provider turn and completion loop smoke | `app.cli-live-turn` | `apps/freehand-cli` | `docs/function-maps/app.cli-live-turn.md` | `docs/testing/app.cli-live-turn.md` |
+| WebUI/protocol-only app boundary smoke | `app.webui-smoke` | `apps/freehand-server` | `docs/function-maps/app.webui-smoke.md` | `docs/testing/app.webui-smoke.md` |
+| runtime-backed HTTP/SSE UI daemon host | `app.runtime-daemon` | `apps/freehand-daemon` | `docs/function-maps/app.runtime-daemon.md` | `docs/testing/app.runtime-daemon.md` |
+
+If a problem does not fit this table, update this routing index before making code changes. Do not create a second owner by patching an adjacent module.
 
 ## Seed Entries
 
@@ -72,6 +104,7 @@ Use order:
   - startup mode config tests
   - slave startup permission config tests
   - multi-agent named-table config tests
+  - reciprocal peer-topology config tests
   - multi-provider named-table config tests
   - provider auth source resolution tests
   - provider protocol declaration tests
@@ -104,6 +137,7 @@ Use order:
   - provider selection lifecycle is fully covered
   - config update path is closed-loop
   - one-process-one-agent startup rule remains explicit
+  - paired node topology remains config-owned and reciprocal
 
 ### `app.cli-runtime-smoke`
 
@@ -140,7 +174,7 @@ Use order:
 ### `app.cli-live-turn`
 
 - owner: `apps/freehand-cli`
-- allowed_paths: `apps/freehand-cli/**`, `crates/freehand-testkit/**`, `crates/freehand-config/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-provider-core/**`, `crates/freehand-reason/**`, `docs/function-maps/**`, `docs/testing/**`
+- allowed_paths: `apps/freehand-cli/**`, `crates/freehand-runtime/**`, `crates/freehand-config/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-provider-core/**`, `crates/freehand-reason/**`, `docs/function-maps/**`, `docs/testing/**`
 - forbidden_paths: `crates/freehand-reason/**` semantic-owner changes unrelated to provider-neutral consumption
 - required_checks:
   - `cargo test -p freehand-cli`
@@ -167,9 +201,87 @@ Use order:
   - config-selected anthropic path changes
 - lifecycle_checks:
   - CLI remains app boundary only
-  - live turn still routes through `freehand-testkit` bridge instead of duplicating provider/runtime semantics
+  - live turn still routes through runtime-owned live bridge instead of duplicating provider/runtime semantics
   - config-selected anthropic path remains closed-loop
   - completion loop projections stay on the app boundary and do not leak tagged schema text
+
+### `app.webui-smoke`
+
+- owner: `apps/freehand-server`
+- allowed_paths: `apps/freehand-server/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
+- forbidden_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**`
+- required_checks:
+  - `cargo test -p freehand-server`
+- required_white_box_tests:
+  - render helper coverage
+  - protocol-only router coverage
+  - dependency boundary scan
+- required_module_black_box_tests:
+  - WebUI command ingress dispatch receipt smoke
+  - WebUI command ingress query-route-misuse rejection smoke
+  - WebUI query projection smoke
+  - WebUI debug query projection smoke
+  - WebUI latest-turn SSE subscribe smoke
+  - WebUI debug SSE subscribe smoke
+  - WebUI slave-card render smoke
+  - CLI/WebUI divergence smoke via protocol projection
+- required_project_black_box_tests:
+  - protocol-only app boundary smoke for HTTP query/SSE/command ingress
+- test_design_doc: `docs/testing/app.webui-smoke.md`
+- function_map_doc: `docs/function-maps/app.webui-smoke.md`
+- debug_artifacts:
+  - WebUI smoke stdout fixture
+- runtime_paths:
+  - `~/.freehand/state/ui`
+  - `~/.freehand/replays/ui`
+- update_triggers:
+  - HTTP/SSE route shape changes
+  - static smoke dispatch behavior changes
+  - protocol-only app boundary changes
+- lifecycle_checks:
+  - app remains protocol-only
+  - shared transport helpers remain protocol-only
+  - runtime owner injection stays outside this app crate
+
+### `app.runtime-daemon`
+
+- owner: `apps/freehand-daemon`
+- allowed_paths: `apps/freehand-daemon/**`, `crates/freehand-runtime/**`, `apps/freehand-server/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
+- forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except through `crates/freehand-runtime`
+- required_checks:
+  - `cargo test -p freehand-daemon`
+- required_white_box_tests:
+  - daemon bootstrap config coverage
+  - config-selected bootstrap coverage
+  - runtime-dispatcher wiring coverage
+  - dependency boundary scan
+- required_module_black_box_tests:
+  - daemon submit-user-input HTTP smoke
+  - daemon latest-turn query smoke
+  - daemon restart latest-turn query/SSE restore smoke
+  - daemon restart next-turn-id continuation smoke
+  - daemon provider failure HTTP smoke
+  - daemon direct-message dispatch smoke
+  - daemon slave-mode startup rejection smoke
+- required_project_black_box_tests:
+  - real runtime owner injection over shared HTTP/SSE/command transport without app-owned business logic
+- test_design_doc: `docs/testing/app.runtime-daemon.md`
+- function_map_doc: `docs/function-maps/app.runtime-daemon.md`
+- debug_artifacts:
+  - daemon stdout fixture
+- runtime_paths:
+  - `~/.freehand/state/ui`
+  - `~/.freehand/state/turns`
+  - `~/.freehand/ledgers/reason`
+- update_triggers:
+  - runtime transport injection changes
+  - daemon bootstrap contract changes
+  - shared app transport injection shape changes
+- lifecycle_checks:
+  - daemon depends on `freehand-runtime`, not directly on reason/node/provider/config owners
+  - app transport remains shared and protocol-only
+  - runtime dispatch and UI projection stay closed-loop through one shared state handle
+  - config-selected bootstrap remains one-process-one-agent and rejects slave-mode UI host startup explicitly
 
 ### `provider.semantic`
 
@@ -289,11 +401,11 @@ Use order:
 
 ### `provider.reason-live-bridge`
 
-- owner: `crates/freehand-testkit`
-- allowed_paths: `crates/freehand-testkit/**`, `crates/freehand-config/**`, `crates/freehand-provider-core/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-reason/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
-- forbidden_paths: `crates/freehand-reason/**` semantic-owner changes unrelated to provider-neutral consumption, `crates/freehand-provider-openai/**`
+- owner: `crates/freehand-runtime`
+- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-config/**`, `crates/freehand-provider-core/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-reason/**`, `crates/freehand-blocks/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
+- forbidden_paths: `crates/freehand-reason/**` semantic-owner changes unrelated to provider-neutral consumption, `crates/freehand-provider-openai/**`, `apps/freehand-daemon/**`
 - required_checks:
-  - `cargo test -p freehand-testkit`
+  - `cargo test -p freehand-runtime`
 - required_white_box_tests:
   - live bridge request build tests
   - live bridge anthropic single-shot mock tests
@@ -304,10 +416,15 @@ Use order:
   - live bridge continue-next-round tests
   - live bridge retry-exhausted failed-terminal tests
   - unsupported provider selection tests
+  - provider HTTP failure tests
+  - persistence restore/write tests on runtime-owned live bridge
+  - tool-result re-entry into second provider request tests
 - required_module_black_box_tests:
-  - config-selected anthropic provider can drive one reason turn through live bridge
+  - config-selected anthropic provider can drive one runtime-owned live turn with persistence and UI projection updates
+  - config-selected restart can restore prior closed turns and continue ordinal allocation without turn-id reuse
 - required_project_black_box_tests:
   - CLI live-turn smoke against local anthropic-compatible mock server
+  - daemon submit-user-input HTTP smoke against local anthropic-compatible mock server
 - test_design_doc: `docs/testing/provider.reason-live-bridge.md`
 - function_map_doc: `docs/function-maps/provider.reason-live-bridge.md`
 - debug_artifacts:
@@ -325,8 +442,93 @@ Use order:
 - lifecycle_checks:
   - reason remains provider-implementation independent
   - live bridge owns runtime composition without duplicating adapter semantics
-  - anthropic live path is closed-loop from config selection to turn truth
+  - anthropic live path is closed-loop from config selection to turn truth, persistence, and UI projection
   - completion schema loop remains bridge composition, not provider or app semantics
+
+### `tool.registry`
+
+- owner: `crates/freehand-tools`
+- allowed_paths: `crates/freehand-tools/**`, `crates/freehand-provider-core/**`, `docs/architecture/**`, `docs/design/**`
+- forbidden_paths: `apps/**`, `crates/freehand-provider-openai/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-reason/**`
+- required_checks:
+  - `cargo test -p freehand-tools`
+- required_white_box_tests:
+  - registry schema export tests
+  - read-only / implemented metadata tests
+  - implemented tool execution tests
+  - unknown/unimplemented tool rejection tests
+- required_module_black_box_tests:
+  - runtime live bridge tool-schema export smoke
+  - runtime live bridge implemented tool execution smoke
+- required_project_black_box_tests:
+  - CLI live provider tool-loop smoke
+  - daemon live provider tool-loop smoke
+- test_design_doc: `docs/testing/tool.registry.md`
+- function_map_doc: `docs/function-maps/tool.registry.md`
+- mainline_call_doc: `docs/mainline-calls/tool.registry.json`
+- generated_wiki_doc: `docs/wiki/tool.registry.md`
+- debug_artifacts:
+  - tool registry spec fixture path
+- runtime_paths:
+  - `~/.freehand/ledgers/reason`
+  - `~/.freehand/replays/providers`
+- update_triggers:
+  - tool registry surface changes
+  - tool schema changes
+  - implemented tool execution behavior changes
+  - runtime live bridge tool ownership changes
+- lifecycle_checks:
+  - tool schema ownership remains outside runtime orchestration
+  - registered but unimplemented tools fail explicitly
+  - first-version path tools remain locked to one workspace-root policy
+  - implemented tool execution path is closed-loop into provider tool-result re-entry
+
+### `ui.protocol`
+
+- owner: `crates/freehand-ui-protocol`
+- allowed_paths: `crates/freehand-ui-protocol/**`, `crates/freehand-debug/**`, `docs/architecture/**`, `docs/design/**`
+- forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `apps/**` except transport-only adapters
+- required_checks:
+  - `cargo test -p freehand-ui-protocol`
+- required_white_box_tests:
+  - command/projection mapping tests
+  - ingress acceptance/rejection tests
+  - command dispatch routing tests
+  - subscription selector and match tests
+  - public turn projection tests
+  - client-specific projection gating tests
+  - debug-state projection and receiver-drain tests
+- required_module_black_box_tests:
+  - command ingress accept/reject smoke
+  - command dispatch envelope owner-routing smoke
+  - latest-turn subscribe and specific-turn query smoke
+  - debug-state snapshot/query/subscribe smoke
+  - CLI/WebUI divergence smoke via protocol projection
+  - public conversation projection smoke
+- required_project_black_box_tests:
+  - protocol truth can back HTTP query and SSE subscribe adapters without app-owned projection duplication
+- test_design_doc: `docs/testing/ui.protocol.md`
+- function_map_doc: `docs/function-maps/ui.protocol.md`
+- mainline_call_doc: `docs/mainline-calls/ui.protocol.json`
+- generated_wiki_doc: `docs/wiki/ui.protocol.md`
+- debug_artifacts:
+  - UI protocol stream fixtures
+  - node status snapshots
+- runtime_paths:
+  - `~/.freehand/state/ui`
+  - `~/.freehand/replays/ui`
+- update_triggers:
+  - UI command shape changes
+  - query/subscribe routing changes
+  - public projection rules change
+  - debug snapshot bridge changes
+  - client-specific projection gating changes
+- lifecycle_checks:
+  - UI remains ingress plus read-only projection boundary
+  - command ingress stays separate from query/subscribe
+  - projection ownership stays in `freehand-ui-protocol`
+  - client-specific projection gating stays protocol-owned
+  - UI does not become reason/debug/session truth writer
 
 ### `contracts.core`
 
@@ -382,6 +584,8 @@ Use order:
   - reason-to-ui terminal projection smoke
 - test_design_doc: `docs/testing/reason.turn.md`
 - function_map_doc: `docs/function-maps/reason.turn.md`
+- mainline_call_doc: `docs/mainline-calls/reason.turn.json`
+- generated_wiki_doc: `docs/wiki/reason.turn.md`
 - debug_artifacts:
   - turn replay fixture path
   - completion schema rejection fixture path
@@ -404,6 +608,7 @@ Use order:
   - turn startup rewrite state remains sourced from `reason.session-history`
   - provider adapter crates remain independent from `freehand-reason`
   - metadata and request-chain data remain type-isolated
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `reason.session-history`
 
@@ -583,56 +788,99 @@ Use order:
   - provider renderers still do not own context planning
   - metadata and request-chain data remain type-isolated
 
-### `ui.protocol`
+### `debug.core`
 
-- owner: `crates/freehand-ui-protocol`
-- allowed_paths: `crates/freehand-ui-protocol/**`, `docs/architecture/**`, `docs/design/**`
-- forbidden_paths: `crates/freehand-provider-*/**`, `crates/freehand-config/**` except imported config selections, UI rendering app internals except wiring
+- owner: `crates/freehand-debug`
+- allowed_paths: `crates/freehand-debug/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`
+- forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `crates/freehand-node/**`, `apps/**`
 - required_checks:
-  - `cargo test -p freehand-ui-protocol`
+  - `cargo test -p freehand-debug`
 - required_white_box_tests:
-  - command -> projection smoke
-  - slave turn subscription smoke
-  - node status query smoke
-  - terminal result projection smoke
+  - debug snapshot builder tests
+  - trace envelope serialization tests
+  - semantic/scene coordinate preservation tests
 - required_module_black_box_tests:
-  - latest-active-turn subscribe smoke
-  - specific-turn snapshot/query smoke
-  - stream-kind routing smoke
+  - debug snapshot caller-visible smoke
+  - trace envelope JSON round-trip smoke
 - required_project_black_box_tests:
-  - CLI command/query projection smoke
-  - WebUI slave-card subscription smoke
-- test_design_doc: `docs/testing/ui.protocol.md`
-- function_map_doc: `docs/function-maps/ui.protocol.md`
+  - UI debug-state projection consumes `freehand-debug` snapshot truth
+- test_design_doc: `docs/testing/debug.core.md`
+- function_map_doc: `docs/function-maps/debug.core.md`
 - debug_artifacts:
-  - ui protocol stream fixture path
-  - node status snapshot fixture path
+  - debug trace envelope fixture path
+  - debug snapshot fixture path
 - runtime_paths:
-  - `~/.freehand/replays/ui`
-  - `~/.freehand/state/ui`
+  - `~/.freehand/ledgers`
+  - `~/.freehand/replays`
+  - `~/.freehand/logs`
 - update_triggers:
-  - command surface changes
-  - projection surface changes
-  - subscription model changes
-  - source identity field changes
-  - slave turn presentation changes
+  - trace envelope fields change
+  - debug snapshot fields change
+  - debug module dependency direction changes
+  - debug ledger/replay ownership changes
 - lifecycle_checks:
-  - query and subscribe boundaries remain explicit
-  - source identity remains traceable
-  - CLI/WebUI divergence remains protocol-safe
-  - terminal text projection remains closed-loop
+  - debug remains observation-only
+  - debug does not become request/session/reason truth
+  - semantic and scene positions remain paired
+  - UI consumes debug projections without owning debug truth
+
+### `runtime.ui-command-dispatch`
+
+- owner: `crates/freehand-runtime`
+- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/architecture/**`
+- forbidden_paths: `apps/freehand-server/**` except protocol-only transport injection, `crates/freehand-provider-*/**`
+- required_checks:
+  - `cargo test -p freehand-runtime`
+- required_white_box_tests:
+  - config-selected runtime bootstrap tests
+  - submit-input dispatch routing tests
+  - cancel-turn dispatch tests
+  - direct-message dispatch tests
+  - resume-turn unsupported dispatch tests
+  - runtime ui-state projection update tests
+- required_module_black_box_tests:
+  - command dispatch receipt smoke
+  - command dispatch owner-routing smoke
+  - reason-backed turn projection smoke
+  - node-backed direct-message smoke
+  - config-selected runtime bootstrap smoke
+- required_project_black_box_tests:
+  - runtime dispatch owner stays outside app boundary smoke
+- test_design_doc: `docs/testing/runtime.ui-command-dispatch.md`
+- function_map_doc: `docs/function-maps/runtime.ui-command-dispatch.md`
+- debug_artifacts:
+  - runtime dispatch smoke fixtures
+- runtime_paths:
+  - `~/.freehand/state/turns`
+  - `~/.freehand/state/ui`
+  - `~/.freehand/ledgers/reason`
+- update_triggers:
+  - command-to-owner routing changes
+  - runtime dispatch receipt/failure contract changes
+  - runtime reason/node adapter behavior changes
+  - app/runtime injection boundary changes
+- lifecycle_checks:
+  - apps remain protocol-only and do not become runtime owners
+  - command dispatch owner routing remains explicit and single-sourced
+  - reason turn truth mutation still stays inside `freehand-reason`
+  - node direct-message/task semantics still stay inside `freehand-node`
 
 ### `app.webui-smoke`
 
 - owner: `apps/freehand-server`
 - allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/goals/**`
-- forbidden_paths: `crates/freehand-provider-*/**`, `crates/freehand-reason/**`, `crates/freehand-node/**` except consuming already-owned UI protocol projections
+- forbidden_paths: `crates/freehand-provider-*/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**` except consuming already-owned UI protocol projections
 - required_checks:
   - `cargo test -p freehand-server`
 - required_white_box_tests:
   - none beyond app boundary rendering helpers
 - required_module_black_box_tests:
+  - WebUI command ingress accept smoke
+  - WebUI command ingress query-route-misuse rejection smoke
   - WebUI query projection smoke
+  - WebUI debug query projection smoke
+  - WebUI latest-turn SSE subscribe smoke
+  - WebUI debug SSE subscribe smoke
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
 - required_project_black_box_tests:

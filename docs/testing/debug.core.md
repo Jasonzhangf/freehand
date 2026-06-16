@@ -1,0 +1,35 @@
+# Test Design: `debug.core`
+
+- feature_id: `debug.core`
+- owner: `crates/freehand-debug`
+- lifecycle path under test:
+  - module owner creates semantic debug coordinates
+  - module owner creates scene debug coordinates
+  - debug core combines them into trace envelopes or snapshots
+  - debug hub accepts emitted events and fans them out to subscribers/sinks
+  - UI protocol can consume snapshots without owning debug truth
+  - debug contracts stay serializable and replayable
+- white-box plan:
+  - debug snapshot builder coverage
+  - trace envelope serialization coverage
+  - semantic/scene coordinate preservation coverage
+  - debug hub fanout and sink dispatch coverage
+- module black-box plan:
+  - caller-visible debug snapshot smoke
+  - trace envelope JSON round-trip smoke
+  - subscriber receive smoke
+  - sink dispatch smoke
+- project black-box impact:
+  - UI debug-state projection consumes `freehand-debug` snapshot truth instead of duplicating a DTO
+- fixtures / replay inputs / runtime evidence paths:
+  - `~/.freehand/ledgers`
+  - `~/.freehand/replays`
+  - `~/.freehand/logs`
+- known gaps:
+  - no standardized runtime-owned debug ledger path contract yet
+  - provider/node emitters are still not wired into `debug.core`
+  - reason-side sink failures are not yet surfaced through a dedicated observation error chain
+- sync status between design and implementation:
+  - crate/test baseline is landed
+  - runtime hub fanout, subscriber delivery, and sink dispatch are implemented and covered
+  - `reason.turn` emission smoke now covers one real producer without mutating turn truth

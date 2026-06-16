@@ -8,11 +8,15 @@ members = [
   "crates/freehand-provider-anthropic",
   "crates/freehand-reason",
   "crates/freehand-node",
+  "crates/freehand-debug",
   "crates/freehand-ui-protocol",
+  "crates/freehand-tools",
+  "crates/freehand-runtime",
   "crates/freehand-gates",
   "crates/freehand-testkit",
   "apps/freehand-cli",
   "apps/freehand-server",
+  "apps/freehand-daemon",
   "xtask",
 ]
 resolver = "2"

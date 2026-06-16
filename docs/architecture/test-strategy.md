@@ -65,10 +65,18 @@ Required fields:
   - `required_module_black_box_tests`
   - `required_project_black_box_tests`
   - `test_design_doc`
+- test orchestration starts from `feature_id`, not from the changed file path
+- the function map owns the mainline and symbol binding, while the test-design doc owns the regression stack
+- a change is not closed until function-map binding and test-design mapping agree
 - no feature may rely on an implicit test stack
 - if a required layer does not exist yet, the gap must be explicit and tracked rather than hidden
 - test-design records and implemented tests must be updated in the same change set when feature truth changes
 - if implementation and test-design record disagree, the feature is not closed
+- tool-facing features must declare:
+  - spec export tests
+  - implemented/unimplemented exposure tests
+  - runtime no-hardcoded-demo-tool regression
+  - execution and explicit-failure tests for unknown/unimplemented tools
 
 ## Behavioral Focus
 
@@ -76,4 +84,7 @@ Required fields:
 - module black-box tests cover feature-level standard behavior
 - project black-box tests cover whole-project typical behavior and regression-sensitive journeys
 - when state machine, stream, timeout, retry, error projection, or cleanup logic changes, positive and negative tests must both be present
+- when the tool surface changes, tests must prove both sides:
+  - newly implemented tools execute through the owner registry
+  - unimplemented or unknown tools still fail explicitly and are not exposed as successful runtime truth
 - test-design records should explain why each test exists, not just list names

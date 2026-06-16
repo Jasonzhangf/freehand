@@ -3,11 +3,13 @@
 - feature_id: `reason.turn`
 - owner crate: `crates/freehand-reason`
 - owner module: `crates/freehand-reason/src/lib.rs`
+- mainline call source: `docs/mainline-calls/reason.turn.json`
+- generated wiki: `docs/wiki/reason.turn.md`
 - owner entry symbols:
   - `ReasonTurnEngine::start_turn`
   - `ReasonTurnEngine::apply_provider_output`
   - `ReasonTurnEngine::submit_completion`
-  - `ReasonTurnEngine::project_session`
+- `ReasonTurnEngine::project_session`
 
 ## Request Mainline
 
@@ -24,6 +26,7 @@
 
 - provider semantic events become turn truth updates
 - turn truth broadcasts semantic events for reasoning, text, tool, usage, terminal, and error
+- turn lifecycle and provider-output milestones may emit debug events into `debug.core`
 - terminal result is projected from validated completion schema, not raw provider finish reason
 - completion schema is extracted from `<freehand_completion>...</freehand_completion>` tagged JSON before validation
 - invalid completion schema feedback identifies concrete invalid schema entries
@@ -35,6 +38,7 @@
 - invalid completion schema retries are capped at 3 before a failed terminal outcome is written
 - provider `finish_reason=stop` or `finish_reason=end_turn` does not end the turn by itself
 - raw provider events go to debug ledger, not session truth
+- debug emission is observation-only and must not mutate turn/session truth
 - metadata/request boundary violations must be treated as architecture errors, not silently tolerated
 
 ## Shared Multi-Reference Functions
@@ -51,6 +55,12 @@
   - allowed callers: reason orchestrator, live bridge, tests
   - related tests: tagged schema extraction, missing tag rejection, invalid JSON rejection, invalid claim rejection
   - why shared: keeps completion schema parsing out of live/provider/app orchestration
+- `DebugHub::emit`
+  - owner: `crates/freehand-debug/src/lib.rs`
+  - purpose: receive reason-turn debug emissions without making `freehand-reason` the observation delivery owner
+  - allowed callers: reason orchestrator, future runtime bridges
+  - related tests: reason debug emission smoke
+  - why shared: keeps debug distribution separate from turn truth ownership
 
 ## Function Call Table
 
@@ -64,6 +74,7 @@
 | 05 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | accept or reject terminal outcome | candidate completion payload | terminal event or rejection | turn state writer | terminal validator | bound |
 | 06 | `ReasonTurnEngine::fail_turn` | `crates/freehand-reason/src/lib.rs` | write explicit failed terminal outcome after retry exhaustion | failure reason | failed terminal event | turn/live runtime | turn state writer | bound |
 | 07 | `ReasonTurnEngine::project_session` | `crates/freehand-reason/src/lib.rs` | project conversation view from turns | turn records | projected session view | UI/session consumers | projector | bound |
+| 08 | `ReasonTurnEngine::emit_debug` | `crates/freehand-reason/src/lib.rs` | emit observation-only debug event for turn lifecycle or provider-output milestones | turn truth + scene metadata + status/detail text | debug event fanout | reason orchestrator | `DebugHub::emit` | bound |
 
 ## Sync Status Against Code
 
@@ -72,5 +83,8 @@
 - `reason.session-history` now owns rewrite version and explicit rewrite-gate orchestration for turn startup
 - `ReasonRewriteRuntime` now provides the baseline consumer path for calling `reason.rewrite-policy` and then triggering compaction/rollback/resume gates
 - provider usage conversion into rewrite policy is bound
+- debug emission into `debug.core` is bound for start-turn, provider-output application, completion acceptance/rejection, and explicit failed terminal write
+- current debug emission remains observation-only; `DebugHub::emit` failures are not promoted into turn truth or reason error events
 - remaining gap is final CLI/server runtime loop integration with real provider usage events and persisted recovery payloads
 - metadata/request hard isolation is now reflected in request content vs planner diagnostics split, but not yet enforced by a dedicated static gate or separate envelope types
+- the generated wiki must be regenerated from `docs/mainline-calls/reason.turn.json` when this function-map truth changes

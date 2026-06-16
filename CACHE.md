@@ -133,3 +133,113 @@
   - WebUI projection shows latest active turn terminal text and slave card; CLI projection hides slave card through `turn_projection_for_client`
   - `ui.protocol` and `app.webui-smoke` function maps/test designs are synced
   - `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass with `138` tests
+- 2026-06-16: WebUI/reason decoupling is now part of the enforced app boundary
+  - `freehand-server` should depend only on `freehand-ui-protocol` plus shared contracts
+  - `xtask gates check` now scans `apps/freehand-server/Cargo.toml` for forbidden reason/provider/node/config dependencies
+- 2026-06-16: UI truth generalized beyond WebUI
+  - any UI is an input port plus a read-only consumer of turn/debug state
+  - UI may submit commands but cannot become a reason/debug/session truth writer
+- 2026-06-16: `ui.protocol` debug-state implementation started
+  - target is minimal per-turn debug query/subscribe contract
+  - debug projection should stay read-only and avoid raw-ledger leakage
+- 2026-06-16: `ui.protocol` debug-state baseline landed
+  - added per-turn `QueryDebugState` / `SubscribeDebugState`
+  - `UiProtocolState` now stores read-only debug snapshots by `turn_id`
+  - `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` pass with `140` tests
+- 2026-06-16: `debug.core` module started
+  - new crate `freehand-debug` owns observation-only debug/trace contracts
+  - `ui.protocol` now reuses the debug snapshot DTO from `freehand-debug`
+- 2026-06-16: owner/test routing rules were sedimented
+  - `feature-map` now has an `Owner Routing Index`
+  - workflow now requires problem area -> `feature_id` -> owner -> function map -> test-design doc
+  - `xtask gates check` verifies routing snippets
+- 2026-06-16: `debug.core` runtime fanout/sink + `reason.turn` emission baseline landed
+  - `freehand-debug` now owns `DebugHub`, subscriber fanout, and stdout/file sink primitives
+  - `freehand-reason` now emits lifecycle debug observations into `debug.core`
+  - `cargo fmt --all`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check` all passed
+- 2026-06-16: `ui.protocol` debug receiver bridge baseline landed
+  - `UiProtocolState` now ingests `DebugEvent` through `apply_debug_event` and `drain_debug_receiver`
+  - `freehand-server webui-smoke` now queries and renders debug projection from protocol state
+  - targeted checks passed: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo run -p xtask -- gates check`
+- 2026-06-16: `app.webui-smoke` transport baseline landed
+  - first WebUI transport is HTTP query plus SSE subscribe
+  - `freehand-server` now serves protocol-only query/subscribe smoke routes from `UiProtocolState`
+  - workspace verification passed: `cargo fmt --all --check`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
+- 2026-06-16: `ui.protocol` command ingress ack baseline landed
+  - `accept_command_ingress` now validates mutation-intent commands and returns explicit ack
+  - `protocol_rejection` now maps protocol errors into transport-safe rejection payloads
+  - `freehand-server` now exposes POST `/ui/command` as protocol-only ingress transport
+- 2026-06-16: `ui.protocol` command dispatch-port baseline landed
+  - `build_command_dispatch_envelope` now declares owner routing before transport dispatch
+  - `UiCommandDispatchPort` now gives app boundaries a protocol-owned dispatch hook
+  - `freehand-server` now returns dispatch receipts from a static smoke port while staying protocol-only
+- 2026-06-16: `runtime.ui-command-dispatch` baseline landed
+  - `freehand-runtime` now implements `UiCommandDispatchPort`
+  - runtime-backed submit/cancel/direct-message dispatch is now outside app boundary
+  - app boundary is still intentionally wired to a static smoke dispatch port, so runtime injection remains the next transport step
+- 2026-06-16: `app.runtime-daemon` baseline landed
+  - `freehand-server` now exposes shared protocol-only transport from a library surface
+  - `freehand-daemon` now injects `RuntimeCommandDispatcher` into that shared HTTP/SSE/command transport
+  - targeted verification passed: `cargo test -p freehand-server`, `cargo test -p freehand-daemon`, `cargo test -p freehand-runtime`, `cargo run -p xtask -- gates check`
+- 2026-06-16: config-selected runtime host bootstrap landed
+  - `freehand-runtime` now owns `from_selected_agent` and `from_default_config`
+  - `freehand-daemon` now starts via `serve --agent <name>`
+  - daemon still avoids direct `freehand-config` dependency
+  - peer-topology config truth now includes explicit `node_id` + `paired_agent` reciprocal binding and is consumed by runtime bootstrap
+  - local slave ids are no longer synthetic in runtime bootstrap
+  - targeted verification passed: `cargo test -p freehand-config`, `cargo test -p freehand-runtime`, `cargo test -p freehand-daemon`
+- 2026-06-16: runtime-owned live bridge migration closed
+  - `provider.reason-live-bridge` owner is now code-bound in `crates/freehand-runtime`
+  - `freehand-testkit` no longer keeps a duplicate live bridge implementation or live bridge tests
+  - `apps/freehand-cli` now links `freehand-runtime` directly for `reason-live`
+  - `apps/freehand-daemon` now proves provider-backed submit/query and provider-failure surfacing against local anthropic mock servers
+  - protocol-only HTTP command ingress now dispatches runtime work through `tokio::task::spawn_blocking` to avoid sync live-provider execution panicking inside async handlers
+  - full verification passed: `cargo fmt --all`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
+- 2026-06-16: daemon restore/real-provider closeout landed
+  - `freehand-runtime` bootstrap now restores persisted turn projections into `UiProtocolState` and resumes runtime turn ordinal from persisted turn ids
+  - daemon restart black-box now proves query + SSE can serve restored terminal projection before any new submit
+  - daemon restart black-box now proves next submit continues to `runtime-turn-2...` instead of reusing `runtime-turn-1`
+  - local `~/.freehand/config.toml` was brought up to the locked peer-topology minimum with reciprocal `master/worker`, `node_id`, and `paired_agent`
+  - real online verification passed:
+    - `freehand-cli reason-live --agent master` against configured `minimonth`
+    - `freehand-daemon` HTTP submit against real `minimonth` returned `reason_live_turn_completed rounds=2 schema_rejections=0 tool_executions=1`
+    - daemon restart then served restored query/SSE for `runtime-turn-1-r2`
+    - second real daemon submit after restart advanced to `runtime-turn-2-r2`
+- 2026-06-16: WebUI design review phase started
+  - current runtime transport and provider path are already live-verified
+  - next work is not more backend wiring first; it is WebUI proposal review
+  - proposal doc: `docs/design/webui-console-proposal.md`
+  - static prototype: `docs/prototypes/webui-console/index.html`
+  - prototype is review-only and intentionally not wired into `apps/freehand-server` yet
+- 2026-06-16: WebUI implementation baseline landed
+  - `freehand-server` now serves a real protocol-driven WebUI shell at `/`
+  - theme assets are split into `assets/theme.css` and `assets/theme.js`
+  - WebUI layout/protocol-consumer assets are split into `assets/webui.css` and `assets/webui.js`
+  - root page consumes `UiTurnProjection` and `DebugStateSnapshot` through existing query/SSE endpoints and command ingress remains protocol-owned
+- 2026-06-16: WebUI submit idle-looking bug fixed
+  - `freehand-daemon` runtime path was already live; one startup prerequisite is `FREEHAND_PAIR_TOKEN_SHARED`
+- 2026-06-16: `tool.registry` harness rule locked
+  - `freehand-tools` is the only owner for built-in tool specs and execution truth
+  - every tool must have explicit spec + implemented state before runtime/provider exposure
+  - design doc, function map, test design, and xtask gate are now part of the required closeout set for tool-surface changes
+- 2026-06-16: first real `tool.registry` read-only batch landed
+  - `freehand-tools` now truly implements `read_file`, `glob`, `grep`, and `ls`
+  - first-version path tools are locked to the canonical process current working directory and reject path escape outside that root
+  - runtime no longer hardcodes first-round `todo_write` selection; live bridge and CLI/daemon smokes now use real registry-owned read-only tools
+  - verified clean with `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and `cargo run -p xtask -- gates check`
+  - current `/ui/subscribe/turn/latest` and `/ui/subscribe/debug/{turn_id}` now keep one connection open and stream later matching updates after the initial snapshot
+  - WebUI submit success path now actively refreshes latest turn truth after command receipt so real runtime inference appears in the page
+- 2026-06-16: mainline-call/wiki generation baseline landed for `tool.registry`
+  - `xtask` now owns `mainlines generate` and `mainlines check`
+  - machine-readable truth lives under `docs/mainline-calls/`
+  - generated wiki artifacts live under `docs/wiki/`
+  - first migrated feature is `tool.registry`
+  - `xtask gates check` now verifies generated wiki freshness, not just file existence
+- 2026-06-16: `ui.protocol` also migrated into the mainline/wiki chain
+  - `docs/mainline-calls/ui.protocol.json` is now the machine-readable mainline truth
+  - `docs/wiki/ui.protocol.md` is generated from it
+  - owner registry duplication for `ui.protocol` was removed from `feature-map.md`
+- 2026-06-16: `reason.turn` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/reason.turn.json` is now the machine-readable reason-turn mainline truth
+  - `docs/wiki/reason.turn.md` is generated from it
+  - `xtask gates check` now requires the reason-turn mainline source and generated wiki files

@@ -1,0 +1,172 @@
+{
+  "feature_id": "tool.registry",
+  "owner_crate": "crates/freehand-tools",
+  "owner_module": "crates/freehand-tools/src/lib.rs",
+  "function_map_doc": "docs/function-maps/tool.registry.md",
+  "test_design_doc": "docs/testing/tool.registry.md",
+  "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
+  "generated_wiki_doc": "docs/wiki/tool.registry.md",
+  "request_mainline": [
+    "runtime asks the tool owner for a per-run registry",
+    "registry exports provider-neutral tool definitions without importing provider adapter DTOs",
+    "registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner",
+    "path-based read-only tools resolve against one locked workspace root: the canonical process current working directory",
+    "runtime may choose a subset of implemented definitions for live execution",
+    "provider adapters render schemas; they do not own tool registry truth"
+  ],
+  "response_mainline": [
+    "completed provider tool calls enter `BuiltinToolRegistry::execute`",
+    "first real read-only execution set is: `read_file`, `glob`, `grep`, `ls`",
+    "implemented tools return user/model-visible tool result text",
+    "unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth"
+  ],
+  "error_mainline": [
+    "unknown tool names return `ToolRegistryError::UnknownTool`",
+    "registered but not implemented tools return `ToolRegistryError::UnimplementedTool`",
+    "invalid tool arguments return `ToolRegistryError::InvalidArguments`",
+    "runtime and filesystem failures return `ToolRegistryError::ExecutionFailed`"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "locked_workspace_root",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "derive the canonical locked workspace root for all first-version path tools",
+      "allowed_callers": [
+        "execute_read_file",
+        "execute_glob",
+        "execute_grep",
+        "execute_ls"
+      ],
+      "related_tests": [
+        "read-file path-lock test",
+        "runtime live tool loop test"
+      ],
+      "why_shared": "keeps directory-lock truth in one owner helper instead of per-tool duplication"
+    },
+    {
+      "symbol": "resolve_locked_path",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "resolve path arguments and reject escapes outside the locked workspace root",
+      "allowed_callers": [
+        "execute_read_file",
+        "execute_grep",
+        "execute_ls"
+      ],
+      "related_tests": [
+        "read-file path-lock test"
+      ],
+      "why_shared": "keeps path-boundary enforcement single-sourced"
+    },
+    {
+      "symbol": "render_tool_arguments_json",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "render structured tool arguments without duplicating JSON conversion in runtime/tool owner code",
+      "allowed_callers": [
+        "provider adapters",
+        "tool registry diagnostics",
+        "tests"
+      ],
+      "related_tests": [
+        "tool argument JSON render tests",
+        "tool registry execution tests"
+      ],
+      "why_shared": "keeps tool argument conversion as a shared block instead of per-crate helpers"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "BuiltinToolRegistry::reasonix_aligned",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "create per-run built-in registry aligned with Reasonix names and schemas",
+      "input_semantic": "none",
+      "output_semantic": "registry",
+      "caller": "runtime live bridge/tests",
+      "callee": "tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "reasonix_aligned_builtin_specs",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "declare built-in tool metadata, schema, read-only state, and implementation state",
+      "input_semantic": "static registry truth",
+      "output_semantic": "tool specs",
+      "caller": "registry constructor/tests",
+      "callee": "tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "BuiltinToolRegistry::implemented_definitions",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "export currently executable provider-neutral tool schemas",
+      "input_semantic": "registry",
+      "output_semantic": "provider tool definitions",
+      "caller": "runtime live bridge",
+      "callee": "tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "BuiltinToolRegistry::execute",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "dispatch completed tool calls into the single owner implementation set",
+      "input_semantic": "ReasonReq04ToolCall",
+      "output_semantic": "tool execution output",
+      "caller": "runtime live bridge",
+      "callee": "tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "execute_read_file",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "read UTF-8 text from one locked in-root file with line-windowing",
+      "input_semantic": "path plus optional offset plus optional limit",
+      "output_semantic": "numbered text window",
+      "caller": "registry execute",
+      "callee": "read-only file tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "execute_glob",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "match in-root files by glob pattern with recursive filename fallback",
+      "input_semantic": "pattern",
+      "output_semantic": "newline-separated match list",
+      "caller": "registry execute",
+      "callee": "read-only search tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "execute_grep",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "search in-root UTF-8 text files by regex",
+      "input_semantic": "pattern plus optional path",
+      "output_semantic": "path:line:text matches",
+      "caller": "registry execute",
+      "callee": "read-only search tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "execute_ls",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "list directory entries or recursive tree under locked root",
+      "input_semantic": "optional path plus optional recursive",
+      "output_semantic": "newline-separated directory listing",
+      "caller": "registry execute",
+      "callee": "read-only file tool owner",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "Reasonix-aligned built-in names and schemas are bound in `freehand-tools`",
+    "current implemented tool set is: `read_file`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`",
+    "first-version path tools are locked to the canonical process current working directory and reject path escape outside that root",
+    "write/edit/bash/web/notebook tools remain registered but explicitly unimplemented until their lifecycle/gates are designed"
+  ]
+}

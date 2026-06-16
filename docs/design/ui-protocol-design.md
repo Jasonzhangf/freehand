@@ -2,7 +2,7 @@
 
 ## Status
 
-Confirmed discussion only. Unconfirmed details remain `TBD`.
+Confirmed discussion with first transport baseline partly landed. Remaining open items stay `TBD`.
 
 ## Confirmed
 
@@ -25,6 +25,13 @@ First version supports:
 
 It does not own concrete rendering components.
 
+`ui.protocol` is an input ingress plus read-only projection boundary:
+
+- UI may submit commands into the system
+- UI may consume turn-state and debug-state projections
+- UI must not directly mutate reason truth
+- UI must not directly mutate debug truth
+
 ### First-version commands
 
 First version command surface includes:
@@ -37,6 +44,12 @@ First version command surface includes:
 - send direct message to slave
 - cancel turn
 - resume / retry
+
+These commands are ingress only:
+
+- UI submits intent
+- owner modules decide whether and how system truth changes
+- UI does not become a turn/debug/session truth writer by sending a command
 
 ### First-version displayed projections
 
@@ -52,6 +65,8 @@ First version projection surface includes all of:
 - pairing status
 - task progress
 - slave turn stream
+
+UI also needs debug-state consumption at the architecture level, but the exact first-version debug projection contract remains `TBD`.
 
 ### Completion result display
 
@@ -70,6 +85,7 @@ First version supports all of:
 
 - subscribe latest active turn
 - subscribe specific `turn_id`
+- subscribe specific `turn_id` debug state
 - subscribe node status / progress / turn stream classes
 
 First-version stream classes are locked at semantic level as:
@@ -77,19 +93,43 @@ First-version stream classes are locked at semantic level as:
 - `turn`
 - `progress`
 - `node_status`
+- `debug`
 
 ### Query vs subscribe
 
 - query and subscribe are separate
 - query returns snapshot
 - subscribe returns incremental updates
+- both are read-only from the UI side
+- neither gives UI direct mutation authority over reason/debug truth
+- first WebUI transport baseline maps this to:
+  - HTTP query endpoints
+  - SSE subscribe endpoints
 
 First-version query surface includes:
 
 - latest active turn snapshot
 - specific `turn_id` snapshot
+- specific `turn_id` debug snapshot
 - node status snapshot
 - task progress snapshot
+
+### First-version debug-state contract
+
+First version locks a minimal debug-state UI contract:
+
+- debug state is queryable by `turn_id`
+- debug state is subscribable by `turn_id`
+- debug state is a read-only projection
+- debug state carries source identity plus `turn_id`
+- debug state carries one summary `status_text`
+- debug state carries ordered `detail_lines`
+
+This is a projection contract only:
+
+- raw provider payloads stay in debug ledgers and replay artifacts
+- authoritative reason/debug/session truth stays outside UI
+- UI consumes debug-state snapshots and streams without becoming a writer
 
 ### Source identity fields
 
@@ -113,6 +153,7 @@ First version black-box targets include:
 - slave turn subscription smoke
 - node status query smoke
 - terminal result projection smoke
+- debug state query/subscription smoke
 
 UI black-box validation is user-behavior oriented:
 

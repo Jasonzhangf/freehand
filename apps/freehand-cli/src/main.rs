@@ -1,9 +1,9 @@
 use freehand_blocks::strip_completion_submission_block;
 use freehand_config::{AgentMode, default_config_path, load_default_config};
 use freehand_contracts::{SemanticEventKind, SessionId, TraceId, TurnId};
+use freehand_runtime::{LiveReasonRestoreStatus, LiveReasonTurnRequest, run_live_reason_turn};
 use freehand_testkit::{
-    LiveReasonRestoreStatus, LiveReasonTurnRequest, ReasonRuntimeSmokeScenario,
-    run_live_reason_turn, run_reason_persistence_smoke, run_reason_runtime_smoke,
+    ReasonRuntimeSmokeScenario, run_reason_persistence_smoke, run_reason_runtime_smoke,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 

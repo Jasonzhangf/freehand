@@ -1,0 +1,45 @@
+# Test Design: `runtime.ui-command-dispatch`
+
+- feature_id: `runtime.ui-command-dispatch`
+- owner: `crates/freehand-runtime`
+- lifecycle path under test:
+  - config-selected bootstrap becomes one runtime dispatcher
+  - accepted command ingress becomes a dispatch envelope
+  - runtime dispatch routes to the declared owner module
+  - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
+  - reason-backed submit/cancel update derived UI state
+  - live provider submit incrementally updates derived UI turn/debug state before terminal receipt
+  - node-backed direct message returns owner-backed receipt
+  - unsupported resume path fails explicitly
+- white-box plan:
+  - runtime bootstrap coverage
+  - config-selected bootstrap coverage
+  - persisted latest-turn restore coverage
+  - next runtime turn ordinal restore coverage
+  - submit/cancel reason dispatch coverage
+  - live reason hook-to-ui-state coverage
+  - node direct-message dispatch coverage
+  - unsupported/missing-target dispatch failure coverage
+- module black-box plan:
+  - command dispatch receipt smoke
+  - owner-routing smoke
+  - runtime-derived UI latest-turn smoke
+  - config-selected runtime bootstrap smoke
+  - config-selected live restart/restore smoke
+- project black-box impact:
+  - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
+- fixtures / replay inputs / runtime evidence paths:
+  - `~/.freehand/state/turns`
+  - `~/.freehand/state/ui`
+  - `~/.freehand/ledgers/reason`
+- known gaps:
+  - production daemon/process transport exists only as the current HTTP/SSE smoke host
+  - real websocket pairing transport is not wired yet
+- sync status between design and implementation:
+  - runtime dispatch owner baseline is landed
+  - config-selected bootstrap is landed and consumes explicit peer-topology config truth
+  - provider-backed submit dispatch plus persisted restore/bootstrap is covered
+  - live provider submit now streams incremental UI state updates through runtime-owned hooks
+  - reason-backed cancel dispatch is covered
+  - node-backed direct-message dispatch is covered
+  - explicit unsupported resume dispatch is covered

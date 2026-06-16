@@ -1,0 +1,37 @@
+# Test Design: `tool.registry`
+
+- feature_id: `tool.registry`
+- owner: `crates/freehand-tools`
+- lifecycle path under test:
+  - registry is created per run
+  - Reasonix-aligned tool names and schemas are exported in stable registry order
+  - implemented tools execute and return explicit result text
+  - unimplemented registered tools fail explicitly
+  - unknown tools fail explicitly
+- white-box plan:
+  - registry name/schema export tests
+  - `read_only` metadata tests
+  - `read_file` line-window and path-lock tests
+  - `glob` recursive and simple-filename pattern tests
+  - `grep` recursive match tests
+  - `ls` flat and recursive listing tests
+  - `todo_write` argument validation and success tests
+  - `complete_step` argument validation and success tests
+  - unknown/unimplemented tool error tests
+- module black-box plan:
+  - runtime live bridge can advertise implemented tool definitions without hardcoded demo tools
+  - runtime live bridge can execute a real implemented read-only registry tool and re-enter the result
+- project black-box impact:
+  - provider live turn tool loop no longer depends on `echo_json` or forced `todo_write`
+  - daemon and runtime smokes now prove `read_file` can run through the registry-owned live path
+  - future write/search/edit/bash/web tools still have one owner and cannot be implemented in runtime orchestration
+- mainline/wiki sync:
+  - wiki generated from mainline call must stay in sync with tool owner code and function map updates
+- fixtures / replay inputs / runtime evidence paths:
+  - provider mock tool-use fixtures
+  - `~/.freehand/ledgers/reason`
+- known gaps:
+  - write/edit/bash/web/notebook tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
+- sync status between design and implementation:
+  - registry-backed first read-only file/search tools are landed
+  - runtime and daemon smokes now consume real registry tools instead of a forced demo first tool

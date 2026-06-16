@@ -30,6 +30,8 @@ Confirmed discussion only. Unconfirmed details remain `TBD`.
 
 - `name`
 - `mode`
+- `node_id`
+- `paired_agent`
 - `pair_token`
 - `provider`
 
@@ -101,8 +103,19 @@ api_key = "sk-inline"
 [agents.master]
 name = "master"
 mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
 pair_token = "FREEHAND_MASTER_TOKEN"
 provider = "mini27"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+allowed_pair_ip = "127.0.0.1"
+pair_token = "FREEHAND_WORKER_TOKEN"
+provider = "claude"
 ```
 
 ### Field alias compatibility
@@ -120,16 +133,23 @@ provider = "mini27"
 - allowed modes confirmed so far:
   - `master`
   - `slave`
+- `node_id` is required for all agents
+- `paired_agent` is required for all agents
+- `paired_agent` must reference another configured agent
+- paired agents must point back to each other
+- paired agents must use opposite modes in first-version local topology
 - `allowed_pair_ip` is optional
 - when `allowed_pair_ip` is omitted, pairing source IP is not filtered
 - `pair_token` is not inline secret text
 - `pair_token` is an environment variable reference
+- runtime host bootstrap must validate paired token equality before local pairing starts
 
 ### Local startup model
 
 - one process starts one agent
 - CLI selects the target `agent name`
 - selected agent resolution also resolves the bound provider and provider auth source
+- selected agent resolution also carries paired node topology metadata for runtime bootstrap
 
 ### Config activation
 

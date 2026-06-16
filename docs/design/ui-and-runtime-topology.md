@@ -2,7 +2,7 @@
 
 ## Status
 
-Confirmed discussion only. Unconfirmed details remain `TBD`.
+Confirmed discussion with first transport baseline partly landed. Remaining open items stay `TBD`.
 
 ## Confirmed
 
@@ -12,6 +12,9 @@ Confirmed discussion only. Unconfirmed details remain `TBD`.
 - multiple UIs should access one truth source
 - UI should use `freehand-ui-protocol`
 - UI should not directly depend on provider crates
+- any UI is an input port plus a read-only consumer of reason/debug projections
+- UI must not directly write reason truth
+- UI must not directly write debug truth
 - UI should bind to feature/function truth through function map driven ownership, not ad hoc logic
 - first version UI scope is CLI and WebUI
 - CLI and WebUI share one protocol truth, but may render different views
@@ -59,6 +62,17 @@ Confirmed discussion only. Unconfirmed details remain `TBD`.
 - if pairing is lost, slave keeps listening for re-pairing
 - master can subscribe to slave turn stream and surface it like UI streaming
 
+### First UI transport baseline
+
+- first WebUI transport baseline is mixed:
+  - HTTP query for snapshot reads
+  - SSE subscribe for incremental read-only projections
+- this UI transport is separate from node pairing transport
+- UI transport must stay protocol-only and must not import reason/provider/node/config semantics
+- runtime-backed hosting is now a separate daemon concern:
+  - `apps/freehand-server` stays protocol-only transport owner
+  - `apps/freehand-daemon` injects `freehand-runtime` into that shared transport
+
 ### Operational workflow
 
 - feature work starts from owner lookup
@@ -68,8 +82,8 @@ Confirmed discussion only. Unconfirmed details remain `TBD`.
 
 ## Open Questions / TBD
 
-- whether first multi-UI transport is SSE, WebSocket, HTTP polling, or mixed
 - exact command flow from UI to truth source
+- exact debug-state source owners beyond first-version per-turn snapshot/stream
 - exact master/slave registration and heartbeat design
 - exact access control model beyond source IP + pairing token
 - exact session/topic isolation model for multiple UIs

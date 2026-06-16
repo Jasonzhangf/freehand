@@ -16,17 +16,19 @@
 
 - config load begins from `~/.freehand/config.toml`
 - requested agent name selects one `[agents.<name>]` entry
+- selected agent also resolves explicit peer-topology metadata from the same agent registry
 - selected agent references one `[providers.<id>]` entry
-- validation resolves startup mode, provider binding, explicit protocol declaration, auth-source invariants, and unknown-field rejection
+- validation resolves startup mode, reciprocal peer binding, provider binding, explicit protocol declaration, auth-source invariants, and unknown-field rejection
 
 ## Response Mainline
 
 - validated config returns one selected agent runtime configuration plus one selected provider runtime configuration
+- selected agent runtime configuration includes explicit local node id, paired agent name, paired mode, paired node id, paired allowed IP, and paired pair-token env metadata for runtime bootstrap
 - restart is required before config changes take effect
 
 ## Error Mainline
 
-- missing config, invalid agent selection, invalid provider binding, invalid auth source, unknown provider fields, disabled provider selection, or permission mismatch return explicit errors
+- missing config, invalid agent selection, self-pairing, missing paired agent, same-mode paired agents, non-reciprocal pairing, invalid provider binding, invalid auth source, unknown provider fields, disabled provider selection, or permission mismatch return explicit errors
 - no fallback config source exists
 
 ## Shared Multi-Reference Functions
@@ -43,7 +45,7 @@
 | 04 | `parse_config` | `crates/freehand-config/src/lib.rs` | parse raw TOML into typed config | raw config text | raw parsed config | file loader | TOML parser | bound |
 | 05 | `validate_config` | `crates/freehand-config/src/lib.rs` | validate agent registry and provider registry invariants | raw parsed config | validated loaded config | parser | validator | bound |
 | 06 | `LoadedConfig::providers` | `crates/freehand-config/src/lib.rs` | expose validated provider registry truth | loaded config | provider registry view | tests/runtime wiring | registry accessor | bound |
-| 07 | `LoadedConfig::select_agent` | `crates/freehand-config/src/lib.rs` | select and resolve one agent plus its bound provider | agent name + env | selected agent runtime config | CLI/server startup | env resolver | bound |
+| 07 | `LoadedConfig::select_agent` | `crates/freehand-config/src/lib.rs` | select and resolve one agent plus its bound provider and paired topology metadata | agent name + env | selected agent runtime config | CLI/server startup | env resolver | bound |
 
 ## Sync Status Against Code
 

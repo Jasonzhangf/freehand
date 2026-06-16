@@ -258,5 +258,158 @@
 - 2026-06-16: UI next-step decision
   - `ui.protocol` already owns query/subscribe/projection truth; WebUI must consume it instead of inventing its own semantics
   - repo already had `apps/freehand-server`; using it as the minimal WebUI smoke boundary avoids a second UI app boundary
+- 2026-06-16: tool registry harness closeout
+  - `freehand-tools` already owns Reasonix-aligned tool registry baseline
+  - missing durable truth was the top-level design + workflow lock
+  - follow-up change adds design doc and elevates tool spec / implemented-state / runtime-exposure rules into architecture docs and skill
+- 2026-06-16: first real tool batch implementation
+  - selected first batch stayed read-only: `read_file`, `glob`, `grep`, `ls`
+  - implementation was aligned to local Reasonix reference direction:
+    - `read_file` line windowing
+    - `glob` recursive filename fallback
+    - `grep` recursive regex search
+    - `ls` flat/recursive listing
+  - Freehand-specific boundary added: path tools are locked to canonical cwd root and reject escapes
+  - runtime correction removed forced first-round `todo_write`; mock live loops in runtime/CLI/daemon now exercise real `read_file`
+  - full verification passed after updating CLI project black-box assertions
+- 2026-06-16: WebUI submit not appearing to start reasoning root cause
+  - runtime-backed daemon path is live, but startup requires `FREEHAND_PAIR_TOKEN_SHARED`
+  - `/ui/command` on daemon really runs provider inference and returns a completed receipt
+  - the previous SSE bug was two-part: subscribe routes emitted only one snapshot, and the WebUI submit handler relied on that for visible updates
+  - first fix was submit-success active refresh; second fix is now landed continuous SSE:
+    - `freehand-ui-protocol` now owns a subscription channel and incremental shared-contract turn projection updates
+    - `freehand-runtime` now streams reason/debug updates into `UiProtocolState` during live turns
+    - `freehand-server` subscribe routes now keep one connection open and emit later matching updates
+  - tests also needed lifecycle closure: open SSE responses must be dropped before graceful shutdown or daemon/server tests hang
+- 2026-06-16: WebUI design proposal started after user rejected current smoke usability
+  - goal changed from runtime-only validation to operator-usable WebUI design
+  - current deliverable is proposal doc + offline static prototype, not runtime wiring
+  - proposal direction is control-room console, not chat-first layout
+  - must clearly separate currently backed transport truth from mock-only proposal regions
+- 2026-06-16: WebUI proposal corrected by user review
+  - user rejected the first one-page heavy layout
+  - low-frequency and configuration work must live on a separate settings page with categories
+  - future phone version is a first-class target, not just responsive shrink
+  - structural reference should move closer to OpenCode shell layering
+  - revised prototype now splits into workspace/settings pages and uses a mobile bottom-nav fallback
+  - workspace keeps only high-frequency reading + command ingress; settings owns providers/agents/pairing/debug/runtime categories
+  - after direct OpenCode inspection, main workspace direction is corrected again: chat/conversation first, input composer persistent, tool/process output shown as semantic cards rather than raw JSON/payload dumps
+  - latest correction: design must use autonomous regions; top bar owns expandable slave-agent status, conversation owns fixed message blocks, assistant/model messages left, user messages right, tool/text/success/failure states have fixed colors and details disclosure
+- 2026-06-16: runtime-host transport injection baseline
+  - avoided a duplicate second HTTP/SSE/command implementation by turning `freehand-server` into a protocol-only transport library plus smoke bin
+  - added `apps/freehand-daemon` as the runtime host owner
+  - daemon reuses shared transport and injects `freehand-runtime::RuntimeCommandDispatcher`
+  - xtask now checks both `freehand-server` protocol-only boundary and `freehand-daemon` runtime-host boundary
+- 2026-06-16: config-selected daemon bootstrap baseline
+  - user-facing daemon startup now moves from fixed bootstrap to `serve --agent <name>`
+  - chose `freehand-runtime` as the owner of config-selected bootstrap so daemon host stays thin and gate can still forbid direct app->config dependency
+  - found a real gap: config truth still lacks explicit master->slave peer topology fields, so current bootstrap derives synthetic local slave ids in the in-memory host model
+  - added explicit negative coverage for slave-mode host rejection
+- 2026-06-16: peer-topology config truth closeout
+  - `config.core` now requires explicit `node_id` and `paired_agent` for every agent
+  - validation rejects self-pairing, missing paired agent, same-mode paired agents, and non-reciprocal pairing
+  - selected config projects paired agent mode, paired node id, paired allowed IP, and paired pair-token env for runtime bootstrap
+  - `freehand-runtime` now consumes configured local/paired node ids instead of deriving synthetic peer ids
+  - targeted verification passed: `cargo test -p freehand-config`, `cargo test -p freehand-runtime`, `cargo test -p freehand-daemon`
+- 2026-06-16: debug.core runtime and reason emission closeout
+  - `freehand-debug` now has runtime `DebugHub`, subscriber fanout, `StdoutDebugSink`, and `FileDebugSink`
+  - `freehand-reason` now emits observation-only debug events on start-turn, provider-output apply, completion accept/reject/continue, and fail-turn
+  - minimal verification passed before doc closeout: `cargo test -p freehand-debug`, `cargo test -p freehand-reason`, `cargo run -p xtask -- gates check`
+  - final workspace verification passed: `cargo fmt --all`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
+  - current known gap is not compile/test related: `DebugHub::emit` failures are explicit in `freehand-debug`, but `freehand-reason` currently keeps them observation-only and does not surface them through a dedicated error chain
+- 2026-06-16: ui.protocol debug receiver bridge in progress
+  - `freehand-ui-protocol` now owns `apply_debug_event`, `drain_debug_receiver`, and `debug_projection_from_event`
+  - protocol can now ingest `debug.core` receiver events into read-only per-turn debug state without becoming a truth writer
+  - `freehand-server webui-smoke` now renders debug query projection in addition to terminal/slave-card projection while still depending only on `freehand-ui-protocol`
+  - targeted verification passed: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo run -p xtask -- gates check`
+- 2026-06-16: app.webui transport smoke baseline landed
+  - first WebUI transport is now locked to HTTP query + SSE subscribe, separate from node WebSocket pairing
+  - `freehand-server` now serves protocol-only routes for latest-turn query, per-turn debug query, latest-turn SSE subscribe, and per-turn debug SSE subscribe
+  - `freehand-server` still depends only on `freehand-ui-protocol` plus shared contracts even after adding transport
+  - final verification passed: `cargo fmt --all --check`, `cargo test -p freehand-server`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
+- 2026-06-16: ui command ingress ack baseline landed
+  - `freehand-ui-protocol` now owns `accept_command_ingress` and `protocol_rejection`
+  - POST `/ui/command` accepts only mutation-intent commands and returns protocol-owned ack/rejection payloads
+  - query/subscribe commands sent to command ingress are now explicit misuse, not silently accepted
+  - targeted verification passed: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo run -p xtask -- gates check`
+- 2026-06-16: ui command dispatch-port baseline landed
+  - `freehand-ui-protocol` now owns `build_command_dispatch_envelope`, `UiCommandDispatchPort`, and dispatch receipt/failure contracts
+  - accepted UI commands are now routed to declared owner targets before leaving the protocol boundary:
+    - `SubmitUserInput` / `CancelTurn` / `ResumeTurn` -> `reason.turn`
+    - `SendDirectMessageToSlave` -> `node.master-slave`
+  - `freehand-server` now returns dispatch receipts from a protocol-owned static smoke port instead of plain ack-only acceptance
+  - targeted verification passed: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo run -p xtask -- gates check`
+- 2026-06-16: runtime.ui-command-dispatch baseline landed
+  - new crate `freehand-runtime` is now the runtime wiring owner for UI command dispatch
+  - it composes `ReasonTurnEngine`, `SessionHistory`, `LocalNodeRuntime`, and derived `UiProtocolState` without making app crates runtime owners
+  - submit/cancel now dispatch through `reason.turn`, direct slave message dispatches through `node.master-slave`, resume returns explicit unsupported error
+  - full workspace verification passed: `cargo fmt --all --check`, `cargo test -p freehand-runtime`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
   - `turn_projection_for_client` is the protocol-owned client-specific gate for slave-card visibility
   - the first UI milestone is a protocol-consumer smoke, not a full transport stack or polished browser app
+- 2026-06-16: webui decoupling lock
+  - `freehand-server` dependency boundary is now being locked to protocol-only
+  - direct `freehand-reason` / provider / node / config dependencies in the WebUI app are forbidden
+  - `xtask gates check` should fail fast if that boundary regresses
+- 2026-06-16: UI/input truth clarified by user
+  - UI is not limited to WebUI; any UI must stay decoupled from reasoning
+  - UI is an input ingress plus read-only consumer of turn-state and debug-state projections
+  - UI must not directly mutate reason/debug/session truth
+- 2026-06-16: ui.protocol debug contract closeout started
+  - first landed contract should stay minimal: query/subscribe debug state by `turn_id`
+  - UI debug projection should expose summary + ordered detail lines only
+  - raw provider/debug ledger artifacts remain outside `ui.protocol`
+- 2026-06-16: ui.protocol debug contract landed
+  - `freehand-ui-protocol` now supports per-turn debug snapshot query and subscribe
+  - debug projection stays read-only and carries `status_text` + `detail_lines`
+  - package test and workspace gate stack passed after landing
+- 2026-06-16: debug.core module started
+  - `freehand-debug` is the independent observation module
+  - it owns debug semantic/scene positions, trace envelope, and reusable debug snapshot shape
+  - UI protocol now consumes debug snapshots from `freehand-debug` instead of defining its own DTO
+- 2026-06-16: owner/test routing sedimented
+  - problem location now starts from `Owner Routing Index` in `feature-map`
+  - feature routing must go `feature_id -> owner -> function map -> test-design doc`
+  - `xtask gates check` now verifies routing-policy snippets in docs/skill
+- 2026-06-16: runtime live bridge owner migration closeout
+  - starting point was mid-migration breakage: `freehand-testkit` had deleted live implementation but still kept live tests and imports
+  - fixed by moving live mock helpers/tests into `freehand-runtime` test module and deleting duplicate live tests from `freehand-testkit`
+  - `apps/freehand-cli` needed direct `freehand-runtime` dependency after import switch
+  - `apps/freehand-daemon` black-box tests were invalid because they still pointed at real `api.53hk.cn`; replaced with local anthropic mock servers for success and provider-failure cases
+  - found runtime host boundary bug: protocol-only async command ingress called sync live provider dispatch inline, which panicked with Tokio blocking-runtime drop; fixed by wrapping dispatch in `tokio::task::spawn_blocking`
+  - post-fix verification passed: `cargo test -p freehand-testkit`, `cargo test -p freehand-runtime`, `cargo test -p freehand-daemon`, `cargo test -p freehand-cli`, workspace build/clippy/test, and `xtask gates check`
+- 2026-06-16: daemon restore/ordinal closeout
+  - detected remaining goal gap after green tests: runtime bootstrap did not restore persisted UI projections and reset `next_turn_ordinal`, so restart could have served empty query/SSE and reused `runtime-turn-1`
+  - fixed by restoring persisted turns during `RuntimeCommandDispatcher::new` when live config is present, replaying projections into `UiProtocolState`, and deriving next ordinal from persisted `runtime-turn-*` ids
+  - added runtime white-box proving restored projection + resumed ordinal, plus daemon black-box proving restart query/SSE restore and post-restart next-turn continuation
+  - online verification needed one local config correction: `~/.freehand/config.toml` was missing locked `node_id` / `paired_agent` truth and only had `master`; patched it to reciprocal `master/worker` with shared pair-token env so real daemon bootstrap could pass config validation
+  - real online verification passed:
+    - CLI `reason-live` against configured `minimonth`
+    - daemon HTTP submit against real provider returned `rounds=2`, `tool_executions=1`
+    - daemon restart served restored `runtime-turn-1-r2` through query and SSE
+    - second real daemon submit after restart advanced to `runtime-turn-2-r2`
+- 2026-06-16: WebUI static prototype visual correction
+  - user confirmed the latest layout is much better but the palette still looked bad
+  - adjusted prototype to preserve the improved autonomous-region layout while moving colors toward cleaner neutral canvas plus restrained blue/green/amber/red status colors
+  - reduced large warm fills on tool/failure cards; status is now carried mainly by side rails and badges instead of dirty full-card backgrounds
+  - next correction added three concrete UI truths: larger command composer, full-card colored borders/title rows for semantic blocks, and white/black dual theme switching on the static prototype
+- 2026-06-16: WebUI/provider correction after live inference
+  - user reported real inference succeeds but WebUI exposes internal reasoning/raw schema/tool-debug details and does not feel like live SSE
+  - owner trace: SSE transport is continuous; visible problem is main WebUI renderer consuming full `UiTurnProjection` instead of a public conversation projection
+  - owner trace: live bridge still advertises demo `echo_json`; Reasonix evidence uses Tool trait + per-run registry + stable schema export + read_only marker
+  - fix direction: add protocol-owned `UiPublicTurnProjection`, route WebUI query/SSE through it, and move tool surface into `freehand-tools`
+- 2026-06-16: function-map/mainline/wiki automation started
+  - user required `function map`, `mainline call`, and `wiki` to be synchronized, with wiki generated from mainline call
+  - current repo truth before change: only human-maintained `docs/function-maps/*.md`, no machine-readable mainline truth, no generated wiki chain
+  - implementation direction locked:
+    - `docs/mainline-calls/<feature>.json` = machine-readable mainline call source
+    - `docs/wiki/<feature>.md` = generated wiki artifact
+    - `cargo run -p xtask -- mainlines generate|check` = generation/freshness gate
+  - first migrated sample is `tool.registry`
+- 2026-06-16: second migrated mainline/wiki sample landed
+  - migrated `ui.protocol` into `docs/mainline-calls/ui.protocol.json`
+  - generated `docs/wiki/ui.protocol.md`
+  - caught and removed a duplicate `ui.protocol` owner entry from `docs/architecture/feature-map.md`
+- 2026-06-16: third migrated mainline/wiki sample landed
+  - migrated `reason.turn` into `docs/mainline-calls/reason.turn.json`
+  - generated `docs/wiki/reason.turn.md`
+  - `feature-map`, function-map, testing doc, mainline source, and wiki now all point to the same reason-turn owner path

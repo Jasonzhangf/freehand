@@ -6,7 +6,7 @@
   - CLI loads default config
   - CLI selects one named anthropic provider
   - CLI derives runtime home from `~/.freehand/config.toml`
-  - CLI routes live turn through `freehand-testkit::run_live_reason_turn`
+  - CLI routes live turn through the runtime-owned `run_live_reason_turn`
   - CLI prints safe summary of visible text/usage/broadcast counts plus completion loop, tool count, restore status, and persistence projection
 - white-box plan:
   - none in app crate beyond argument dispatch helpers
@@ -25,6 +25,6 @@
   - `~/.freehand/ledgers/providers/anthropic`
   - `~/.freehand/ledgers/reason`
 - sync status between design and implementation:
-  - CLI live-turn baseline is implemented against local mock servers
-  - CLI output now strips tagged completion JSON from visible text and reports `rounds`, `schema_rejections`, and final terminal projection
-  - live tool-call and restore/resume CLI smoke coverage is now implemented
+  - CLI live-turn baseline currently exists against local mock servers
+  - migration from `freehand-testkit` bridge to runtime-owned bridge is pending implementation
+  - CLI output must continue stripping tagged completion JSON and reporting `rounds`, `schema_rejections`, final terminal projection, tool count, and restore status after migration

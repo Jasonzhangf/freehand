@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Freehand Workspace Proposal</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="theme-light">
+    <div class="app-shell">
+      <aside class="rail">
+        <div class="brand">FH</div>
+        <div class="rail-group">
+          <a class="rail-button active" href="./index.html">WS</a>
+          <a class="rail-button" href="#">ND</a>
+          <a class="rail-button" href="#">RP</a>
+          <a class="rail-button" href="#">DG</a>
+        </div>
+        <div class="rail-group rail-bottom">
+          <a class="rail-button" href="./settings.html">ST</a>
+        </div>
+      </aside>
+
+      <aside class="sidebar">
+        <div class="eyebrow">workspace / sessions</div>
+        <h1 class="page-title">Sessions</h1>
+        <p class="page-copy">会话列表只负责切换上下文，不承载配置和调试详情。</p>
+
+        <div class="stack" style="margin-top: 18px">
+          <input class="search" value="watch latest active turn" />
+
+          <div class="session-item active">
+            <div class="meta-label">active</div>
+            <div class="session-title">ops-2026-06-16-a</div>
+            <div class="session-copy">runtime-turn-12-r2 · streaming</div>
+          </div>
+
+          <div class="session-item">
+            <div class="meta-label">recent</div>
+            <div class="session-title">pair-restore-smoke</div>
+            <div class="session-copy">restart restore verified</div>
+          </div>
+
+          <div class="session-item">
+            <div class="meta-label">recent</div>
+            <div class="session-title">tool-loop-e2e</div>
+            <div class="session-copy">tool call + completion schema</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="topbar region-card">
+          <div class="topbar-main">
+            <div class="topbar-copy">
+              <div class="eyebrow">master workspace</div>
+              <h1 class="page-title">master · Active Turn Conversation</h1>
+              <p class="topbar-note">
+                当前页只保留高频控制：活动 turn、slave 状态、主输入口。配置和维护操作全部留在 Settings。
+              </p>
+            </div>
+            <div class="topbar-actions">
+              <div class="theme-toggle" aria-label="Theme switch">
+                <button class="theme-button is-active" data-theme="light" type="button">White</button>
+                <button class="theme-button" data-theme="dark" type="button">Black</button>
+              </div>
+              <span class="status-pill ok">master idle</span>
+              <span class="status-pill live">turn streaming</span>
+              <a class="nav-link active" href="./index.html">Workspace</a>
+              <a class="nav-link" href="./settings.html">Settings</a>
+            </div>
+          </div>
+
+          <div class="topbar-strip">
+            <div class="strip-item">
+              <span class="strip-label">session</span>
+              <span class="strip-value">ops-2026-06-16-a</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">active turn</span>
+              <span class="strip-value">runtime-turn-12-r2</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">paired</span>
+              <span class="strip-value">3 agents · 1 busy</span>
+            </div>
+          </div>
+
+          <details class="slave-drawer">
+            <summary>
+              <span class="slave-summary-title">Slave Agents</span>
+              <span class="slave-chip busy">worker-node · busy</span>
+              <span class="slave-chip idle">searcher · idle</span>
+              <span class="slave-chip idle">reviewer · idle</span>
+            </summary>
+            <div class="slave-grid">
+              <div class="slave-card busy-card">
+                <div class="meta-label">busy</div>
+                <div class="slave-name">worker-node</div>
+                <div class="slave-copy">正在执行 delegated tool verification，最近更新 12s 前。</div>
+              </div>
+              <div class="slave-card">
+                <div class="meta-label">idle</div>
+                <div class="slave-name">searcher</div>
+                <div class="slave-copy">已配对，可接收 master 搜索任务。</div>
+              </div>
+              <div class="slave-card">
+                <div class="meta-label">idle</div>
+                <div class="slave-name">reviewer</div>
+                <div class="slave-copy">等待 review / replay 任务。</div>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <section class="conversation-region region-card">
+          <div class="region-header">
+            <div>
+              <div class="eyebrow">conversation region</div>
+              <h2 class="region-title">runtime-turn-12-r2</h2>
+              <p class="region-note">语义事件按固定消息块投影。主流只展示可读结论，细节按块展开。</p>
+            </div>
+            <div class="turn-status">
+              <span class="status-dot">streaming</span>
+              <span class="status-dot muted">cache 74%</span>
+              <span class="status-dot muted">schema ok</span>
+            </div>
+          </div>
+
+          <div class="stream-stage">
+            <div class="message-list autonomous">
+              <article class="dialog-block user-block">
+                <div class="block-head">
+                  <span class="role-badge user-badge">User</span>
+                  <span class="block-state pending">submitted</span>
+                </div>
+                <div class="block-body text-kind">
+                  <div class="block-title">任务输入</div>
+                  做一个简单多轮推理，要求有工具调用，有 completion schema 收口，并且 WebUI 要能看懂当前 turn 的过程。
+                </div>
+                <details class="block-details">
+                  <summary>查看详情</summary>
+                  <div class="detail-line">source: command ingress · POST /ui/command</div>
+                </details>
+              </article>
+
+              <article class="dialog-block assistant-block">
+                <div class="block-head">
+                  <span class="role-badge assistant-badge">Assistant</span>
+                  <span class="block-state running">reasoning</span>
+                </div>
+                <div class="block-body text-kind">
+                  <div class="block-title">终止条件确认</div>
+                  我先确认终止条件。这里不会因为 provider finish reason 自动结束；只有 completion schema 合法并满足条件时，turn 才能真正收口。
+                </div>
+                <details class="block-details">
+                  <summary>查看详情</summary>
+                  <div class="detail-line">semantic: reasoning · terminal: non-terminal</div>
+                </details>
+              </article>
+
+              <article class="dialog-block assistant-block tool-block">
+                <div class="block-head">
+                  <span class="role-badge tool-badge">Tool</span>
+                  <span class="block-state success">success</span>
+                </div>
+                <div class="block-body tool-kind">
+                  <div class="block-title">echo_json</div>
+                  <div class="tool-summary">已执行工具调用，返回结构化结果，并由 reason owner 写回 turn 继续下一轮。</div>
+                  <div class="tool-fields">
+                    <span>goal: e2e reasoning</span>
+                    <span>need: tool call</span>
+                    <span>need: completion schema</span>
+                  </div>
+                </div>
+                <details class="block-details">
+                  <summary>查看详情</summary>
+                  <div class="detail-line">owner: reason.turn · re-entry: tool_result</div>
+                </details>
+              </article>
+
+              <article class="dialog-block assistant-block">
+                <div class="block-head">
+                  <span class="role-badge assistant-badge">Assistant</span>
+                  <span class="block-state success">completed</span>
+                </div>
+                <div class="block-body text-kind">
+                  <div class="block-title">最终投影</div>
+                  当前页只展示当前 turn 的语义对话流。slave、trace、usage 由各自区域自治，不再和主消息流混成一个面板墙。
+                </div>
+                <details class="block-details">
+                  <summary>查看详情</summary>
+                  <div class="detail-line">completion schema: valid · projection: terminal text</div>
+                </details>
+              </article>
+
+              <article class="dialog-block assistant-block failure-block">
+                <div class="block-head">
+                  <span class="role-badge tool-badge">Tool</span>
+                  <span class="block-state failed">failed sample</span>
+                </div>
+                <div class="block-body tool-kind">
+                  <div class="block-title">provider-check</div>
+                  <div class="tool-summary">失败块使用固定失败颜色，只显示可读错误和下一步，不把 provider 原始错误直接倒出。</div>
+                </div>
+                <details class="block-details">
+                  <summary>查看详情</summary>
+                  <div class="detail-line">error class: recoverable · next: retry after policy window</div>
+                </details>
+              </article>
+            </div>
+          </div>
+
+          <section class="composer-card compact">
+            <div class="composer-head">
+              <div class="composer-title">Command Composer</div>
+              <div class="composer-note">输入区是主入口。这里要足够大，能承载多步指令和上下文补充。</div>
+            </div>
+            <div class="composer-grid">
+              <textarea class="composer-input">继续这个 turn：检查 slave 展开栏和消息块状态色是否清晰，失败和成功必须一眼可区分。</textarea>
+              <div class="composer-actions">
+                <button class="button" type="button">Send</button>
+                <button class="button secondary" type="button">Cancel</button>
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+
+      <aside class="inspector">
+        <div class="eyebrow">detail region</div>
+        <h2 class="inspector-title">Selected Block</h2>
+        <p class="page-copy">右侧只服务当前选中块：trace、slave、usage 不再抢主对话区注意力。</p>
+
+        <div class="tab-row" style="margin-top: 16px">
+          <span class="tab active">Trace</span>
+          <span class="tab">Slave</span>
+          <span class="tab">Usage</span>
+        </div>
+
+        <div class="stack" style="margin-top: 16px">
+          <section class="inspector-block">
+            <div class="meta-label">feature id</div>
+            <div class="inspector-block-title">app.runtime-daemon</div>
+            <div class="inspector-copy">turn runtime-turn-12-r2 · trace trace-live-12</div>
+          </section>
+
+          <section class="inspector-block">
+            <div class="meta-label">pipeline node</div>
+            <div class="inspector-block-title">ReasonResp05Process</div>
+            <div class="inspector-copy">semantic event projected into conversation block</div>
+          </section>
+        </div>
+      </aside>
+    </div>
+
+    <nav class="mobile-nav">
+      <a class="active" href="./index.html">Work</a>
+      <a href="#">Slave</a>
+      <a href="#">Detail</a>
+      <a href="./settings.html">Set</a>
+    </nav>
+    <script src="./theme.js"></script>
+  </body>
+</html>

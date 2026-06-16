@@ -1,0 +1,19 @@
+[package]
+name = "freehand-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+freehand-blocks = { path = "../freehand-blocks" }
+freehand-config = { path = "../freehand-config" }
+freehand-contracts = { path = "../freehand-contracts" }
+freehand-debug = { path = "../freehand-debug" }
+freehand-node = { path = "../freehand-node" }
+freehand-provider-anthropic = { path = "../freehand-provider-anthropic" }
+freehand-provider-core = { path = "../freehand-provider-core" }
+freehand-reason = { path = "../freehand-reason" }
+freehand-tools = { path = "../freehand-tools" }
+freehand-ui-protocol = { path = "../freehand-ui-protocol" }
+serde_json = "1"
+thiserror = "2"

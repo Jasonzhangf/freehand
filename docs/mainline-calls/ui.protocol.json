@@ -1,0 +1,316 @@
+{
+  "feature_id": "ui.protocol",
+  "owner_crate": "crates/freehand-ui-protocol",
+  "owner_module": "crates/freehand-ui-protocol/src/lib.rs",
+  "function_map_doc": "docs/function-maps/ui.protocol.md",
+  "test_design_doc": "docs/testing/ui.protocol.md",
+  "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
+  "generated_wiki_doc": "docs/wiki/ui.protocol.md",
+  "request_mainline": [
+    "UI commands enter one protocol truth shared by CLI and WebUI",
+    "UI acts as an input ingress only; command submission does not make UI a truth writer",
+    "command ingress acceptance is explicit and route-scoped: only mutation-intent commands may enter the ingress transport path",
+    "accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary",
+    "query and subscribe stay separate",
+    "subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams"
+  ],
+  "response_mainline": [
+    "query returns snapshots",
+    "command ingress returns explicit dispatch receipt without claiming truth mutation success",
+    "subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel",
+    "projections are read-only views over owner-written truth",
+    "terminal completion shows only final projected text",
+    "public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, and debug details from the main user-visible stream",
+    "debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines",
+    "`ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state",
+    "`ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`",
+    "slave turn may surface as WebUI-only separate card while staying in one protocol truth",
+    "client-specific projection gating stays inside the protocol owner, not in apps",
+    "UI must be able to consume reason-turn state and debug-state projections without owning either truth source",
+    "transport adapters may drain debug receivers and query protocol snapshots, but projection ownership stays in `freehand-ui-protocol`"
+  ],
+  "error_mainline": [
+    "invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors",
+    "query/subscribe commands sent to command-ingress route are explicit protocol misuse errors",
+    "source identity fields remain explicit across success and error paths",
+    "UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "terminal_text_projection",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "collapse terminal event to final user-visible text",
+      "allowed_callers": [
+        "query handlers",
+        "stream handlers",
+        "CLI/WebUI adapters"
+      ],
+      "related_tests": [
+        "terminal result projection smoke"
+      ],
+      "why_shared": "ensures CLI and WebUI project the same terminal text truth"
+    },
+    {
+      "symbol": "public_conversation_items",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "derive user-visible conversation items from a full turn projection without exposing internal reasoning/debug/raw schema data",
+      "allowed_callers": [
+        "CLI/WebUI renderers",
+        "transport adapters"
+      ],
+      "related_tests": [
+        "public conversation projection smoke"
+      ],
+      "why_shared": "all UI clients need one public projection rule instead of per-client filtering"
+    },
+    {
+      "symbol": "turn_projection_for_client",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "gate slave substream visibility by UI client kind without changing turn truth",
+      "allowed_callers": [
+        "CLI/WebUI adapters",
+        "query handlers"
+      ],
+      "related_tests": [
+        "slave turn subscription smoke"
+      ],
+      "why_shared": "keeps client-specific projection rules centralized and protocol-owned"
+    },
+    {
+      "symbol": "DebugStateSnapshot::new",
+      "owner": "crates/freehand-debug/src/lib.rs",
+      "purpose": "construct reusable debug snapshots consumed by UI protocol without making UI the debug owner",
+      "allowed_callers": [
+        "reason/provider/node/testkit/UI protocol adapters"
+      ],
+      "related_tests": [
+        "debug state query/subscription smoke"
+      ],
+      "why_shared": "keeps debug projection shape in `debug.core` instead of duplicating it inside UI protocol"
+    },
+    {
+      "symbol": "accept_command_ingress",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "validate mutation-intent command ingress and return explicit acknowledgement without mutating truth",
+      "allowed_callers": [
+        "CLI/WebUI transport adapters"
+      ],
+      "related_tests": [
+        "command ingress acceptance/rejection smoke"
+      ],
+      "why_shared": "keeps ingress-route semantics inside the protocol owner instead of duplicating them in apps"
+    },
+    {
+      "symbol": "build_command_dispatch_envelope",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "route accepted ingress command to the declared owner feature/module before dispatch",
+      "allowed_callers": [
+        "CLI/WebUI transport adapters",
+        "runtime owner adapters"
+      ],
+      "related_tests": [
+        "command dispatch envelope owner-routing smoke"
+      ],
+      "why_shared": "keeps command-to-owner routing out of app transport glue"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "validate_command",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "accept and validate UI command payload",
+      "input_semantic": "UI command",
+      "output_semantic": "validated command",
+      "caller": "CLI/WebUI",
+      "callee": "protocol boundary",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "accept_command_ingress",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "accept only mutation-intent ingress commands and return explicit ack",
+      "input_semantic": "UI command",
+      "output_semantic": "ingress ack",
+      "caller": "CLI/WebUI transport adapters",
+      "callee": "protocol boundary",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "protocol_rejection",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "convert protocol error into transport-safe rejection payload",
+      "input_semantic": "protocol error",
+      "output_semantic": "rejection payload",
+      "caller": "CLI/WebUI transport adapters",
+      "callee": "protocol boundary",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "build_command_dispatch_envelope",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "wrap accepted ingress command with declared owner routing",
+      "input_semantic": "UI command",
+      "output_semantic": "dispatch envelope",
+      "caller": "CLI/WebUI transport adapters",
+      "callee": "protocol boundary",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "UiProtocolState::query",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "execute read-only query path",
+      "input_semantic": "query command",
+      "output_semantic": "snapshot projection",
+      "caller": "protocol boundary",
+      "callee": "query handler",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "UiProtocolState::subscribe",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "expose the protocol-owned continuous subscription channel for app transports",
+      "input_semantic": "none",
+      "output_semantic": "UiSubscriptionEvent receiver",
+      "caller": "app/transport adapters",
+      "callee": "protocol state",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "subscription_selector",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "build read-only subscribe selector",
+      "input_semantic": "subscribe command",
+      "output_semantic": "subscription selector",
+      "caller": "protocol boundary",
+      "callee": "stream handler",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "subscription_matches",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "route incremental projection to matching subscription",
+      "input_semantic": "subscription selector plus projection",
+      "output_semantic": "delivery decision",
+      "caller": "stream handler",
+      "callee": "selector matcher",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "turn_projection_from_events",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "project whole-turn state into UI snapshot",
+      "input_semantic": "semantic/tool/usage/terminal/error inputs",
+      "output_semantic": "UI turn projection",
+      "caller": "query/stream handler",
+      "callee": "projector",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "terminal_text_projection",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "project terminal text",
+      "input_semantic": "terminal semantic payload",
+      "output_semantic": "UI terminal text",
+      "caller": "query/stream handler",
+      "callee": "projector",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10a",
+      "symbol_path": "public_conversation_items / public_turn_projection",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "derive public user-visible conversation stream and strip raw completion schema",
+      "input_semantic": "full turn projection",
+      "output_semantic": "public turn projection",
+      "caller": "app transports/renderers",
+      "callee": "projector",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11",
+      "symbol_path": "UiProtocolState::apply_semantic_event / apply_tool_call / apply_usage_event / apply_terminal_event / apply_error_event",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "incrementally update one turn projection from shared contract events and publish subscription updates",
+      "input_semantic": "shared reason/error contracts",
+      "output_semantic": "updated queryable/subscribable turn projection",
+      "caller": "runtime/debug bridges",
+      "callee": "protocol state",
+      "binding_status": "bound"
+    },
+    {
+      "step": "12",
+      "symbol_path": "turn_projection_for_client",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "gate client-specific slave substream visibility",
+      "input_semantic": "turn projection plus client kind",
+      "output_semantic": "client-specific turn projection",
+      "caller": "CLI/WebUI adapter",
+      "callee": "projector",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "UiProtocolState::set_debug_state",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "store per-turn read-only debug projection for UI consumption and publish subscription updates",
+      "input_semantic": "freehand-debug snapshot",
+      "output_semantic": "queryable/subscribable debug state",
+      "caller": "reason/node/debug bridge",
+      "callee": "protocol state",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "UiProtocolState::apply_debug_event",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "ingest one observation-only debug event into UI protocol state when a snapshot is present",
+      "input_semantic": "freehand-debug event",
+      "output_semantic": "updated per-turn debug state or ignored event",
+      "caller": "reason/node/debug bridge",
+      "callee": "protocol state",
+      "binding_status": "bound"
+    },
+    {
+      "step": "15",
+      "symbol_path": "UiProtocolState::drain_debug_receiver",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "drain a debug.core receiver without making UI a truth writer",
+      "input_semantic": "debug receiver",
+      "output_semantic": "applied snapshot count",
+      "caller": "protocol transport/app adapters",
+      "callee": "protocol state",
+      "binding_status": "bound"
+    },
+    {
+      "step": "16",
+      "symbol_path": "debug_projection_from_event",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "map one debug event to read-only UI debug projection when snapshot exists",
+      "input_semantic": "freehand-debug event",
+      "output_semantic": "UiProjection::Debug",
+      "caller": "protocol tests/transport adapters",
+      "callee": "projector",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "command validation, query selection, subscription routing, turn projection, and debug-state projection are bound in code",
+    "command ingress acceptance, dispatch-envelope routing, and rejection payload mapping are now bound in code",
+    "client-specific projection gating is now also bound in code",
+    "UiProtocolState now owns a continuous subscription channel plus incremental shared-contract turn projection updates",
+    "debug-state projection consumes freehand-debug::DebugStateSnapshot instead of a UI-owned duplicate DTO",
+    "UI ingress versus truth-writer separation is now locked in the function map",
+    "minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in UiProtocolState",
+    "public turn projection is protocol-owned"
+  ]
+}

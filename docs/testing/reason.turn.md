@@ -5,6 +5,7 @@
 - lifecycle path under test:
   - per-turn truth is written
   - semantic events broadcast
+  - debug events emit to `debug.core` without mutating turn truth
   - tool result re-entry returns to the owning turn
   - completion schema controls terminal acceptance
   - completion schema is extracted from tagged JSON in model text
@@ -13,9 +14,10 @@
   - start-turn request payload preserves typed context segments through provider payload contract
   - start-turn rewrite mode/version are sourced from session history truth
 - white-box plan:
-  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability
+  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability, debug emission
 - module black-box plan:
   - reason turn boundary emits semantic stream and handles rejection/retry behavior
+  - reason turn boundary emits debug observations through `debug.core`
   - completion parser rejects missing tag, malformed JSON, invalid claim, missing required field, and empty required field
   - reason turn boundary propagates explicit rewrite gate diagnostics
 - project black-box impact:
@@ -30,3 +32,7 @@
   - turn truth, typed request payload baseline, completion parsing/validation, tool-result re-entry, non-blocking broadcast baseline, and session-history rewrite-state sourcing landed
   - rewrite trigger policy exists in `freehand-blocks`, and `ReasonRewriteRuntime` now wires policy-approved rewrite gates into session history
   - provider usage can feed rewrite policy through shared prompt-token conversion
+  - debug emission to `debug.core` is landed for start-turn, provider-output, completion, and fail-turn milestones
+  - current known gap is observation error surfacing when `DebugHub::emit` returns a sink-dispatch failure
+- mainline/wiki sync:
+  - wiki generated from mainline call must stay in sync with reason turn owner code and function map updates

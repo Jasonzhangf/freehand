@@ -1,0 +1,15 @@
+[package]
+name = "freehand-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+freehand-blocks = { path = "../freehand-blocks" }
+freehand-contracts = { path = "../freehand-contracts" }
+freehand-provider-core = { path = "../freehand-provider-core" }
+glob = "0.3"
+regex = "1"
+serde_json = "1"
+thiserror = "2"
+walkdir = "2"

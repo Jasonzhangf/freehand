@@ -11,5 +11,6 @@ freehand-contracts = { path = "../freehand-contracts" }
 freehand-provider-anthropic = { path = "../freehand-provider-anthropic" }
 freehand-provider-core = { path = "../freehand-provider-core" }
 freehand-reason = { path = "../freehand-reason" }
+freehand-runtime = { path = "../freehand-runtime" }
 serde_json = "1"
 thiserror = "2"

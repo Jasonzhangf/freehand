@@ -1,0 +1,196 @@
+{
+  "feature_id": "reason.turn",
+  "owner_crate": "crates/freehand-reason",
+  "owner_module": "crates/freehand-reason/src/lib.rs",
+  "function_map_doc": "docs/function-maps/reason.turn.md",
+  "test_design_doc": "docs/testing/reason.turn.md",
+  "mainline_call_doc": "docs/mainline-calls/reason.turn.json",
+  "generated_wiki_doc": "docs/wiki/reason.turn.md",
+  "request_mainline": [
+    "user input and context material enter the turn orchestration path",
+    "`reason.session-history` provides stable base context plus the current turn's `rewrite_mode` and `rewrite_version`",
+    "`reason.rewrite-policy` owns the decision of whether runtime should stay append-only or call a rewrite gate before turn startup",
+    "provider TokenUsage is converted into compaction prompt pressure through `prompt_tokens_from_usage`",
+    "turn orchestration manages tool re-entry and delegates context planning to `reason.context-planner`",
+    "current code baseline now calls `plan_context`, carries typed `context_segments`, stores planner diagnostics separately, and derives provider payload from `input_segments`",
+    "stable-prefix and volatile-tail separation now exists at planner baseline level, and rewrite sourcing now comes from `SessionHistory`",
+    "metadata and request-chain content must stay separate types; `freehand-reason` owns request-content composition truth"
+  ],
+  "response_mainline": [
+    "provider semantic events become turn truth updates",
+    "turn truth broadcasts semantic events for reasoning, text, tool, usage, terminal, and error",
+    "turn lifecycle and provider-output milestones may emit debug events into `debug.core`",
+    "terminal result is projected from validated completion schema, not raw provider finish reason",
+    "completion schema is extracted from `<freehand_completion>...</freehand_completion>` tagged JSON before validation",
+    "invalid completion schema feedback identifies concrete invalid schema entries",
+    "provider metadata signals may influence orchestration decisions only through explicit typed fields, never by hidden prompt mutation"
+  ],
+  "error_mainline": [
+    "invalid completion schema is rejected and reprompted with field-level feedback",
+    "invalid completion schema retries are capped at 3 before a failed terminal outcome is written",
+    "provider finish_reason=stop or finish_reason=end_turn does not end the turn by itself",
+    "raw provider events go to debug ledger, not session truth",
+    "debug emission is observation-only and must not mutate turn/session truth",
+    "metadata/request boundary violations must be treated as architecture errors, not silently tolerated"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "validate_completion_submission",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "shared pure completion-schema validator for terminal acceptance",
+      "allowed_callers": [
+        "reason orchestrator",
+        "tests"
+      ],
+      "related_tests": [
+        "completion acceptance",
+        "invalid schema rejection",
+        "blocked terminal tests"
+      ],
+      "why_shared": "keeps terminal validation semantics out of orchestrator glue"
+    },
+    {
+      "symbol": "parse_completion_submission_block",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "extract and parse tagged completion JSON into a typed submission or itemized schema errors",
+      "allowed_callers": [
+        "reason orchestrator",
+        "live bridge",
+        "tests"
+      ],
+      "related_tests": [
+        "tagged schema extraction",
+        "missing tag rejection",
+        "invalid JSON rejection",
+        "invalid claim rejection"
+      ],
+      "why_shared": "keeps completion schema parsing out of live/provider/app orchestration"
+    },
+    {
+      "symbol": "DebugHub::emit",
+      "owner": "crates/freehand-debug/src/lib.rs",
+      "purpose": "receive reason-turn debug emissions without making freehand-reason the observation delivery owner",
+      "allowed_callers": [
+        "reason orchestrator",
+        "future runtime bridges"
+      ],
+      "related_tests": [
+        "reason debug emission smoke"
+      ],
+      "why_shared": "keeps debug distribution separate from turn truth ownership"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "ReasonTurnEngine::start_turn",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "create per-turn truth container and provider payload from session-owned rewrite state",
+      "input_semantic": "session history plus user input plus turn-scoped additions",
+      "output_semantic": "initialized turn record",
+      "caller": "CLI/server/node",
+      "callee": "reason orchestrator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "01 note",
+      "symbol_path": "ReasonTurnEngine::start_turn",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "current startup path reads rewrite mode/version and base context from SessionHistory, invokes planner-owned segment admission, and stores planner diagnostics while keeping them off request content",
+      "input_semantic": "request-chain content plus session metadata inputs",
+      "output_semantic": "provider-ready typed request content plus metadata-side cache diagnostics",
+      "caller": "reason orchestrator",
+      "callee": "plan_context",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "ReasonTurnEngine::apply_provider_output",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "materialize provider semantic output into turn truth",
+      "input_semantic": "provider semantic output",
+      "output_semantic": "updated turn state",
+      "caller": "provider boundary",
+      "callee": "turn state writer",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "parse_completion_submission_block",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "responsibility": "parse tagged completion schema from model text",
+      "input_semantic": "model text with tagged JSON",
+      "output_semantic": "typed completion submission or itemized parse errors",
+      "caller": "turn/live runtime",
+      "callee": "completion parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "validate_completion_submission",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "responsibility": "validate completion schema",
+      "input_semantic": "completion submission",
+      "output_semantic": "completion decision or rejection",
+      "caller": "turn state writer",
+      "callee": "terminal validator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "ReasonTurnEngine::submit_completion",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "accept or reject terminal outcome",
+      "input_semantic": "candidate completion payload",
+      "output_semantic": "terminal event or rejection",
+      "caller": "turn state writer",
+      "callee": "terminal validator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "ReasonTurnEngine::fail_turn",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "write explicit failed terminal outcome after retry exhaustion",
+      "input_semantic": "failure reason",
+      "output_semantic": "failed terminal event",
+      "caller": "turn/live runtime",
+      "callee": "turn state writer",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "ReasonTurnEngine::project_session",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "project conversation view from turns",
+      "input_semantic": "turn records",
+      "output_semantic": "projected session view",
+      "caller": "UI/session consumers",
+      "callee": "projector",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "ReasonTurnEngine::emit_debug",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "emit observation-only debug event for turn lifecycle or provider-output milestones",
+      "input_semantic": "turn truth plus scene metadata plus status/detail text",
+      "output_semantic": "debug event fanout",
+      "caller": "reason orchestrator",
+      "callee": "DebugHub::emit",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "turn startup, provider-output materialization, completion parsing/validation, failed terminal writing, and session projection are bound in code",
+    "planner baseline is implemented and called from turn startup",
+    "`reason.session-history` now owns rewrite version and explicit rewrite-gate orchestration for turn startup",
+    "`ReasonRewriteRuntime` now provides the baseline consumer path for calling `reason.rewrite-policy` and then triggering compaction/rollback/resume gates",
+    "provider usage conversion into rewrite policy is bound",
+    "debug emission into `debug.core` is bound for start-turn, provider-output application, completion acceptance/rejection, and explicit failed terminal write",
+    "current debug emission remains observation-only; `DebugHub::emit` failures are not promoted into turn truth or reason error events",
+    "remaining gap is final CLI/server runtime loop integration with real provider usage events and persisted recovery payloads",
+    "metadata/request hard isolation is now reflected in request content vs planner diagnostics split, but not yet enforced by a dedicated static gate or separate envelope types",
+    "generated wiki must be regenerated from `docs/mainline-calls/reason.turn.json` when this function-map truth changes"
+  ]
+}

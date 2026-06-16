@@ -2,7 +2,7 @@
 
 ## Status
 
-Confirmed discussion only. Missing implementation details remain `TBD`.
+Confirmed discussion with partial implementation landed. Remaining missing details stay `TBD`.
 
 ## Confirmed
 
@@ -49,6 +49,21 @@ Confirmed standard directories:
 - runtime debug paths should be documented before use
 - if truth changes during debug, docs and skill workflow must be updated in same task
 
+### Debug module boundary
+
+- `debug.core` should be an independent module
+- any module may import and emit debug/trace material through it
+- `debug.core` does not own request truth
+- `debug.core` does not own session truth
+- `debug.core` does not own provider semantic truth
+- UI may consume debug projections through protocol-owned wrappers, but UI does not own debug truth
+
+### Landed baseline
+
+- `crates/freehand-debug` now owns shared debug snapshot, trace envelope, hub, subscriber fanout, and stdout/file sink primitives
+- `freehand-reason` now emits per-turn lifecycle debug observations into `debug.core`
+- `freehand-ui-protocol` consumes `freehand-debug::DebugStateSnapshot` directly instead of defining a duplicate DTO
+
 ## Open Questions / TBD
 
 - exact ledger format
@@ -56,6 +71,7 @@ Confirmed standard directories:
 - exact trace envelope schema
 - exact retention and cleanup rules
 - exact online/offline replay workflow
+- dedicated observation error surfacing path for sink-dispatch failures
 
 ## Update trigger
 
@@ -65,4 +81,3 @@ Update this doc when:
 - runtime evidence directories change
 - ledger/replay design changes
 - trace schema changes
-

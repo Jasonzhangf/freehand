@@ -4,22 +4,50 @@
 - owner: `apps/freehand-server`
 - lifecycle path under test:
   - app boundary receives protocol-owned query/projection truth
-  - app boundary renders terminal text projection
+  - app boundary receives protocol-owned command ingress intent and returns dispatch receipt/failure only
+  - app boundary renders a usable protocol-driven WebUI shell
+  - app boundary serves split theme and WebUI assets
+  - app boundary renders protocol-owned debug query projection
   - app boundary renders slave-card visibility only for WebUI
   - CLI and WebUI divergences stay protocol-safe
+  - app boundary remains decoupled from reason/provider/node/config semantics
+  - app boundary serves protocol-owned HTTP query and SSE subscribe routes
 - white-box plan:
-  - minimal render helper and protocol-ownership glue
+  - page shell render helper
+  - embedded asset serving helper
+  - router and serve helper
+  - dependency boundary scan for protocol-only app wiring
 - module black-box plan:
+  - WebUI root shell smoke
+  - WebUI theme asset smoke
+  - WebUI JS asset smoke
+  - WebUI submit-success path refresh smoke
+  - WebUI command ingress dispatch receipt smoke
+  - WebUI command ingress query-route-misuse rejection smoke
   - WebUI query projection smoke
+  - WebUI debug query projection smoke
+  - WebUI latest-turn SSE initial snapshot plus later update smoke
+  - WebUI debug SSE initial snapshot plus later update smoke
+  - WebUI latest-turn query/SSE public projection excludes raw completion schema and internal reasoning from public conversation
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
+  - app dependency boundary smoke
 - project black-box impact:
   - app boundary proves WebUI can consume `freehand-ui-protocol` without owning reason/provider semantics
+  - app boundary proves it does not need direct reason/provider/node/config imports
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/state/ui`
   - `~/.freehand/replays/ui`
   - WebUI smoke stdout fixture
 - known gaps:
-  - transport binding is intentionally minimal for first step
+  - command ingress currently dispatches through a static protocol-owned smoke port, not real runtime owner adapters yet
+- WebUI still re-queries latest turn truth after submit receipt because a command may complete before the browser consumes the next streamed event
 - sync status between design and implementation:
-  - design is newly locked before app implementation
+  - WebUI shell rendering is landed
+  - split theme/WebUI static assets are landed
+  - HTTP query and continuous SSE subscribe transport smoke is landed
+  - HTTP command ingress dispatch-receipt/failure smoke is landed
+  - submit-success path now refreshes latest turn truth after command receipt
+  - query/SSE now return a public turn payload with `public_conversation` for main cards
+  - protocol-only transport library reuse is landed
+  - app remains protocol-only by dependency gate

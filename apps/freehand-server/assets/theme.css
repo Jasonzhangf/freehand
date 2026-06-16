@@ -1,0 +1,55 @@
+:root {
+  --bg: #edf1ee;
+  --canvas: #f7f9f7;
+  --panel: #ffffff;
+  --panel-soft: rgba(255, 255, 255, 0.9);
+  --rail: #12211d;
+  --line: #d7dfd9;
+  --line-strong: #b8c5bc;
+  --text: #17211d;
+  --text-soft: #607067;
+  --text-faint: #90a097;
+  --master: #1f6c58;
+  --master-soft: #e2f0ea;
+  --user: #486f92;
+  --user-soft: #e8f0f7;
+  --assistant: #2f745f;
+  --assistant-soft: #e8f3ee;
+  --tool: #8a6a30;
+  --tool-soft: #f6efdf;
+  --success: #187553;
+  --success-soft: #e5f3ec;
+  --fail: #b2433b;
+  --fail-soft: #fbe9e7;
+  --running: #9b6d1c;
+  --running-soft: #f9efd9;
+  --shadow: 0 18px 42px rgba(32, 28, 20, 0.08);
+}
+
+body.theme-dark {
+  --bg: #0d1110;
+  --canvas: #141918;
+  --panel: #161d1a;
+  --panel-soft: rgba(21, 27, 25, 0.92);
+  --rail: #050808;
+  --line: #26312d;
+  --line-strong: #3a4742;
+  --text: #eef4f0;
+  --text-soft: #9fb0a7;
+  --text-faint: #72837b;
+  --master: #58b08d;
+  --master-soft: rgba(88, 176, 141, 0.14);
+  --user: #7db0dd;
+  --user-soft: rgba(61, 94, 126, 0.24);
+  --assistant: #69c097;
+  --assistant-soft: rgba(70, 117, 93, 0.2);
+  --tool: #d1a35c;
+  --tool-soft: rgba(97, 76, 40, 0.18);
+  --success: #78c9a0;
+  --success-soft: rgba(80, 150, 116, 0.16);
+  --fail: #f08b81;
+  --fail-soft: rgba(132, 53, 48, 0.18);
+  --running: #efbb66;
+  --running-soft: rgba(145, 109, 43, 0.18);
+  --shadow: 0 22px 46px rgba(0, 0, 0, 0.28);
+}

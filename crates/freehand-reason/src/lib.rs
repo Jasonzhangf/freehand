@@ -4,8 +4,10 @@ mod persistence;
 mod rewrite_runtime;
 mod session_history;
 
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::{
     CompletionDecision, CompletionSubmission, CompletionValidationError, ContextPlannerInput,
@@ -16,6 +18,10 @@ use freehand_contracts::{
     FeatureId, ReasonReq02ContextComposedInput, ReasonReq03ProviderPayload, ReasonReq04ToolCall,
     ReasonReq05ToolResultReentry, ReasonResp01SemanticEvent, ReasonResp02UsageEvent,
     ReasonResp03TerminalEvent, SessionId, TerminalStatus, TraceId, TurnId, validate_reason_req02,
+};
+use freehand_debug::{
+    DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
+    DebugTraceEnvelope,
 };
 use freehand_provider_core::ProviderSemanticOutput;
 use serde::{Deserialize, Serialize};
@@ -78,6 +84,7 @@ pub struct TurnRecord {
 
 pub struct ReasonTurnEngine {
     subscribers: Mutex<Vec<SyncSender<ReasonBroadcastEvent>>>,
+    debug_hub: Option<Arc<DebugHub>>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -104,6 +111,14 @@ impl ReasonTurnEngine {
     pub fn new() -> Self {
         Self {
             subscribers: Mutex::new(Vec::new()),
+            debug_hub: None,
+        }
+    }
+
+    pub fn with_debug_hub(debug_hub: Arc<DebugHub>) -> Self {
+        Self {
+            subscribers: Mutex::new(Vec::new()),
+            debug_hub: Some(debug_hub),
         }
     }
 
@@ -164,7 +179,7 @@ impl ReasonTurnEngine {
             model: input.model,
             input_segments: planned_context.ordered_segments.clone(),
         };
-        Ok(TurnRecord {
+        let turn = TurnRecord {
             request,
             provider_payload,
             planned_context,
@@ -174,7 +189,24 @@ impl ReasonTurnEngine {
             usage_events: Vec::new(),
             terminal_event: None,
             error_events: Vec::new(),
-        })
+        };
+        self.emit_debug(
+            &turn,
+            "ReasonTurnEngine::start_turn",
+            "reason turn started",
+            vec![
+                format!("model={}", turn.provider_payload.model),
+                format!(
+                    "rewrite_mode={:?}",
+                    turn.planned_context.diagnostics.rewrite_mode
+                ),
+                format!(
+                    "rewrite_version={}",
+                    turn.planned_context.diagnostics.rewrite_version
+                ),
+            ],
+        );
+        Ok(turn)
     }
 
     pub fn apply_provider_output(&self, turn: &mut TurnRecord, output: ProviderSemanticOutput) {
@@ -182,24 +214,69 @@ impl ReasonTurnEngine {
             ProviderSemanticOutput::SemanticEvent(event) => {
                 turn.semantic_events.push(event.clone());
                 self.publish(ReasonBroadcastEvent::Semantic(event));
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::apply_provider_output",
+                    "provider semantic event applied",
+                    vec![format!(
+                        "kind={:?}",
+                        turn.semantic_events.last().map(|it| &it.kind)
+                    )],
+                );
             }
             ProviderSemanticOutput::ToolCall(event) => {
                 turn.tool_calls.push(event.clone());
                 self.publish(ReasonBroadcastEvent::Tool(event));
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::apply_provider_output",
+                    "provider tool call applied",
+                    vec![format!(
+                        "tool_name={}",
+                        turn.tool_calls
+                            .last()
+                            .map(|it| it.tool_call.tool_name.as_str())
+                            .unwrap_or("")
+                    )],
+                );
             }
             ProviderSemanticOutput::ToolResultReentry(result) => {
                 turn.tool_results.push(result);
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::apply_provider_output",
+                    "tool result re-entry applied",
+                    vec![format!("tool_results={}", turn.tool_results.len())],
+                );
             }
             ProviderSemanticOutput::Usage(event) => {
                 turn.usage_events.push(event.clone());
                 self.publish(ReasonBroadcastEvent::Usage(event));
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::apply_provider_output",
+                    "provider usage applied",
+                    vec![format!("usage_events={}", turn.usage_events.len())],
+                );
             }
             ProviderSemanticOutput::Terminal(_) => {
                 // provider terminal is not final truth; wait for completion schema validation
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::apply_provider_output",
+                    "provider terminal observed but not accepted",
+                    vec!["terminal_waits_for_completion_schema=true".to_owned()],
+                );
             }
             ProviderSemanticOutput::Error(event) => {
                 turn.error_events.push(event.clone());
                 self.publish(ReasonBroadcastEvent::Error(event));
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::apply_provider_output",
+                    "provider error applied",
+                    vec![format!("error_events={}", turn.error_events.len())],
+                );
             }
         }
     }
@@ -229,14 +306,33 @@ impl ReasonTurnEngine {
                 };
                 turn.terminal_event = Some(event.clone());
                 self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::submit_completion",
+                    "completion accepted",
+                    vec![format!("terminal_status={:?}", event.status)],
+                );
                 Ok(event)
             }
             Ok(CompletionDecision::ContinueWithNextStep { next_step }) => {
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::submit_completion",
+                    "completion requested continuation",
+                    vec![format!("next_step={next_step}")],
+                );
                 Err(ReasonTurnError::CompletionRequiresNextStep(next_step))
             }
-            Err(err) => Err(ReasonTurnError::CompletionRejected(
-                completion_error_message(err),
-            )),
+            Err(err) => {
+                let message = completion_error_message(err);
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::submit_completion",
+                    "completion rejected",
+                    vec![message.clone()],
+                );
+                Err(ReasonTurnError::CompletionRejected(message))
+            }
         }
     }
 
@@ -256,6 +352,12 @@ impl ReasonTurnEngine {
         };
         turn.terminal_event = Some(event.clone());
         self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
+        self.emit_debug(
+            turn,
+            "ReasonTurnEngine::fail_turn",
+            "turn failed",
+            vec![event.summary.clone()],
+        );
         event
     }
 
@@ -280,6 +382,57 @@ impl ReasonTurnEngine {
             Err(TrySendError::Full(_)) => true,
             Err(TrySendError::Disconnected(_)) => false,
         });
+    }
+
+    fn emit_debug(
+        &self,
+        turn: &TurnRecord,
+        function: &str,
+        status_text: impl Into<String>,
+        detail_lines: Vec<String>,
+    ) {
+        let Some(hub) = &self.debug_hub else {
+            return;
+        };
+        let snapshot = DebugStateSnapshot::new(
+            DebugSemanticPosition {
+                feature_id: turn.request.feature_id.clone(),
+                session_id: turn.request.session_id.clone(),
+                turn_id: turn.request.turn_id.clone(),
+                trace_id: turn.request.trace_id.clone(),
+                agent_id: Some(turn.request.agent_id.clone()),
+                pipeline_node: Some("reason.turn".to_owned()),
+            },
+            DebugScenePosition {
+                crate_name: "freehand-reason".to_owned(),
+                file: "src/lib.rs".to_owned(),
+                function: function.to_owned(),
+                line: None,
+                artifact_path: None,
+                raw_exchange_id: None,
+            },
+            status_text,
+            detail_lines,
+        );
+        let event = DebugEvent {
+            envelope: DebugTraceEnvelope {
+                semantic: snapshot.semantic.clone(),
+                scene: snapshot.scene.clone(),
+                input_hash: None,
+                output_hash: None,
+                artifact_path: snapshot.scene.artifact_path.clone(),
+                timestamp: unix_timestamp_string(),
+            },
+            snapshot: Some(snapshot),
+        };
+        let _ = hub.emit(event);
+    }
+}
+
+fn unix_timestamp_string() -> String {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs().to_string(),
+        Err(_) => "0".to_owned(),
     }
 }
 
@@ -308,8 +461,10 @@ mod tests {
         ContextCachePolicy, ContextRewriteMode, ContextRole, ContextSegmentKind, ContextStability,
         TerminalStatus, TokenUsage, ToolArgument, ToolCallContract, ToolCallId,
     };
+    use freehand_debug::DebugHub;
     use freehand_provider_core::ProviderAdapterEvent;
     use serde_json::json;
+    use std::sync::Arc;
 
     fn session_history() -> SessionHistory {
         SessionHistory::new(
@@ -640,5 +795,29 @@ mod tests {
             ordinary_after.planned_context.diagnostics.rewrite_version,
             1
         );
+    }
+
+    #[test]
+    fn emits_debug_event_without_mutating_turn_truth() {
+        let debug_hub = Arc::new(DebugHub::new(true));
+        let debug_receiver = debug_hub.subscribe(4);
+        let engine = ReasonTurnEngine::with_debug_hub(debug_hub);
+        let mut history = session_history();
+        let turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+
+        let event = debug_receiver.recv().expect("debug event");
+        let snapshot = event.snapshot.expect("snapshot");
+        assert_eq!(snapshot.status_text, "reason turn started");
+        assert_eq!(snapshot.semantic.turn_id, TurnId::new("turn-1"));
+        assert!(
+            snapshot
+                .detail_lines
+                .iter()
+                .any(|line| line == "model=gpt-test")
+        );
+        assert!(turn.semantic_events.is_empty());
+        assert!(turn.terminal_event.is_none());
     }
 }

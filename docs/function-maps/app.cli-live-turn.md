@@ -13,7 +13,7 @@
 - CLI loads default config and selects one agent plus bound provider
 - CLI derives the runtime home from the default config path and passes it to the shared live bridge
 - CLI uses a stable default session id per selected agent unless an explicit session flag is provided
-- CLI delegates the live turn to `freehand-testkit::run_live_reason_turn`
+- CLI delegates the live turn to the runtime-owned live bridge through `freehand-runtime`
 
 ## Response Mainline
 
@@ -30,11 +30,11 @@
 ## Shared Multi-Reference Functions
 
 - `run_live_reason_turn`
-  - owner: `crates/freehand-testkit/src/lib.rs`
+  - owner: `crates/freehand-runtime/src/lib.rs`
   - purpose: bridge config-selected provider execution into one live request with persistence and tool-loop support without leaking provider DTOs into app code
-  - allowed callers: CLI, project tests
-  - related tests: CLI live-turn smoke tests, live bridge mock tests
-  - why shared: app and tests must reuse one live bridge path
+  - allowed callers: runtime dispatch, CLI, daemon, project tests
+  - related tests: CLI live-turn smoke tests, live bridge mock tests, daemon live-command smoke tests
+  - why shared: app and runtime dispatch must reuse one live bridge path
 
 ## Function Call Table
 
@@ -44,11 +44,11 @@
 | 02 | `load_default_config` | `crates/freehand-config/src/lib.rs` | load runtime config from `~/.freehand/config.toml` | runtime home config path | selected config truth | CLI dispatcher | config owner | bound |
 | 03 | `default_config_path` | `crates/freehand-config/src/lib.rs` | derive runtime home from config truth | default config path | runtime home parent | CLI live runner | config owner | bound |
 | 04 | `run_reason_live` | `apps/freehand-cli/src/main.rs` | run one config-selected provider live request through app boundary | selected agent + prompt + stream/session flags | terminal-facing live summary | CLI dispatcher | app live runner | bound |
-| 05 | `run_live_reason_turn` | `crates/freehand-testkit/src/lib.rs` | bridge selected provider execution into one persisted tool-capable live request | selected config + live turn request | turn truth + broadcasts + persistence/tool summary | app live runner | testkit bridge | bound |
+| 05 | `run_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | bridge selected provider execution into one persisted tool-capable live request | selected config + live turn request | turn truth + broadcasts + persistence/tool summary | app live runner | runtime bridge | pending |
 
 ## Sync Status Against Code
 
 - CLI live-turn command is implemented
-- CLI live-turn path reuses `freehand-testkit` bridge
+- CLI live-turn path reuses the runtime-owned bridge
 - CLI output strips completion tagged JSON from visible text projection and reports completion loop counts
 - CLI live-turn now reports runtime-home persistence restore status and tool execution summary

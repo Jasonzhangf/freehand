@@ -1,0 +1,40 @@
+# Test Design: `app.runtime-daemon`
+
+- feature_id: `app.runtime-daemon`
+- owner: `apps/freehand-daemon`
+- lifecycle path under test:
+  - daemon bootstrap selects one agent from config and creates a runtime dispatcher
+  - runtime dispatcher exposes one shared UI state handle
+  - daemon injects runtime dispatch into shared HTTP/SSE transport
+  - daemon restart restores persisted latest-turn projection before new command ingress
+  - provider-backed submit and direct-message commands return runtime-backed receipts
+  - latest-turn query reflects runtime-owned terminal projection changes after provider completion
+  - latest-turn SSE reflects restored projections and continues streaming later runtime updates on the same connection
+  - provider execution failures surface through protocol-mapped HTTP failure payloads
+  - slave-mode agent selection fails explicitly
+- white-box plan:
+  - daemon bootstrap helper coverage
+  - config-selected bootstrap coverage
+  - bind-arg parsing coverage
+  - dependency boundary scan
+- module black-box plan:
+  - daemon provider-backed submit-user-input HTTP smoke
+  - daemon latest-turn query after provider-backed submit smoke
+  - daemon restart latest-turn query/SSE restore smoke
+  - daemon same-connection latest-turn SSE continuation smoke
+  - daemon restart next-turn-id continuation smoke
+  - daemon provider failure HTTP smoke
+  - daemon direct-message dispatch HTTP smoke
+  - daemon slave-mode startup rejection smoke
+- project black-box impact:
+  - closes the first real runtime host gap without polluting the protocol-only app boundary
+- fixtures / replay inputs / runtime evidence paths:
+  - `~/.freehand/state/ui`
+  - `~/.freehand/state/turns`
+  - `~/.freehand/ledgers/reason`
+- known gaps:
+  - real websocket pairing transport is not wired yet; current daemon uses runtime-owned local node semantics
+- sync status between design and implementation:
+  - daemon bootstrap helper is landed
+  - runtime-backed submit/query/restart-restore/continuous-SSE/provider-failure/direct-message HTTP smoke is landed
+  - config-selected bootstrap smoke is landed and uses configured peer topology

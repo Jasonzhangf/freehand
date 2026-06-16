@@ -13,6 +13,7 @@ Use this directory family for durable design truth.
 - `docs/design/system-architecture-overview.md`
 - `docs/design/provider-and-reasoning-design.md`
 - `docs/design/debug-and-observability-design.md`
+- `docs/design/debug-core-design.md`
 - `docs/design/ui-and-runtime-topology.md`
 - `docs/design/config-core-design.md`
 - `docs/design/contracts-core-design.md`
@@ -22,8 +23,13 @@ Use this directory family for durable design truth.
 - `docs/design/reason-persistence-design.md`
 - `docs/design/reason-context-planner-design.md`
 - `docs/design/reason-rewrite-policy-design.md`
+- `docs/design/tool-registry-design.md`
 - `docs/design/node-master-slave-design.md`
 - `docs/design/ui-protocol-design.md`
+- `docs/design/webui-console-proposal.md`
+- `docs/design/runtime-command-dispatch-design.md`
+- `docs/design/runtime-daemon-design.md`
+- `docs/prototypes/README.md`
 
 ## Rule
 
@@ -46,10 +52,20 @@ Use this directory family for durable design truth.
   - typed context segments, cache-stable prefix rules, subagent conclusion admission, metadata/request isolation
 - `reason-rewrite-policy-design.md`
   - compaction thresholds, rollback/resume-rebuild triggers, and unexpected-case rewrite strategy
+- `tool-registry-design.md`
+  - built-in tool owner boundary, explicit implementation-state registry, runtime exposure gate, and Reasonix-aligned tool-surface policy
 - `node-master-slave-design.md`
   - local master/slave topology, pairing, node states, task delegation, turn subscription
 - `ui-protocol-design.md`
   - CLI/WebUI scope, commands, projections, subscription model, black-box targets
+- `webui-console-proposal.md`
+  - proposal-only WebUI information architecture, visual direction, and binding matrix for a static review prototype
+- `runtime-command-dispatch-design.md`
+  - runtime-owned command dispatch wiring from UI protocol ingress to reason/node owner adapters
+- `runtime-daemon-design.md`
+  - runtime host process that injects `freehand-runtime` into shared protocol-only HTTP/SSE transport
+- `docs/prototypes/README.md`
+  - offline static prototype routing and review-only entry points
 - `test-strategy.md`
   - white-box, module black-box, and project black-box validation policy
 - `docs/function-maps/README.md`
@@ -59,6 +75,8 @@ Use this directory family for durable design truth.
 
 - `debug-and-observability-design.md`
   - semantic location, scene location, ledgers, replays, runtime evidence
+- `debug-core-design.md`
+  - debug module ownership, trace envelope, debug snapshot, and read-only observation boundaries
 - `ui-and-runtime-topology.md`
   - multi-UI access, runtime home, master/slave shape, UI protocol boundaries
 - `config-core-design.md`
