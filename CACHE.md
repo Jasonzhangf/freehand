@@ -249,3 +249,6 @@
 - 2026-06-16: `provider.semantic` migrated into the mainline/wiki chain
   - `docs/mainline-calls/provider.semantic.json` is now the machine-readable provider-semantic mainline truth
   - `docs/wiki/provider.semantic.md` is generated from it
+- 2026-06-16: `provider.anthropic-adapter` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/provider.anthropic-adapter.json` is now the machine-readable Anthropic adapter mainline truth
+  - `docs/wiki/provider.anthropic-adapter.md` is generated from it

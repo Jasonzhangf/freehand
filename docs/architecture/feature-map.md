@@ -385,6 +385,8 @@ If a problem does not fit this table, update this routing index before making co
   - anthropic adapter to reason integration smoke
 - test_design_doc: `docs/testing/provider.anthropic-adapter.md`
 - function_map_doc: `docs/function-maps/provider.anthropic-adapter.md`
+- mainline_call_doc: `docs/mainline-calls/provider.anthropic-adapter.json`
+- generated_wiki_doc: `docs/wiki/provider.anthropic-adapter.md`
 - debug_artifacts:
   - anthropic raw payload fixtures
   - anthropic stream replay fixtures
@@ -401,6 +403,7 @@ If a problem does not fit this table, update this routing index before making co
   - adapter-private DTO boundary remains intact
   - adapter does not depend on `freehand-reason`
   - metadata does not become prompt/request content implicitly
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `provider.reason-live-bridge`
 

@@ -421,3 +421,7 @@
   - migrated `provider.semantic` into `docs/mainline-calls/provider.semantic.json`
   - generated `docs/wiki/provider.semantic.md`
   - provider semantic owner now has machine-readable mainline truth alongside the function map
+- 2026-06-16: sixth migrated mainline/wiki sample landed in progress
+  - migrated `provider.anthropic-adapter` into `docs/mainline-calls/provider.anthropic-adapter.json`
+  - generated `docs/wiki/provider.anthropic-adapter.md`
+  - Anthropic wire owner now has machine-readable mainline truth alongside the function map

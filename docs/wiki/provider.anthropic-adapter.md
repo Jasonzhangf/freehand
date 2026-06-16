@@ -1,19 +1,12 @@
-# Function Map: `provider.anthropic-adapter`
+# Wiki: `provider.anthropic-adapter`
 
-- feature_id: `provider.anthropic-adapter`
+Generated from `docs/mainline-calls/provider.anthropic-adapter.json`. Do not edit by hand.
+
 - owner crate: `crates/freehand-provider-anthropic`
 - owner module: `crates/freehand-provider-anthropic/src/lib.rs`
-- mainline call source: `docs/mainline-calls/provider.anthropic-adapter.json`
+- function map: `docs/function-maps/provider.anthropic-adapter.md`
 - generated wiki: `docs/wiki/provider.anthropic-adapter.md`
-- owner entry symbols:
-  - `AnthropicAdapter::new`
-  - `AnthropicAdapter::render_request`
-  - `AnthropicAdapter::parse_response`
-  - `AnthropicAdapter::parse_stream_event`
-  - `AnthropicExecutor::new`
-  - `AnthropicExecutor::execute_once`
-  - `AnthropicExecutor::execute_stream`
-  - `AnthropicExecutor::execute_stream_with`
+- test design: `docs/testing/provider.anthropic-adapter.md`
 
 ## Request Mainline
 
@@ -57,14 +50,14 @@
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `AnthropicAdapter::render_request` | `crates/freehand-provider-anthropic/src/lib.rs` | render semantic request to Anthropic messages wire request | provider semantic request | Anthropic path + JSON body | runtime/provider caller | adapter renderer | bound |
+| 01 | `AnthropicAdapter::render_request` | `crates/freehand-provider-anthropic/src/lib.rs` | render semantic request to Anthropic messages wire request | provider semantic request | Anthropic path plus JSON body | runtime/provider caller | adapter renderer | bound |
 | 02 | `AnthropicAdapter::parse_response` | `crates/freehand-provider-anthropic/src/lib.rs` | parse single-shot Anthropic response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser | bound |
 | 03 | `AnthropicAdapter::parse_stream_event` | `crates/freehand-provider-anthropic/src/lib.rs` | parse one Anthropic SSE event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser | bound |
-| 04 | `AnthropicExecutor::execute_once` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic messages HTTP request | semantic request + auth/base URL | provider semantic outputs | runtime/provider caller | HTTP executor + adapter parser | bound |
-| 05 | `AnthropicExecutor::execute_stream` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic SSE request and return accumulated semantic outputs | semantic request + auth/base URL | provider semantic outputs | runtime/provider caller | `execute_stream_with` + adapter stream parser | bound |
-| 06 | `AnthropicExecutor::execute_stream_with` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic SSE request and call back for each parsed semantic batch before stream completion | semantic request + auth/base URL + callback | incremental provider semantic output batches plus final accumulated outputs | runtime/provider caller | HTTP executor + adapter stream parser | bound |
+| 04 | `AnthropicExecutor::execute_once` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic messages HTTP request | semantic request plus auth/base URL | provider semantic outputs | runtime/provider caller | HTTP executor plus adapter parser | bound |
+| 05 | `AnthropicExecutor::execute_stream` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic SSE request and return accumulated semantic outputs | semantic request plus auth/base URL | provider semantic outputs | runtime/provider caller | execute_stream_with plus adapter stream parser | bound |
+| 06 | `AnthropicExecutor::execute_stream_with` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic SSE request and call back for each parsed semantic batch before stream completion | semantic request plus auth/base URL plus callback | incremental provider semantic output batches plus final accumulated outputs | runtime/provider caller | HTTP executor plus adapter stream parser | bound |
 
-## Sync Status Against Code
+## Sync Status Against Mainline Call
 
 - renderer and parser bindings now match `AnthropicAdapter`
 - fixture replay bindings now cover `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
@@ -72,4 +65,4 @@
 - HTTP executor bindings now cover single-shot and incremental-SSE execution against local mock servers
 - incremental stream regression proves callback delivery can happen before the provider response completes
 - request renderer now binds Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result` message rendering from provider-neutral metadata
-- the generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes
+- generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes

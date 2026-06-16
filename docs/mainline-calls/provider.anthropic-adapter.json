@@ -1,0 +1,135 @@
+{
+  "feature_id": "provider.anthropic-adapter",
+  "owner_crate": "crates/freehand-provider-anthropic",
+  "owner_module": "crates/freehand-provider-anthropic/src/lib.rs",
+  "function_map_doc": "docs/function-maps/provider.anthropic-adapter.md",
+  "test_design_doc": "docs/testing/provider.anthropic-adapter.md",
+  "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
+  "generated_wiki_doc": "docs/wiki/provider.anthropic-adapter.md",
+  "request_mainline": [
+    "provider-neutral semantic request enters Anthropic adapter",
+    "adapter renders Messages API request body with stateless conversation input",
+    "adapter consumes typed `input_segments` and renders them to Anthropic wire text without owning segment admission truth",
+    "adapter renders provider-neutral tool schema metadata into Anthropic `tools` and `tool_choice`",
+    "adapter renders provider-neutral tool call/result exchanges into Anthropic assistant `tool_use` and user `tool_result` message content",
+    "executor posts rendered requests to configured Anthropic-compatible base URL with explicit `x-api-key`, `anthropic-version`, and JSON headers"
+  ],
+  "response_mainline": [
+    "Anthropic single-shot body or SSE event becomes provider-neutral semantic output",
+    "partial tool-use input stays adapter-local until enough JSON exists to emit structured arguments",
+    "live `minimonth` single-shot and SSE fixtures replay through the same parser entrypoints as synthetic tests",
+    "executor single-shot path parses response body through `AnthropicAdapter::parse_response`",
+    "executor stream path reads SSE event boundaries incrementally, parses `data:` payloads through `AnthropicAdapter::parse_stream_event`, and can notify callers before the HTTP response finishes"
+  ],
+  "error_mainline": [
+    "unsupported protocol, invalid JSON body, invalid tool-use input, and stream-shape violations are explicit adapter errors",
+    "HTTP transport failures and non-success HTTP statuses are explicit executor errors",
+    "Anthropic stop reasons are semantic metadata, not Freehand completion truth"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "parse_tool_arguments_json",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "convert tool argument JSON string into shared structured tool arguments",
+      "allowed_callers": [
+        "provider adapters",
+        "tests"
+      ],
+      "related_tests": [
+        "OpenAI tool-call parser tests",
+        "Anthropic tool-use parser tests"
+      ],
+      "why_shared": "keeps tool-argument parsing centralized instead of duplicated per adapter"
+    },
+    {
+      "symbol": "render_tool_arguments_json",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "render shared structured tool arguments back to JSON for provider wire requests",
+      "allowed_callers": [
+        "provider adapters",
+        "tests"
+      ],
+      "related_tests": [
+        "Anthropic tool_result exchange renderer tests"
+      ],
+      "why_shared": "avoids adapter-local second implementations of shared tool argument JSON"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "AnthropicAdapter::render_request",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "render semantic request to Anthropic messages wire request",
+      "input_semantic": "provider semantic request",
+      "output_semantic": "Anthropic path plus JSON body",
+      "caller": "runtime/provider caller",
+      "callee": "adapter renderer",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "AnthropicAdapter::parse_response",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "parse single-shot Anthropic response",
+      "input_semantic": "raw response body",
+      "output_semantic": "provider semantic outputs",
+      "caller": "runtime/provider caller",
+      "callee": "adapter parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "AnthropicAdapter::parse_stream_event",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "parse one Anthropic SSE event and update partial state",
+      "input_semantic": "raw stream event",
+      "output_semantic": "provider semantic outputs",
+      "caller": "runtime/provider caller",
+      "callee": "adapter stream parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "AnthropicExecutor::execute_once",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "execute one Anthropic messages HTTP request",
+      "input_semantic": "semantic request plus auth/base URL",
+      "output_semantic": "provider semantic outputs",
+      "caller": "runtime/provider caller",
+      "callee": "HTTP executor plus adapter parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "AnthropicExecutor::execute_stream",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "execute one Anthropic SSE request and return accumulated semantic outputs",
+      "input_semantic": "semantic request plus auth/base URL",
+      "output_semantic": "provider semantic outputs",
+      "caller": "runtime/provider caller",
+      "callee": "execute_stream_with plus adapter stream parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "AnthropicExecutor::execute_stream_with",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "execute one Anthropic SSE request and call back for each parsed semantic batch before stream completion",
+      "input_semantic": "semantic request plus auth/base URL plus callback",
+      "output_semantic": "incremental provider semantic output batches plus final accumulated outputs",
+      "caller": "runtime/provider caller",
+      "callee": "HTTP executor plus adapter stream parser",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "renderer and parser bindings now match `AnthropicAdapter`",
+    "fixture replay bindings now cover `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`",
+    "fixture replay bindings now cover `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`",
+    "HTTP executor bindings now cover single-shot and incremental-SSE execution against local mock servers",
+    "incremental stream regression proves callback delivery can happen before the provider response completes",
+    "request renderer now binds Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result` message rendering from provider-neutral metadata",
+    "generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes"
+  ]
+}

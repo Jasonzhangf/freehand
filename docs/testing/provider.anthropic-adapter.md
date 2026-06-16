@@ -33,3 +33,5 @@
   - live `minimonth` fixtures now cover thinking/text/usage/cache/terminal replay for single-shot and SSE
   - HTTP executor now supports incremental SSE callback delivery via `AnthropicExecutor::execute_stream_with`
   - HTTP executor tests use local mock servers and do not require live provider credentials
+- mainline/wiki sync:
+  - wiki generated from mainline call must stay in sync with Anthropic adapter owner code and function map updates
