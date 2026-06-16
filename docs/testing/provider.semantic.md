@@ -27,3 +27,5 @@
 - sync status between design and implementation:
   - semantic request builder, typed payload validation, event mapping, and error classification baseline landed
   - provider-neutral tool metadata is now part of the request contract
+- mainline/wiki sync:
+  - wiki generated from mainline call must stay in sync with provider semantic owner code and function map updates

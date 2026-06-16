@@ -302,6 +302,8 @@ If a problem does not fit this table, update this routing index before making co
   - provider-to-reason integration smoke
 - test_design_doc: `docs/testing/provider.semantic.md`
 - function_map_doc: `docs/function-maps/provider.semantic.md`
+- mainline_call_doc: `docs/mainline-calls/provider.semantic.json`
+- generated_wiki_doc: `docs/wiki/provider.semantic.md`
 - debug_artifacts:
   - provider replay fixture path
   - provider raw event fixture path
@@ -321,6 +323,7 @@ If a problem does not fit this table, update this routing index before making co
   - debug and non-debug retention policies remain explicit
   - provider semantic layer remains independent from `freehand-reason`
   - metadata and request-chain data remain type-isolated
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `provider.openai-adapter`
 

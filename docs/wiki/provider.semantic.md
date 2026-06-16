@@ -1,18 +1,12 @@
-# Function Map: `provider.semantic`
+# Wiki: `provider.semantic`
 
-- feature_id: `provider.semantic`
+Generated from `docs/mainline-calls/provider.semantic.json`. Do not edit by hand.
+
 - owner crate: `crates/freehand-provider-core`
 - owner module: `crates/freehand-provider-core/src/lib.rs`
-- mainline call source: `docs/mainline-calls/provider.semantic.json`
+- function map: `docs/function-maps/provider.semantic.md`
 - generated wiki: `docs/wiki/provider.semantic.md`
-- owner entry symbols:
-  - `build_semantic_request`
-  - `ProviderToolDefinition`
-  - `ProviderToolChoice`
-  - `ProviderToolExchange`
-  - `map_adapter_event`
-  - `map_adapter_events`
-  - `classify_provider_error`
+- test design: `docs/testing/provider.semantic.md`
 
 ## Request Mainline
 
@@ -59,18 +53,18 @@
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `build_semantic_request` | `crates/freehand-provider-core/src/lib.rs` | build semantic provider request and retention policy | typed provider payload + debug flag | provider semantic request | reason/orchestrator | provider core boundary | bound |
+| 01 | `build_semantic_request` | `crates/freehand-provider-core/src/lib.rs` | build semantic provider request and retention policy | typed provider payload plus debug flag | provider semantic request | reason/orchestrator | provider core boundary | bound |
 | 02 | `ProviderToolDefinition` | `crates/freehand-provider-core/src/lib.rs` | carry provider-neutral tool schema metadata outside request text | tool name/description/input schema | adapter-renderable tool metadata | live bridge/tests | provider semantic request | bound |
-| 03 | `ProviderToolExchange` | `crates/freehand-provider-core/src/lib.rs` | carry provider-neutral tool call/result continuation outside request text | tool call + tool result re-entry | adapter-renderable tool continuation | live bridge/tests | provider semantic request | bound |
+| 03 | `ProviderToolExchange` | `crates/freehand-provider-core/src/lib.rs` | carry provider-neutral tool call/result continuation outside request text | tool call plus tool result re-entry | adapter-renderable tool continuation | live bridge/tests | provider semantic request | bound |
 | 04 | `map_adapter_event` | `crates/freehand-provider-core/src/lib.rs` | map normalized adapter event into shared semantic output | normalized adapter event | semantic output | adapter runtime | semantic mapper | bound |
 | 05 | `map_adapter_events` | `crates/freehand-provider-core/src/lib.rs` | map normalized adapter event batch into shared semantic outputs | normalized adapter event batch | semantic output batch | adapter runtime | semantic mapper | bound |
 | 06 | `classify_provider_error` | `crates/freehand-provider-core/src/lib.rs` | classify provider failure into shared error contract | provider error hint | unified error contract | adapter/runtime | error classifier | bound |
 
-## Sync Status Against Code
+## Sync Status Against Mainline Call
 
 - semantic request builder, single-event mapper, batch mapper, and error classifier are bound in code
 - semantic request builder now consumes validated `input_segments` payload contract before adapter rendering
 - provider-neutral tool schema, tool choice, and tool exchange metadata are bound on `ProviderSemanticRequest`
 - provider semantic layer is independent from provider adapter implementation details and from `freehand-reason` implementation crate
 - metadata/request hard isolation is required architecture truth but still needs dedicated type/gate closeout
-- the generated wiki must be regenerated from `docs/mainline-calls/provider.semantic.json` when this function-map truth changes
+- generated wiki must be regenerated from `docs/mainline-calls/provider.semantic.json` when this function-map truth changes

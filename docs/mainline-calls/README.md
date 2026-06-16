@@ -13,6 +13,7 @@ This directory is the machine-readable mainline call source of truth for migrate
 Current migrated features:
 
 - `provider.reason-live-bridge`
+- `provider.semantic`
 - `tool.registry`
 - `ui.protocol`
 - `reason.turn`

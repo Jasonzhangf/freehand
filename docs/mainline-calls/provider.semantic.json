@@ -1,0 +1,136 @@
+{
+  "feature_id": "provider.semantic",
+  "owner_crate": "crates/freehand-provider-core",
+  "owner_module": "crates/freehand-provider-core/src/lib.rs",
+  "function_map_doc": "docs/function-maps/provider.semantic.md",
+  "test_design_doc": "docs/testing/provider.semantic.md",
+  "mainline_call_doc": "docs/mainline-calls/provider.semantic.json",
+  "generated_wiki_doc": "docs/wiki/provider.semantic.md",
+  "request_mainline": [
+    "normalized provider request enters provider semantic boundary",
+    "provider semantic request must validate the typed provider payload contract before adapter rendering",
+    "OpenAI-compatible request path explicitly supports `responses`",
+    "OpenAI-compatible request path explicitly supports `chat completions`",
+    "provider-specific adapters render wire payloads without leaking adapter DTOs outside adapter crates",
+    "provider semantic request must stay provider-neutral",
+    "provider metadata and request content must stay separate types",
+    "provider semantic request may carry provider-neutral tool metadata as `ProviderToolDefinition`, `ProviderToolChoice`, and `ProviderToolExchange`; these are not request text and must be rendered only by adapter owners",
+    "`freehand-provider-core` may bridge reason to provider, but must not import `freehand-reason` implementation truth"
+  ],
+  "response_mainline": [
+    "provider raw stream or single-shot output becomes unified semantic events",
+    "semantic output carries text, reasoning, tool, usage, terminal, and error semantics",
+    "tool-use output maps to shared `ReasonReq04ToolCall`; tool-result continuation maps to shared `ReasonReq05ToolResultReentry`",
+    "provider stop/finish signals remain metadata/usage signals until `freehand-reason` decides terminal truth"
+  ],
+  "error_mainline": [
+    "provider errors are classified into unified error contracts",
+    "periodic-recoverable errors preserve recovery windows in seconds",
+    "debug/raw retention stays separate from normal semantic output",
+    "metadata/request boundary confusion is architecture-invalid and should be blocked by future gate work"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "classify_provider_error",
+      "owner": "crates/freehand-provider-core/src/lib.rs",
+      "purpose": "unify provider failures into shared recovery/error contract",
+      "allowed_callers": [
+        "provider adapters",
+        "tests"
+      ],
+      "related_tests": [
+        "periodic recovery classification tests"
+      ],
+      "why_shared": "keeps recovery policy centralized instead of duplicated per adapter"
+    },
+    {
+      "symbol": "map_adapter_events",
+      "owner": "crates/freehand-provider-core/src/lib.rs",
+      "purpose": "map one provider-parser output batch into shared semantic outputs",
+      "allowed_callers": [
+        "provider adapters",
+        "tests"
+      ],
+      "related_tests": [
+        "openai/anthropic adapter parser tests"
+      ],
+      "why_shared": "keeps event-batch normalization centralized instead of each adapter hand-looping output conversion"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "build_semantic_request",
+      "file_path": "crates/freehand-provider-core/src/lib.rs",
+      "responsibility": "build semantic provider request and retention policy",
+      "input_semantic": "typed provider payload plus debug flag",
+      "output_semantic": "provider semantic request",
+      "caller": "reason/orchestrator",
+      "callee": "provider core boundary",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "ProviderToolDefinition",
+      "file_path": "crates/freehand-provider-core/src/lib.rs",
+      "responsibility": "carry provider-neutral tool schema metadata outside request text",
+      "input_semantic": "tool name/description/input schema",
+      "output_semantic": "adapter-renderable tool metadata",
+      "caller": "live bridge/tests",
+      "callee": "provider semantic request",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "ProviderToolExchange",
+      "file_path": "crates/freehand-provider-core/src/lib.rs",
+      "responsibility": "carry provider-neutral tool call/result continuation outside request text",
+      "input_semantic": "tool call plus tool result re-entry",
+      "output_semantic": "adapter-renderable tool continuation",
+      "caller": "live bridge/tests",
+      "callee": "provider semantic request",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "map_adapter_event",
+      "file_path": "crates/freehand-provider-core/src/lib.rs",
+      "responsibility": "map normalized adapter event into shared semantic output",
+      "input_semantic": "normalized adapter event",
+      "output_semantic": "semantic output",
+      "caller": "adapter runtime",
+      "callee": "semantic mapper",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "map_adapter_events",
+      "file_path": "crates/freehand-provider-core/src/lib.rs",
+      "responsibility": "map normalized adapter event batch into shared semantic outputs",
+      "input_semantic": "normalized adapter event batch",
+      "output_semantic": "semantic output batch",
+      "caller": "adapter runtime",
+      "callee": "semantic mapper",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "classify_provider_error",
+      "file_path": "crates/freehand-provider-core/src/lib.rs",
+      "responsibility": "classify provider failure into shared error contract",
+      "input_semantic": "provider error hint",
+      "output_semantic": "unified error contract",
+      "caller": "adapter/runtime",
+      "callee": "error classifier",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "semantic request builder, single-event mapper, batch mapper, and error classifier are bound in code",
+    "semantic request builder now consumes validated `input_segments` payload contract before adapter rendering",
+    "provider-neutral tool schema, tool choice, and tool exchange metadata are bound on `ProviderSemanticRequest`",
+    "provider semantic layer is independent from provider adapter implementation details and from `freehand-reason` implementation crate",
+    "metadata/request hard isolation is required architecture truth but still needs dedicated type/gate closeout",
+    "generated wiki must be regenerated from `docs/mainline-calls/provider.semantic.json` when this function-map truth changes"
+  ]
+}

@@ -246,3 +246,6 @@
 - 2026-06-16: `provider.reason-live-bridge` migrated into the mainline/wiki chain
   - `docs/mainline-calls/provider.reason-live-bridge.json` is now the machine-readable live-bridge mainline truth
   - `docs/wiki/provider.reason-live-bridge.md` is generated from it
+- 2026-06-16: `provider.semantic` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/provider.semantic.json` is now the machine-readable provider-semantic mainline truth
+  - `docs/wiki/provider.semantic.md` is generated from it

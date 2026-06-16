@@ -417,3 +417,7 @@
   - migrated `provider.reason-live-bridge` into `docs/mainline-calls/provider.reason-live-bridge.json`
   - generated `docs/wiki/provider.reason-live-bridge.md`
   - live bridge now has the same mainline/wiki split as tool, UI protocol, and reason turn
+- 2026-06-16: fifth migrated mainline/wiki sample landed in progress
+  - migrated `provider.semantic` into `docs/mainline-calls/provider.semantic.json`
+  - generated `docs/wiki/provider.semantic.md`
+  - provider semantic owner now has machine-readable mainline truth alongside the function map
