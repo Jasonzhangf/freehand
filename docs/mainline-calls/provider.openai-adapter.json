@@ -1,0 +1,77 @@
+{
+  "feature_id": "provider.openai-adapter",
+  "owner_crate": "crates/freehand-provider-openai",
+  "owner_module": "crates/freehand-provider-openai/src/lib.rs",
+  "function_map_doc": "docs/function-maps/provider.openai-adapter.md",
+  "test_design_doc": "docs/testing/provider.openai-adapter.md",
+  "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
+  "generated_wiki_doc": "docs/wiki/provider.openai-adapter.md",
+  "request_mainline": [
+    "provider-neutral semantic request enters OpenAI adapter",
+    "adapter renders either `responses` or `chat completions` request body based on selected protocol",
+    "adapter consumes typed `input_segments` and renders them to OpenAI wire text without owning segment admission truth"
+  ],
+  "response_mainline": [
+    "OpenAI single-shot body or stream chunk becomes provider-neutral semantic output",
+    "partial tool calls stay adapter-local until enough JSON exists to emit structured arguments"
+  ],
+  "error_mainline": [
+    "unsupported protocol, invalid JSON body, and invalid tool-argument payload are explicit adapter errors",
+    "OpenAI finish reasons are semantic metadata, not Freehand completion truth"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "parse_tool_arguments_json",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "convert tool argument JSON string into shared structured tool arguments",
+      "allowed_callers": [
+        "provider adapters",
+        "tests"
+      ],
+      "related_tests": [
+        "OpenAI tool-call parser tests",
+        "Anthropic tool-use parser tests"
+      ],
+      "why_shared": "keeps tool-argument parsing centralized instead of duplicated per adapter"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "OpenAiAdapter::render_request",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "render semantic request to OpenAI wire request",
+      "input_semantic": "provider semantic request",
+      "output_semantic": "OpenAI path plus JSON body",
+      "caller": "runtime/provider caller",
+      "callee": "adapter renderer",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "OpenAiAdapter::parse_response",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "parse single-shot OpenAI response",
+      "input_semantic": "raw response body",
+      "output_semantic": "provider semantic outputs",
+      "caller": "runtime/provider caller",
+      "callee": "adapter parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "OpenAiAdapter::parse_stream_event",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "parse one OpenAI stream event and update partial state",
+      "input_semantic": "raw stream event",
+      "output_semantic": "provider semantic outputs",
+      "caller": "runtime/provider caller",
+      "callee": "adapter stream parser",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "renderer and parser bindings now match `OpenAiAdapter`",
+    "generated wiki must be regenerated from `docs/mainline-calls/provider.openai-adapter.json` when this function-map truth changes"
+  ]
+}

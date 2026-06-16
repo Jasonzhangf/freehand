@@ -252,3 +252,6 @@
 - 2026-06-16: `provider.anthropic-adapter` migrated into the mainline/wiki chain
   - `docs/mainline-calls/provider.anthropic-adapter.json` is now the machine-readable Anthropic adapter mainline truth
   - `docs/wiki/provider.anthropic-adapter.md` is generated from it
+- 2026-06-16: `provider.openai-adapter` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/provider.openai-adapter.json` is now the machine-readable OpenAI-compatible adapter mainline truth
+  - `docs/wiki/provider.openai-adapter.md` is generated from it

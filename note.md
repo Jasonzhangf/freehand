@@ -425,3 +425,7 @@
   - migrated `provider.anthropic-adapter` into `docs/mainline-calls/provider.anthropic-adapter.json`
   - generated `docs/wiki/provider.anthropic-adapter.md`
   - Anthropic wire owner now has machine-readable mainline truth alongside the function map
+- 2026-06-16: seventh migrated mainline/wiki sample landed in progress
+  - migrated `provider.openai-adapter` into `docs/mainline-calls/provider.openai-adapter.json`
+  - generated `docs/wiki/provider.openai-adapter.md`
+  - OpenAI-compatible wire owner now has machine-readable mainline truth alongside the function map

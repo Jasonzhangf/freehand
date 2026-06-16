@@ -1,15 +1,12 @@
-# Function Map: `provider.openai-adapter`
+# Wiki: `provider.openai-adapter`
 
-- feature_id: `provider.openai-adapter`
+Generated from `docs/mainline-calls/provider.openai-adapter.json`. Do not edit by hand.
+
 - owner crate: `crates/freehand-provider-openai`
 - owner module: `crates/freehand-provider-openai/src/lib.rs`
-- mainline call source: `docs/mainline-calls/provider.openai-adapter.json`
+- function map: `docs/function-maps/provider.openai-adapter.md`
 - generated wiki: `docs/wiki/provider.openai-adapter.md`
-- owner entry symbols:
-  - `OpenAiAdapter::new`
-  - `OpenAiAdapter::render_request`
-  - `OpenAiAdapter::parse_response`
-  - `OpenAiAdapter::parse_stream_event`
+- test design: `docs/testing/provider.openai-adapter.md`
 
 ## Request Mainline
 
@@ -40,11 +37,11 @@
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `OpenAiAdapter::render_request` | `crates/freehand-provider-openai/src/lib.rs` | render semantic request to OpenAI wire request | provider semantic request | OpenAI path + JSON body | runtime/provider caller | adapter renderer | bound |
+| 01 | `OpenAiAdapter::render_request` | `crates/freehand-provider-openai/src/lib.rs` | render semantic request to OpenAI wire request | provider semantic request | OpenAI path plus JSON body | runtime/provider caller | adapter renderer | bound |
 | 02 | `OpenAiAdapter::parse_response` | `crates/freehand-provider-openai/src/lib.rs` | parse single-shot OpenAI response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser | bound |
 | 03 | `OpenAiAdapter::parse_stream_event` | `crates/freehand-provider-openai/src/lib.rs` | parse one OpenAI stream event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser | bound |
 
-## Sync Status Against Code
+## Sync Status Against Mainline Call
 
 - renderer and parser bindings now match `OpenAiAdapter`
-- the generated wiki must be regenerated from `docs/mainline-calls/provider.openai-adapter.json` when this function-map truth changes
+- generated wiki must be regenerated from `docs/mainline-calls/provider.openai-adapter.json` when this function-map truth changes

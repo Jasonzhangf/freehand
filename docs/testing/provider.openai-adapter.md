@@ -22,3 +22,5 @@
   - `OpenAiAdapter` baseline implemented
   - request rendering covers `responses` and `chat completions` from typed input segments
   - single-shot and stream parsing cover text, tool calls, usage, terminal, and error paths
+- mainline/wiki sync:
+  - wiki generated from mainline call must stay in sync with OpenAI adapter owner code and function map updates
