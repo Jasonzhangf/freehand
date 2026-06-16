@@ -427,6 +427,8 @@ If a problem does not fit this table, update this routing index before making co
   - daemon submit-user-input HTTP smoke against local anthropic-compatible mock server
 - test_design_doc: `docs/testing/provider.reason-live-bridge.md`
 - function_map_doc: `docs/function-maps/provider.reason-live-bridge.md`
+- mainline_call_doc: `docs/mainline-calls/provider.reason-live-bridge.json`
+- generated_wiki_doc: `docs/wiki/provider.reason-live-bridge.md`
 - debug_artifacts:
   - live bridge replay fixture path
   - local mock transcript fixtures
@@ -444,6 +446,7 @@ If a problem does not fit this table, update this routing index before making co
   - live bridge owns runtime composition without duplicating adapter semantics
   - anthropic live path is closed-loop from config selection to turn truth, persistence, and UI projection
   - completion schema loop remains bridge composition, not provider or app semantics
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `tool.registry`
 

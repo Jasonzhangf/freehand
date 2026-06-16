@@ -413,3 +413,7 @@
   - migrated `reason.turn` into `docs/mainline-calls/reason.turn.json`
   - generated `docs/wiki/reason.turn.md`
   - `feature-map`, function-map, testing doc, mainline source, and wiki now all point to the same reason-turn owner path
+- 2026-06-16: fourth migrated mainline/wiki sample landed in progress
+  - migrated `provider.reason-live-bridge` into `docs/mainline-calls/provider.reason-live-bridge.json`
+  - generated `docs/wiki/provider.reason-live-bridge.md`
+  - live bridge now has the same mainline/wiki split as tool, UI protocol, and reason turn

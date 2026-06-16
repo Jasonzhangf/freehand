@@ -50,3 +50,5 @@
   - anthropic-only live bridge owner is now `freehand-runtime`
   - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, and persistence restore
   - runtime dispatch and daemon black-box coverage are landed against local mock providers
+- mainline/wiki sync:
+  - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates

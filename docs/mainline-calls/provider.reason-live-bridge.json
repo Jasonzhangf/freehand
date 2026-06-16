@@ -1,0 +1,244 @@
+{
+  "feature_id": "provider.reason-live-bridge",
+  "owner_crate": "crates/freehand-runtime",
+  "owner_module": "crates/freehand-runtime/src/lib.rs",
+  "function_map_doc": "docs/function-maps/provider.reason-live-bridge.md",
+  "test_design_doc": "docs/testing/provider.reason-live-bridge.md",
+  "mainline_call_doc": "docs/mainline-calls/provider.reason-live-bridge.json",
+  "generated_wiki_doc": "docs/wiki/provider.reason-live-bridge.md",
+  "request_mainline": [
+    "selected agent config enters the runtime-owned live bridge with one bound provider",
+    "live bridge restores or creates the requested session through `ReasonPersistence` before round execution",
+    "bridge derives provider descriptor and executor config from selected provider truth",
+    "`reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry",
+    "provider semantic request is built from each round's turn-owned provider payload",
+    "the first tool-capable request exposes a Reasonix-aligned runtime tool registry through provider-neutral request metadata",
+    "Anthropic live executor runs the HTTP/SSE request and returns provider-neutral semantic outputs for each round",
+    "stream mode applies outputs incrementally through the executor callback path before the provider response completes",
+    "completed provider tool calls are executed by `freehand-tools`, written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a tool result exchange",
+    "completion schema is parsed from tagged text, validated, and either accepted, rejected with field-level feedback, or used to schedule the next round",
+    "runtime dispatch callers may consume the same bridge through CLI or daemon command ingress without owning provider DTOs"
+  ],
+  "response_mainline": [
+    "provider-neutral outputs are applied back into the active round through `ReasonTurnEngine::apply_provider_output`",
+    "every applied live semantic output is recorded through `ReasonPersistence::record_provider_output_applied`",
+    "tool-result re-entry is recorded in turn truth and persisted before the next provider request",
+    "completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`",
+    "terminal turns are materialized through `ReasonPersistence::record_turn_closed`",
+    "retry exhaustion writes failed terminal truth through `ReasonTurnEngine::fail_turn`",
+    "bridge returns final turn truth, all round turns, captured broadcast events, schema rejection ledger, tool execution count, restore status, and live-output summary without leaking wire DTOs",
+    "runtime callers project the final turn into `UiProtocolState` from one shared runtime owner path"
+  ],
+  "error_mainline": [
+    "unsupported provider type/protocol is rejected at the bridge boundary",
+    "provider execution failures are returned explicitly",
+    "invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times",
+    "incomplete tool calls are not executed and do not become tool-result truth",
+    "unknown tool names fail explicitly instead of being ignored",
+    "registered but unimplemented tool names fail explicitly instead of being treated as successful fallback",
+    "persistence restore/write failures fail the live bridge explicitly",
+    "provider terminal metadata does not become final completion truth without accepted Freehand completion schema"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "build_semantic_request",
+      "owner": "crates/freehand-provider-core/src/lib.rs",
+      "purpose": "convert turn-owned provider payload plus provider descriptor into provider-neutral request truth",
+      "allowed_callers": [
+        "runtime bridges",
+        "tests"
+      ],
+      "related_tests": [
+        "provider semantic request tests",
+        "live bridge request build tests"
+      ],
+      "why_shared": "keeps provider-neutral request ownership centralized"
+    },
+    {
+      "symbol": "ReasonPersistence::restore",
+      "owner": "crates/freehand-reason/src/persistence.rs",
+      "purpose": "recover authoritative session truth before live execution",
+      "allowed_callers": [
+        "reason runtime/harness owners only"
+      ],
+      "related_tests": [
+        "reason persistence restore tests",
+        "live bridge restore tests"
+      ],
+      "why_shared": "live and smoke recovery must use the same authoritative truth path"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "run_live_reason_turn",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "compose config-selected provider execution with one reason turn",
+      "input_semantic": "selected agent config plus prompt plus stream mode",
+      "output_semantic": "turn truth plus broadcast capture plus output summary",
+      "caller": "CLI/runtime dispatch/tests",
+      "callee": "live bridge owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "ReasonPersistence::restore",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "restore existing authoritative session truth",
+      "input_semantic": "runtime home plus agent plus session id",
+      "output_semantic": "session history plus prior turns or explicit missing truth",
+      "caller": "live bridge",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "ReasonTurnEngine::start_turn",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "create one round turn and provider payload",
+      "input_semantic": "session history plus prompt",
+      "output_semantic": "initialized turn record",
+      "caller": "live bridge",
+      "callee": "reason owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "ReasonPersistence::record_turn_started",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "persist live round start",
+      "input_semantic": "session history plus active turn",
+      "output_semantic": "reason ledger row plus active-turn snapshot",
+      "caller": "live bridge",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "build_semantic_request",
+      "file_path": "crates/freehand-provider-core/src/lib.rs",
+      "responsibility": "build provider-neutral request",
+      "input_semantic": "provider descriptor plus provider payload",
+      "output_semantic": "provider semantic request",
+      "caller": "live bridge",
+      "callee": "provider semantic owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "AnthropicExecutor::execute_once",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "execute one non-stream Anthropic request",
+      "input_semantic": "provider semantic request plus auth/base URL",
+      "output_semantic": "provider semantic outputs",
+      "caller": "live bridge",
+      "callee": "anthropic executor",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "AnthropicExecutor::execute_stream_with",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "execute one stream Anthropic request and call back per semantic batch before completion",
+      "input_semantic": "provider semantic request plus auth/base URL plus callback",
+      "output_semantic": "incremental semantic output batches plus accumulated outputs",
+      "caller": "live bridge",
+      "callee": "anthropic executor",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "ReasonTurnEngine::apply_provider_output",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "write provider-neutral outputs into turn truth",
+      "input_semantic": "provider semantic output",
+      "output_semantic": "updated turn record plus broadcast",
+      "caller": "live bridge",
+      "callee": "reason owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "ReasonPersistence::record_provider_output_applied",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "persist live semantic output application",
+      "input_semantic": "session history plus active turn plus provider-neutral output",
+      "output_semantic": "reason ledger row plus active-turn snapshot",
+      "caller": "live bridge",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "BuiltinToolRegistry::reasonix_aligned / BuiltinToolRegistry::execute",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "export Reasonix-aligned tool schemas and execute implemented tool calls",
+      "input_semantic": "complete tool call",
+      "output_semantic": "tool execution output or explicit tool error",
+      "caller": "live bridge",
+      "callee": "tool registry owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11",
+      "symbol_path": "parse_completion_submission_block",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "responsibility": "parse tagged completion schema from model text",
+      "input_semantic": "model text",
+      "output_semantic": "typed submission or schema rejection list",
+      "caller": "live bridge",
+      "callee": "blocks owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "12",
+      "symbol_path": "ReasonPersistence::record_completion_rejected",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "persist schema rejection evidence",
+      "input_semantic": "schema rejection plus active turn",
+      "output_semantic": "reason ledger row plus active-turn snapshot",
+      "caller": "live bridge",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "ReasonTurnEngine::submit_completion",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "write accepted completed/blocked terminal truth",
+      "input_semantic": "validated completion submission",
+      "output_semantic": "terminal event",
+      "caller": "live bridge",
+      "callee": "reason owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "ReasonTurnEngine::fail_turn",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "write failed terminal truth after schema retry exhaustion",
+      "input_semantic": "retry-exhausted failure summary",
+      "output_semantic": "terminal event",
+      "caller": "live bridge",
+      "callee": "reason owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "15",
+      "symbol_path": "ReasonPersistence::record_turn_closed",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "materialize terminal live turn",
+      "input_semantic": "terminal turn truth",
+      "output_semantic": "closed turn snapshot plus sidecars/index",
+      "caller": "live bridge",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "current live path supports Anthropic `messages` only",
+    "runtime owner path preserves incremental stream apply, completion schema loop, persistence, and registry-backed tool loop without duplicating adapter semantics",
+    "CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`",
+    "generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes"
+  ]
+}

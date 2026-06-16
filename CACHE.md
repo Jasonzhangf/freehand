@@ -243,3 +243,6 @@
   - `docs/mainline-calls/reason.turn.json` is now the machine-readable reason-turn mainline truth
   - `docs/wiki/reason.turn.md` is generated from it
   - `xtask gates check` now requires the reason-turn mainline source and generated wiki files
+- 2026-06-16: `provider.reason-live-bridge` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/provider.reason-live-bridge.json` is now the machine-readable live-bridge mainline truth
+  - `docs/wiki/provider.reason-live-bridge.md` is generated from it
