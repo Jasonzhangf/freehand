@@ -1,12 +1,12 @@
 # CACHE
 
 - Current branch: `main`.
-- Current milestone: WebUI/runtime stop-cancel path closed through protocol/runtime/UI.
+- Current milestone: stability-quality gate hardening.
 - Last verified baseline:
   - `cargo fmt --all --check`
   - `cargo build --workspace`
   - `cargo clippy --workspace --all-targets -- -D warnings`
-  - `cargo test --workspace` -> 221 passed
+  - `cargo test --workspace` -> 224 passed
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - Real provider daemon smoke passed on 2026-06-17:
@@ -29,5 +29,8 @@
 - Docs/mainline sync:
   - updated function maps, test designs, `docs/mainline-calls/**`, and regenerated `docs/wiki/**`
   - generated wiki must continue to come from `cargo run -p xtask -- mainlines generate`
+- Stability gate update:
+  - `xtask gates check` now validates migrated mainline manifests as cross-linked compiled review surfaces
+  - each `docs/mainline-calls/<feature_id>.json` must match canonical function map, test design, generated wiki, and feature-map links
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.

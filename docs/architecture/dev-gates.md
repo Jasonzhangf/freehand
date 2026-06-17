@@ -57,3 +57,15 @@ If a layer is intentionally not yet present for a feature, that absence must be 
 - runtime home is `~/.freehand`
 - truth change requires same-task updates to map, docs, skill, and memory
 - `AGENTS.md` is router only; detailed truth must live in `docs/`
+
+## Mainline Manifest Gate
+
+`xtask gates check` validates migrated mainline-call sources as deterministic manifests:
+
+- `docs/mainline-calls/<feature_id>.json` path must match its internal `feature_id`
+- `function_map_doc`, `test_design_doc`, and `generated_wiki_doc` must point to the canonical feature paths
+- function map and test design must contain the same `feature_id`
+- function map must reference the same mainline-call source
+- feature map must link the mainline-call source and generated wiki path
+
+This keeps generated wiki artifacts as compiled review surfaces over one machine-readable truth instead of independent hand-maintained docs.

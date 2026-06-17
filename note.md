@@ -223,6 +223,11 @@
   - identified two blockers: blank latest-turn SSE returned 404 before first turn, and public conversation projection lost user input after real turn projection arrived
   - chosen fix: query remains snapshot-only 404 on blank state; subscribe stays open and waits for first matching turn; `UiTurnProjection` carries optional `user_text` from reason request truth into public conversation projection
   - goal: replace collected-SSE runtime path with true incremental callback/apply path
+- 2026-06-17: stability-quality gate slice
+  - rooted from owner map: `foundation.workspace`
+  - evidence: existing gate enforces required files, policy snippets, workspace members, app dependency boundaries, and generated wiki freshness
+  - identified low-noise gap: migrated mainline JSON sources are generated into wiki, but gate does not yet validate the compiled-manifest cross-links back to feature map, function map, and test design
+  - chosen fix: add `xtask` mainline manifest link validation with positive and negative tests, keeping product behavior unchanged
 - 2026-06-15: completion schema loop requirement confirmed
   - must guide schema in prompt/context
   - must validate schema structurally and semantically

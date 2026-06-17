@@ -196,6 +196,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_skill_rules(&root)?;
     verify_orchestrator_policy_docs(&root)?;
     verify_generated_wiki(&root)?;
+    verify_mainline_manifest_links(&root)?;
     verify_webui_app_boundary(&root)?;
     verify_runtime_daemon_boundary(&root)?;
     Ok(())
@@ -256,6 +257,7 @@ fn verify_skill_rules(root: &Path) -> Result<(), String> {
         "request mainline",
         "response mainline",
         "function-call tables",
+        "compiled manifests",
         "Do not add temporary helpers to `crates/freehand-reason` or `crates/freehand-node`.",
         "module white-box tests",
         "module black-box tests",
@@ -342,6 +344,17 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
                 "machine-readable mainline call",
                 "source of truth",
                 "generated wiki",
+            ],
+        ),
+        (
+            root.join("docs/architecture/dev-gates.md"),
+            &[
+                "Mainline Manifest Gate",
+                "deterministic manifests",
+                "function_map_doc",
+                "test_design_doc",
+                "generated_wiki_doc",
+                "compiled review surfaces",
             ],
         ),
         (
@@ -583,24 +596,13 @@ fn generate_mainline_wikis(root: &Path, write: bool) -> Result<(), String> {
 }
 
 fn render_all_mainline_wikis(root: &Path) -> Result<Vec<(PathBuf, String)>, String> {
-    let docs_dir = root.join("docs/mainline-calls");
-    let mut source_paths = Vec::new();
-    for entry in fs::read_dir(&docs_dir).map_err(|err| err.to_string())? {
-        let entry = entry.map_err(|err| err.to_string())?;
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
-            source_paths.push(path);
-        }
-    }
-    source_paths.sort();
-
     let mut generated = Vec::new();
     let mut wiki_index = String::new();
     wiki_index.push_str("# Generated Wiki Index\n\n");
     wiki_index.push_str(
         "Generated wiki artifacts from machine-readable mainline call source files. Do not edit by hand.\n\n",
     );
-    for source_path in source_paths {
+    for source_path in mainline_source_paths(root)? {
         let doc = load_mainline_doc(&source_path)?;
         let wiki_path = root.join(&doc.generated_wiki_doc);
         let wiki_content = render_mainline_wiki(&doc);
@@ -612,6 +614,139 @@ fn render_all_mainline_wikis(root: &Path) -> Result<Vec<(PathBuf, String)>, Stri
     }
     generated.push((root.join("docs/wiki/README.md"), wiki_index));
     Ok(generated)
+}
+
+fn verify_mainline_manifest_links(root: &Path) -> Result<(), String> {
+    let feature_map_path = root.join("docs/architecture/feature-map.md");
+    let feature_map = fs::read_to_string(&feature_map_path)
+        .map_err(|err| format!("read feature map {}: {err}", feature_map_path.display()))?;
+
+    for source_path in mainline_source_paths(root)? {
+        let doc = load_mainline_doc(&source_path)?;
+        let source_rel = relative_slash_path(root, &source_path)?;
+        let expected_mainline = format!("docs/mainline-calls/{}.json", doc.feature_id);
+        let expected_function_map = format!("docs/function-maps/{}.md", doc.feature_id);
+        let expected_test_design = format!("docs/testing/{}.md", doc.feature_id);
+        let expected_wiki = format!("docs/wiki/{}.md", doc.feature_id);
+
+        require_equal(
+            &source_rel,
+            &expected_mainline,
+            &doc.feature_id,
+            "source path",
+        )?;
+        require_equal(
+            &doc.mainline_call_doc,
+            &expected_mainline,
+            &doc.feature_id,
+            "mainline_call_doc",
+        )?;
+        require_equal(
+            &doc.function_map_doc,
+            &expected_function_map,
+            &doc.feature_id,
+            "function_map_doc",
+        )?;
+        require_equal(
+            &doc.test_design_doc,
+            &expected_test_design,
+            &doc.feature_id,
+            "test_design_doc",
+        )?;
+        require_equal(
+            &doc.generated_wiki_doc,
+            &expected_wiki,
+            &doc.feature_id,
+            "generated_wiki_doc",
+        )?;
+
+        let function_map_path = root.join(&doc.function_map_doc);
+        let function_map = fs::read_to_string(&function_map_path)
+            .map_err(|err| format!("read function map {}: {err}", function_map_path.display()))?;
+        let test_design_path = root.join(&doc.test_design_doc);
+        let test_design = fs::read_to_string(&test_design_path)
+            .map_err(|err| format!("read test design {}: {err}", test_design_path.display()))?;
+        let generated_wiki_path = root.join(&doc.generated_wiki_doc);
+        if !generated_wiki_path.is_file() {
+            return Err(format!(
+                "mainline manifest `{}` references missing generated wiki `{}`",
+                doc.feature_id,
+                generated_wiki_path.display()
+            ));
+        }
+
+        require_contains(
+            &function_map,
+            &format!("- feature_id: `{}`", doc.feature_id),
+            &doc.function_map_doc,
+        )?;
+        require_contains(&function_map, &doc.mainline_call_doc, &doc.function_map_doc)?;
+        require_contains(
+            &test_design,
+            &format!("- feature_id: `{}`", doc.feature_id),
+            &doc.test_design_doc,
+        )?;
+        require_contains(
+            &feature_map,
+            &doc.mainline_call_doc,
+            "docs/architecture/feature-map.md",
+        )?;
+        require_contains(
+            &feature_map,
+            &doc.generated_wiki_doc,
+            "docs/architecture/feature-map.md",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn mainline_source_paths(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let docs_dir = root.join("docs/mainline-calls");
+    let mut source_paths = Vec::new();
+    for entry in fs::read_dir(&docs_dir).map_err(|err| err.to_string())? {
+        let entry = entry.map_err(|err| err.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            source_paths.push(path);
+        }
+    }
+    source_paths.sort();
+    Ok(source_paths)
+}
+
+fn relative_slash_path(root: &Path, path: &Path) -> Result<String, String> {
+    let relative = path.strip_prefix(root).map_err(|err| {
+        format!(
+            "path {} is not under repo root {}: {err}",
+            path.display(),
+            root.display()
+        )
+    })?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn require_equal(
+    actual: &str,
+    expected: &str,
+    feature_id: &str,
+    field: &str,
+) -> Result<(), String> {
+    if actual != expected {
+        return Err(format!(
+            "mainline manifest `{feature_id}` has invalid {field}: expected `{expected}`, got `{actual}`"
+        ));
+    }
+    Ok(())
+}
+
+fn require_contains(text: &str, snippet: &str, rel_path: &str) -> Result<(), String> {
+    if !text.contains(snippet) {
+        return Err(format!(
+            "mainline manifest cross-link missing `{snippet}` in {rel_path}"
+        ));
+    }
+    Ok(())
 }
 
 fn load_mainline_doc(path: &Path) -> Result<MainlineCallDoc, String> {
@@ -770,4 +905,119 @@ fn verify_runtime_daemon_boundary(root: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn mainline_manifest_links_accept_aligned_docs() {
+        let root = test_repo_root("aligned");
+        write_mainline_fixture(&root, FixtureMode::Aligned);
+
+        verify_mainline_manifest_links(&root).expect("aligned manifest links should pass");
+    }
+
+    #[test]
+    fn mainline_manifest_links_reject_wrong_function_map_path() {
+        let root = test_repo_root("wrong-function-map");
+        write_mainline_fixture(&root, FixtureMode::WrongFunctionMapPath);
+
+        let err = verify_mainline_manifest_links(&root).expect_err("wrong function map must fail");
+        assert!(err.contains("invalid function_map_doc"), "{err}");
+    }
+
+    #[test]
+    fn mainline_manifest_links_reject_missing_feature_map_link() {
+        let root = test_repo_root("missing-feature-map-link");
+        write_mainline_fixture(&root, FixtureMode::MissingFeatureMapLink);
+
+        let err =
+            verify_mainline_manifest_links(&root).expect_err("missing feature map link must fail");
+        assert!(err.contains("docs/architecture/feature-map.md"), "{err}");
+    }
+
+    enum FixtureMode {
+        Aligned,
+        WrongFunctionMapPath,
+        MissingFeatureMapLink,
+    }
+
+    fn test_repo_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = env::temp_dir().join(format!(
+            "freehand-xtask-{name}-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("create temp repo");
+        root
+    }
+
+    fn write_mainline_fixture(root: &Path, mode: FixtureMode) {
+        create_dirs(root);
+        let feature_id = "demo.feature";
+        let function_map_doc = match mode {
+            FixtureMode::WrongFunctionMapPath => "docs/function-maps/wrong.md",
+            FixtureMode::Aligned | FixtureMode::MissingFeatureMapLink => {
+                "docs/function-maps/demo.feature.md"
+            }
+        };
+        let feature_map = match mode {
+            FixtureMode::MissingFeatureMapLink => "# Feature Map\n",
+            FixtureMode::Aligned | FixtureMode::WrongFunctionMapPath => {
+                "- mainline_call_doc: `docs/mainline-calls/demo.feature.json`\n- generated_wiki_doc: `docs/wiki/demo.feature.md`\n"
+            }
+        };
+        fs::write(root.join("docs/architecture/feature-map.md"), feature_map)
+            .expect("write feature map");
+        fs::write(
+            root.join("docs/function-maps/demo.feature.md"),
+            "- feature_id: `demo.feature`\n- mainline call source: `docs/mainline-calls/demo.feature.json`\n",
+        )
+        .expect("write function map");
+        fs::write(
+            root.join("docs/testing/demo.feature.md"),
+            "- feature_id: `demo.feature`\n",
+        )
+        .expect("write test design");
+        fs::write(root.join("docs/wiki/demo.feature.md"), "# generated\n").expect("write wiki");
+        fs::write(
+            root.join("docs/mainline-calls/demo.feature.json"),
+            format!(
+                r#"{{
+  "feature_id": "{feature_id}",
+  "owner_crate": "demo",
+  "owner_module": "demo/src/lib.rs",
+  "function_map_doc": "{function_map_doc}",
+  "test_design_doc": "docs/testing/demo.feature.md",
+  "mainline_call_doc": "docs/mainline-calls/demo.feature.json",
+  "generated_wiki_doc": "docs/wiki/demo.feature.md",
+  "request_mainline": [],
+  "response_mainline": [],
+  "error_mainline": [],
+  "shared_functions": [],
+  "call_table": [],
+  "sync_status": []
+}}"#
+            ),
+        )
+        .expect("write mainline json");
+    }
+
+    fn create_dirs(root: &Path) {
+        for rel in [
+            "docs/architecture",
+            "docs/function-maps",
+            "docs/testing",
+            "docs/wiki",
+            "docs/mainline-calls",
+        ] {
+            fs::create_dir_all(root.join(rel)).expect("create fixture dir");
+        }
+    }
 }
