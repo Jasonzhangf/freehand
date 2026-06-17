@@ -244,18 +244,18 @@ If a problem does not fit this table, update this routing index before making co
 ### `app.webui-smoke`
 
 - owner: `apps/freehand-server`
-- allowed_paths: `apps/freehand-server/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
-- forbidden_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**`
+- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/goals/**`
+- forbidden_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except consuming already-owned UI protocol projections
 - required_checks:
   - `cargo test -p freehand-server`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
-  - render helper coverage
-  - protocol-only router coverage
-  - dependency boundary scan
+  - none beyond app boundary rendering helpers
 - required_module_black_box_tests:
-  - WebUI command ingress dispatch receipt smoke
+  - WebUI command ingress accept smoke
+  - WebUI command ingress dispatch failure projection smoke
+  - WebUI command ingress dispatch join-failure projection smoke
   - WebUI command ingress query-route-misuse rejection smoke
   - WebUI query projection smoke
   - WebUI debug query projection smoke
@@ -264,7 +264,7 @@ If a problem does not fit this table, update this routing index before making co
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
 - required_project_black_box_tests:
-  - protocol-only app boundary smoke for HTTP query/SSE/command ingress
+  - app boundary WebUI consumes `freehand-ui-protocol` projection truth without provider/reason imports
 - test_design_doc: `docs/testing/app.webui-smoke.md`
 - function_map_doc: `docs/function-maps/app.webui-smoke.md`
 - mainline_call_doc: `docs/mainline-calls/app.webui-smoke.json`
@@ -275,13 +275,16 @@ If a problem does not fit this table, update this routing index before making co
   - `~/.freehand/state/ui`
   - `~/.freehand/replays/ui`
 - update_triggers:
-  - HTTP/SSE route shape changes
-  - static smoke dispatch behavior changes
-  - protocol-only app boundary changes
+  - WebUI command shape changes
+  - WebUI projection shape changes
+  - UI protocol projection rules change
+  - generated wiki freshness policy changes
 - lifecycle_checks:
-  - app remains protocol-only
-  - shared transport helpers remain protocol-only
-  - runtime owner injection stays outside this app crate
+  - WebUI remains app/render boundary only
+  - WebUI consumes `freehand-ui-protocol` truth
+  - query and subscribe remain protocol-owned
+  - slave-card divergence remains protocol-safe
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `app.runtime-daemon`
 
@@ -1099,45 +1102,6 @@ If a problem does not fit this table, update this routing index before making co
   - reason persistence remains separate from checkpoint restore truth
   - writable execution is blocked when checkpoint creation fails
   - rewind remains explicit and does not become fallback
-  - migrated mainline call source and generated wiki stay in sync with the function map
-
-### `app.webui-smoke`
-
-- owner: `apps/freehand-server`
-- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/goals/**`
-- forbidden_paths: `crates/freehand-provider-*/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**` except consuming already-owned UI protocol projections
-- required_checks:
-  - `cargo test -p freehand-server`
-- required_white_box_tests:
-  - none beyond app boundary rendering helpers
-- required_module_black_box_tests:
-  - WebUI command ingress accept smoke
-  - WebUI command ingress query-route-misuse rejection smoke
-  - WebUI query projection smoke
-  - WebUI debug query projection smoke
-  - WebUI latest-turn SSE subscribe smoke
-  - WebUI debug SSE subscribe smoke
-  - WebUI slave-card render smoke
-  - CLI/WebUI divergence smoke via protocol projection
-- required_project_black_box_tests:
-  - app boundary WebUI consumes `freehand-ui-protocol` projection truth without provider/reason imports
-- test_design_doc: `docs/testing/app.webui-smoke.md`
-- function_map_doc: `docs/function-maps/app.webui-smoke.md`
-- debug_artifacts:
-  - WebUI smoke stdout fixture
-- runtime_paths:
-  - `~/.freehand/state/ui`
-  - `~/.freehand/replays/ui`
-- update_triggers:
-  - WebUI command shape changes
-  - WebUI projection shape changes
-  - UI protocol projection rules change
-  - generated wiki freshness policy changes
-- lifecycle_checks:
-  - WebUI remains app/render boundary only
-  - WebUI consumes `freehand-ui-protocol` truth
-  - query and subscribe remain protocol-owned
-  - slave-card divergence remains protocol-safe
   - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `node.master-slave`

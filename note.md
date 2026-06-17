@@ -713,3 +713,23 @@
     - `cargo fmt --all`
     - `cargo fmt --check`
     - `make ci`
+- 2026-06-18: webui command-ingress failure slice
+  - owner route: `app.webui-smoke`
+  - audit target: WebUI app boundary only locked command-ingress success and protocol misuse; dispatch-port failure and spawn-blocking join failure were documented as explicit transport failures but not black-box covered
+  - chosen closure:
+    - add a failing injected dispatch port that returns `UiCommandDispatchPortError::DispatchFailed`
+    - add a panic-ing injected dispatch port to force the `dispatch_join_failed` HTTP path
+    - keep app-layer failure vocabulary sourced from `freehand-ui-protocol::dispatch_port_failure`
+    - merge duplicate `app.webui-smoke` entries in `docs/architecture/feature-map.md` back into one owner truth while updating required black-box coverage
+  - implementation:
+    - `apps/freehand-server/src/lib.rs` test server now accepts injected dispatch ports
+    - added `transport_command_ingress_surfaces_dispatch_port_failure_explicitly`
+    - added `transport_command_ingress_surfaces_dispatch_join_failure_explicitly`
+    - synced `docs/function-maps/app.webui-smoke.md`, `docs/testing/app.webui-smoke.md`, `docs/mainline-calls/app.webui-smoke.json`
+  - verification target:
+    - `cargo fmt --all --check`
+    - `cargo test -p freehand-server transport_command_ingress_ -- --nocapture`
+    - `cargo test -p freehand-server`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `make ci`

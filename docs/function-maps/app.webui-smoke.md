@@ -25,6 +25,7 @@
 - transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing
 - front-end cancel button and Escape key send protocol-owned `CancelTurn` commands through command ingress
 - front-end Escape sends `CancelLatestActiveTurn` when submit is in flight but no concrete `turn_id` has reached the browser yet
+- command-ingress transport failures must stay explicit at the app boundary and may not collapse into success projection
 - the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only
 
 ## Response Mainline
@@ -32,6 +33,7 @@
 - app boundary renders a protocol-driven WebUI page shell; live content is populated from existing query/SSE endpoints
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason/debug truth writer
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
+- app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
 - SSE subscribe routes now emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe must stay open on blank state until a turn exists
 - WebUI submit success path still actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing
 - WebUI checkpoint panel renders protocol checkpoint summaries from query state and keeps checkpoint files out of app-boundary truth
@@ -50,6 +52,7 @@
 - transport/render wiring failures are surfaced explicitly
 - unknown static assets return explicit 404
 - cancel without an active turn clears only local input and does not invent a runtime mutation
+- dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
 - direct reason/provider/node/config coupling is a policy violation, not a fallback path
 
 ## Shared Multi-Reference Functions
@@ -60,6 +63,12 @@
   - allowed callers: CLI/WebUI adapters, tests
   - related tests: slave turn subscription smoke
   - why shared: app boundary must not duplicate client-specific projection logic
+- `dispatch_port_failure`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: keep injected dispatch-port failures on one protocol-owned error projection contract
+  - allowed callers: protocol-only app adapters, runtime-backed HTTP hosts, tests
+  - related tests: command ingress dispatch failure smoke
+  - why shared: app boundary must not invent a second HTTP failure vocabulary
 
 ## Function Call Table
 
@@ -76,6 +85,7 @@
 | 09 | `refreshTurn` / `renderMessages` / `submitUserInput` | `apps/freehand-server/assets/webui.js` | consume protocol query/SSE public turn payloads, re-query latest turn after command receipt, and render semantic cards without owning filtering semantics | `UiPublicTurnProjection` JSON + command dispatch receipt | DOM message blocks + command status | WebUI shell | existing protocol endpoints | bound |
 | 10 | `handle_query_checkpoints` / `refreshCheckpoints` | `apps/freehand-server/src/lib.rs` / `apps/freehand-server/assets/webui.js` | serve and render read-only checkpoint summaries from protocol state | protocol checkpoint snapshot | HTTP JSON checkpoint snapshot + secondary inspector cards | WebUI shell | ui.protocol state | bound |
 | 11 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` for the active protocol turn from button or Escape key | latest protocol turn id | command dispatch receipt + refreshed projection | WebUI shell | `/ui/command` | bound |
+| 12 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
 
 ## Sync Status Against Code
 
@@ -84,6 +94,7 @@
 - WebUI layout/protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`
 - app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface
 - app boundary now serves protocol-only POST command ingress dispatch-receipt/failure smoke route from that shared transport surface
+- app boundary now surfaces explicit command-ingress dispatch-port failures and dispatch-task join failures instead of collapsing them into success
 - app boundary now serves static embedded assets through an explicit 404ing route
 - runtime host reuse now happens through injected state and dispatch port, not by duplicating transport behavior
 - protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke

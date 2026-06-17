@@ -28,6 +28,8 @@
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
   - WebUI command ingress dispatch receipt smoke
+  - WebUI command ingress dispatch failure projection smoke
+  - WebUI command ingress dispatch join-failure projection smoke
   - WebUI command ingress query-route-misuse rejection smoke
   - WebUI query projection smoke
   - WebUI debug query projection smoke
@@ -55,6 +57,7 @@
   - split theme/WebUI static assets are landed
   - HTTP query and continuous SSE subscribe transport smoke is landed
   - HTTP command ingress dispatch-receipt/failure smoke is landed
+  - command-ingress dispatch-port failure and join-failure projection coverage is landed
   - submit-success path now refreshes latest turn truth after command receipt
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input
   - submit-in-flight cancel path uses `CancelLatestActiveTurn` before a concrete `turn_id` arrives

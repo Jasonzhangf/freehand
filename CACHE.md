@@ -32,6 +32,7 @@
   - `runtime.checkpoint-rewind` now has explicit regression coverage for missing manifest rewind, missing blob rewind, corrupt checkpoint-ledger query failure, and corrupt checkpoint-ledger bootstrap failure
   - `runtime.ui-command-dispatch` now has explicit regression coverage that missing checkpoint rewind manifests map to `TargetNotFound`
   - `app.runtime-daemon` now has explicit HTTP black-box coverage that missing checkpoint rewind manifests surface `command_dispatch_target_not_found` instead of being projected as success
+  - `app.webui-smoke` now has explicit HTTP black-box coverage that protocol command ingress surfaces both dispatch-port failures and dispatch-task join failures as explicit 500 failure payloads
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
@@ -76,8 +77,14 @@
   - `cargo test -p freehand-daemon daemon_rewind_checkpoint_ -- --nocapture`
   - `cargo test -p freehand-daemon daemon_submit_input_surfaces_provider_failure_from_runtime_owner -- --nocapture`
   - `cargo test -p freehand-daemon`
+  - `cargo test -p freehand-server transport_command_ingress_ -- --nocapture`
+  - `cargo test -p freehand-server`
   - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
   - `make ci`
+- Latest landed docs/gate sync:
+  - `docs/architecture/feature-map.md` no longer carries duplicate `app.webui-smoke` owner entries
+  - `docs/mainline-calls/app.webui-smoke.json` step 12 is now code-bound to `handle_command_ingress`; the first gate failure on prose symbol binding was fixed and reverified
 - metadata docs/mainlines/wiki/runtime directory docs are synced so broader pending producers are now provider/debug only, not runtime live bridge
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.

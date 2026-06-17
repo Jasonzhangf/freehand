@@ -434,7 +434,10 @@ fn sample_checkpoint_snapshot() -> UiCheckpointSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use freehand_ui_protocol::{StaticUiCommandDispatchPort, UiCommand};
+    use freehand_ui_protocol::{
+        StaticUiCommandDispatchPort, UiCommand, UiCommandDispatchEnvelope,
+        UiCommandDispatchPortError,
+    };
     use reqwest::Client;
     use std::time::Duration;
     use tokio::sync::oneshot;
@@ -457,11 +460,23 @@ mod tests {
         }
 
         async fn spawn_with_state(initial_state: UiProtocolState) -> Self {
+            Self::spawn_with_state_and_port(
+                initial_state,
+                Arc::new(StaticUiCommandDispatchPort::default()),
+            )
+            .await
+        }
+
+        async fn spawn_with_state_and_port(
+            initial_state: UiProtocolState,
+            command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
+        ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let addr = listener.local_addr().expect("local addr");
             let protocol_state = Arc::new(Mutex::new(initial_state));
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let protocol_state_for_task = Arc::clone(&protocol_state);
+            let command_dispatch_port_for_task = Arc::clone(&command_dispatch_port);
             let task = tokio::spawn(async move {
                 let shutdown = async move {
                     let _ = shutdown_rx.await;
@@ -469,7 +484,7 @@ mod tests {
                 serve_webui_listener(
                     listener,
                     protocol_state_for_task,
-                    Arc::new(StaticUiCommandDispatchPort::default()),
+                    command_dispatch_port_for_task,
                     shutdown,
                 )
                 .await
@@ -488,6 +503,30 @@ mod tests {
                 let _ = shutdown.send(());
             }
             self.task.await.expect("join");
+        }
+    }
+
+    struct FailingUiCommandDispatchPort;
+
+    impl UiCommandDispatchPort for FailingUiCommandDispatchPort {
+        fn dispatch(
+            &self,
+            _envelope: UiCommandDispatchEnvelope,
+        ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+            Err(UiCommandDispatchPortError::DispatchFailed(
+                "runtime queue unavailable".to_owned(),
+            ))
+        }
+    }
+
+    struct PanicUiCommandDispatchPort;
+
+    impl UiCommandDispatchPort for PanicUiCommandDispatchPort {
+        fn dispatch(
+            &self,
+            _envelope: UiCommandDispatchEnvelope,
+        ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+            panic!("dispatch worker panicked");
         }
     }
 
@@ -818,6 +857,58 @@ mod tests {
         let rejected: UiCommandDispatchFailure = rejected.json().await.expect("reject json");
         assert_eq!(rejected.code, "ingress_command_kind_mismatch");
         assert!(!rejected.retryable);
+
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn transport_command_ingress_surfaces_dispatch_port_failure_explicitly() {
+        let server = TestServer::spawn_with_state_and_port(
+            seed_webui_protocol_state(),
+            Arc::new(FailingUiCommandDispatchPort),
+        )
+        .await;
+        let client = Client::builder().build().expect("client");
+
+        let failure = client
+            .post(format!("{}/ui/command", server.base_url))
+            .json(&UiCommand::SubmitUserInput {
+                text: "run task".to_owned(),
+            })
+            .send()
+            .await
+            .expect("command response");
+        assert_eq!(failure.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let failure: UiCommandDispatchFailure = failure.json().await.expect("failure json");
+        assert_eq!(failure.code, "command_dispatch_port_failure");
+        assert!(failure.retryable);
+        assert!(failure.message.contains("runtime queue unavailable"));
+
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn transport_command_ingress_surfaces_dispatch_join_failure_explicitly() {
+        let server = TestServer::spawn_with_state_and_port(
+            seed_webui_protocol_state(),
+            Arc::new(PanicUiCommandDispatchPort),
+        )
+        .await;
+        let client = Client::builder().build().expect("client");
+
+        let failure = client
+            .post(format!("{}/ui/command", server.base_url))
+            .json(&UiCommand::SubmitUserInput {
+                text: "run task".to_owned(),
+            })
+            .send()
+            .await
+            .expect("command response");
+        assert_eq!(failure.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let failure: UiCommandDispatchFailure = failure.json().await.expect("failure json");
+        assert_eq!(failure.code, "dispatch_join_failed");
+        assert!(!failure.retryable);
+        assert!(failure.message.contains("command dispatch task failed"));
 
         server.stop().await;
     }

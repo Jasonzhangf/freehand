@@ -23,12 +23,14 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only
 - front-end cancel button and Escape key send protocol-owned CancelTurn commands through command ingress
 - front-end Escape sends CancelLatestActiveTurn when submit is in flight but no concrete turn_id has reached the browser yet
+- command-ingress transport failures must stay explicit at the app boundary and may not collapse into success projection
 
 ## Response Mainline
 
 - app boundary renders a protocol-driven WebUI page shell; live content is populated from existing query and SSE endpoints
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason or debug truth writer
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
+- app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
 - SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe keeps waiting when no turn exists yet
 - WebUI submit success path actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing
 - front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes, and preserves the user prompt in the public conversation stream
@@ -48,6 +50,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - unknown static assets return explicit 404
 - checkpoint query uses protocol state only and must not parse runtime checkpoint files in the app boundary
 - blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn
+- dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
 - direct reason, provider, node, or config coupling is a policy violation, not a fallback path
 - cancel without an active turn clears only local input and does not invent a runtime mutation
 
@@ -59,6 +62,12 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
   - allowed callers: CLI or WebUI adapters, tests
   - related tests: slave turn subscription smoke
   - why shared: app boundary must not duplicate client-specific projection logic
+- `dispatch_port_failure`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: keep injected dispatch-port failures on one protocol-owned error projection contract
+  - allowed callers: protocol-only app adapters, runtime-backed HTTP hosts, tests
+  - related tests: command ingress dispatch failure smoke
+  - why shared: app boundary must not invent a second HTTP failure vocabulary
 
 ## Function Call Table
 
@@ -75,6 +84,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | 09 | `refreshTurn / renderMessages / submitUserInput` | `apps/freehand-server/assets/webui.js` | consume protocol query and SSE public turn payloads, re-query latest turn after command receipt, and render semantic cards without owning filtering semantics | `UiPublicTurnProjection` JSON plus command dispatch receipt | DOM message blocks plus command status | WebUI shell | existing protocol endpoints | bound |
 | 10 | `handle_query_checkpoints / refreshCheckpoints` | `apps/freehand-server/src/lib.rs / apps/freehand-server/assets/webui.js` | serve and render read-only checkpoint summaries from protocol state | protocol checkpoint snapshot | HTTP JSON checkpoint snapshot plus secondary inspector cards | WebUI shell | ui.protocol state | bound |
 | 11 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send CancelTurn for the active protocol turn from button or Escape key | latest protocol turn id | command dispatch receipt plus refreshed projection | WebUI shell | POST /ui/command | bound |
+| 12 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -83,6 +93,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - WebUI layout and protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`
 - app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface
 - app boundary now serves protocol-only POST command ingress dispatch-receipt or failure smoke route from that shared transport surface
+- app boundary now surfaces explicit command-ingress dispatch-port failures and dispatch-task join failures instead of collapsing them into success
 - app boundary now serves static embedded assets through an explicit 404ing route
 - runtime host reuse now happens through injected state and dispatch port, not by duplicating transport behavior
 - protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke
