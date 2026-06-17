@@ -17,6 +17,7 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - path-based read-only tools resolve against one locked workspace root: the canonical process current working directory
 - path-based tools resolve against one locked workspace root: the canonical process current working directory
 - runtime may choose a subset of implemented definitions for live execution
+- writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`
 - provider adapters render schemas; they do not own tool registry truth
 
 ## Response Mainline
@@ -99,4 +100,5 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - first-version path tools are locked to the canonical process current working directory and reject path escape outside that root
 - first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing
 - first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path
+- checkpointed live writable execution now depends on `tool.preview` and `runtime.checkpoint-rewind`, which are design-locked but not yet code-bound
 - `bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools remain registered but explicitly unimplemented until their lifecycle/gates are designed

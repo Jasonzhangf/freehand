@@ -37,6 +37,15 @@ Current first implemented set:
 - `todo_write`
 - `complete_step`
 
+Related lifecycle owners that must stay separate:
+
+- `tool.registry`
+  - owns names, schemas, `read_only`, `implemented`, and execution ownership
+- `tool.preview`
+  - owns writable-tool preview truth and preview/execute parity
+- `runtime.checkpoint-rewind`
+  - owns pre-write snapshots, restore manifests, and rewind lifecycle
+
 ## Separation Rules
 
 - `freehand-tools` owns tool registry truth and execution ownership
@@ -67,6 +76,7 @@ A new tool is not allowed onto the live request path until all of the following 
 3. the tool has test coverage declared in `docs/testing/tool.registry.md`
 4. the tool lifecycle and permission model are described in durable design docs
 5. `implemented = true` is justified by real execution code in `freehand-tools`
+6. for writable tools, `tool.preview` and `runtime.checkpoint-rewind` must both be locked and implemented enough for checkpointed live execution
 
 If any of the above is false, the tool may remain registered only as explicitly unimplemented.
 

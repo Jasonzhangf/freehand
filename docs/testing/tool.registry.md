@@ -37,6 +37,7 @@
   - provider mock tool-use fixtures
   - `~/.freehand/ledgers/reason`
 - known gaps:
+  - writable tool live exposure still needs `tool.preview` plus `runtime.checkpoint-rewind` owner paths before checkpointed mutation closeout
   - `bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
 - sync status between design and implementation:
   - registry-backed foreground `bash`, read-only file/search, and first text-mutation tools are landed

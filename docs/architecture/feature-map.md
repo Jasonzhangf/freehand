@@ -45,6 +45,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | Anthropic Messages wire rendering/parsing/executor | `provider.anthropic-adapter` | `crates/freehand-provider-anthropic` | `docs/function-maps/provider.anthropic-adapter.md` | `docs/testing/provider.anthropic-adapter.md` |
 | provider-selected live bridge into runtime-owned live reason turn | `provider.reason-live-bridge` | `crates/freehand-runtime` | `docs/function-maps/provider.reason-live-bridge.md` | `docs/testing/provider.reason-live-bridge.md` |
 | built-in tool registry, Reasonix-aligned tool schemas, tool execution ownership | `tool.registry` | `crates/freehand-tools` | `docs/function-maps/tool.registry.md` | `docs/testing/tool.registry.md` |
+| writable-tool preview truth and preview/execute parity | `tool.preview` | `crates/freehand-tools` | `docs/function-maps/tool.preview.md` | `docs/testing/tool.preview.md` |
 | turn truth, provider-output application, terminal schema | `reason.turn` | `crates/freehand-reason` | `docs/function-maps/reason.turn.md` | `docs/testing/reason.turn.md` |
 | session-history rewrite state and rewrite gates | `reason.session-history` | `crates/freehand-reason` | `docs/function-maps/reason.session-history.md` | `docs/testing/reason.session-history.md` |
 | reason persistence, ledgers, restore, derived sidecars | `reason.persistence` | `crates/freehand-reason` | `docs/function-maps/reason.persistence.md` | `docs/testing/reason.persistence.md` |
@@ -54,6 +55,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | master/slave pairing, node status, delegation, slave turn publication | `node.master-slave` | `crates/freehand-node` | `docs/function-maps/node.master-slave.md` | `docs/testing/node.master-slave.md` |
 | UI commands, query/subscribe, UI projections | `ui.protocol` | `crates/freehand-ui-protocol` | `docs/function-maps/ui.protocol.md` | `docs/testing/ui.protocol.md` |
 | runtime wiring for UI command dispatch into owner modules | `runtime.ui-command-dispatch` | `crates/freehand-runtime` | `docs/function-maps/runtime.ui-command-dispatch.md` | `docs/testing/runtime.ui-command-dispatch.md` |
+| writable-tool checkpoints, restore manifests, and runtime rewind | `runtime.checkpoint-rewind` | `crates/freehand-runtime` | `docs/function-maps/runtime.checkpoint-rewind.md` | `docs/testing/runtime.checkpoint-rewind.md` |
 | CLI reason smoke and config-selected runtime harness | `app.cli-runtime-smoke` | `apps/freehand-cli` | `docs/function-maps/app.cli-runtime-smoke.md` | `docs/testing/app.cli-runtime-smoke.md` |
 | CLI live provider turn and completion loop smoke | `app.cli-live-turn` | `apps/freehand-cli` | `docs/function-maps/app.cli-live-turn.md` | `docs/testing/app.cli-live-turn.md` |
 | WebUI/protocol-only app boundary smoke | `app.webui-smoke` | `apps/freehand-server` | `docs/function-maps/app.webui-smoke.md` | `docs/testing/app.webui-smoke.md` |
@@ -532,6 +534,48 @@ If a problem does not fit this table, update this routing index before making co
   - foreground bash cwd lock and timeout policy remain explicit
   - first-version path tools remain locked to one workspace-root policy
   - implemented tool execution path is closed-loop into provider tool-result re-entry
+  - writable live tool exposure remains gated by `tool.preview` and `runtime.checkpoint-rewind`
+
+### `tool.preview`
+
+- owner: `crates/freehand-tools`
+- allowed_paths: `crates/freehand-tools/**`, `crates/freehand-contracts/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
+- forbidden_paths: `apps/**`, `crates/freehand-provider-openai/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-reason/**`
+- required_checks:
+  - `cargo test -p freehand-tools`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - write-file preview parity tests
+  - edit-file preview parity tests
+  - multi-edit preview parity tests
+  - delete-range preview parity tests
+  - preview path-lock rejection tests
+  - preview invalid-argument rejection tests
+- required_module_black_box_tests:
+  - runtime writable-tool preview request smoke
+  - runtime no-preview writable-tool rejection smoke
+- required_project_black_box_tests:
+  - live writable-tool path emits preview truth before execution smoke
+- test_design_doc: `docs/testing/tool.preview.md`
+- function_map_doc: `docs/function-maps/tool.preview.md`
+- mainline_call_doc: `docs/mainline-calls/tool.preview.json`
+- generated_wiki_doc: `docs/wiki/tool.preview.md`
+- debug_artifacts:
+  - preview parity fixture path
+- runtime_paths:
+  - `~/.freehand/state/checkpoints`
+  - `~/.freehand/ledgers/checkpoints`
+- update_triggers:
+  - writable tool transform rules change
+  - writable tool live exposure gate changes
+  - preview contract changes
+  - preview parity enforcement changes
+- lifecycle_checks:
+  - preview and execute share one semantic transform path
+  - preview truth stays tool-owned and is not recomputed in runtime or UI
+  - writable tools are not live-exposed without preview support
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `ui.protocol`
 
@@ -932,6 +976,52 @@ If a problem does not fit this table, update this routing index before making co
   - command dispatch owner routing remains explicit and single-sourced
   - reason turn truth mutation still stays inside `freehand-reason`
   - node direct-message/task semantics still stay inside `freehand-node`
+
+### `runtime.checkpoint-rewind`
+
+- owner: `crates/freehand-runtime`
+- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-tools/**`, `crates/freehand-debug/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/architecture/**`, `docs/mainline-calls/**`, `docs/wiki/**`
+- forbidden_paths: `apps/freehand-server/**`, `crates/freehand-provider-*/**`, `crates/freehand-reason/**` persistence-owner changes unrelated to consumption
+- required_checks:
+  - `cargo test -p freehand-runtime`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - checkpoint manifest round-trip tests
+  - checkpoint create/apply/restore ledger tests
+  - preview-derived path-set snapshot tests
+  - restore create/modify/delete state tests
+  - no-preview writable-tool rejection tests
+  - checkpoint corruption rejection tests
+- required_module_black_box_tests:
+  - runtime writable execution creates checkpoint before tool execute smoke
+  - runtime explicit rewind restores workspace state smoke
+  - runtime restart checkpoint-ledger inspection smoke
+- required_project_black_box_tests:
+  - CLI or daemon writable live-tool mutate-then-rewind smoke
+- test_design_doc: `docs/testing/runtime.checkpoint-rewind.md`
+- function_map_doc: `docs/function-maps/runtime.checkpoint-rewind.md`
+- mainline_call_doc: `docs/mainline-calls/runtime.checkpoint-rewind.json`
+- generated_wiki_doc: `docs/wiki/runtime.checkpoint-rewind.md`
+- debug_artifacts:
+  - checkpoint manifest fixture path
+  - checkpoint ledger fixture path
+- runtime_paths:
+  - `~/.freehand/state/checkpoints`
+  - `~/.freehand/ledgers/checkpoints`
+  - `~/.freehand/state/turns`
+  - `~/.freehand/ledgers/reason`
+- update_triggers:
+  - checkpoint manifest schema changes
+  - checkpoint runtime path changes
+  - preview-to-checkpoint lifecycle changes
+  - explicit rewind contract changes
+- lifecycle_checks:
+  - runtime remains the only checkpoint/rewind owner
+  - reason persistence remains separate from checkpoint restore truth
+  - writable execution is blocked when checkpoint creation fails
+  - rewind remains explicit and does not become fallback
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `app.webui-smoke`
 

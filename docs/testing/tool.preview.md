@@ -1,0 +1,33 @@
+# Test Design: `tool.preview`
+
+- feature_id: `tool.preview`
+- owner: `crates/freehand-tools`
+- lifecycle path under test:
+  - runtime asks the tool owner for writable preview before execution
+  - preview reuses writable tool validation and transform semantics without writing
+  - preview produces canonical create / modify / delete truth on locked paths
+  - preview post-image equals execute post-image
+  - writable live execution is blocked when preview is unavailable
+- white-box plan:
+  - write-file preview create/overwrite parity tests
+  - edit-file preview exact-match parity tests
+  - multi-edit preview ordered-transform parity tests
+  - delete-range preview anchor parity tests
+  - preview path-lock and parent-directory parity tests
+  - preview invalid-argument rejection parity tests
+- module black-box plan:
+  - runtime can request preview from the tool owner for writable tools
+  - runtime rejects writable live execution when preview support is absent
+- project black-box impact:
+  - live provider writable-tool path becomes checkpointable only through tool-owner preview truth
+- fixtures / replay inputs / runtime evidence paths:
+  - preview fixture path
+  - `~/.freehand/state/checkpoints`
+  - `~/.freehand/ledgers/checkpoints`
+- known gaps:
+  - no code-bound preview implementation is landed yet
+  - no current live runtime path consumes preview before writable execution
+- sync status between design and implementation:
+  - design is locked
+  - code binding is still pending
+  - migrated mainline-call source and generated wiki must stay in sync with this test design

@@ -1,0 +1,120 @@
+{
+  "feature_id": "tool.preview",
+  "owner_crate": "crates/freehand-tools",
+  "owner_module": "crates/freehand-tools/src/lib.rs",
+  "function_map_doc": "docs/function-maps/tool.preview.md",
+  "test_design_doc": "docs/testing/tool.preview.md",
+  "mainline_call_doc": "docs/mainline-calls/tool.preview.json",
+  "generated_wiki_doc": "docs/wiki/tool.preview.md",
+  "request_mainline": [
+    "runtime identifies a writable tool call that wants checkpointed live execution",
+    "runtime asks the tool owner for preview truth before any file write",
+    "tool owner applies the same argument validation, path lock, and transform semantics as execute",
+    "preview computes canonical file-change truth without writing to disk",
+    "runtime may use preview truth for checkpoint scope, debug evidence, and future UI projection"
+  ],
+  "response_mainline": [
+    "preview returns structured file-change truth for one writable tool call",
+    "preview truth identifies create / modify / delete semantics on locked paths",
+    "preview truth remains semantic and replayable; unified diff or colorized display is downstream rendering",
+    "preview/execute parity tests prove preview post-image equals execute post-image"
+  ],
+  "error_mainline": [
+    "invalid tool arguments return explicit preview failure",
+    "path escape or parent-directory violations return explicit preview failure",
+    "ambiguity, anchor-not-found, or unsupported preview shape return explicit preview failure",
+    "writable live execution without preview support must be blocked explicitly"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "pending: exact transform helper shared by preview and execute",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "guarantee one semantic transform path for writable tools",
+      "allowed_callers": [
+        "writable preview paths",
+        "writable execute paths"
+      ],
+      "related_tests": [
+        "preview/execute parity tests"
+      ],
+      "why_shared": "preview and execute must not diverge into duplicated semantics"
+    },
+    {
+      "symbol": "pending: preview change renderer",
+      "owner": "crates/freehand-tools/src/lib.rs or crates/freehand-blocks",
+      "purpose": "project canonical preview truth into unified diff or compact text without changing semantics",
+      "allowed_callers": [
+        "runtime debug projection",
+        "future UI projections",
+        "tests"
+      ],
+      "related_tests": [
+        "preview projection smoke"
+      ],
+      "why_shared": "rendering should stay downstream from canonical preview truth"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "pending: BuiltinToolRegistry preview dispatch",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "route writable tool preview requests into the single owner preview path",
+      "input_semantic": "writable tool call",
+      "output_semantic": "preview request dispatch",
+      "caller": "runtime checkpoint owner",
+      "callee": "tool preview owner",
+      "binding_status": "pending"
+    },
+    {
+      "step": "02",
+      "symbol_path": "pending: write_file preview entry",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "compute create/overwrite preview without writing",
+      "input_semantic": "path plus content",
+      "output_semantic": "canonical file-change truth",
+      "caller": "preview dispatch",
+      "callee": "write tool preview owner",
+      "binding_status": "pending"
+    },
+    {
+      "step": "03",
+      "symbol_path": "pending: edit_file preview entry",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "compute exact-match edit preview without writing",
+      "input_semantic": "path plus old_string plus new_string",
+      "output_semantic": "canonical file-change truth",
+      "caller": "preview dispatch",
+      "callee": "edit tool preview owner",
+      "binding_status": "pending"
+    },
+    {
+      "step": "04",
+      "symbol_path": "pending: multi_edit preview entry",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "compute ordered multi-edit preview without writing",
+      "input_semantic": "path plus ordered edits",
+      "output_semantic": "canonical file-change truth",
+      "caller": "preview dispatch",
+      "callee": "multi-edit preview owner",
+      "binding_status": "pending"
+    },
+    {
+      "step": "05",
+      "symbol_path": "pending: delete_range preview entry",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "compute anchor-based delete preview without writing",
+      "input_semantic": "path plus range anchors",
+      "output_semantic": "canonical file-change truth",
+      "caller": "preview dispatch",
+      "callee": "delete-range preview owner",
+      "binding_status": "pending"
+    }
+  ],
+  "sync_status": [
+    "design truth is locked",
+    "current code has writable execute paths but no code-bound preview owner path yet",
+    "current live writable tool path therefore lacks checkpoint-ready preview semantics",
+    "generated wiki must be regenerated from `docs/mainline-calls/tool.preview.json` when this function-map truth changes"
+  ]
+}

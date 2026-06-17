@@ -218,6 +218,10 @@
   - root page consumes `UiTurnProjection` and `DebugStateSnapshot` through existing query/SSE endpoints and command ingress remains protocol-owned
 - 2026-06-16: WebUI submit idle-looking bug fixed
   - `freehand-daemon` runtime path was already live; one startup prerequisite is `FREEHAND_PAIR_TOKEN_SHARED`
+- 2026-06-17: writable tool closeout design locked
+  - new features: `tool.preview` and `runtime.checkpoint-rewind`
+  - runtime home now reserves `~/.freehand/state/checkpoints` and `~/.freehand/ledgers/checkpoints`
+  - workspace gates and generated wiki now require the new docs/mainline/wiki set
 - 2026-06-16: `tool.registry` harness rule locked
   - `freehand-tools` is the only owner for built-in tool specs and execution truth
   - every tool must have explicit spec + implemented state before runtime/provider exposure

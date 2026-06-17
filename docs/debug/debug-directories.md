@@ -8,9 +8,11 @@
 ## Runtime Debug Directories
 
 - `~/.freehand/state/turns`
+- `~/.freehand/state/checkpoints`
 - `~/.freehand/state/ui`
 - `~/.freehand/logs`
 - `~/.freehand/ledgers`
+- `~/.freehand/ledgers/checkpoints`
 - `~/.freehand/ledgers/reason`
 - `~/.freehand/ledgers/providers`
 - `~/.freehand/replays`

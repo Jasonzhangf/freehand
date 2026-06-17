@@ -65,11 +65,13 @@ Use this skill for any non-trivial work in this repo.
 - Runtime home is `~/.freehand`.
 - Use standard runtime paths:
   - `~/.freehand/state`
+  - `~/.freehand/state/checkpoints`
   - `~/.freehand/state/config`
   - `~/.freehand/state/turns`
   - `~/.freehand/state/ui`
   - `~/.freehand/logs`
   - `~/.freehand/ledgers`
+  - `~/.freehand/ledgers/checkpoints`
   - `~/.freehand/ledgers/reason`
   - `~/.freehand/ledgers/providers`
   - `~/.freehand/replays`
@@ -152,9 +154,11 @@ Use this skill for any non-trivial work in this repo.
 - Provider `TokenUsage` enters rewrite policy only through `freehand-blocks::prompt_tokens_from_usage`; do not hand-roll provider usage interpretation in runtime or UI
 - `freehand-testkit` may host project black-box runtime harnesses before production CLI/server loops exist; keep harness behavior aligned with function maps and test design
 - built-in tool specs and execution ownership live in `crates/freehand-tools`
+- writable tool preview ownership also lives in `crates/freehand-tools`
 - runtime must not hardcode demo tool schemas or demo tool execution outside `crates/freehand-tools`
 - every new built-in tool must first land as a spec in the tool owner with explicit `implemented` state
 - no tool may be exposed on the live provider path until its function map and test-design docs are updated in the same change set
+- writable file-mutation tools may not reach the live provider path without a preview path in `freehand-tools` and checkpoint/rewind gating in `freehand-runtime`
 - `reason.session-history` inside `freehand-reason` owns base context, rewrite mode/version, rewrite ledger, and persisted session-history snapshots.
 - `reason.persistence` inside `freehand-reason` owns authoritative snapshot and reason-ledger persistence; UI sidecars and provider raw ledgers remain derived or debug-only.
 - Non-ordinary rewrite modes may enter planner only through explicit session-history gate methods for compaction, rollback, or resume rebuild.

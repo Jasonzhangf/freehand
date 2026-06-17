@@ -24,10 +24,12 @@ Use this directory family for durable design truth.
 - `docs/design/reason-context-planner-design.md`
 - `docs/design/reason-rewrite-policy-design.md`
 - `docs/design/tool-registry-design.md`
+- `docs/design/tool-preview-design.md`
 - `docs/design/node-master-slave-design.md`
 - `docs/design/ui-protocol-design.md`
 - `docs/design/webui-console-proposal.md`
 - `docs/design/runtime-command-dispatch-design.md`
+- `docs/design/runtime-checkpoint-rewind-design.md`
 - `docs/design/runtime-daemon-design.md`
 - `docs/prototypes/README.md`
 
@@ -54,6 +56,8 @@ Use this directory family for durable design truth.
   - compaction thresholds, rollback/resume-rebuild triggers, and unexpected-case rewrite strategy
 - `tool-registry-design.md`
   - built-in tool owner boundary, explicit implementation-state registry, runtime exposure gate, and Reasonix-aligned tool-surface policy
+- `tool-preview-design.md`
+  - writable-tool preview truth, preview/execute parity, and diff contract direction
 - `node-master-slave-design.md`
   - local master/slave topology, pairing, node states, task delegation, turn subscription
 - `ui-protocol-design.md`
@@ -62,6 +66,8 @@ Use this directory family for durable design truth.
   - proposal-only WebUI information architecture, visual direction, and binding matrix for a static review prototype
 - `runtime-command-dispatch-design.md`
   - runtime-owned command dispatch wiring from UI protocol ingress to reason/node owner adapters
+- `runtime-checkpoint-rewind-design.md`
+  - runtime-owned writable-tool checkpoint snapshots, restore lifecycle, and rewind boundary
 - `runtime-daemon-design.md`
   - runtime host process that injects `freehand-runtime` into shared protocol-only HTTP/SSE transport
 - `docs/prototypes/README.md`

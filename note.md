@@ -496,3 +496,13 @@
   - first owner-test pass caught two real issues in the test harness: macOS canonical `pwd` path differs by `/private` prefix, and cwd-lock poisoning hid later failures after the first panic
   - fixed by comparing against canonicalized temp roots and allowing poisoned cwd-lock recovery in the test harness
   - real live verification also needed `FREEHAND_PAIR_TOKEN_SHARED` set because selected-agent bootstrap validates the configured pair-token env even for CLI `reason-live`
+- 2026-06-17: reasonix comparison for tool/edit/rewrite gap
+  - Reasonix built-in write surface is materially ahead of current Freehand: `edit_file`, `multi_edit`, `delete_range`, `delete_symbol`, `notebook_edit`, `bash`, background-job companions, and `web_fetch` all exist with owner-local execution semantics
+  - Reasonix edit tools preserve file encoding and line endings; deletion/symbol/notebook tools return diff-style or structure-aware results instead of summary-only text
+  - current Freehand tool registry is still missing `delete_range`, `delete_symbol`, `notebook_edit`, `web_fetch`, and background bash job lifecycle even though some specs are already registered
+  - Reasonix compaction summary prompt explicitly carries `Errors & fixes`, `Commands & outcomes`, and `Pending & next step`; current Freehand rewrite gate only stages externally supplied rewritten base segments and policy decisions, but does not yet own a real summarizer/orchestrated error-to-summary rewrite pipeline
+  - Reasonix rewrite state is lightweight (`Session.Replace` + `IncrementRewrite`) and planner/executor sessions are fully separate; current Freehand has stronger typed rewrite gates and persistence truth, but still lacks tool-schema fingerprint wiring into planner diagnostics and lacks a concrete error-driven rewrite materializer
+- 2026-06-17: new durable owner split from the Reasonix comparison
+  - `tool.preview` is now locked as the owner for no-write writable-tool preview truth and preview/execute parity
+  - `runtime.checkpoint-rewind` is now locked as the owner for workspace snapshot, restore manifest, and explicit rewind lifecycle
+  - current closeout direction is checkpointed writable mutation first; error-driven rewrite summarization stays under `reason.rewrite-policy` / `reason.context-planner`

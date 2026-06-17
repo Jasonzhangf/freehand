@@ -1,0 +1,38 @@
+# Test Design: `runtime.checkpoint-rewind`
+
+- feature_id: `runtime.checkpoint-rewind`
+- owner: `crates/freehand-runtime`
+- lifecycle path under test:
+  - runtime receives writable tool execution intent
+  - runtime requests preview truth from `tool.preview`
+  - runtime snapshots previewed pre-image paths before tool execute
+  - runtime records checkpoint lifecycle rows
+  - explicit rewind restores workspace state through runtime owner path
+  - checkpoint truth remains separate from reason persistence truth
+- white-box plan:
+  - checkpoint manifest round-trip tests
+  - checkpoint create / apply / restore ledger tests
+  - preview-derived path-set snapshot tests
+  - restore create / modify / delete state tests
+  - no-preview writable-tool rejection tests
+  - missing manifest / blob / ledger corruption rejection tests
+- module black-box plan:
+  - runtime writable tool loop creates checkpoint before execute
+  - runtime explicit rewind restores prior workspace state
+  - runtime restart can inspect checkpoint ledger and manifests without treating them as reason truth
+- project black-box impact:
+  - CLI or daemon live writable-tool path can mutate files and later rewind through runtime owner path
+- fixtures / replay inputs / runtime evidence paths:
+  - checkpoint manifest fixture path
+  - checkpoint ledger fixture path
+  - `~/.freehand/state/checkpoints`
+  - `~/.freehand/ledgers/checkpoints`
+  - `~/.freehand/state/turns`
+  - `~/.freehand/ledgers/reason`
+- known gaps:
+  - checkpoint store and rewind owner code are not landed yet
+  - command ingress for explicit rewind is not wired yet
+- sync status between design and implementation:
+  - design is locked
+  - code binding is still pending
+  - migrated mainline-call source and generated wiki must stay in sync with this test design
