@@ -27,6 +27,9 @@ This doc locks the first built-in tool surface for Freehand.
 Current first implemented set:
 
 - `read_file`
+- `write_file`
+- `edit_file`
+- `multi_edit`
 - `glob`
 - `grep`
 - `ls`
@@ -37,6 +40,8 @@ Current first implemented set:
 
 - `freehand-tools` owns tool registry truth and execution ownership
 - first-version path tools are directory-locked to the canonical process current working directory
+- first-version file-mutation tools are also workspace-locked and may only target existing parent directories inside that root
+- first-version file-mutation tools must write atomically through the tool owner; no app/runtime/orchestrator may write file content on their behalf
 - `freehand-runtime` may:
   - construct a per-run registry
   - expose only `implemented_definitions()` to live provider requests
@@ -71,7 +76,16 @@ If any of the above is false, the tool may remain registered only as explicitly 
   - `glob`
   - `grep`
   - `ls`
-- side-effectful tools require additional lifecycle and gate design before implementation
+- first real file-mutation batch is still workspace-locked and text-only:
+  - `write_file`
+  - `edit_file`
+  - `multi_edit`
+- first-version file-mutation limits:
+  - target path must stay inside locked workspace root
+  - target parent directory must already exist
+  - `edit_file` requires exactly one match
+  - `multi_edit` applies ordered exact edits in memory and writes once at the end
+  - shell, network, notebook, and symbol-aware mutation remain out of scope
 
 ## Error Policy
 

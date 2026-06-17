@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::render_tool_arguments_json;
 use freehand_contracts::{ReasonReq04ToolCall, ToolArgument};
@@ -95,6 +96,9 @@ impl BuiltinToolRegistry {
         }
         match name {
             "read_file" => execute_read_file(&call.tool_call.arguments),
+            "write_file" => execute_write_file(&call.tool_call.arguments),
+            "edit_file" => execute_edit_file(&call.tool_call.arguments),
+            "multi_edit" => execute_multi_edit(&call.tool_call.arguments),
             "glob" => execute_glob(&call.tool_call.arguments),
             "grep" => execute_grep(&call.tool_call.arguments),
             "ls" => execute_ls(&call.tool_call.arguments),
@@ -168,7 +172,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
         spec(
             "write_file",
             false,
-            false,
+            true,
             "Write content to a file, overwriting existing content.",
             json!({
                 "type": "object",
@@ -182,7 +186,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
         spec(
             "edit_file",
             false,
-            false,
+            true,
             "Replace an exact string in a file with another.",
             json!({
                 "type": "object",
@@ -197,7 +201,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
         spec(
             "multi_edit",
             false,
-            false,
+            true,
             "Apply a list of edits to a single file atomically.",
             json!({
                 "type": "object",
@@ -545,6 +549,112 @@ fn execute_read_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
     Ok(ToolExecutionOutput { text: rendered })
 }
 
+fn execute_write_file(
+    arguments: &[ToolArgument],
+) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let path = required_string(arguments, "write_file", "path")?;
+    let content = required_present_string(arguments, "write_file", "content")?;
+    let root = locked_workspace_root("write_file")?;
+    let path = resolve_locked_write_path(&root, path, "write_file", "path")?;
+    if path.is_dir() {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "write_file".to_owned(),
+            message: format!("`{}` is a directory", relative_display(&root, &path)),
+        });
+    }
+    let existed = path.exists();
+    write_text_atomic(&path, content, "write_file")?;
+    Ok(ToolExecutionOutput {
+        text: format!(
+            "{} `{}` ({} bytes)",
+            if existed { "Overwrote" } else { "Created" },
+            relative_display(&root, &path),
+            content.len()
+        ),
+    })
+}
+
+fn execute_edit_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let path = required_string(arguments, "edit_file", "path")?;
+    let old_string = required_non_empty_string(arguments, "edit_file", "old_string")?;
+    let new_string = required_present_string(arguments, "edit_file", "new_string")?;
+    let root = locked_workspace_root("edit_file")?;
+    let path = resolve_locked_path(&root, path, "edit_file", "path")?;
+    let original = read_text_file(&path, "edit_file")?;
+    let updated = replace_exactly_once(&original, old_string, new_string, "edit_file")?;
+    write_text_atomic(&path, &updated, "edit_file")?;
+    Ok(ToolExecutionOutput {
+        text: format!(
+            "Edited `{}` by replacing 1 exact occurrence.",
+            relative_display(&root, &path)
+        ),
+    })
+}
+
+fn execute_multi_edit(
+    arguments: &[ToolArgument],
+) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let path = required_string(arguments, "multi_edit", "path")?;
+    let edits = argument_value(arguments, "edits")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ToolRegistryError::InvalidArguments {
+            tool: "multi_edit".to_owned(),
+            message: "`edits` array is required".to_owned(),
+        })?;
+    if edits.is_empty() {
+        return Err(ToolRegistryError::InvalidArguments {
+            tool: "multi_edit".to_owned(),
+            message: "`edits` must contain at least one item".to_owned(),
+        });
+    }
+    let root = locked_workspace_root("multi_edit")?;
+    let path = resolve_locked_path(&root, path, "multi_edit", "path")?;
+    let mut content = read_text_file(&path, "multi_edit")?;
+    let mut total_replacements = 0usize;
+    for (index, edit) in edits.iter().enumerate() {
+        let object = edit
+            .as_object()
+            .ok_or_else(|| invalid_tool_argument("multi_edit", index, "edit must be an object"))?;
+        let old_string = object
+            .get("old_string")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if old_string.is_empty() {
+            return Err(invalid_tool_argument(
+                "multi_edit",
+                index,
+                "`old_string` is required",
+            ));
+        }
+        let new_string = object
+            .get("new_string")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                invalid_tool_argument("multi_edit", index, "`new_string` is required")
+            })?;
+        let replace_all = object
+            .get("replace_all")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let replacements = if replace_all {
+            replace_all_occurrences(&mut content, old_string, new_string, "multi_edit", index)?
+        } else {
+            content = replace_exactly_once(&content, old_string, new_string, "multi_edit")?;
+            1
+        };
+        total_replacements += replacements;
+    }
+    write_text_atomic(&path, &content, "multi_edit")?;
+    Ok(ToolExecutionOutput {
+        text: format!(
+            "Edited `{}` with {} edit(s) and {} replacement(s).",
+            relative_display(&root, &path),
+            edits.len(),
+            total_replacements
+        ),
+    })
+}
+
 fn execute_glob(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
     let pattern = required_string(arguments, "glob", "pattern")?;
     validate_glob_pattern(pattern)?;
@@ -793,6 +903,34 @@ fn required_string<'a>(
     Ok(value)
 }
 
+fn required_non_empty_string<'a>(
+    arguments: &'a [ToolArgument],
+    tool: &str,
+    field: &str,
+) -> Result<&'a str, ToolRegistryError> {
+    let value = required_string(arguments, tool, field)?;
+    if value.is_empty() {
+        return Err(ToolRegistryError::InvalidArguments {
+            tool: tool.to_owned(),
+            message: format!("`{field}` may not be empty"),
+        });
+    }
+    Ok(value)
+}
+
+fn required_present_string<'a>(
+    arguments: &'a [ToolArgument],
+    tool: &str,
+    field: &str,
+) -> Result<&'a str, ToolRegistryError> {
+    argument_value(arguments, field)
+        .and_then(Value::as_str)
+        .ok_or_else(|| ToolRegistryError::InvalidArguments {
+            tool: tool.to_owned(),
+            message: format!("`{field}` is required"),
+        })
+}
+
 fn argument_value<'a>(arguments: &'a [ToolArgument], name: &str) -> Option<&'a Value> {
     arguments
         .iter()
@@ -882,6 +1020,38 @@ fn resolve_locked_path(
     Ok(canonical)
 }
 
+fn resolve_locked_write_path(
+    root: &Path,
+    raw: &str,
+    tool: &str,
+    field: &str,
+) -> Result<PathBuf, ToolRegistryError> {
+    let candidate = if Path::new(raw).is_absolute() {
+        PathBuf::from(raw)
+    } else {
+        root.join(raw)
+    };
+    let file_name = candidate
+        .file_name()
+        .ok_or_else(|| ToolRegistryError::InvalidArguments {
+            tool: tool.to_owned(),
+            message: format!("`{field}` must point to a file path"),
+        })?;
+    let parent = candidate.parent().unwrap_or(root);
+    let canonical_parent =
+        fs::canonicalize(parent).map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: format!("cannot resolve parent directory for `{field}` `{raw}`: {err}"),
+        })?;
+    if !canonical_parent.starts_with(root) {
+        return Err(ToolRegistryError::InvalidArguments {
+            tool: tool.to_owned(),
+            message: format!("`{field}` escapes the locked workspace root"),
+        });
+    }
+    Ok(canonical_parent.join(file_name))
+}
+
 fn validate_glob_pattern(pattern: &str) -> Result<(), ToolRegistryError> {
     let path = Path::new(pattern);
     if path.is_absolute() {
@@ -928,6 +1098,91 @@ fn relative_display(root: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")
+}
+
+fn read_text_file(path: &Path, tool: &str) -> Result<String, ToolRegistryError> {
+    fs::read_to_string(path).map_err(|err| ToolRegistryError::ExecutionFailed {
+        tool: tool.to_owned(),
+        message: format!("cannot read `{}` as UTF-8 text: {err}", path.display()),
+    })
+}
+
+fn write_text_atomic(path: &Path, content: &str, tool: &str) -> Result<(), ToolRegistryError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: format!("cannot determine parent directory for `{}`", path.display()),
+        })?;
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: format!("cannot derive temp file timestamp: {err}"),
+        })?
+        .as_nanos();
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("freehand-tool-target");
+    let temp_path = parent.join(format!(".{file_name}.freehand-tmp-{unique}"));
+    fs::write(&temp_path, content).map_err(|err| ToolRegistryError::ExecutionFailed {
+        tool: tool.to_owned(),
+        message: format!("cannot write temp file `{}`: {err}", temp_path.display()),
+    })?;
+    if let Err(err) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: format!(
+                "cannot replace `{}` with temp file `{}`: {err}",
+                path.display(),
+                temp_path.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn replace_exactly_once(
+    haystack: &str,
+    old_string: &str,
+    new_string: &str,
+    tool: &str,
+) -> Result<String, ToolRegistryError> {
+    let matches = haystack.match_indices(old_string).collect::<Vec<_>>();
+    match matches.len() {
+        0 => Err(ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: "target text not found exactly once".to_owned(),
+        }),
+        1 => Ok(haystack.replacen(old_string, new_string, 1)),
+        count => Err(ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: format!(
+                "target text matched {count} times; use `multi_edit` with `replace_all=true` or choose a more specific string"
+            ),
+        }),
+    }
+}
+
+fn replace_all_occurrences(
+    content: &mut String,
+    old_string: &str,
+    new_string: &str,
+    tool: &str,
+    index: usize,
+) -> Result<usize, ToolRegistryError> {
+    let matches = content.match_indices(old_string).count();
+    if matches == 0 {
+        return Err(invalid_tool_argument(
+            tool,
+            index,
+            "target text not found for replace_all edit",
+        ));
+    }
+    *content = content.replace(old_string, new_string);
+    Ok(matches)
 }
 
 fn grep_file(
@@ -1077,6 +1332,258 @@ mod tests {
     }
 
     #[test]
+    fn write_file_creates_and_overwrites_files_inside_workspace() {
+        with_temp_workspace(|root| {
+            fs::create_dir_all(root.join("docs")).expect("create docs");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+
+            let created = registry
+                .execute(&tool_call(
+                    "write_file",
+                    vec![
+                        ToolArgument {
+                            name: "path".to_owned(),
+                            value: json!("docs/new.txt"),
+                        },
+                        ToolArgument {
+                            name: "content".to_owned(),
+                            value: json!("hello"),
+                        },
+                    ],
+                ))
+                .expect("write_file creates");
+            assert!(created.text.contains("Created `docs/new.txt`"));
+            assert_eq!(
+                fs::read_to_string(root.join("docs/new.txt")).expect("read created"),
+                "hello"
+            );
+
+            let overwritten = registry
+                .execute(&tool_call(
+                    "write_file",
+                    vec![
+                        ToolArgument {
+                            name: "path".to_owned(),
+                            value: json!("docs/new.txt"),
+                        },
+                        ToolArgument {
+                            name: "content".to_owned(),
+                            value: json!("updated"),
+                        },
+                    ],
+                ))
+                .expect("write_file overwrites");
+            assert!(overwritten.text.contains("Overwrote `docs/new.txt`"));
+            assert_eq!(
+                fs::read_to_string(root.join("docs/new.txt")).expect("read overwritten"),
+                "updated"
+            );
+        });
+    }
+
+    #[test]
+    fn write_file_rejects_escape_and_missing_parent() {
+        with_temp_workspace(|root| {
+            let parent = root.parent().expect("parent");
+            fs::write(parent.join("outside-write.txt"), "secret").expect("write outside");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+
+            let escape = registry.execute(&tool_call(
+                "write_file",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("../outside-write.txt"),
+                    },
+                    ToolArgument {
+                        name: "content".to_owned(),
+                        value: json!("replace"),
+                    },
+                ],
+            ));
+            assert_eq!(
+                escape,
+                Err(ToolRegistryError::InvalidArguments {
+                    tool: "write_file".to_owned(),
+                    message: "`path` escapes the locked workspace root".to_owned(),
+                })
+            );
+
+            let missing_parent = registry.execute(&tool_call(
+                "write_file",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("missing/new.txt"),
+                    },
+                    ToolArgument {
+                        name: "content".to_owned(),
+                        value: json!("replace"),
+                    },
+                ],
+            ));
+            assert!(matches!(
+                missing_parent,
+                Err(ToolRegistryError::ExecutionFailed { tool, .. }) if tool == "write_file"
+            ));
+        });
+    }
+
+    #[test]
+    fn edit_file_replaces_exact_single_occurrence() {
+        with_temp_workspace(|root| {
+            fs::write(root.join("notes.txt"), "alpha\nbeta\n").expect("write notes");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let output = registry
+                .execute(&tool_call(
+                    "edit_file",
+                    vec![
+                        ToolArgument {
+                            name: "path".to_owned(),
+                            value: json!("notes.txt"),
+                        },
+                        ToolArgument {
+                            name: "old_string".to_owned(),
+                            value: json!("beta"),
+                        },
+                        ToolArgument {
+                            name: "new_string".to_owned(),
+                            value: json!("gamma"),
+                        },
+                    ],
+                ))
+                .expect("edit file");
+            assert!(output.text.contains("replacing 1 exact occurrence"));
+            assert_eq!(
+                fs::read_to_string(root.join("notes.txt")).expect("read edited"),
+                "alpha\ngamma\n"
+            );
+        });
+    }
+
+    #[test]
+    fn edit_file_rejects_zero_or_multiple_matches() {
+        with_temp_workspace(|root| {
+            fs::write(root.join("notes.txt"), "beta\nbeta\n").expect("write notes");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+
+            let multiple = registry.execute(&tool_call(
+                "edit_file",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("notes.txt"),
+                    },
+                    ToolArgument {
+                        name: "old_string".to_owned(),
+                        value: json!("beta"),
+                    },
+                    ToolArgument {
+                        name: "new_string".to_owned(),
+                        value: json!("gamma"),
+                    },
+                ],
+            ));
+            assert!(matches!(
+                multiple,
+                Err(ToolRegistryError::ExecutionFailed { tool, .. }) if tool == "edit_file"
+            ));
+
+            let missing = registry.execute(&tool_call(
+                "edit_file",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("notes.txt"),
+                    },
+                    ToolArgument {
+                        name: "old_string".to_owned(),
+                        value: json!("absent"),
+                    },
+                    ToolArgument {
+                        name: "new_string".to_owned(),
+                        value: json!("gamma"),
+                    },
+                ],
+            ));
+            assert!(matches!(
+                missing,
+                Err(ToolRegistryError::ExecutionFailed { tool, .. }) if tool == "edit_file"
+            ));
+        });
+    }
+
+    #[test]
+    fn multi_edit_applies_sequential_and_replace_all_edits() {
+        with_temp_workspace(|root| {
+            fs::write(root.join("notes.txt"), "alpha\nbeta\nbeta\n").expect("write notes");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let output = registry
+                .execute(&tool_call(
+                    "multi_edit",
+                    vec![
+                        ToolArgument {
+                            name: "path".to_owned(),
+                            value: json!("notes.txt"),
+                        },
+                        ToolArgument {
+                            name: "edits".to_owned(),
+                            value: json!([
+                                {
+                                    "old_string": "alpha",
+                                    "new_string": "start"
+                                },
+                                {
+                                    "old_string": "beta",
+                                    "new_string": "done",
+                                    "replace_all": true
+                                }
+                            ]),
+                        },
+                    ],
+                ))
+                .expect("multi edit");
+            assert!(output.text.contains("2 edit(s)"));
+            assert!(output.text.contains("3 replacement(s)"));
+            assert_eq!(
+                fs::read_to_string(root.join("notes.txt")).expect("read multi edited"),
+                "start\ndone\ndone\n"
+            );
+        });
+    }
+
+    #[test]
+    fn multi_edit_rejects_missing_target_text() {
+        with_temp_workspace(|root| {
+            fs::write(root.join("notes.txt"), "alpha\n").expect("write notes");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let result = registry.execute(&tool_call(
+                "multi_edit",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("notes.txt"),
+                    },
+                    ToolArgument {
+                        name: "edits".to_owned(),
+                        value: json!([
+                            {
+                                "old_string": "beta",
+                                "new_string": "gamma",
+                                "replace_all": true
+                            }
+                        ]),
+                    },
+                ],
+            ));
+            assert!(matches!(
+                result,
+                Err(ToolRegistryError::InvalidArguments { tool, .. }) if tool == "multi_edit"
+            ));
+        });
+    }
+
+    #[test]
     fn read_file_rejects_path_outside_workspace_root() {
         with_temp_workspace(|root| {
             let parent = root.parent().expect("parent");
@@ -1205,10 +1712,8 @@ mod tests {
             Err(ToolRegistryError::UnknownTool("missing_tool".to_owned()))
         );
         assert_eq!(
-            registry.execute(&tool_call("write_file", vec![])),
-            Err(ToolRegistryError::UnimplementedTool(
-                "write_file".to_owned()
-            ))
+            registry.execute(&tool_call("web_fetch", vec![])),
+            Err(ToolRegistryError::UnimplementedTool("web_fetch".to_owned()))
         );
     }
 

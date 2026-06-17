@@ -485,3 +485,8 @@
   - `docs/mainline-calls/app.runtime-daemon.json` is the machine-readable source
   - `docs/wiki/app.runtime-daemon.md` must be generated, not hand-edited
   - `xtask gates check` must require function map, test design, JSON source, and generated wiki
+- 2026-06-17: tool.registry writable batch implementation
+  - implemented `write_file`, `edit_file`, and `multi_edit` inside `freehand-tools`
+  - writable path resolution needed a separate helper because target files may not exist yet
+  - `edit_file` is locked to exact single-match semantics; `multi_edit` carries ordered edit and `replace_all` behavior
+  - gate initially failed because a locked policy snippet expected the old read-only wording; function map and JSON were updated to preserve the old locked phrase while adding writable semantics

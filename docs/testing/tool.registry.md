@@ -12,6 +12,9 @@
   - registry name/schema export tests
   - `read_only` metadata tests
   - `read_file` line-window and path-lock tests
+  - `write_file` create/overwrite/path-lock tests
+  - `edit_file` exact-single-match and rejection tests
+  - `multi_edit` ordered apply and replace-all tests
   - `glob` recursive and simple-filename pattern tests
   - `grep` recursive match tests
   - `ls` flat and recursive listing tests
@@ -24,14 +27,15 @@
 - project black-box impact:
   - provider live turn tool loop no longer depends on `echo_json` or forced `todo_write`
   - daemon and runtime smokes now prove `read_file` can run through the registry-owned live path
-  - future write/search/edit/bash/web tools still have one owner and cannot be implemented in runtime orchestration
+  - writable file-mutation tools now still enter the live path only through the registry owner instead of runtime orchestration
+  - future bash/web/notebook tools still have one owner and cannot be implemented in runtime orchestration
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with tool owner code and function map updates
 - fixtures / replay inputs / runtime evidence paths:
   - provider mock tool-use fixtures
   - `~/.freehand/ledgers/reason`
 - known gaps:
-  - write/edit/bash/web/notebook tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
+  - bash/web/notebook tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
 - sync status between design and implementation:
-  - registry-backed first read-only file/search tools are landed
+  - registry-backed read-only file/search and first text-mutation tools are landed
   - runtime and daemon smokes now consume real registry tools instead of a forced demo first tool

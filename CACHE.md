@@ -297,3 +297,7 @@
 - 2026-06-17: `app.runtime-daemon` migrated into the mainline/wiki chain
   - `docs/mainline-calls/app.runtime-daemon.json` is now the machine-readable daemon host mainline truth
   - `docs/wiki/app.runtime-daemon.md` is generated from it
+- 2026-06-17: `tool.registry` writable file-mutation batch landed
+  - `freehand-tools` now truly implements `write_file`, `edit_file`, and `multi_edit`
+  - first-version writable tools are workspace-locked, existing-parent-only, and owner-atomic
+  - `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo run -p xtask -- mainlines check`, and `cargo run -p xtask -- gates check` pass

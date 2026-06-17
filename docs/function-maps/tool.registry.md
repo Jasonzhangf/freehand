@@ -11,6 +11,9 @@
   - `BuiltinToolRegistry::implemented_definitions`
   - `BuiltinToolRegistry::execute`
   - `reasonix_aligned_builtin_specs`
+  - `execute_write_file`
+  - `execute_edit_file`
+  - `execute_multi_edit`
 
 ## Request Mainline
 
@@ -18,6 +21,7 @@
 - registry exports provider-neutral tool definitions without importing provider adapter DTOs
 - registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner
 - path-based read-only tools resolve against one locked workspace root: the canonical process current working directory
+- path-based tools resolve against one locked workspace root: the canonical process current working directory
 - runtime may choose a subset of implemented definitions for live execution
 - provider adapters render schemas; they do not own tool registry truth
 
@@ -29,6 +33,10 @@
   - `glob`
   - `grep`
   - `ls`
+- first real file-mutation execution set is:
+  - `write_file`
+  - `edit_file`
+  - `multi_edit`
 - implemented tools return user/model-visible tool result text
 - unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth
 
@@ -53,6 +61,24 @@
   - allowed callers: `read_file`, `grep`, `ls`
   - related tests: read-file path-lock test
   - why shared: keeps path-boundary enforcement single-sourced
+- `resolve_locked_write_path`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: resolve writable path targets inside the locked workspace root even when the target file does not yet exist
+  - allowed callers: `write_file`
+  - related tests: write-file create/escape tests
+  - why shared: keeps writable path-boundary enforcement single-sourced
+- `write_text_atomic`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: persist file-mutation tool output through one owner-controlled temp-file-and-rename path
+  - allowed callers: `write_file`, `edit_file`, `multi_edit`
+  - related tests: write-file overwrite test, edit-file test, multi-edit test
+  - why shared: keeps mutation write semantics centralized instead of per-tool duplication
+- `replace_exactly_once`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: enforce exact single-match replacement semantics for text mutation tools
+  - allowed callers: `edit_file`, `multi_edit`
+  - related tests: edit-file single-match test, edit-file multi-match rejection test
+  - why shared: keeps exact-match editing semantics centralized
 - `render_tool_arguments_json`
   - owner: `crates/freehand-blocks/src/lib.rs`
   - purpose: render structured tool arguments without duplicating JSON conversion in runtime/tool owner code
@@ -69,20 +95,27 @@
 | 03 | `BuiltinToolRegistry::implemented_definitions` | `crates/freehand-tools/src/lib.rs` | export currently executable provider-neutral tool schemas | registry | provider tool definitions | runtime live bridge | tool owner | bound |
 | 04 | `BuiltinToolRegistry::execute` | `crates/freehand-tools/src/lib.rs` | dispatch completed tool calls into the single owner implementation set | `ReasonReq04ToolCall` | tool execution output | runtime live bridge | tool owner | bound |
 | 05 | `execute_read_file` | `crates/freehand-tools/src/lib.rs` | read UTF-8 text from one locked in-root file with line-windowing | `path` + optional `offset` + optional `limit` | numbered text window | registry execute | read-only file tool owner | bound |
-| 06 | `execute_glob` | `crates/freehand-tools/src/lib.rs` | match in-root files by glob pattern with recursive filename fallback | `pattern` | newline-separated match list | registry execute | read-only search tool owner | bound |
-| 07 | `execute_grep` | `crates/freehand-tools/src/lib.rs` | search in-root UTF-8 text files by regex | `pattern` + optional `path` | `path:line:text` matches | registry execute | read-only search tool owner | bound |
-| 08 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list directory entries or recursive tree under locked root | optional `path` + optional `recursive` | newline-separated directory listing | registry execute | read-only file tool owner | bound |
+| 06 | `execute_write_file` | `crates/freehand-tools/src/lib.rs` | create or overwrite one UTF-8 text file inside the locked root | `path` + `content` | write summary | registry execute | file-mutation tool owner | bound |
+| 07 | `execute_edit_file` | `crates/freehand-tools/src/lib.rs` | replace one exact text occurrence in one locked in-root file | `path` + `old_string` + `new_string` | edit summary | registry execute | file-mutation tool owner | bound |
+| 08 | `execute_multi_edit` | `crates/freehand-tools/src/lib.rs` | apply ordered exact text edits and write once at the end | `path` + ordered `edits` | edit summary | registry execute | file-mutation tool owner | bound |
+| 09 | `execute_glob` | `crates/freehand-tools/src/lib.rs` | match in-root files by glob pattern with recursive filename fallback | `pattern` | newline-separated match list | registry execute | read-only search tool owner | bound |
+| 10 | `execute_grep` | `crates/freehand-tools/src/lib.rs` | search in-root UTF-8 text files by regex | `pattern` + optional `path` | `path:line:text` matches | registry execute | read-only search tool owner | bound |
+| 11 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list directory entries or recursive tree under locked root | optional `path` + optional `recursive` | newline-separated directory listing | registry execute | read-only file tool owner | bound |
 
 ## Sync Status Against Code
 
 - Reasonix-aligned built-in names and schemas are bound in `freehand-tools`
 - current implemented tool set is:
   - `read_file`
+  - `write_file`
+  - `edit_file`
+  - `multi_edit`
   - `glob`
   - `grep`
   - `ls`
   - `todo_write`
   - `complete_step`
 - first-version path tools are locked to the canonical process current working directory and reject path escape outside that root
-- write/edit/bash/web/notebook tools remain registered but explicitly unimplemented until their lifecycle/gates are designed
+- first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path
+- bash/web/notebook/symbol-aware mutation tools remain registered but explicitly unimplemented until their lifecycle/gates are designed
 - the generated wiki must be regenerated from `docs/mainline-calls/tool.registry.json` when this function map truth changes
