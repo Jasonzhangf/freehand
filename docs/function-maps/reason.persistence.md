@@ -39,8 +39,8 @@
 - invalid persisted snapshot JSON is rejected explicitly
 - invalid persisted snapshot coherence is rejected explicitly
 - reason-ledger sequence gaps or duplicate sequence numbers must block recovery
-- provider raw payload availability must not mask missing authoritative reason truth
-- UI sidecar presence must not be treated as session-truth recovery evidence
+- provider raw payload availability alone must not mask missing authoritative reason truth
+- UI sidecar presence alone must not be treated as session-truth recovery evidence
 
 ## Shared Multi-Reference Functions
 
@@ -104,4 +104,5 @@
 - current code baseline now binds session-history JSON/file round-trip, reason-ledger append, provider-raw debug-ledger append, active-turn refresh, terminal turn materialization, derived sidecar writes, and snapshot-plus-tail / ledger-only recovery
 - CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer
 - live Anthropic runtime path now records provider raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` while keeping those ledgers outside recovery truth
+- explicit owner-bound regression coverage now locks ledger sequence gaps plus provider-raw-only and UI-sidecar-only missing-recovery rejection
 - migrated mainline-call source now lives at `docs/mainline-calls/reason.persistence.json` and generated wiki lives at `docs/wiki/reason.persistence.md`

@@ -13,7 +13,7 @@
 - Current verified head:
   - `make ci` -> passed after daemon checkpoint failure-transport hardening and doc/mainline/wiki sync
 - Current working slice:
-  - `provider.reason-live-bridge` explicit tool failure lock for unknown and registered-but-unimplemented tool names
+  - `reason.persistence` recovery-failure lock for ledger sequence gaps and debug-only artifacts
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -39,6 +39,7 @@
   - `runtime.ui-command-dispatch` now has explicit negative coverage that missing `CancelTurn`, empty `CancelLatestActiveTurn`, and wrong-node direct-message all stay `TargetNotFound` failures
   - `foundation.workspace` now has an explicit gate that rejects duplicate `feature-map` seed entries for one `feature_id`
   - `provider.reason-live-bridge` now has explicit white-box regression coverage that unknown tool names and registered-but-unimplemented tool names fail as `RuntimeLiveBridgeError::ToolExecutionFailed(...)` and do not materialize tool-result or terminal-success truth
+  - `reason.persistence` now has explicit white-box regression coverage that ledger sequence gaps block recovery and that provider-raw-only or UI-sidecar-only artifacts still return `MissingRecoveryTruth`
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
@@ -80,6 +81,12 @@
   - provider raw ledgers remain debug-only and never participate in restore or session truth
   - if provider raw retention is enabled and the raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - Latest verification:
+  - `cargo test -p freehand-reason restore_rejects_reason_ledger_sequence_gap_explicitly -- --nocapture`
+  - `cargo test -p freehand-reason provider_raw_only_debug_files_do_not_mask_missing_recovery_truth -- --nocapture`
+  - `cargo test -p freehand-reason ui_sidecar_only_does_not_mask_missing_recovery_truth -- --nocapture`
+  - `cargo test -p freehand-reason`
+  - `cargo test -p freehand-testkit`
+  - `cargo test -p freehand-cli`
   - `cargo test -p freehand-runtime live_bridge_fails_explicitly_on_unknown_tool_name -- --nocapture`
   - `cargo test -p freehand-runtime live_bridge_fails_explicitly_on_registered_unimplemented_tool_name -- --nocapture`
   - `cargo test -p freehand-daemon daemon_rewind_checkpoint_ -- --nocapture`
@@ -105,3 +112,4 @@
 - metadata docs/mainlines/wiki/runtime directory docs are synced so broader pending producers are now provider/debug only, not runtime live bridge
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.
+  - targeted cargo tests that rely on timestamp-based temp runtime helpers should be verified serially; parallel spot-checks can collide across separate cargo processes and create false persistence failures.

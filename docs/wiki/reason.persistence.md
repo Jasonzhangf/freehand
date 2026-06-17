@@ -31,8 +31,8 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - invalid persisted snapshot JSON is rejected explicitly
 - invalid persisted snapshot coherence is rejected explicitly
 - reason-ledger sequence gaps or duplicate sequence numbers must block recovery
-- provider raw payload availability must not mask missing authoritative reason truth
-- UI sidecar presence must not be treated as session-truth recovery evidence
+- provider raw payload availability alone must not mask missing authoritative reason truth
+- UI sidecar presence alone must not be treated as session-truth recovery evidence
 
 ## Shared Multi-Reference Functions
 

@@ -818,3 +818,32 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: reason.persistence recovery-failure slice
+  - owner route: `reason.persistence`
+  - audit target: function map and test design already claimed explicit recovery failure for ledger sequence gaps and for debug-only artifacts not becoming recovery truth, but owner white-box coverage did not directly lock those failure paths
+  - chosen closure:
+    - add one white-box test for `LedgerSequenceGap`
+    - add one white-box test proving provider-raw-only presence still returns `MissingRecoveryTruth`
+    - add one white-box test proving UI-sidecar-only presence still returns `MissingRecoveryTruth`
+    - sync error wording from “must not mask truth” to “alone must not mask truth” where needed
+  - implementation:
+    - added `restore_rejects_reason_ledger_sequence_gap_explicitly`
+    - added `provider_raw_only_debug_files_do_not_mask_missing_recovery_truth`
+    - added `ui_sidecar_only_does_not_mask_missing_recovery_truth`
+    - synced `docs/testing/reason.persistence.md`
+    - synced `docs/function-maps/reason.persistence.md`
+    - synced `docs/mainline-calls/reason.persistence.json`
+    - regenerated `docs/wiki/reason.persistence.md`
+  - verification:
+    - `cargo test -p freehand-reason restore_rejects_reason_ledger_sequence_gap_explicitly -- --nocapture`
+    - `cargo test -p freehand-reason provider_raw_only_debug_files_do_not_mask_missing_recovery_truth -- --nocapture`
+    - `cargo test -p freehand-reason ui_sidecar_only_does_not_mask_missing_recovery_truth -- --nocapture`
+    - `cargo test -p freehand-reason`
+    - `cargo test -p freehand-testkit`
+    - `cargo test -p freehand-cli`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`
+  - verification note:
+    - do not parallel-run multiple `cargo test` processes that share time-stamp-based temp runtime helpers; a parallel spot-check polluted one run with another test's ledger and produced a false `LedgerSequenceGap`

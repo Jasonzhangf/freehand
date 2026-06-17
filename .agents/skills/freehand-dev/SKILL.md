@@ -207,6 +207,7 @@ Use this skill for any non-trivial work in this repo.
   - module white-box tests
   - module black-box tests
   - project black-box tests
+- Do not parallel-run multiple `cargo test` processes that rely on timestamp-based temp runtime helpers inside the same owner area; cross-process temp-path collisions can create false persistence/runtime failures during spot checks.
 - Canonical full local gate is `make ci`.
 - Minimum baseline:
   - `cargo build --workspace`

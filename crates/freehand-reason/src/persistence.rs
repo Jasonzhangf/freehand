@@ -1025,6 +1025,50 @@ mod tests {
     }
 
     #[test]
+    fn restore_rejects_reason_ledger_sequence_gap_explicitly() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+        let turn = started_turn(&mut history);
+        let turn_id = turn.request.turn_id.clone();
+        let row = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 2,
+            session_id: history.session_id().clone(),
+            turn_id: Some(turn_id.clone()),
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 2,
+                latest_turn_id: Some(turn_id.clone()),
+                active_turn_id: Some(turn_id),
+            },
+            session_history: history.clone(),
+            payload: ReasonLedgerPayload::TurnStarted {
+                snapshot: ActiveTurnSnapshot {
+                    turn,
+                    schema_rejections: 0,
+                },
+            },
+        };
+        coordinator
+            .append_row_only(history.session_id(), &row)
+            .expect("append invalid gap row");
+
+        let err = coordinator
+            .restore(history.session_id())
+            .expect_err("sequence gap must fail recovery");
+        assert_eq!(
+            err,
+            ReasonPersistenceError::LedgerSequenceGap {
+                expected: 1,
+                actual: 2,
+            }
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
     fn ledger_only_rebuild_restores_state() {
         let runtime_home = temp_runtime_home();
         let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
@@ -1040,6 +1084,32 @@ mod tests {
         let restored = coordinator.restore(history.session_id()).expect("restore");
         assert_eq!(restored.history, history);
         assert!(restored.active_turn.is_some());
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn provider_raw_only_debug_files_do_not_mask_missing_recovery_truth() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let session_id = SessionId::new("session-1");
+        let provider_debug_path = runtime_home
+            .join("ledgers")
+            .join("providers")
+            .join("anthropic")
+            .join("agent-1")
+            .join(session_id.as_str())
+            .join("turn-1.jsonl");
+        ensure_parent_dir(&provider_debug_path).expect("parent");
+        fs::write(&provider_debug_path, "{\"raw\":\"provider event\"}\n").expect("write raw");
+
+        let err = coordinator
+            .restore(&session_id)
+            .expect_err("provider raw only must not restore session truth");
+        assert_eq!(
+            err,
+            ReasonPersistenceError::MissingRecoveryTruth(session_id.as_str().to_owned())
+        );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");
     }
@@ -1067,6 +1137,35 @@ mod tests {
         let restored = coordinator.restore(history.session_id()).expect("restore");
         assert_eq!(restored.closed_turns.len(), 0);
         assert!(restored.active_turn.is_some());
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn ui_sidecar_only_does_not_mask_missing_recovery_truth() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let session_id = SessionId::new("session-1");
+        let sidecar_path = coordinator.ui_sidecar_path(&session_id);
+        write_json_atomic(
+            &sidecar_path,
+            &PersistedSessionView {
+                agent_id: AgentId::new("agent-1"),
+                session_id: session_id.clone(),
+                latest_turn_id: Some(TurnId::new("turn-sidecar")),
+                active_turn_id: Some(TurnId::new("turn-sidecar")),
+                projections: Vec::new(),
+            },
+        )
+        .expect("write sidecar");
+
+        let err = coordinator
+            .restore(&session_id)
+            .expect_err("ui sidecar only must not restore session truth");
+        assert_eq!(
+            err,
+            ReasonPersistenceError::MissingRecoveryTruth(session_id.as_str().to_owned())
+        );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");
     }

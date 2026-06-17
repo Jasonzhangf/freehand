@@ -14,11 +14,14 @@
   - invalid snapshot coherence rejection tests
   - persistence cursor serialization tests
   - reason-ledger sequence monotonicity tests
+  - reason-ledger sequence gap rejection tests
   - snapshot-plus-tail replay tests
   - ledger-only rebuild tests
   - atomic snapshot replace tests
   - provider-raw debug-ledger write tests
   - provider-raw-ledger exclusion tests
+  - provider-raw-only recovery rejection tests
+  - UI-sidecar-only recovery rejection tests
 - module black-box plan:
   - persistence save/reload smoke at the `freehand-reason` boundary
   - active-turn update then terminal materialization smoke
@@ -43,4 +46,5 @@
   - session snapshot, active-turn snapshot, reason-ledger append, provider-raw debug-ledger append, terminal turn materialization, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
   - shared harness and CLI smoke are implemented
   - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
+  - runtime white-box coverage now explicitly locks ledger sequence-gap rejection plus provider-raw-only and UI-sidecar-only missing-recovery rejection
   - migrated mainline-call source and generated wiki are kept in sync with this test design
