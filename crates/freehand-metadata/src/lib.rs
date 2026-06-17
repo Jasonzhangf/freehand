@@ -4,6 +4,10 @@
 //! writer provenance, write-node provenance, and validation before metadata
 //! can be stored or forwarded to observers.
 
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
 use freehand_contracts::{AgentId, FeatureId, SessionId, TraceId, TurnId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -95,6 +99,7 @@ impl MetadataEnvelope {
 #[derive(Debug, Default)]
 pub struct MetadataCenter {
     records: Vec<MetadataEnvelope>,
+    ledger: Option<MetadataLedger>,
 }
 
 impl MetadataCenter {
@@ -102,8 +107,24 @@ impl MetadataCenter {
         Self::default()
     }
 
+    pub fn with_ledger_path(path: impl Into<PathBuf>) -> Result<Self, MetadataError> {
+        let ledger = MetadataLedger::new(path.into());
+        let records = ledger.load_records()?;
+        Ok(Self {
+            records,
+            ledger: Some(ledger),
+        })
+    }
+
+    pub fn ledger_path(&self) -> Option<&Path> {
+        self.ledger.as_ref().map(MetadataLedger::path)
+    }
+
     pub fn write(&mut self, envelope: MetadataEnvelope) -> Result<(), MetadataError> {
         validate_metadata_envelope(&envelope)?;
+        if let Some(ledger) = &self.ledger {
+            ledger.append(&envelope)?;
+        }
         self.records.push(envelope);
         Ok(())
     }
@@ -117,6 +138,60 @@ impl MetadataCenter {
             .iter()
             .filter(|record| &record.subject.trace_id == trace_id)
             .collect()
+    }
+}
+
+#[derive(Debug)]
+struct MetadataLedger {
+    path: PathBuf,
+}
+
+impl MetadataLedger {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn append(&self, envelope: &MetadataEnvelope) -> Result<(), MetadataError> {
+        ensure_parent_dir(&self.path)?;
+        let payload = serde_json::to_string(envelope)
+            .map_err(|err| MetadataError::LedgerRenderFailed(err.to_string()))?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|err| MetadataError::LedgerIoFailed(err.to_string()))?;
+        writeln!(file, "{payload}").map_err(|err| MetadataError::LedgerIoFailed(err.to_string()))
+    }
+
+    fn load_records(&self) -> Result<Vec<MetadataEnvelope>, MetadataError> {
+        if !self.path.is_file() {
+            return Ok(Vec::new());
+        }
+        let raw = fs::read_to_string(&self.path)
+            .map_err(|err| MetadataError::LedgerIoFailed(err.to_string()))?;
+        let mut records = Vec::new();
+        for (index, line) in raw.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let envelope: MetadataEnvelope =
+                serde_json::from_str(line).map_err(|err| MetadataError::LedgerParseFailed {
+                    line: index + 1,
+                    message: err.to_string(),
+                })?;
+            validate_metadata_envelope(&envelope).map_err(|err| {
+                MetadataError::LedgerValidationFailed {
+                    line: index + 1,
+                    message: err.to_string(),
+                }
+            })?;
+            records.push(envelope);
+        }
+        Ok(records)
     }
 }
 
@@ -142,6 +217,14 @@ pub enum MetadataError {
     EmptyEntryKey,
     #[error("metadata entry key `{0}` is reserved for request data")]
     ReservedRequestDataKey(String),
+    #[error("metadata ledger io failed: {0}")]
+    LedgerIoFailed(String),
+    #[error("metadata ledger render failed: {0}")]
+    LedgerRenderFailed(String),
+    #[error("metadata ledger line {line} failed to parse: {message}")]
+    LedgerParseFailed { line: usize, message: String },
+    #[error("metadata ledger line {line} failed validation: {message}")]
+    LedgerValidationFailed { line: usize, message: String },
 }
 
 pub fn validate_metadata_envelope(envelope: &MetadataEnvelope) -> Result<(), MetadataError> {
@@ -205,10 +288,21 @@ fn is_reserved_request_key(key: &str) -> bool {
         || normalized.starts_with("input.")
 }
 
+fn ensure_parent_dir(path: &Path) -> Result<(), MetadataError> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    fs::create_dir_all(parent).map_err(|err| MetadataError::LedgerIoFailed(err.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn metadata_envelope_records_writer_owner_and_write_node() {
@@ -233,6 +327,56 @@ mod tests {
         assert_eq!(center.records().len(), 1);
         assert_eq!(center.by_trace(&trace_id).len(), 1);
         assert!(center.by_trace(&TraceId::new("trace-2")).is_empty());
+    }
+
+    #[test]
+    fn metadata_center_writes_and_reloads_durable_ledger() {
+        let path = temp_ledger_path("metadata-ledger");
+        let trace_id = TraceId::new("trace-1");
+        let mut center = MetadataCenter::with_ledger_path(&path).expect("ledger center");
+
+        center.write(sample_envelope()).expect("write metadata");
+
+        assert_eq!(center.records().len(), 1);
+        assert_eq!(center.ledger_path(), Some(path.as_path()));
+        let raw = fs::read_to_string(&path).expect("read ledger");
+        assert!(raw.contains("cache.hit_rate"));
+
+        let restored = MetadataCenter::with_ledger_path(&path).expect("restore ledger");
+        assert_eq!(restored.records().len(), 1);
+        assert_eq!(restored.by_trace(&trace_id).len(), 1);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn metadata_center_rejects_corrupt_durable_ledger_line() {
+        let path = temp_ledger_path("metadata-corrupt-ledger");
+        fs::write(&path, "{\"broken\":\n").expect("write corrupt ledger");
+
+        let err = MetadataCenter::with_ledger_path(&path).expect_err("corrupt ledger must fail");
+
+        assert!(matches!(
+            err,
+            MetadataError::LedgerParseFailed { line: 1, .. }
+        ));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn metadata_ledger_write_failure_does_not_mutate_in_memory_records() {
+        let parent = temp_ledger_path("metadata-ledger-parent-file");
+        fs::write(&parent, "not-a-directory").expect("write parent file");
+        let ledger_path = parent.join("metadata.jsonl");
+        let mut center = MetadataCenter::with_ledger_path(&ledger_path).expect("ledger center");
+
+        let err = center
+            .write(sample_envelope())
+            .expect_err("ledger write must fail");
+
+        assert!(matches!(err, MetadataError::LedgerIoFailed(_)));
+        assert!(center.records().is_empty());
+        let _ = fs::remove_file(&parent);
     }
 
     #[test]
@@ -308,5 +452,13 @@ mod tests {
             }],
         )
         .expect("sample metadata")
+    }
+
+    fn temp_ledger_path(prefix: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{unique}.jsonl"))
     }
 }

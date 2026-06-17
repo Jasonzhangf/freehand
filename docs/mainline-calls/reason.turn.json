@@ -20,6 +20,7 @@
   "response_mainline": [
     "provider semantic events become turn truth updates",
     "provider semantic outputs write owner/node-provenance metadata before mutating turn truth",
+    "metadata producer writes may persist durably when the injected metadata center is ledger-backed",
     "turn truth broadcasts semantic events for reasoning, text, tool, usage, terminal, and error",
     "turn lifecycle and provider-output milestones may emit debug events into `debug.core`",
     "terminal result is projected from validated completion schema, not raw provider finish reason",
@@ -108,6 +109,7 @@
       "related_tests": [
         "reason producer metadata provenance",
         "request-text isolation",
+        "durable-ledger persistence",
         "metadata-write failure tests"
       ],
       "why_shared": "keeps metadata admission and request-data-key rejection in `metadata.core` instead of local reason maps"
@@ -256,6 +258,7 @@
     "debug emission into `debug.core` is bound for start-turn, provider-output application, completion acceptance/rejection, and explicit failed terminal write",
     "current debug emission remains observation-only; sink-dispatch failures surface through `DebugHub::subscribe_failures` and are not promoted into turn truth or reason error events",
     "metadata emission into `metadata.core` is bound for start-turn and provider-output application",
+    "reason metadata producers can now persist durably through a ledger-backed `MetadataCenter` without request-text leakage",
     "metadata write failures are explicit and are tested to prevent start-turn history commit or provider-output turn mutation",
     "remaining gap is final CLI/server runtime loop integration with real provider usage events and persisted recovery payloads",
     "metadata/request hard isolation is reflected in request content vs planner diagnostics split and now enforced for reason-turn producer metadata through `metadata.core` key validation and producer tests; static repo-wide metadata leak gate remains pending",

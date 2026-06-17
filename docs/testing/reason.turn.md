@@ -23,6 +23,7 @@
   - reason turn boundary emits debug observations through `debug.core`
   - reason turn boundary surfaces debug sink-dispatch failures through the observation-failure stream without mutating turn truth
   - reason turn boundary writes metadata only through `metadata.core` with owner/node provenance
+  - reason turn boundary persists metadata durably without request-text leakage when a ledger-backed metadata center is supplied
   - completion parser rejects missing tag, malformed JSON, invalid claim, missing required field, and empty required field
   - reason turn boundary propagates explicit rewrite gate diagnostics
   - reason turn boundary broadcasts cancelled terminal status for runtime/user cancellation
@@ -43,6 +44,6 @@
   - debug emission to `debug.core` is landed for start-turn, provider-output, completion, and fail-turn milestones
   - explicit cancelled terminal write and broadcast are landed through `ReasonTurnEngine::cancel_turn`
   - debug sink-dispatch failures are now observable through `debug.core` without mutating turn truth
-  - `reason.turn` is the first metadata producer and has positive/negative metadata write coverage
+  - `reason.turn` is the first metadata producer and has positive/negative metadata write coverage plus durable-ledger persistence coverage
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with reason turn owner code and function map updates

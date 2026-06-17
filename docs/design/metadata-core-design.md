@@ -2,7 +2,7 @@
 
 ## Status
 
-Baseline owner and contract are implemented. `reason.turn` is the first producer wired into the in-memory metadata center.
+Baseline owner and contract are implemented. `reason.turn` is the first producer wired into `metadata.core`, and the metadata center now supports owner-controlled durable ledger append/reload.
 
 ## Purpose
 
@@ -96,12 +96,12 @@ The key guard is not a semantic payload scanner. It is the first hard gate again
 
 ## Runtime Persistence Direction
 
-Future durable metadata ledgers should live under:
+Durable metadata ledgers live under:
 
 - `~/.freehand/ledgers/metadata`
 - `~/.freehand/replays/metadata`
 
-This baseline implements validated in-memory admission and first producer writes from `reason.turn`. Persistent ledger ownership is intentionally not claimed yet.
+This baseline now implements validated in-memory admission, owner-controlled durable ledger append/reload, and first producer writes from `reason.turn`. Broader runtime/provider/debug producer wiring is still pending.
 
 ## Update Trigger
 

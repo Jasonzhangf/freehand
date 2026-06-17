@@ -697,6 +697,7 @@ mod tests {
     use freehand_provider_core::ProviderAdapterEvent;
     use serde_json::json;
     use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct FailingDebugSink;
 
@@ -1207,6 +1208,64 @@ mod tests {
     }
 
     #[test]
+    fn persists_reason_turn_metadata_to_durable_ledger_without_request_text() {
+        let ledger_path = temp_metadata_ledger_path("reason-turn-metadata");
+        let center = Arc::new(Mutex::new(
+            MetadataCenter::with_ledger_path(&ledger_path).expect("metadata ledger center"),
+        ));
+        let engine = ReasonTurnEngine::with_metadata_center(Arc::clone(&center));
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    user_text: "secret operator prompt".to_owned(),
+                    ..start_input()
+                },
+            )
+            .expect("turn");
+
+        let usage = ProviderSemanticOutput::Usage(freehand_contracts::ReasonResp02UsageEvent {
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+            agent_id: turn.request.agent_id.clone(),
+            usage: TokenUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+                total_tokens: Some(15),
+                reasoning_tokens: Some(3),
+                cache_creation_tokens: 2,
+                cache_read_tokens: 8,
+                finish_reason: Some("stop".to_owned()),
+            },
+        });
+        engine
+            .apply_provider_output(&mut turn, usage)
+            .expect("apply usage");
+
+        let restored = MetadataCenter::with_ledger_path(&ledger_path).expect("restore ledger");
+        assert_eq!(restored.records().len(), 2);
+        assert!(
+            restored
+                .records()
+                .iter()
+                .any(|record| record.write_node.pipeline_node == "ReasonReq02ContextComposedInput")
+        );
+        assert!(
+            restored
+                .records()
+                .iter()
+                .any(|record| record.write_node.pipeline_node == "ReasonResp02UsageEvent")
+        );
+        let raw = std::fs::read_to_string(&ledger_path).expect("read metadata ledger");
+        assert!(!raw.contains("secret operator prompt"));
+
+        let _ = std::fs::remove_file(&ledger_path);
+    }
+
+    #[test]
     fn metadata_write_failure_does_not_commit_start_turn_history() {
         let center = Arc::new(Mutex::new(MetadataCenter::new()));
         let poison_center = Arc::clone(&center);
@@ -1288,5 +1347,13 @@ mod tests {
 
         assert!(matches!(err, ReasonTurnError::MetadataWriteFailed(_)));
         assert!(turn.semantic_events.is_empty());
+    }
+
+    fn temp_metadata_ledger_path(prefix: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{unique}.jsonl"))
     }
 }

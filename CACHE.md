@@ -29,6 +29,8 @@
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
+  - `metadata.core` now supports durable metadata ledger append/reload inside `freehand-metadata`
+  - `reason.turn` producer tests now prove durable metadata persistence without request-text leakage when a ledger-backed metadata center is supplied
 - Docs/mainline sync:
   - updated function maps, test designs, `docs/mainline-calls/**`, and regenerated `docs/wiki/**`
   - generated wiki must continue to come from `cargo run -p xtask -- mainlines generate`
@@ -43,6 +45,7 @@
   - metadata writes must carry `MetadataWriteOwner` and `MetadataWriteNode`
   - metadata/request separation is enforced by type boundary plus request-like key rejection in `validate_metadata_envelope`
   - `reason.turn` is now the first metadata producer for start-turn and provider-output application
-  - runtime/provider/debug producer wiring and persistent metadata ledger are still pending
+  - durable metadata ledger append/reload is now implemented in `metadata.core`
+  - broader runtime/provider/debug producer wiring is still pending
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.

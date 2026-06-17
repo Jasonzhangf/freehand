@@ -16,21 +16,23 @@
   - missing write node is rejected
   - request-data keys are rejected
   - metadata JSON round-trip preserves provenance fields
+  - metadata center durable ledger append/reload coverage
+  - ledger write failure does not mutate in-memory metadata truth
 - module black-box plan:
   - metadata center write/query smoke
+  - metadata center durable ledger smoke
   - metadata/request isolation smoke
 - project black-box impact:
   - workspace gate validates metadata owner docs, mainline source, generated wiki, and workspace membership
-  - first producer integration is covered by `reason.turn` tests; broader runtime/provider/debug producers are not claimed in this slice
+  - `reason.turn` producer tests cover both in-memory admission and durable-ledger persistence; broader runtime/provider/debug producers are not claimed in this slice
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/ledgers/metadata`
   - `~/.freehand/replays/metadata`
 - known gaps:
   - runtime/provider/debug producers are not yet wired to the metadata center
-  - no persistent metadata ledger writer is implemented yet
   - no architecture scan yet detects metadata-like ad hoc structs outside the owner crate
 - sync status between design and implementation:
   - crate/test baseline is landed
-  - metadata center validation and in-memory write/query behavior are implemented and covered
-  - `reason.turn` producer tests prove owner/node provenance and request-text isolation on start-turn and provider-output metadata
+  - metadata center validation, in-memory write/query behavior, and durable ledger behavior are implemented and covered together
+  - `reason.turn` producer tests prove owner/node provenance, request-text isolation, and durable persistence on start-turn and provider-output metadata
   - migrated mainline-call source and generated wiki are kept in sync with this test design

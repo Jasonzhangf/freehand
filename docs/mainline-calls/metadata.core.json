@@ -11,17 +11,20 @@
     "owner module constructs metadata with one explicit `MetadataWriteNode`",
     "owner module attaches a `MetadataSubject` carrying trace/session/turn identity without carrying request text",
     "metadata entry keys are validated before admission",
+    "metadata center may restore prior durable metadata records from a ledger path before new writes",
     "metadata center stores only validated internal control/provenance metadata"
   ],
   "response_mainline": [
     "metadata center returns accepted metadata records as internal provenance/control truth",
     "metadata center can query records by `trace_id` for debugging and audit correlation",
+    "metadata center appends accepted metadata to a durable ledger when a ledger path is configured",
     "serialized metadata remains replay-safe without becoming request-chain data"
   ],
   "error_mainline": [
     "missing metadata id, writer owner, writer node, trace id, or entries is rejected explicitly",
     "request-data-like keys such as `request.*`, `payload.*`, `prompt.*`, `input.*`, `content`, or `text` are rejected explicitly",
     "invalid metadata is not stored and is not rewritten into debug/session/request truth",
+    "invalid durable-ledger parse, validation, render, or io states are rejected explicitly",
     "no fallback path exists for recovering request content from metadata"
   ],
   "shared_functions": [
@@ -48,9 +51,26 @@
         "runtime/reason/provider/node/debug integration layers after they construct metadata envelopes"
       ],
       "related_tests": [
-        "metadata center write/query smoke"
+        "metadata center write/query smoke",
+        "durable ledger smoke",
+        "reason producer durable-ledger smoke"
       ],
       "why_shared": "keeps metadata admission and validation in one owner instead of distributed module-local maps"
+    },
+    {
+      "symbol": "MetadataCenter::with_ledger_path",
+      "owner": "crates/freehand-metadata/src/lib.rs",
+      "purpose": "restore and continue owner-controlled durable metadata truth from one ledger path",
+      "allowed_callers": [
+        "runtime bootstrap",
+        "reason/provider/node/debug producer wiring",
+        "tests"
+      ],
+      "related_tests": [
+        "durable ledger append/reload tests",
+        "corrupt ledger rejection tests"
+      ],
+      "why_shared": "keeps durable metadata replay/bootstrap inside `metadata.core` instead of ad hoc file readers in caller crates"
     }
   ],
   "call_table": [
@@ -130,12 +150,24 @@
       "caller": "debug/audit tools",
       "callee": "in-memory store",
       "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "MetadataCenter::with_ledger_path",
+      "file_path": "crates/freehand-metadata/src/lib.rs",
+      "responsibility": "restore owner-controlled metadata truth from one durable ledger path",
+      "input_semantic": "metadata ledger path",
+      "output_semantic": "metadata center preloaded with replay-safe records",
+      "caller": "runtime bootstrap/debug tests/producer wiring",
+      "callee": "metadata ledger loader",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
-    "metadata envelope, writer owner, write node, subject, validation, and in-memory center are bound in code",
+    "metadata envelope, writer owner, write node, subject, validation, in-memory center, and durable-ledger restore/append are bound in code",
     "first producer integration is wired from `reason.turn` through `ReasonTurnEngine::start_turn` and `ReasonTurnEngine::apply_provider_output`",
-    "runtime/provider/debug producers and persistent metadata ledger remain pending",
+    "`reason.turn` producer tests now prove durable-ledger persistence without request-text leakage when a ledger-backed center is supplied",
+    "broader runtime/provider/debug producers remain pending",
     "generated wiki must be regenerated from `docs/mainline-calls/metadata.core.json` when this function-map truth changes"
   ]
 }

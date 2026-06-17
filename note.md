@@ -577,3 +577,10 @@
   - first guard rejects missing owner/node/trace/entries and request-data-like metadata keys such as `request.*`, `payload.*`, `prompt.*`, `input.*`, `content`, and `text`
   - known gap after follow-up: runtime/provider/debug producers are not yet wired, and persistent metadata ledger is not implemented yet
   - targeted verification so far: `cargo fmt --all --check`, `cargo test -p freehand-metadata` -> 6 passed, `cargo test -p xtask` -> 8 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
+- 2026-06-18: metadata durable-ledger slice
+  - rooted from owner map: `metadata.core` owns durable metadata persistence; `reason.turn` owns first producer proof only
+  - gap before change: metadata center was in-memory only while owner docs already claimed `~/.freehand/ledgers/metadata` as future truth
+  - chosen owner behavior: `MetadataCenter::write` validates -> appends durable ledger -> mutates in-memory records; reload/bootstrap comes from `MetadataCenter::with_ledger_path`
+  - negative rule locked: ledger parse/validation/render/io failure stays explicit and does not mutate in-memory metadata truth
+  - producer proof: `reason.turn` persists start-turn plus provider-output metadata through a ledger-backed metadata center and the raw ledger must not contain request text
+  - verification target: `cargo test -p freehand-metadata`, `cargo test -p freehand-reason`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `make ci`

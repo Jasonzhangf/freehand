@@ -693,6 +693,7 @@ If a problem does not fit this table, update this routing index before making co
   - turn semantic stream smoke
   - completion rejection/retry smoke
   - reason metadata/request isolation smoke
+  - reason metadata durable-ledger persistence smoke
 - required_project_black_box_tests:
   - reason-to-ui terminal projection smoke
 - test_design_doc: `docs/testing/reason.turn.md`
@@ -713,6 +714,7 @@ If a problem does not fit this table, update this routing index before making co
   - raw-event retention policy changes
   - session-history ownership changes
   - metadata producer write path changes
+  - metadata producer durable-ledger persistence changes
   - debug observation-failure surfacing changes
 - lifecycle_checks:
   - turn truth write path remains single-owner
@@ -970,12 +972,16 @@ If a problem does not fit this table, update this routing index before making co
   - write-node required-field tests
   - request-data key rejection tests
   - metadata JSON round-trip tests
+  - durable metadata ledger append/reload tests
+  - durable metadata ledger parse-failure tests
+  - durable metadata ledger write-failure atomicity tests
 - required_module_black_box_tests:
   - metadata center write/query smoke
+  - metadata center durable-ledger smoke
   - metadata/request isolation smoke
 - required_project_black_box_tests:
   - workspace gate validates metadata owner docs, mainline source, and generated wiki
-  - reason-turn producer tests validate first metadata writer integration
+  - reason-turn producer tests validate first metadata writer integration and durable-ledger persistence
 - test_design_doc: `docs/testing/metadata.core.md`
 - function_map_doc: `docs/function-maps/metadata.core.md`
 - mainline_call_doc: `docs/mainline-calls/metadata.core.json`
@@ -991,6 +997,7 @@ If a problem does not fit this table, update this routing index before making co
   - write-node provenance contract changes
   - metadata/request isolation policy changes
   - metadata center storage/query behavior changes
+  - metadata durable-ledger path or replay behavior changes
   - metadata producer integration changes
   - generated wiki freshness policy changes
 - lifecycle_checks:
@@ -999,6 +1006,7 @@ If a problem does not fit this table, update this routing index before making co
   - metadata remains internal control/provenance data, not request-chain content
   - request content cannot be recovered from metadata fields
   - debug remains observation-only and does not become the metadata owner
+  - durable metadata ledger append/reload remains request-isolated and replay-safe
 
 ### `runtime.ui-command-dispatch`
 
