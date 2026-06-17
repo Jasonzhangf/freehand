@@ -693,10 +693,22 @@ mod tests {
         ContextCachePolicy, ContextRewriteMode, ContextRole, ContextSegmentKind, ContextStability,
         TerminalStatus, TokenUsage, ToolArgument, ToolCallContract, ToolCallId,
     };
-    use freehand_debug::DebugHub;
+    use freehand_debug::{DebugHub, DebugSink, DebugSinkError, DebugSinkKind};
     use freehand_provider_core::ProviderAdapterEvent;
     use serde_json::json;
     use std::sync::Arc;
+
+    struct FailingDebugSink;
+
+    impl DebugSink for FailingDebugSink {
+        fn kind(&self) -> DebugSinkKind {
+            DebugSinkKind::ReplayCapture
+        }
+
+        fn handle(&self, _event: &freehand_debug::DebugEvent) -> Result<(), DebugSinkError> {
+            Err(DebugSinkError::Io("reason debug sink failed".to_owned()))
+        }
+    }
 
     fn session_history() -> SessionHistory {
         SessionHistory::new(
@@ -1080,6 +1092,34 @@ mod tests {
                 .any(|line| line == "model=gpt-test")
         );
         assert!(turn.semantic_events.is_empty());
+        assert!(turn.terminal_event.is_none());
+    }
+
+    #[test]
+    fn surfaces_debug_sink_failure_without_mutating_turn_truth() {
+        let debug_hub = Arc::new(DebugHub::new(true));
+        debug_hub.add_sink(FailingDebugSink);
+        let failure_receiver = debug_hub.subscribe_failures(1);
+        let engine = ReasonTurnEngine::with_debug_hub(debug_hub);
+        let mut history = session_history();
+
+        let turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn should still start");
+
+        let failure = failure_receiver.recv().expect("failure event");
+        assert_eq!(failure.sink_kind, DebugSinkKind::ReplayCapture);
+        assert_eq!(
+            failure.event_envelope.semantic.feature_id,
+            FeatureId::new("reason.turn")
+        );
+        assert_eq!(
+            failure.event_envelope.scene.function,
+            "ReasonTurnEngine::start_turn"
+        );
+        assert_eq!(failure.message, "io failure: reason debug sink failed");
+        assert!(turn.semantic_events.is_empty());
+        assert!(turn.error_events.is_empty());
         assert!(turn.terminal_event.is_none());
     }
 

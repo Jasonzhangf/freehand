@@ -7,18 +7,20 @@
   - module owner creates scene debug coordinates
   - debug core combines them into trace envelopes or snapshots
   - debug hub accepts emitted events and fans them out to subscribers/sinks
+  - sink-dispatch failures enter a dedicated observation-failure stream
   - UI protocol can consume snapshots without owning debug truth
   - debug contracts stay serializable and replayable
 - white-box plan:
   - debug snapshot builder coverage
   - trace envelope serialization coverage
   - semantic/scene coordinate preservation coverage
-  - debug hub fanout and sink dispatch coverage
+  - debug hub fanout, sink dispatch, and observation-failure coverage
 - module black-box plan:
   - caller-visible debug snapshot smoke
   - trace envelope JSON round-trip smoke
   - subscriber receive smoke
   - sink dispatch smoke
+  - observation-failure subscriber smoke
 - project black-box impact:
   - UI debug-state projection consumes `freehand-debug` snapshot truth instead of duplicating a DTO
 - fixtures / replay inputs / runtime evidence paths:
@@ -28,9 +30,9 @@
 - known gaps:
   - no standardized runtime-owned debug ledger path contract yet
   - provider/node emitters are still not wired into `debug.core`
-  - reason-side sink failures are not yet surfaced through a dedicated observation error chain
 - sync status between design and implementation:
   - crate/test baseline is landed
   - runtime hub fanout, subscriber delivery, and sink dispatch are implemented and covered
-  - `reason.turn` emission smoke now covers one real producer without mutating turn truth
+  - dedicated observation-failure stream is implemented and covered
+  - `reason.turn` emission smoke now covers one real producer without mutating turn truth, including sink-failure surfacing
   - migrated mainline-call source and generated wiki are kept in sync with this test design

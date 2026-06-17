@@ -79,6 +79,13 @@ pub struct DebugEvent {
     pub snapshot: Option<DebugStateSnapshot>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugObservationFailure {
+    pub sink_kind: DebugSinkKind,
+    pub event_envelope: DebugTraceEnvelope,
+    pub message: String,
+}
+
 pub trait DebugSink: Send + Sync {
     fn kind(&self) -> DebugSinkKind;
     fn handle(&self, event: &DebugEvent) -> Result<(), DebugSinkError>;
@@ -104,6 +111,7 @@ pub enum DebugHubError {
 pub struct DebugHub {
     enabled: AtomicBool,
     subscribers: Mutex<Vec<SyncSender<DebugEvent>>>,
+    failure_subscribers: Mutex<Vec<SyncSender<DebugObservationFailure>>>,
     sinks: Mutex<Vec<Arc<dyn DebugSink>>>,
 }
 
@@ -112,6 +120,7 @@ impl DebugHub {
         Self {
             enabled: AtomicBool::new(enabled),
             subscribers: Mutex::new(Vec::new()),
+            failure_subscribers: Mutex::new(Vec::new()),
             sinks: Mutex::new(Vec::new()),
         }
     }
@@ -129,6 +138,15 @@ impl DebugHub {
         self.subscribers
             .lock()
             .expect("lock debug subscribers")
+            .push(sender);
+        receiver
+    }
+
+    pub fn subscribe_failures(&self, capacity: usize) -> Receiver<DebugObservationFailure> {
+        let (sender, receiver) = mpsc::sync_channel(capacity.max(1));
+        self.failure_subscribers
+            .lock()
+            .expect("lock debug failure subscribers")
             .push(sender);
         receiver
     }
@@ -159,13 +177,32 @@ impl DebugHub {
 
         let sinks = self.sinks.lock().expect("lock debug sinks");
         for sink in sinks.iter() {
-            sink.handle(&event)
-                .map_err(|err| DebugHubError::SinkDispatch {
+            if let Err(err) = sink.handle(&event) {
+                let failure = DebugObservationFailure {
+                    sink_kind: sink.kind(),
+                    event_envelope: event.envelope.clone(),
+                    message: err.to_string(),
+                };
+                self.publish_failure(failure);
+                return Err(DebugHubError::SinkDispatch {
                     kind: sink.kind(),
                     message: err.to_string(),
-                })?;
+                });
+            }
         }
         Ok(())
+    }
+
+    fn publish_failure(&self, failure: DebugObservationFailure) {
+        let mut subscribers = self
+            .failure_subscribers
+            .lock()
+            .expect("lock debug failure subscribers");
+        subscribers.retain(|sender| match sender.try_send(failure.clone()) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => true,
+            Err(TrySendError::Disconnected(_)) => false,
+        });
     }
 }
 
@@ -222,6 +259,18 @@ impl DebugSink for FileDebugSink {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct FailingDebugSink;
+
+    impl DebugSink for FailingDebugSink {
+        fn kind(&self) -> DebugSinkKind {
+            DebugSinkKind::ReplayCapture
+        }
+
+        fn handle(&self, _event: &DebugEvent) -> Result<(), DebugSinkError> {
+            Err(DebugSinkError::Io("debug sink failed".to_owned()))
+        }
+    }
 
     fn semantic_position() -> DebugSemanticPosition {
         DebugSemanticPosition {
@@ -333,5 +382,38 @@ mod tests {
         let receiver = hub.subscribe(1);
         hub.emit(debug_event()).expect("emit");
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn hub_surfaces_sink_failure_through_observation_failure_stream() {
+        let hub = DebugHub::new(true);
+        let receiver = hub.subscribe(1);
+        let failure_receiver = hub.subscribe_failures(1);
+        hub.add_sink(FailingDebugSink);
+
+        let err = hub
+            .emit(debug_event())
+            .expect_err("sink failure must surface");
+
+        assert_eq!(
+            err,
+            DebugHubError::SinkDispatch {
+                kind: DebugSinkKind::ReplayCapture,
+                message: "io failure: debug sink failed".to_owned(),
+            }
+        );
+        let delivered = receiver.recv().expect("subscriber event");
+        assert_eq!(
+            delivered.envelope.semantic.feature_id,
+            FeatureId::new("debug.core")
+        );
+
+        let failure = failure_receiver.recv().expect("failure event");
+        assert_eq!(failure.sink_kind, DebugSinkKind::ReplayCapture);
+        assert_eq!(
+            failure.event_envelope.semantic.turn_id,
+            TurnId::new("turn-1")
+        );
+        assert_eq!(failure.message, "io failure: debug sink failed");
     }
 }

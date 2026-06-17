@@ -10,19 +10,21 @@
     "owner modules create debug semantic position and scene position from their own truth",
     "owner modules build debug trace envelopes or debug snapshots through `freehand-debug`",
     "debug material is observation data, not request content",
-    "owner modules emit debug events into `DebugHub`"
+    "owner modules emit debug events into `DebugHub`",
+    "sink-dispatch failures are surfaced through a dedicated observation-failure stream without mutating owner truth"
   ],
   "response_mainline": [
     "debug snapshots may be consumed by UI protocol as read-only projection data",
     "trace envelopes may be persisted or replayed by future debug/runtime writers",
     "consumers preserve semantic and scene coordinates together",
-    "`DebugHub` fans out to subscribers and sinks without mutating owner truth"
+    "`DebugHub` fans out to subscribers and sinks without mutating owner truth",
+    "failure subscribers can observe sink-dispatch failures with the original event envelope and sink classification"
   ],
   "error_mainline": [
     "empty required debug fields are explicit construction errors only when builder helpers validate them",
     "debug artifacts must not be promoted into successful reason/session/request truth",
     "missing debug data is an observation gap, not a fallback source for business state",
-    "sink failures are explicit and do not rewrite owner truth"
+    "sink failures are explicit, do not rewrite owner truth, and are emitted through `DebugHub::subscribe_failures`"
   ],
   "shared_functions": [
     {
@@ -50,6 +52,19 @@
         "sink dispatch tests"
       ],
       "why_shared": "centralizes observation delivery instead of duplicating buses in each owner crate"
+    },
+    {
+      "symbol": "DebugHub::subscribe_failures",
+      "owner": "crates/freehand-debug/src/lib.rs",
+      "purpose": "expose a dedicated observation-failure stream for sink-dispatch failures",
+      "allowed_callers": [
+        "reason/provider/node/testkit/UI protocol adapters"
+      ],
+      "related_tests": [
+        "sink failure surfacing tests",
+        "reason producer observation-failure smoke"
+      ],
+      "why_shared": "keeps observation failures separate from business error truth while remaining queryable"
     }
   ],
   "call_table": [
@@ -118,12 +133,24 @@
       "caller": "UI/debug tools",
       "callee": "debug hub",
       "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "DebugHub::subscribe_failures",
+      "file_path": "crates/freehand-debug/src/lib.rs",
+      "responsibility": "register read-only subscribers for observation failures",
+      "input_semantic": "failure-subscriber request",
+      "output_semantic": "observation-failure subscription handle",
+      "caller": "reason/provider/node/UI debug tools",
+      "callee": "debug hub",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
     "debug core crate, reusable snapshot/envelope contracts, hub fanout, subscriber registration, and file/stdout sink classes are bound in code",
+    "dedicated observation-failure stream is bound in code through `DebugObservationFailure` and `DebugHub::subscribe_failures`",
     "current landed emitters are `freehand-reason` lifecycle milestones; provider/node producers remain future integration work",
-    "sink failures are explicit at `DebugHub::emit`, but current reason-side integration keeps them observation-only and does not promote them into reason truth",
+    "sink failures are explicit at `DebugHub::emit`, surface through the dedicated observation-failure stream, and current reason-side integration keeps them observation-only without promoting them into reason truth",
     "generated wiki must be regenerated from `docs/mainline-calls/debug.core.json` when this function-map truth changes"
   ]
 }

@@ -27,6 +27,8 @@
   - runtime live submit releases the dispatcher mutex before provider IO and active cancel prevents later provider success projection
   - `UiTurnProjection.terminal_status` preserves cancelled/failed terminal status for public UI mapping
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
+  - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
+  - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
 - Docs/mainline sync:
   - updated function maps, test designs, `docs/mainline-calls/**`, and regenerated `docs/wiki/**`
   - generated wiki must continue to come from `cargo run -p xtask -- mainlines generate`

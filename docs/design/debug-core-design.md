@@ -131,6 +131,16 @@ The debug runtime bus:
 
 The hub is the only place where observation delivery is coordinated.
 
+### DebugObservationFailure
+
+Dedicated sink-dispatch failure payload:
+
+- original event envelope
+- failed sink kind
+- failure message
+
+This is observation-only. It exists so emitting modules can observe debug delivery failures without promoting them into request/session/reason truth.
+
 ## UI Consumption
 
 UI consumes debug state through `freehand-ui-protocol`.

@@ -243,6 +243,13 @@
   - doc sync: updated feature map, reason/metadata function maps, test designs, mainline JSON, generated wiki, local skill, CACHE, MEMORY
   - targeted verification: `cargo fmt --all --check`; `cargo test -p freehand-reason`; `cargo test -p freehand-metadata -p freehand-runtime -p freehand-testkit`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`
   - final verification: `make ci` passed after all docs/wiki/memory updates
+- 2026-06-18: debug observation failure slice
+  - rooted from owner map: `debug.core` owns sink-dispatch surfacing; `reason.turn` owns producer-side non-mutation guarantee
+  - current documented gap: `DebugHub::emit` failure is explicit, but reason-side has no dedicated observation-failure chain to observe it
+  - chosen fix: add a separate debug failure subscription path in `freehand-debug`, keep sink failures observation-only, and prove `reason.turn` producer still does not mutate turn truth when sink dispatch fails
+  - implementation status: `DebugObservationFailure` and `DebugHub::subscribe_failures` landed in `freehand-debug`; `reason.turn` now has a producer smoke proving sink failure is surfaced while turn truth stays unchanged
+  - doc sync: updated debug/reason function maps, test designs, mainline JSON, generated wiki, design docs, feature map, CACHE, MEMORY
+  - verification: `cargo test -p freehand-debug`; `cargo test -p freehand-reason`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `cargo fmt --all --check`; `make ci`
 - 2026-06-15: completion schema loop requirement confirmed
   - must guide schema in prompt/context
   - must validate schema structurally and semantically

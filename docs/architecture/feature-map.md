@@ -688,6 +688,7 @@ If a problem does not fit this table, update this routing index before making co
   - slow subscriber non-blocking tests
   - metadata producer provenance tests
   - metadata write failure stop-path tests
+  - debug sink failure non-mutation tests
 - required_module_black_box_tests:
   - turn semantic stream smoke
   - completion rejection/retry smoke
@@ -712,6 +713,7 @@ If a problem does not fit this table, update this routing index before making co
   - raw-event retention policy changes
   - session-history ownership changes
   - metadata producer write path changes
+  - debug observation-failure surfacing changes
 - lifecycle_checks:
   - turn truth write path remains single-owner
   - terminal decision path is closed-loop
@@ -921,11 +923,14 @@ If a problem does not fit this table, update this routing index before making co
   - debug snapshot builder tests
   - trace envelope serialization tests
   - semantic/scene coordinate preservation tests
+  - debug observation-failure stream tests
 - required_module_black_box_tests:
   - debug snapshot caller-visible smoke
   - trace envelope JSON round-trip smoke
+  - observation-failure subscriber smoke
 - required_project_black_box_tests:
   - UI debug-state projection consumes `freehand-debug` snapshot truth
+  - reason producer debug sink failure remains observation-only
 - test_design_doc: `docs/testing/debug.core.md`
 - function_map_doc: `docs/function-maps/debug.core.md`
 - mainline_call_doc: `docs/mainline-calls/debug.core.json`
@@ -941,12 +946,14 @@ If a problem does not fit this table, update this routing index before making co
   - trace envelope fields change
   - debug snapshot fields change
   - debug module dependency direction changes
+  - debug observation-failure stream changes
   - debug ledger/replay ownership changes
 - lifecycle_checks:
   - debug remains observation-only
   - debug does not become request/session/reason truth
   - semantic and scene positions remain paired
   - UI consumes debug projections without owning debug truth
+  - sink-dispatch failures remain observable without becoming business truth
 
 ### `metadata.core`
 

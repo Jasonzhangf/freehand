@@ -71,7 +71,11 @@ Confirmed standard directories:
 - exact trace envelope schema
 - exact retention and cleanup rules
 - exact online/offline replay workflow
-- dedicated observation error surfacing path for sink-dispatch failures
+
+## Landed Follow-up
+
+- sink-dispatch failures now surface through a dedicated observation-failure stream in `debug.core`
+- producing modules may observe those failures without promoting them into request/session/reason truth
 
 ## Update trigger
 

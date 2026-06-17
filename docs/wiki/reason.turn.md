@@ -63,6 +63,12 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
   - allowed callers: reason orchestrator, future runtime bridges
   - related tests: reason debug emission smoke
   - why shared: keeps debug distribution separate from turn truth ownership
+- `DebugHub::subscribe_failures`
+  - owner: `crates/freehand-debug/src/lib.rs`
+  - purpose: surface observation-only sink-dispatch failures without rewriting turn truth
+  - allowed callers: reason tests, future runtime/provider/node observers
+  - related tests: reason debug sink failure surfacing smoke
+  - why shared: keeps debug failure observability outside session/turn business truth
 - `MetadataCenter::write`
   - owner: `crates/freehand-metadata/src/lib.rs`
   - purpose: receive reason-turn internal control/provenance metadata with writer owner and write-node provenance
@@ -95,7 +101,7 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 - `ReasonRewriteRuntime` now provides the baseline consumer path for calling `reason.rewrite-policy` and then triggering compaction/rollback/resume gates
 - provider usage conversion into rewrite policy is bound
 - debug emission into `debug.core` is bound for start-turn, provider-output application, completion acceptance/rejection, and explicit failed terminal write
-- current debug emission remains observation-only; `DebugHub::emit` failures are not promoted into turn truth or reason error events
+- current debug emission remains observation-only; sink-dispatch failures surface through `DebugHub::subscribe_failures` and are not promoted into turn truth or reason error events
 - metadata emission into `metadata.core` is bound for start-turn and provider-output application
 - metadata write failures are explicit and are tested to prevent start-turn history commit or provider-output turn mutation
 - remaining gap is final CLI/server runtime loop integration with real provider usage events and persisted recovery payloads
