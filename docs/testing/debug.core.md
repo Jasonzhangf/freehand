@@ -15,6 +15,9 @@
   - trace envelope serialization coverage
   - semantic/scene coordinate preservation coverage
   - debug hub fanout, sink dispatch, and observation-failure coverage
+  - file-sink append coverage
+  - file-sink real io-failure coverage
+  - disabled-hub no-dispatch coverage
 - module black-box plan:
   - caller-visible debug snapshot smoke
   - trace envelope JSON round-trip smoke
@@ -34,7 +37,8 @@
 - sync status between design and implementation:
   - crate/test baseline is landed
   - runtime hub fanout, subscriber delivery, and sink dispatch are implemented and covered
-- dedicated observation-failure stream is implemented and covered
-- `reason.turn` emission smoke now covers one real producer without mutating turn truth, including sink-failure surfacing
-- `provider.reason-live-bridge` runtime tests now cover a second real producer for restore/request/tool/terminal lifecycle debug snapshots without prompt or tool-result leakage
-- migrated mainline-call source and generated wiki are kept in sync with this test design
+  - dedicated observation-failure stream is implemented and covered
+  - file-sink append semantics, real file-io failure surfacing, and disabled-hub no-dispatch behavior are now explicitly covered in owner white-box tests
+  - `reason.turn` emission smoke now covers one real producer without mutating turn truth, including sink-failure surfacing
+  - `provider.reason-live-bridge` runtime tests now cover a second real producer for restore/request/tool/terminal lifecycle debug snapshots without prompt or tool-result leakage
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

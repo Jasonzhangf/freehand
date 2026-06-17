@@ -32,6 +32,7 @@
 - consumers preserve semantic and scene coordinates together
 - `DebugHub` fans out to subscribers and sinks without mutating owner truth
 - failure subscribers can observe sink-dispatch failures with the original event envelope and sink classification
+- file sinks append replay-safe JSONL entries instead of overwriting prior debug evidence
 
 ## Error Mainline
 
@@ -39,6 +40,7 @@
 - debug artifacts must not be promoted into successful reason/session/request truth
 - missing debug data is an observation gap, not a fallback source for business state
 - sink failures are explicit, do not rewrite owner truth, and are emitted through `DebugHub::subscribe_failures`
+- disabled hubs do not dispatch to subscribers or sinks
 
 ## Shared Multi-Reference Functions
 
@@ -79,4 +81,5 @@
 - dedicated observation-failure stream is bound in code through `DebugObservationFailure` and `DebugHub::subscribe_failures`
 - current landed emitters are `freehand-reason` lifecycle milestones plus runtime-owned `provider.reason-live-bridge` restore/request/tool/terminal boundaries; node producers and direct provider-adapter emitters remain future integration work
 - sink failures are explicit at `DebugHub::emit`, surface through the dedicated observation-failure stream, and current reason-side integration keeps them observation-only without promoting them into reason truth
+- direct white-box locks now cover file-sink append semantics, real file-io failure surfacing, and disabled-hub no-dispatch behavior
 - migrated mainline-call source now lives at `docs/mainline-calls/debug.core.json` and generated wiki lives at `docs/wiki/debug.core.md`

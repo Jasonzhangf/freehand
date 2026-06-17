@@ -944,3 +944,25 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: debug.core sink persistence/failure slice
+  - owner route: `debug.core`
+  - audit target: debug docs already claimed sink dispatch coverage and replayable file-sink classes, but owner white-box tests did not directly lock file-sink append semantics, real file-sink io failure, or disabled-hub no-dispatch behavior
+  - chosen closure:
+    - add one white-box test proving `FileDebugSink` appends multiple JSONL records instead of overwriting
+    - add one white-box test proving a real non-directory parent failure surfaces `DebugSinkError::Io`
+    - add one white-box test proving disabled `DebugHub` does not dispatch to sinks
+    - sync function map / test design / migrated mainline JSON / generated wiki
+  - implementation:
+    - added `file_sink_appends_multiple_events_as_jsonl`
+    - added `file_sink_reports_io_failure_explicitly`
+    - added `disabled_hub_does_not_dispatch_to_sinks`
+    - synced `docs/function-maps/debug.core.md`
+    - synced `docs/testing/debug.core.md`
+    - synced `docs/mainline-calls/debug.core.json`
+    - regenerated `docs/wiki/debug.core.md`
+  - verification:
+    - `cargo test -p freehand-debug`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

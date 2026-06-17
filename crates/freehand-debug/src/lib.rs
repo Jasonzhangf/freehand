@@ -377,11 +377,68 @@ mod tests {
     }
 
     #[test]
+    fn file_sink_appends_multiple_events_as_jsonl() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("freehand-debug-append-{unique}.jsonl"));
+        let sink = FileDebugSink::new(&path);
+
+        sink.handle(&debug_event()).expect("first append");
+        sink.handle(&debug_event()).expect("second append");
+
+        let stored = fs::read_to_string(&path).expect("read");
+        let lines: Vec<_> = stored.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.contains("\"status_text\":\"debug snapshot ready\""))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn file_sink_reports_io_failure_explicitly() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let parent = std::env::temp_dir().join(format!("freehand-debug-parent-{unique}"));
+        fs::write(&parent, "not-a-directory").expect("write parent file");
+        let path = parent.join("debug.jsonl");
+        let sink = FileDebugSink::new(&path);
+
+        let err = sink
+            .handle(&debug_event())
+            .expect_err("file sink io failure must surface");
+
+        assert!(matches!(err, DebugSinkError::Io(_)));
+        let _ = fs::remove_file(parent);
+    }
+
+    #[test]
     fn disabled_hub_drops_delivery() {
         let hub = DebugHub::new(false);
         let receiver = hub.subscribe(1);
         hub.emit(debug_event()).expect("emit");
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn disabled_hub_does_not_dispatch_to_sinks() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("freehand-debug-disabled-{unique}.jsonl"));
+        let hub = DebugHub::new(false);
+        hub.add_sink(FileDebugSink::new(&path));
+
+        hub.emit(debug_event()).expect("emit");
+
+        assert!(!path.exists());
     }
 
     #[test]

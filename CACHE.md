@@ -9,11 +9,11 @@
   - `cargo run -p xtask -- gates check`
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
 - Latest local full gate:
-  - `make ci` -> passed after reason.session-history explicit error-path hardening
+  - `make ci` -> passed after debug.core sink persistence/failure hardening
 - Current verified head:
-  - `make ci` -> passed after reason.session-history explicit error-path hardening
+  - `make ci` -> passed after debug.core sink persistence/failure hardening
 - Current working slice:
-  - `reason.session-history` explicit error-path lock completed; next pending audit remains metadata producer wiring or debug/node owner gaps
+  - `debug.core` sink persistence/failure lock completed; next pending audit remains metadata producer wiring or debug/node owner gaps
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -43,6 +43,7 @@
   - `reason.persistence` now also has explicit white-box regression coverage that invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate ledger sequence numbers fail recovery explicitly
   - `reason.session-history` now has explicit white-box regression coverage that empty rewrite reasons, forbidden rewrite base segments, invalid persisted json, persist/load file-io failures, and `ReasonTurnEngine::start_turn` session mismatches all fail explicitly
   - `metadata.core` now has explicit white-box regression coverage that missing `metadata_id`, owner feature id/crate name/module path/symbol path, missing `trace_id`, empty entry keys, empty `entries`, and validation-failed durable-ledger lines are rejected explicitly
+  - `debug.core` now has explicit white-box regression coverage that file sinks append JSONL replay evidence, real file-sink io failures surface explicitly, and disabled hubs do not dispatch to subscribers or sinks
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
@@ -84,7 +85,7 @@
   - provider raw ledgers remain debug-only and never participate in restore or session truth
   - if provider raw retention is enabled and the raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - Latest verification:
-  - `cargo test -p freehand-reason`
+  - `cargo test -p freehand-debug`
   - `cargo run -p xtask -- mainlines generate`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
