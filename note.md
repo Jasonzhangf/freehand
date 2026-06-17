@@ -688,3 +688,28 @@
     - `cargo run -p xtask -- mainlines generate`
     - `cargo test -p freehand-runtime`
     - `make ci`
+- 2026-06-18: daemon checkpoint failure-transport slice
+  - owner route: `app.runtime-daemon`
+  - audit target: runtime owner already locked missing checkpoint rewind as `TargetNotFound`, but daemon app boundary only had success rewind HTTP smoke and provider-failure smoke; missing-checkpoint rewind was not black-box covered on the real transport path
+  - chosen closure:
+    - create a real writable checkpoint through daemon HTTP submit
+    - physically remove the checkpoint manifest under `~/.freehand/state/checkpoints/**`
+    - call daemon HTTP rewind on the same `/ui/command` ingress
+    - assert protocol-mapped failure payload stays explicit and file state is unchanged
+  - implementation:
+    - added `daemon_rewind_checkpoint_missing_manifest_surfaces_protocol_failure`
+    - imported `UiCommandDispatchFailure` in daemon test module only
+    - no product behavior change; this is app-boundary regression locking
+  - docs synced:
+    - `docs/function-maps/app.runtime-daemon.md`
+    - `docs/testing/app.runtime-daemon.md`
+    - `docs/mainline-calls/app.runtime-daemon.json`
+    - generated `docs/wiki/app.runtime-daemon.md`
+  - verification:
+    - `cargo test -p freehand-daemon daemon_rewind_checkpoint_ -- --nocapture`
+    - `cargo test -p freehand-daemon daemon_submit_input_surfaces_provider_failure_from_runtime_owner -- --nocapture`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo test -p freehand-daemon`
+    - `cargo fmt --all`
+    - `cargo fmt --check`
+    - `make ci`

@@ -70,7 +70,8 @@ mod tests {
     use super::*;
     use freehand_contracts::TurnId;
     use freehand_ui_protocol::{
-        UiCheckpointSnapshot, UiCommand, UiCommandDispatchReceipt, UiPublicTurnProjection,
+        UiCheckpointSnapshot, UiCommand, UiCommandDispatchFailure, UiCommandDispatchReceipt,
+        UiPublicTurnProjection,
     };
     use reqwest::Client;
     use serde_json::Value;
@@ -464,6 +465,78 @@ mod tests {
             .await
             .expect("post-rewind checkpoint json");
         assert_eq!(checkpoint_query.checkpoints[0].latest_status, "restored");
+
+        server.stop().await;
+        drop(workspace);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn daemon_rewind_checkpoint_missing_manifest_surfaces_protocol_failure() {
+        let workspace = enter_temp_workspace();
+        fs::create_dir_all(workspace.root().join("scratch")).expect("create parent dir");
+        let (provider_url, request_rx, provider_handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_write_file_response(
+                    "scratch/daemon-rewind-missing.txt",
+                    "daemon rewind missing\n",
+                ),
+                complete_single_response("write done"),
+            ],
+        );
+        let server = TestServer::spawn(master_config_text(&provider_url)).await;
+        let client = Client::builder().build().expect("client");
+
+        let submitted = client
+            .post(format!("{}/ui/command", server.base_url))
+            .json(&UiCommand::SubmitUserInput {
+                text: "create writable checkpoint".to_owned(),
+            })
+            .send()
+            .await
+            .expect("submit response");
+        assert_eq!(submitted.status(), reqwest::StatusCode::ACCEPTED);
+        let _: UiCommandDispatchReceipt = submitted.json().await.expect("receipt json");
+        let _ = request_rx.recv().expect("first request");
+        let _ = request_rx.recv().expect("second request");
+        provider_handle.join().expect("join provider");
+
+        let file_path = workspace.root().join("scratch/daemon-rewind-missing.txt");
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("written file"),
+            "daemon rewind missing\n"
+        );
+
+        let checkpoint_id = checkpoint_id_from_home(&server.home);
+        let manifest_path = server
+            .home
+            .join(".freehand")
+            .join("state")
+            .join("checkpoints")
+            .join("master")
+            .join("runtime-session-master")
+            .join(&checkpoint_id)
+            .join("manifest.json");
+        fs::remove_file(&manifest_path).expect("remove manifest");
+
+        let rewind = client
+            .post(format!("{}/ui/command", server.base_url))
+            .json(&UiCommand::RewindCheckpoint {
+                checkpoint_id: checkpoint_id.clone(),
+            })
+            .send()
+            .await
+            .expect("rewind response");
+        assert_eq!(rewind.status(), reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+        let rewind: UiCommandDispatchFailure = rewind.json().await.expect("rewind failure json");
+        assert_eq!(rewind.code, "command_dispatch_target_not_found");
+        assert!(!rewind.retryable);
+        assert!(rewind.message.contains(&checkpoint_id));
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("file should remain after failed rewind"),
+            "daemon rewind missing\n"
+        );
 
         server.stop().await;
         drop(workspace);
