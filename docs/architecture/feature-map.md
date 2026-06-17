@@ -66,19 +66,24 @@ If a problem does not fit this table, update this routing index before making co
 ### `foundation.workspace`
 
 - owner: `xtask`, workspace root
-- allowed_paths: `Cargo.toml`, `xtask/**`, `docs/architecture/**`
+- allowed_paths: `Cargo.toml`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `CACHE.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: provider and reason implementation crates unless scaffold-related
 - required_checks:
   - `cargo test --workspace`
+  - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
   - xtask gate rule tests
+  - xtask mainline render/generation tests
 - required_module_black_box_tests:
   - xtask gate smoke
+  - xtask mainlines check smoke
 - required_project_black_box_tests:
   - workspace harness smoke
 - test_design_doc: `docs/testing/foundation.workspace.md`
 - function_map_doc: `docs/function-maps/foundation.workspace.md`
+- mainline_call_doc: `docs/mainline-calls/foundation.workspace.json`
+- generated_wiki_doc: `docs/wiki/foundation.workspace.md`
 - debug_artifacts:
   - none
 - runtime_paths:
@@ -87,6 +92,8 @@ If a problem does not fit this table, update this routing index before making co
   - workspace member changes
   - gate policy changes
   - repo workflow changes
+  - mainline generation shape changes
+  - generated wiki freshness policy changes
 - lifecycle_checks:
   - information sufficient
   - logic closed-loop

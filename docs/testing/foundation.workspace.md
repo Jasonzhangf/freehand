@@ -7,15 +7,23 @@
   - required architecture docs exist
   - required hooks and CI files exist
   - gate command can validate policy locks
+  - mainline generation command can render wiki from JSON truth
+  - mainline check command rejects stale wiki
 - white-box plan:
   - xtask rule-check logic
+  - mainline JSON parse/render logic
+  - generated-wiki freshness logic
 - module black-box plan:
   - `xtask gates check` smoke from repo root
+  - `xtask mainlines check` smoke from repo root
 - project black-box impact:
   - full workspace `make ci` gate smoke
+  - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - repo filesystem layout
 - known gaps:
   - no diff-aware gate yet for changed-feature-only optimization
 - sync status between design and implementation:
   - baseline aligned with current harness
+  - mainline generation and freshness checks are implemented in `xtask`
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

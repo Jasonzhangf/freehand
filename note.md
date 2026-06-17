@@ -453,3 +453,7 @@
   - `docs/mainline-calls/runtime.ui-command-dispatch.json` is the machine-readable source
   - `docs/wiki/runtime.ui-command-dispatch.md` must be generated, not hand-edited
   - `xtask gates check` must require function map, test design, JSON source, and generated wiki
+- 2026-06-17: foundation.workspace migrated mainline/wiki source in progress
+  - `docs/mainline-calls/foundation.workspace.json` is the machine-readable source
+  - `docs/wiki/foundation.workspace.md` must be generated, not hand-edited
+  - `xtask gates check` must require function map, test design, JSON source, and generated wiki

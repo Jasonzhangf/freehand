@@ -12,6 +12,7 @@ This directory is the machine-readable mainline call source of truth for migrate
 
 Current migrated features:
 
+- `foundation.workspace`
 - `provider.anthropic-adapter`
 - `provider.openai-adapter`
 - `provider.reason-live-bridge`

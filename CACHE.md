@@ -273,3 +273,6 @@
 - 2026-06-17: `runtime.ui-command-dispatch` migrated into the mainline/wiki chain
   - `docs/mainline-calls/runtime.ui-command-dispatch.json` is now the machine-readable runtime-dispatch mainline truth
   - `docs/wiki/runtime.ui-command-dispatch.md` is generated from it
+- 2026-06-17: `foundation.workspace` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/foundation.workspace.json` is now the machine-readable workspace-gate mainline truth
+  - `docs/wiki/foundation.workspace.md` is generated from it

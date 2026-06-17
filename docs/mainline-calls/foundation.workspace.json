@@ -1,0 +1,168 @@
+{
+  "feature_id": "foundation.workspace",
+  "owner_crate": "xtask",
+  "owner_module": "xtask/src/main.rs",
+  "function_map_doc": "docs/function-maps/foundation.workspace.md",
+  "test_design_doc": "docs/testing/foundation.workspace.md",
+  "mainline_call_doc": "docs/mainline-calls/foundation.workspace.json",
+  "generated_wiki_doc": "docs/wiki/foundation.workspace.md",
+  "request_mainline": [
+    "repo root may invoke `xtask gates check`",
+    "repo root may invoke `xtask mainlines generate`",
+    "repo root may invoke `xtask mainlines check`",
+    "gate runner verifies required files, workspace members, policy doc snippets, and generated wiki freshness",
+    "mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`"
+  ],
+  "response_mainline": [
+    "gate returns success when required repo truth, workspace structure, and generated wiki freshness are present",
+    "gate returns explicit failure with missing path, missing policy snippet, or stale generated wiki",
+    "mainline generation writes `docs/wiki/*.md` and `docs/wiki/README.md` from JSON truth",
+    "mainline freshness check returns success only when current generated wiki matches current JSON source"
+  ],
+  "error_mainline": [
+    "missing file or missing required snippet surfaces as gate failure",
+    "invalid JSON mainline source surfaces as generation/check failure",
+    "stale generated wiki surfaces as explicit freshness failure",
+    "no fallback path exists"
+  ],
+  "shared_functions": [],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "run_gates_check",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "workspace gate orchestrator",
+      "input_semantic": "repo root state",
+      "output_semantic": "gate result",
+      "caller": "CLI `main`",
+      "callee": "helper verifiers",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "require_files",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "required-file presence check",
+      "input_semantic": "repo file list",
+      "output_semantic": "pass/fail",
+      "caller": "run_gates_check",
+      "callee": "filesystem",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "verify_workspace_members",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "workspace member cargo check",
+      "input_semantic": "workspace member list",
+      "output_semantic": "pass/fail",
+      "caller": "run_gates_check",
+      "callee": "filesystem",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "verify_skill_rules",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "skill rule snippet check",
+      "input_semantic": "skill text",
+      "output_semantic": "pass/fail",
+      "caller": "run_gates_check",
+      "callee": "file reader",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "verify_orchestrator_policy_docs",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "policy doc snippet check",
+      "input_semantic": "docs text",
+      "output_semantic": "pass/fail",
+      "caller": "run_gates_check",
+      "callee": "file reader",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "verify_generated_wiki",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "generated wiki freshness check",
+      "input_semantic": "JSON mainline truth plus current wiki files",
+      "output_semantic": "pass/fail",
+      "caller": "run_gates_check",
+      "callee": "wiki renderer/checker",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "run_mainlines_generate",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "mainline wiki generation command",
+      "input_semantic": "repo root state",
+      "output_semantic": "generated wiki refresh result",
+      "caller": "CLI `main`",
+      "callee": "mainline generator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "run_mainlines_check",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "mainline wiki freshness command",
+      "input_semantic": "repo root state",
+      "output_semantic": "freshness check result",
+      "caller": "CLI `main`",
+      "callee": "mainline checker",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "generate_mainline_wikis",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "write or verify generated wiki artifacts from JSON sources",
+      "input_semantic": "repo root plus write flag",
+      "output_semantic": "wiki generation/check result",
+      "caller": "mainline commands",
+      "callee": "renderer pipeline",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "render_all_mainline_wikis",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "enumerate JSON sources and derive all wiki outputs including README index",
+      "input_semantic": "`docs/mainline-calls/*.json`",
+      "output_semantic": "expected wiki path/content pairs",
+      "caller": "mainline commands plus gate",
+      "callee": "renderer pipeline",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11",
+      "symbol_path": "load_mainline_doc",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "parse one machine-readable mainline source",
+      "input_semantic": "JSON source file",
+      "output_semantic": "typed mainline document",
+      "caller": "renderer pipeline",
+      "callee": "serde loader",
+      "binding_status": "bound"
+    },
+    {
+      "step": "12",
+      "symbol_path": "render_mainline_wiki",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "render one human-readable wiki artifact from one typed mainline document",
+      "input_semantic": "typed mainline document",
+      "output_semantic": "wiki markdown",
+      "caller": "renderer pipeline",
+      "callee": "markdown renderer",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code",
+    "current gate baseline enforces required files, policy docs, and generated wiki freshness",
+    "generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes"
+  ]
+}
