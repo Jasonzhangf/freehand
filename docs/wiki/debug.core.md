@@ -1,19 +1,12 @@
-# Function Map: `debug.core`
+# Wiki: `debug.core`
 
-- feature_id: `debug.core`
+Generated from `docs/mainline-calls/debug.core.json`. Do not edit by hand.
+
 - owner crate: `crates/freehand-debug`
 - owner module: `crates/freehand-debug/src/lib.rs`
-- owner entry symbols:
-  - `DebugSemanticPosition`
-  - `DebugScenePosition`
-  - `DebugTraceEnvelope`
-  - `DebugStateSnapshot`
-  - `DebugStateSnapshot::new`
-  - `DebugEvent`
-  - `DebugSinkKind`
-  - `DebugHub`
-  - `DebugHub::emit`
-  - `DebugHub::subscribe`
+- function map: `docs/function-maps/debug.core.md`
+- generated wiki: `docs/wiki/debug.core.md`
+- test design: `docs/testing/debug.core.md`
 
 ## Request Mainline
 
@@ -42,13 +35,13 @@
   - owner: `crates/freehand-debug/src/lib.rs`
   - purpose: construct the minimal reusable debug projection shared by UI protocol and future module emitters
   - allowed callers: reason/provider/node/testkit/UI protocol adapters
-  - related tests: debug snapshot serialization and UI debug query/subscription tests
+  - related tests: debug snapshot serialization, UI debug query/subscription tests
   - why shared: avoids each module defining a private debug snapshot DTO
 - `DebugHub::emit`
   - owner: `crates/freehand-debug/src/lib.rs`
   - purpose: ingest debug events and fan them out to subscribers and sinks
   - allowed callers: reason/provider/node/testkit/UI protocol adapters
-  - related tests: fanout and sink dispatch tests
+  - related tests: fanout tests, sink dispatch tests
   - why shared: centralizes observation delivery instead of duplicating buses in each owner crate
 
 ## Function Call Table
@@ -57,14 +50,14 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `DebugSemanticPosition` | `crates/freehand-debug/src/lib.rs` | carry semantic coordinates for debug correlation | feature/session/turn/trace/node identifiers | semantic debug position | module emitters | debug contract | bound |
 | 02 | `DebugScenePosition` | `crates/freehand-debug/src/lib.rs` | carry scene coordinates for debug correlation | crate/file/function/artifact coordinates | scene debug position | module emitters | debug contract | bound |
-| 03 | `DebugTraceEnvelope` | `crates/freehand-debug/src/lib.rs` | combine semantic and scene coordinates with optional hashes/artifact/timestamp | debug coordinates + hash/timestamp metadata | trace envelope | module emitters/replay tools | debug contract | bound |
-| 04 | `DebugStateSnapshot::new` | `crates/freehand-debug/src/lib.rs` | build UI-consumable read-only debug snapshot | semantic position + scene position + status/detail text | debug snapshot | module emitters/UI protocol tests | debug contract | bound |
+| 03 | `DebugTraceEnvelope` | `crates/freehand-debug/src/lib.rs` | combine semantic and scene coordinates with optional hashes/artifact/timestamp | debug coordinates plus hash/timestamp metadata | trace envelope | module emitters/replay tools | debug contract | bound |
+| 04 | `DebugStateSnapshot::new` | `crates/freehand-debug/src/lib.rs` | build UI-consumable read-only debug snapshot | semantic position plus scene position plus status/detail text | debug snapshot | module emitters/UI protocol tests | debug contract | bound |
 | 05 | `DebugHub::emit` | `crates/freehand-debug/src/lib.rs` | fan out emitted debug events to subscribers and sinks | debug event | delivered debug event | owner modules | debug hub | bound |
 | 06 | `DebugHub::subscribe` | `crates/freehand-debug/src/lib.rs` | register read-only debug subscribers | subscriber request | subscription handle | UI/debug tools | debug hub | bound |
 
-## Sync Status Against Code
+## Sync Status Against Mainline Call
 
 - debug core crate, reusable snapshot/envelope contracts, hub fanout, subscriber registration, and file/stdout sink classes are bound in code
 - current landed emitters are `freehand-reason` lifecycle milestones; provider/node producers remain future integration work
 - sink failures are explicit at `DebugHub::emit`, but current reason-side integration keeps them observation-only and does not promote them into reason truth
-- migrated mainline-call source now lives at `docs/mainline-calls/debug.core.json` and generated wiki lives at `docs/wiki/debug.core.md`
+- generated wiki must be regenerated from `docs/mainline-calls/debug.core.json` when this function-map truth changes

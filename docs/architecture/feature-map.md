@@ -811,7 +811,7 @@ If a problem does not fit this table, update this routing index before making co
 ### `debug.core`
 
 - owner: `crates/freehand-debug`
-- allowed_paths: `crates/freehand-debug/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`
+- allowed_paths: `crates/freehand-debug/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `crates/freehand-node/**`, `apps/**`
 - required_checks:
   - `cargo test -p freehand-debug`
@@ -826,6 +826,8 @@ If a problem does not fit this table, update this routing index before making co
   - UI debug-state projection consumes `freehand-debug` snapshot truth
 - test_design_doc: `docs/testing/debug.core.md`
 - function_map_doc: `docs/function-maps/debug.core.md`
+- mainline_call_doc: `docs/mainline-calls/debug.core.json`
+- generated_wiki_doc: `docs/wiki/debug.core.md`
 - debug_artifacts:
   - debug trace envelope fixture path
   - debug snapshot fixture path

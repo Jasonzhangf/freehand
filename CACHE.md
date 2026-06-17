@@ -267,3 +267,6 @@
 - 2026-06-17: `reason.context-planner` migrated into the mainline/wiki chain
   - `docs/mainline-calls/reason.context-planner.json` is now the machine-readable context-planner mainline truth
   - `docs/wiki/reason.context-planner.md` is generated from it
+- 2026-06-17: `debug.core` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/debug.core.json` is now the machine-readable debug mainline truth
+  - `docs/wiki/debug.core.md` is generated from it

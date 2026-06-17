@@ -1,0 +1,129 @@
+{
+  "feature_id": "debug.core",
+  "owner_crate": "crates/freehand-debug",
+  "owner_module": "crates/freehand-debug/src/lib.rs",
+  "function_map_doc": "docs/function-maps/debug.core.md",
+  "test_design_doc": "docs/testing/debug.core.md",
+  "mainline_call_doc": "docs/mainline-calls/debug.core.json",
+  "generated_wiki_doc": "docs/wiki/debug.core.md",
+  "request_mainline": [
+    "owner modules create debug semantic position and scene position from their own truth",
+    "owner modules build debug trace envelopes or debug snapshots through `freehand-debug`",
+    "debug material is observation data, not request content",
+    "owner modules emit debug events into `DebugHub`"
+  ],
+  "response_mainline": [
+    "debug snapshots may be consumed by UI protocol as read-only projection data",
+    "trace envelopes may be persisted or replayed by future debug/runtime writers",
+    "consumers preserve semantic and scene coordinates together",
+    "`DebugHub` fans out to subscribers and sinks without mutating owner truth"
+  ],
+  "error_mainline": [
+    "empty required debug fields are explicit construction errors only when builder helpers validate them",
+    "debug artifacts must not be promoted into successful reason/session/request truth",
+    "missing debug data is an observation gap, not a fallback source for business state",
+    "sink failures are explicit and do not rewrite owner truth"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "DebugStateSnapshot::new",
+      "owner": "crates/freehand-debug/src/lib.rs",
+      "purpose": "construct the minimal reusable debug projection shared by UI protocol and future module emitters",
+      "allowed_callers": [
+        "reason/provider/node/testkit/UI protocol adapters"
+      ],
+      "related_tests": [
+        "debug snapshot serialization",
+        "UI debug query/subscription tests"
+      ],
+      "why_shared": "avoids each module defining a private debug snapshot DTO"
+    },
+    {
+      "symbol": "DebugHub::emit",
+      "owner": "crates/freehand-debug/src/lib.rs",
+      "purpose": "ingest debug events and fan them out to subscribers and sinks",
+      "allowed_callers": [
+        "reason/provider/node/testkit/UI protocol adapters"
+      ],
+      "related_tests": [
+        "fanout tests",
+        "sink dispatch tests"
+      ],
+      "why_shared": "centralizes observation delivery instead of duplicating buses in each owner crate"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "DebugSemanticPosition",
+      "file_path": "crates/freehand-debug/src/lib.rs",
+      "responsibility": "carry semantic coordinates for debug correlation",
+      "input_semantic": "feature/session/turn/trace/node identifiers",
+      "output_semantic": "semantic debug position",
+      "caller": "module emitters",
+      "callee": "debug contract",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "DebugScenePosition",
+      "file_path": "crates/freehand-debug/src/lib.rs",
+      "responsibility": "carry scene coordinates for debug correlation",
+      "input_semantic": "crate/file/function/artifact coordinates",
+      "output_semantic": "scene debug position",
+      "caller": "module emitters",
+      "callee": "debug contract",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "DebugTraceEnvelope",
+      "file_path": "crates/freehand-debug/src/lib.rs",
+      "responsibility": "combine semantic and scene coordinates with optional hashes/artifact/timestamp",
+      "input_semantic": "debug coordinates plus hash/timestamp metadata",
+      "output_semantic": "trace envelope",
+      "caller": "module emitters/replay tools",
+      "callee": "debug contract",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "DebugStateSnapshot::new",
+      "file_path": "crates/freehand-debug/src/lib.rs",
+      "responsibility": "build UI-consumable read-only debug snapshot",
+      "input_semantic": "semantic position plus scene position plus status/detail text",
+      "output_semantic": "debug snapshot",
+      "caller": "module emitters/UI protocol tests",
+      "callee": "debug contract",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "DebugHub::emit",
+      "file_path": "crates/freehand-debug/src/lib.rs",
+      "responsibility": "fan out emitted debug events to subscribers and sinks",
+      "input_semantic": "debug event",
+      "output_semantic": "delivered debug event",
+      "caller": "owner modules",
+      "callee": "debug hub",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "DebugHub::subscribe",
+      "file_path": "crates/freehand-debug/src/lib.rs",
+      "responsibility": "register read-only debug subscribers",
+      "input_semantic": "subscriber request",
+      "output_semantic": "subscription handle",
+      "caller": "UI/debug tools",
+      "callee": "debug hub",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "debug core crate, reusable snapshot/envelope contracts, hub fanout, subscriber registration, and file/stdout sink classes are bound in code",
+    "current landed emitters are `freehand-reason` lifecycle milestones; provider/node producers remain future integration work",
+    "sink failures are explicit at `DebugHub::emit`, but current reason-side integration keeps them observation-only and does not promote them into reason truth",
+    "generated wiki must be regenerated from `docs/mainline-calls/debug.core.json` when this function-map truth changes"
+  ]
+}

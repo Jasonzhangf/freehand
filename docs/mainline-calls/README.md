@@ -23,3 +23,4 @@ Current migrated features:
 - `reason.session-history`
 - `reason.rewrite-policy`
 - `reason.context-planner`
+- `debug.core`

@@ -2,6 +2,7 @@
 
 Generated wiki artifacts from machine-readable mainline call source files. Do not edit by hand.
 
+- [debug.core](./debug.core.md) mainline call source `docs/mainline-calls/debug.core.json`
 - [provider.anthropic-adapter](./provider.anthropic-adapter.md) mainline call source `docs/mainline-calls/provider.anthropic-adapter.json`
 - [provider.openai-adapter](./provider.openai-adapter.md) mainline call source `docs/mainline-calls/provider.openai-adapter.json`
 - [provider.reason-live-bridge](./provider.reason-live-bridge.md) mainline call source `docs/mainline-calls/provider.reason-live-bridge.json`

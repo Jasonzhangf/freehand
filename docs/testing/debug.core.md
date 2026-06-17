@@ -33,3 +33,4 @@
   - crate/test baseline is landed
   - runtime hub fanout, subscriber delivery, and sink dispatch are implemented and covered
   - `reason.turn` emission smoke now covers one real producer without mutating turn truth
+  - migrated mainline-call source and generated wiki are kept in sync with this test design
