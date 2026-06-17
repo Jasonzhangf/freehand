@@ -87,6 +87,7 @@ Out of scope:
 
 ## Validation Matrix
 
+- Full local gate: `make ci`
 - Formatting: `cargo fmt --all --check`
 - Build: `cargo build --workspace`
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings`

@@ -198,6 +198,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_generated_wiki(&root)?;
     verify_mainline_manifest_links(&root)?;
     verify_mainline_call_table_bindings(&root)?;
+    verify_ci_cd_gate_commands(&root)?;
     verify_webui_app_boundary(&root)?;
     verify_runtime_daemon_boundary(&root)?;
     Ok(())
@@ -271,7 +272,10 @@ fn verify_skill_rules(root: &Path) -> Result<(), String> {
         "Owner Routing Index",
         "Owner Routing",
         "cargo build --workspace",
+        "cargo run -p xtask -- mainlines check",
         "cargo run -p xtask -- gates check",
+        "CI/CD command alignment",
+        "make ci",
     ];
     for snippet in required_skill_snippets {
         if !skill.contains(snippet) {
@@ -360,6 +364,9 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
                 "Mainline Call-Table Binding Gate",
                 "binding_status = \"bound\"",
                 "symbol_path",
+                "CI/CD Command Alignment Gate",
+                "make ci",
+                "cargo run -p xtask -- mainlines check",
             ],
         ),
         (
@@ -760,6 +767,44 @@ fn verify_mainline_call_table_bindings(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
+    let makefile =
+        fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
+    require_contains(
+        &makefile,
+        ".PHONY: build fmt clippy test mainlines gates ci hooks",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "mainlines:\n\tcargo run -p xtask -- mainlines check",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "ci: build fmt clippy test mainlines gates",
+        "Makefile",
+    )?;
+
+    let pre_push = fs::read_to_string(root.join(".githooks/pre-push"))
+        .map_err(|err| format!("read .githooks/pre-push: {err}"))?;
+    require_contains(&pre_push, "make ci", ".githooks/pre-push")?;
+
+    let ci_workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .map_err(|err| format!("read .github/workflows/ci.yml: {err}"))?;
+    require_contains(&ci_workflow, "run: make ci", ".github/workflows/ci.yml")?;
+
+    let release_workflow = fs::read_to_string(root.join(".github/workflows/release.yml"))
+        .map_err(|err| format!("read .github/workflows/release.yml: {err}"))?;
+    require_contains(
+        &release_workflow,
+        "run: make ci",
+        ".github/workflows/release.yml",
+    )?;
+
+    Ok(())
+}
+
 fn split_binding_segments(value: &str) -> Vec<String> {
     value
         .split(" / ")
@@ -1127,10 +1172,44 @@ mod tests {
         assert!(err.contains("missing symbol"), "{err}");
     }
 
+    #[test]
+    fn ci_cd_gate_commands_accept_aligned_full_gate() {
+        let root = test_repo_root("ci-cd-aligned");
+        write_ci_cd_fixture(&root, CiFixtureMode::Aligned);
+
+        verify_ci_cd_gate_commands(&root).expect("aligned CI/CD full gate should pass");
+    }
+
+    #[test]
+    fn ci_cd_gate_commands_reject_make_ci_without_mainlines() {
+        let root = test_repo_root("ci-cd-missing-mainlines");
+        write_ci_cd_fixture(&root, CiFixtureMode::MakeCiMissingMainlines);
+
+        let err = verify_ci_cd_gate_commands(&root)
+            .expect_err("make ci without mainlines check must fail");
+        assert!(err.contains("Makefile"), "{err}");
+    }
+
+    #[test]
+    fn ci_cd_gate_commands_reject_ci_workflow_without_full_gate() {
+        let root = test_repo_root("ci-cd-partial-ci");
+        write_ci_cd_fixture(&root, CiFixtureMode::CiWorkflowPartialGate);
+
+        let err =
+            verify_ci_cd_gate_commands(&root).expect_err("CI workflow without make ci must fail");
+        assert!(err.contains(".github/workflows/ci.yml"), "{err}");
+    }
+
     enum FixtureMode {
         Aligned,
         WrongFunctionMapPath,
         MissingFeatureMapLink,
+    }
+
+    enum CiFixtureMode {
+        Aligned,
+        MakeCiMissingMainlines,
+        CiWorkflowPartialGate,
     }
 
     fn test_repo_root(name: &str) -> PathBuf {
@@ -1195,6 +1274,54 @@ mod tests {
             ),
         )
         .expect("write mainline json");
+    }
+
+    fn write_ci_cd_fixture(root: &Path, mode: CiFixtureMode) {
+        for rel in [".githooks", ".github/workflows"] {
+            fs::create_dir_all(root.join(rel)).expect("create ci fixture dir");
+        }
+        let makefile = match mode {
+            CiFixtureMode::Aligned | CiFixtureMode::CiWorkflowPartialGate => {
+                ".PHONY: build fmt clippy test mainlines gates ci hooks\n\
+build:\n\tcargo build --workspace\n\
+fmt:\n\tcargo fmt --check\n\
+clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
+test:\n\tcargo test --workspace\n\
+mainlines:\n\tcargo run -p xtask -- mainlines check\n\
+gates:\n\tcargo run -p xtask -- gates check\n\
+ci: build fmt clippy test mainlines gates\n"
+            }
+            CiFixtureMode::MakeCiMissingMainlines => {
+                ".PHONY: build fmt clippy test gates ci hooks\n\
+build:\n\tcargo build --workspace\n\
+fmt:\n\tcargo fmt --check\n\
+clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
+test:\n\tcargo test --workspace\n\
+gates:\n\tcargo run -p xtask -- gates check\n\
+ci: build fmt clippy test gates\n"
+            }
+        };
+        fs::write(root.join("Makefile"), makefile).expect("write Makefile fixture");
+        fs::write(
+            root.join(".githooks/pre-push"),
+            "#!/usr/bin/env bash\nset -euo pipefail\nmake ci\n",
+        )
+        .expect("write pre-push fixture");
+        let ci_workflow = match mode {
+            CiFixtureMode::Aligned | CiFixtureMode::MakeCiMissingMainlines => {
+                "name: ci\njobs:\n  rust-gates:\n    steps:\n      - name: Full gate\n        run: make ci\n"
+            }
+            CiFixtureMode::CiWorkflowPartialGate => {
+                "name: ci\njobs:\n  rust-gates:\n    steps:\n      - name: Architecture gates\n        run: cargo run -p xtask -- gates check\n"
+            }
+        };
+        fs::write(root.join(".github/workflows/ci.yml"), ci_workflow)
+            .expect("write ci workflow fixture");
+        fs::write(
+            root.join(".github/workflows/release.yml"),
+            "name: release\njobs:\n  release:\n    steps:\n      - name: Full gate\n        run: make ci\n",
+        )
+        .expect("write release workflow fixture");
     }
 
     fn create_dirs(root: &Path) {

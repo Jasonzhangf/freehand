@@ -6,6 +6,8 @@
   - workspace scaffold exists
   - required architecture docs exist
   - required hooks and CI files exist
+  - `make ci` is the canonical full local gate and includes mainline freshness before architecture gates
+  - pre-push, CI, and release paths consume the same full gate instead of drifting into partial gate stacks
   - gate command can validate policy locks
   - mainline generation command can render wiki from JSON truth
   - mainline check command rejects stale wiki
@@ -15,13 +17,15 @@
   - generated-wiki freshness logic
   - mainline manifest cross-link logic between JSON, feature map, function map, test design, and generated wiki path
   - mainline call-table file and symbol binding logic for migrated `bound` rows
+  - CI/CD and local hook command-alignment logic
 - module black-box plan:
   - `xtask gates check` smoke from repo root
   - `xtask mainlines check` smoke from repo root
   - `cargo test -p xtask` manifest-link positive and negative tests
   - `cargo test -p xtask` call-table binding positive and negative tests
+  - `cargo test -p xtask` CI/CD command-alignment positive and negative tests
 - project black-box impact:
-  - full workspace `make ci` gate smoke
+  - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - repo filesystem layout
@@ -32,4 +36,5 @@
   - mainline generation and freshness checks are implemented in `xtask`
   - mainline manifest cross-link checks are implemented in `xtask`
   - mainline call-table binding checks are implemented in `xtask`
+  - CI/CD command-alignment checks are implemented in `xtask`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

@@ -4,11 +4,20 @@ Freehand uses one gate stack locally and in CI.
 
 ## Required Local Gate
 
+Canonical command:
+
+```bash
+make ci
+```
+
+Expanded command stack:
+
 ```bash
 cargo build --workspace
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```
 
@@ -23,9 +32,9 @@ No feature may claim regression-safe completion unless all three mapped layers p
 ## Commit And Push Rule
 
 - commit requires format and architecture gate
-- push requires full local gate
-- CI reruns the same gate
-- release jobs only run after CI success
+- push requires `make ci`
+- CI reruns `make ci`
+- release jobs rerun `make ci` before building release binaries
 - gate failures block commit and push; no bypass-by-default workflow exists
 
 ## Test Taxonomy
@@ -80,3 +89,15 @@ This keeps generated wiki artifacts as compiled review surfaces over one machine
 - `binding_status = "pending"` remains explicit and is not treated as a bound symbol
 
 This keeps mainline call maps code-bound instead of becoming stale review prose.
+
+## CI/CD Command Alignment Gate
+
+`xtask gates check` validates local and remote automation routes through the same full-gate truth:
+
+- `Makefile` must provide a `mainlines` target that runs `cargo run -p xtask -- mainlines check`
+- `Makefile` `ci` must include `build fmt clippy test mainlines gates`
+- `.githooks/pre-push` must run `make ci`
+- GitHub CI must run `make ci`
+- release workflow must run `make ci` before release build/publish steps
+
+This prevents pre-push, CI, and release from silently drifting into partial gate stacks.

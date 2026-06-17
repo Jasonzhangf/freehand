@@ -68,7 +68,7 @@ If a problem does not fit this table, update this routing index before making co
 ### `foundation.workspace`
 
 - owner: `xtask`, workspace root
-- allowed_paths: `Cargo.toml`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `CACHE.md`, `MEMORY.md`, `note.md`
+- allowed_paths: `Cargo.toml`, `Makefile`, `.github/workflows/**`, `.githooks/**`, `.agents/skills/freehand-dev/**`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `CACHE.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: provider and reason implementation crates unless scaffold-related
 - required_checks:
   - `cargo test --workspace`
@@ -79,6 +79,7 @@ If a problem does not fit this table, update this routing index before making co
   - xtask mainline render/generation tests
   - xtask mainline manifest cross-link tests
   - xtask mainline call-table binding tests
+  - xtask CI/CD command-alignment tests
 - required_module_black_box_tests:
   - xtask gate smoke
   - xtask mainlines check smoke
@@ -96,6 +97,7 @@ If a problem does not fit this table, update this routing index before making co
   - workspace member changes
   - gate policy changes
   - repo workflow changes
+  - CI/CD full-gate alignment changes
   - mainline generation shape changes
   - generated wiki freshness policy changes
   - mainline manifest cross-link policy changes

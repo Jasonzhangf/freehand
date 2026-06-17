@@ -142,6 +142,7 @@ Use this skill for any non-trivial work in this repo.
 - generated wiki must come from the machine-readable mainline call source; do not hand-edit generated wiki files.
 - `xtask gates check` validates migrated mainline-call sources as compiled manifests: JSON path, `feature_id`, function map, test design, generated wiki, and feature-map links must cross-link deterministically.
 - `xtask gates check` validates migrated `bound` call-table rows: listed source files must exist and listed symbols must resolve in those files; use `binding pending`/`pending` only for unlanded bindings.
+- `xtask gates check` validates CI/CD command alignment: `make ci` must include `mainlines check`, and pre-push, CI, and release workflows must route through the full gate.
 - New features and bug fixes both require lifecycle thinking, not just local code patches.
 - In provider work, preserve raw provider events in debug mode and rely on unified semantic events for normal operation.
 - In provider work, read local official protocol snapshots under `docs/references/provider-protocols/` before inventing wire behavior.
@@ -198,11 +199,13 @@ Use this skill for any non-trivial work in this repo.
   - module white-box tests
   - module black-box tests
   - project black-box tests
+- Canonical full local gate is `make ci`.
 - Minimum baseline:
   - `cargo build --workspace`
   - `cargo fmt --check`
   - `cargo clippy --workspace --all-targets -- -D warnings`
   - `cargo test --workspace`
+  - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - For state machine, stream, timeout, retry, error projection, or resource cleanup changes, add both positive and negative tests.
 - For provider recovery logic, classify errors as recoverable, unrecoverable, or periodic-recoverable. Periodic windows use provider-supplied seconds first, otherwise configured defaults.

@@ -548,3 +548,8 @@
   - runtime live submit now registers an active cancel token, releases runtime mutex before provider IO, checks cancellation across live-loop boundaries, and prevents later provider success from overwriting cancelled projection
   - WebUI Cancel/Escape now sends `CancelTurn`; if submit is in flight before a concrete `turn_id` reaches the browser, it sends protocol-owned `CancelLatestActiveTurn`
   - verification evidence: `cargo fmt --all --check`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` -> 221 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
+- 2026-06-17: stability-quality CI/CD full-gate alignment
+  - owner route confirmed: `foundation.workspace`
+  - drift found: full gate docs required `cargo run -p xtask -- mainlines check`, but `make ci`, pre-push via `make ci`, release via `make ci`, and GitHub CI did not all explicitly include that freshness check
+  - fix direction: make `make ci` the canonical full local gate, add a `mainlines` target before `gates`, make GitHub CI run `make ci`, and add `xtask gates check` coverage so the automation cannot silently drift back to partial gates
+  - targeted verification so far: `cargo test -p xtask` -> 8 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`

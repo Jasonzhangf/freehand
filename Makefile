@@ -1,4 +1,4 @@
-.PHONY: build fmt clippy test gates ci hooks
+.PHONY: build fmt clippy test mainlines gates ci hooks
 
 build:
 	cargo build --workspace
@@ -12,12 +12,14 @@ clippy:
 test:
 	cargo test --workspace
 
+mainlines:
+	cargo run -p xtask -- mainlines check
+
 gates:
 	cargo run -p xtask -- gates check
 
-ci: build fmt clippy test gates
+ci: build fmt clippy test mainlines gates
 
 hooks:
 	git config core.hooksPath .githooks
 	chmod +x .githooks/pre-commit .githooks/pre-push
-

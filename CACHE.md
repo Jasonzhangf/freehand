@@ -3,12 +3,10 @@
 - Current branch: `main`.
 - Current milestone: stability-quality gate hardening.
 - Last verified baseline:
-  - `cargo fmt --all --check`
-  - `cargo build --workspace`
-  - `cargo clippy --workspace --all-targets -- -D warnings`
-  - `cargo test --workspace` -> 226 passed
+  - `cargo test -p xtask` -> 8 passed
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
+  - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -33,5 +31,7 @@
   - `xtask gates check` now validates migrated mainline manifests as cross-linked compiled review surfaces
   - each `docs/mainline-calls/<feature_id>.json` must match canonical function map, test design, generated wiki, and feature-map links
   - `xtask gates check` now validates migrated mainline `bound` call-table rows against existing source files and resolvable symbols
+  - `make ci` is the canonical full local gate and now includes `cargo run -p xtask -- mainlines check` before `cargo run -p xtask -- gates check`
+  - `xtask gates check` now validates CI/CD command alignment so pre-push, GitHub CI, and release paths cannot silently skip the full gate
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.

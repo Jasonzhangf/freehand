@@ -16,6 +16,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - gate runner verifies required files, workspace members, policy doc snippets, and generated wiki freshness
 - gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
+- gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 
 ## Response Mainline
@@ -23,6 +24,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - gate returns success when required repo truth, workspace structure, and generated wiki freshness are present
 - gate returns success when migrated mainline manifests are deterministically linked to their owner docs
 - gate returns success when migrated mainline call-table bindings resolve to source files and source symbols
+- gate returns success when local and remote automation routes through the same full gate stack
 - gate returns explicit failure with missing path, missing policy snippet, or stale generated wiki
 - mainline generation writes `docs/wiki/*.md` and `docs/wiki/README.md` from JSON truth
 - mainline freshness check returns success only when current generated wiki matches current JSON source
@@ -32,6 +34,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - missing file or missing required snippet surfaces as gate failure
 - mismatched mainline manifest source path, function map path, test design path, generated wiki path, or feature-map link surfaces as gate failure
 - missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure
+- missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
 - invalid JSON mainline source surfaces as generation/check failure
 - stale generated wiki surfaces as explicit freshness failure
 - no fallback path exists
@@ -57,9 +60,10 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 | 12 | `render_mainline_wiki` | `xtask/src/main.rs` | render one human-readable wiki artifact from one typed mainline document | typed mainline document | wiki markdown | renderer pipeline | markdown renderer | bound |
 | 13 | `verify_mainline_manifest_links` | `xtask/src/main.rs` | validate migrated mainline manifest cross-links | JSON mainline truth plus feature/function/testing docs | pass/fail | run_gates_check | filesystem and mainline loader | bound |
 | 14 | `verify_mainline_call_table_bindings` | `xtask/src/main.rs` | validate migrated mainline call-table file and symbol bindings | JSON mainline truth plus source files | pass/fail | run_gates_check | filesystem and symbol resolver | bound |
+| 15 | `verify_ci_cd_gate_commands` | `xtask/src/main.rs` | validate local hook, Makefile, CI, and release full-gate command alignment | automation config files | pass/fail | run_gates_check | filesystem and policy snippets | bound |
 
 ## Sync Status Against Mainline Call
 
 - workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code
-- current gate baseline enforces required files, policy docs, generated wiki freshness, migrated mainline manifest cross-links, and migrated mainline call-table bindings
+- current gate baseline enforces required files, policy docs, generated wiki freshness, migrated mainline manifest cross-links, migrated mainline call-table bindings, and CI/CD full-gate command alignment
 - generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes
