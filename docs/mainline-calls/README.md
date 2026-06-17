@@ -22,3 +22,4 @@ Current migrated features:
 - `reason.persistence`
 - `reason.session-history`
 - `reason.rewrite-policy`
+- `reason.context-planner`

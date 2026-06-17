@@ -37,3 +37,4 @@
   - planner baseline implemented in `freehand-blocks`
   - session-history rewrite-mode/version wiring is landed
   - runtime tool-schema fingerprint wiring is still pending
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

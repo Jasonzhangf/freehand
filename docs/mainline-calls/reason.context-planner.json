@@ -1,0 +1,165 @@
+{
+  "feature_id": "reason.context-planner",
+  "owner_crate": "crates/freehand-blocks",
+  "owner_module": "crates/freehand-blocks/src/lib.rs",
+  "function_map_doc": "docs/function-maps/reason.context-planner.md",
+  "test_design_doc": "docs/testing/reason.context-planner.md",
+  "mainline_call_doc": "docs/mainline-calls/reason.context-planner.json",
+  "generated_wiki_doc": "docs/wiki/reason.context-planner.md",
+  "request_mainline": [
+    "`freehand-reason` reads session truth and current turn inputs",
+    "`reason.session-history` provides stable base context plus session-owned `rewrite_mode` and `rewrite_version`",
+    "it asks the planner owner path to classify context into stable and volatile segments",
+    "the planner admits additional context only through typed segment rules",
+    "preferred context expansion path is subagent search final report -> `SubagentConclusion`",
+    "the planner returns request-content-only output; metadata/cache/debug stay outside this mainline"
+  ],
+  "response_mainline": [
+    "planner output becomes provider-neutral request content for the current turn",
+    "planner also returns cache-shape diagnostics through metadata-side outputs",
+    "provider renderers consume only planned request content plus explicit provider config",
+    "downstream response handling does not mutate the stable prefix except through explicit rewrite events"
+  ],
+  "error_mainline": [
+    "raw subagent transcript attempted as parent context is rejected as an architecture error",
+    "metadata/request mixing is rejected as an architecture error",
+    "unbounded or over-budget context segment admission is rejected",
+    "prefix rewrite without explicit rewrite gate is rejected"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "plan_context",
+      "owner": "crates/freehand-blocks",
+      "purpose": "classify, validate, order, and project typed context segments while emitting metadata-side cache diagnostics",
+      "allowed_callers": [
+        "freehand-reason",
+        "owner-crate tests",
+        "replay/debug tools"
+      ],
+      "related_tests": [
+        "context segment admission",
+        "subagent conclusion admission",
+        "cache-shape drift tests"
+      ],
+      "why_shared": "context semantics must not be duplicated in orchestrator or provider crates"
+    },
+    {
+      "symbol": "validate_rewrite_base_segments",
+      "owner": "crates/freehand-blocks",
+      "purpose": "validate and order session rewrite base segments before `reason.session-history` mutates stable prefix truth",
+      "allowed_callers": [
+        "freehand-reason",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "rewrite-base rejection tests"
+      ],
+      "why_shared": "rewrite-base segment semantics must stay aligned with ordinary-turn planner semantics"
+    },
+    {
+      "symbol": "inspect_context_cache_diagnostics",
+      "owner": "crates/freehand-blocks",
+      "purpose": "compute metadata-side cache diagnostics for explicit rewrite ledger events",
+      "allowed_callers": [
+        "freehand-reason",
+        "owner-crate tests",
+        "replay/debug tools"
+      ],
+      "related_tests": [
+        "rewrite diagnostics snapshot tests"
+      ],
+      "why_shared": "rewrite and ordinary-turn cache evidence must use one semantic calculator"
+    },
+    {
+      "symbol": "render_context_segments_as_text",
+      "owner": "crates/freehand-blocks",
+      "purpose": "single renderer from typed request-side segments into provider-consumable text",
+      "allowed_callers": [
+        "provider adapters",
+        "tests"
+      ],
+      "related_tests": [
+        "planned request render smoke"
+      ],
+      "why_shared": "provider adapters must consume a single context rendering path and must not own segment interpretation"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "plan_context",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "responsibility": "classify stable and volatile context sources into typed segments and append the owning user-turn segment",
+      "input_semantic": "candidate segments plus current turn input plus rewrite metadata",
+      "output_semantic": "ordered typed context segment set plus cache diagnostics",
+      "caller": "freehand-reason",
+      "callee": "planner builder",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "plan_context",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "responsibility": "validate segment admission and token caps",
+      "input_semantic": "typed context segment candidates",
+      "output_semantic": "admitted/rejected segment set",
+      "caller": "planner builder",
+      "callee": "planner validator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "plan_context",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "responsibility": "calculate cache-shape diagnostics including rewrite mode/version",
+      "input_semantic": "admitted stable prefix plus rewrite version plus tool schema shape",
+      "output_semantic": "metadata-side cache diagnostics",
+      "caller": "planner builder",
+      "callee": "cache diagnostics block",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "validate_rewrite_base_segments",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "responsibility": "validate stable/session-stable base segments for explicit rewrite gates",
+      "input_semantic": "rewritten stable prefix candidates",
+      "output_semantic": "admitted/rejected rewrite base segment set",
+      "caller": "reason.session-history",
+      "callee": "rewrite validator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "inspect_context_cache_diagnostics",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "responsibility": "calculate rewrite-ledger diagnostics outside request content",
+      "input_semantic": "admitted rewrite base segments plus rewrite mode/version",
+      "output_semantic": "metadata-side cache diagnostics",
+      "caller": "reason.session-history",
+      "callee": "cache diagnostics block",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "render_context_segments_as_text",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "responsibility": "materialize provider-neutral planned request content",
+      "input_semantic": "admitted ordered segments",
+      "output_semantic": "provider-neutral request content string",
+      "caller": "provider adapters",
+      "callee": "planner projector",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "semantic design is locked",
+    "planner baseline is landed in `freehand-blocks`",
+    "current `freehand-reason` baseline now routes turn startup through `plan_context`",
+    "current baseline enforces segment ordering, segment-contract validation, token-budget rejection, user-turn append ownership, raw-subagent-transcript rejection by provenance, and rewrite-base validation for session history",
+    "current baseline emits cache diagnostics separated from request content for both ordinary turns and explicit rewrite ledger events",
+    "rewrite-mode and rewrite-version are now sourced from persistent `SessionHistory` truth instead of turn-local constants",
+    "remaining gap: tool-schema fingerprint is still not wired from runtime tool truth into planner diagnostics",
+    "generated wiki must be regenerated from `docs/mainline-calls/reason.context-planner.json` when this function-map truth changes"
+  ]
+}

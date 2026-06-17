@@ -441,3 +441,7 @@
   - `docs/mainline-calls/reason.rewrite-policy.json` is the machine-readable source
   - `docs/wiki/reason.rewrite-policy.md` must be generated, not hand-edited
   - `xtask gates check` must require function map, test design, JSON source, and generated wiki
+- 2026-06-17: reason.context-planner migrated mainline/wiki source in progress
+  - `docs/mainline-calls/reason.context-planner.json` is the machine-readable source
+  - `docs/wiki/reason.context-planner.md` must be generated, not hand-edited
+  - `xtask gates check` must require function map, test design, JSON source, and generated wiki

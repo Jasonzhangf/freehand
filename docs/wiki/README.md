@@ -6,6 +6,7 @@ Generated wiki artifacts from machine-readable mainline call source files. Do no
 - [provider.openai-adapter](./provider.openai-adapter.md) mainline call source `docs/mainline-calls/provider.openai-adapter.json`
 - [provider.reason-live-bridge](./provider.reason-live-bridge.md) mainline call source `docs/mainline-calls/provider.reason-live-bridge.json`
 - [provider.semantic](./provider.semantic.md) mainline call source `docs/mainline-calls/provider.semantic.json`
+- [reason.context-planner](./reason.context-planner.md) mainline call source `docs/mainline-calls/reason.context-planner.json`
 - [reason.persistence](./reason.persistence.md) mainline call source `docs/mainline-calls/reason.persistence.json`
 - [reason.rewrite-policy](./reason.rewrite-policy.md) mainline call source `docs/mainline-calls/reason.rewrite-policy.json`
 - [reason.session-history](./reason.session-history.md) mainline call source `docs/mainline-calls/reason.session-history.json`

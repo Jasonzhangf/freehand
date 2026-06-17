@@ -264,3 +264,6 @@
 - 2026-06-17: `reason.rewrite-policy` migrated into the mainline/wiki chain
   - `docs/mainline-calls/reason.rewrite-policy.json` is now the machine-readable rewrite-policy mainline truth
   - `docs/wiki/reason.rewrite-policy.md` is generated from it
+- 2026-06-17: `reason.context-planner` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/reason.context-planner.json` is now the machine-readable context-planner mainline truth
+  - `docs/wiki/reason.context-planner.md` is generated from it

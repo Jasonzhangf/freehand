@@ -763,7 +763,7 @@ If a problem does not fit this table, update this routing index before making co
 ### `reason.context-planner`
 
 - owner: `crates/freehand-blocks`
-- allowed_paths: `crates/freehand-blocks/**`, `crates/freehand-contracts/**`, `crates/freehand-reason/**`, `docs/architecture/**`, `docs/design/**`
+- allowed_paths: `crates/freehand-blocks/**`, `crates/freehand-contracts/**`, `crates/freehand-reason/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
 - forbidden_paths: `crates/freehand-provider-*/**` except explicit request-consumer interfaces, `crates/freehand-ui-protocol/**`
 - required_checks:
   - `cargo test -p freehand-blocks`
@@ -784,6 +784,8 @@ If a problem does not fit this table, update this routing index before making co
   - compaction/rollback-only rewrite smoke
 - test_design_doc: `docs/testing/reason.context-planner.md`
 - function_map_doc: `docs/function-maps/reason.context-planner.md`
+- mainline_call_doc: `docs/mainline-calls/reason.context-planner.json`
+- generated_wiki_doc: `docs/wiki/reason.context-planner.md`
 - debug_artifacts:
   - context planner replay fixture path
   - cache-shape drift fixture path
