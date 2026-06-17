@@ -2,6 +2,7 @@
 
 Generated wiki artifacts from machine-readable mainline call source files. Do not edit by hand.
 
+- [config.core](./config.core.md) mainline call source `docs/mainline-calls/config.core.json`
 - [debug.core](./debug.core.md) mainline call source `docs/mainline-calls/debug.core.json`
 - [foundation.workspace](./foundation.workspace.md) mainline call source `docs/mainline-calls/foundation.workspace.json`
 - [provider.anthropic-adapter](./provider.anthropic-adapter.md) mainline call source `docs/mainline-calls/provider.anthropic-adapter.json`

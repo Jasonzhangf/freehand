@@ -106,6 +106,8 @@ If a problem does not fit this table, update this routing index before making co
 - forbidden_paths: `apps/**` provider adapter internals
 - required_checks:
   - `cargo test -p freehand-config`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
   - config load/validate tests
   - startup mode config tests
@@ -125,6 +127,8 @@ If a problem does not fit this table, update this routing index before making co
   - CLI agent-start config + provider projection smoke
 - test_design_doc: `docs/testing/config.core.md`
 - function_map_doc: `docs/function-maps/config.core.md`
+- mainline_call_doc: `docs/mainline-calls/config.core.json`
+- generated_wiki_doc: `docs/wiki/config.core.md`
 - debug_artifacts:
   - config snapshot path
 - runtime_paths:
@@ -137,6 +141,7 @@ If a problem does not fit this table, update this routing index before making co
   - config resolution order changes
   - runtime home layout changes
   - startup file contract changes
+  - generated wiki freshness policy changes
 - lifecycle_checks:
   - multi-agent config ownership remains single-source
   - multi-provider config ownership remains single-source
@@ -145,6 +150,7 @@ If a problem does not fit this table, update this routing index before making co
   - config update path is closed-loop
   - one-process-one-agent startup rule remains explicit
   - paired node topology remains config-owned and reciprocal
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `app.cli-runtime-smoke`
 

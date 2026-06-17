@@ -276,3 +276,6 @@
 - 2026-06-17: `foundation.workspace` migrated into the mainline/wiki chain
   - `docs/mainline-calls/foundation.workspace.json` is now the machine-readable workspace-gate mainline truth
   - `docs/wiki/foundation.workspace.md` is generated from it
+- 2026-06-17: `config.core` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/config.core.json` is now the machine-readable config-selection mainline truth
+  - `docs/wiki/config.core.md` is generated from it

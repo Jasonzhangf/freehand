@@ -19,6 +19,7 @@
   - load config file and select named agent with full provider runtime selection plus paired-topology projection through public config boundary
 - project black-box impact:
   - CLI startup path consumes one named agent configuration and projects selected provider metadata without exposing API key
+  - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - config fixtures under crate test fixtures
   - runtime evidence under `~/.freehand/state/config`
@@ -26,3 +27,4 @@
   - provider runtime execution support is still outside `config.core`; current project black-box scope stops at safe projection of selection truth
 - sync status between design and implementation:
   - white-box, module black-box, and project black-box baseline cover multi-provider registry, reciprocal peer topology, and selected-provider projection
+  - migrated mainline-call source and generated wiki are kept in sync with this test design
