@@ -65,6 +65,7 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 ## Sync Status Against Mainline Call
 
 - function-map bindings now cover pairing, pairing loss, direct message, progress query, and slave turn publication on `LocalNodeRuntime`
+- direct white-box locks now cover unauthorized pair source node, unauthorized pair source ip, empty delegated task status, pre-pair or intruder slave-turn publication, and existing pair-token/direct-message guardrails
 - node runtime still writes status, progress, and slave turn through `freehand-ui-protocol` instead of duplicate storage
 - real websocket IO adapter remains intentionally out of scope for this first runtime semantic layer
 - generated wiki must be regenerated from `docs/mainline-calls/node.master-slave.json` when this function-map truth changes

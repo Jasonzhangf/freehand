@@ -11,6 +11,9 @@
   - pairing state transitions, permission checks, handshake validation, relisten behavior
   - config bootstrap validation for master/slave ownership fields
   - direct-message permission validation
+  - pairing rejection for unauthorized source node and unauthorized source ip
+  - delegated-task empty-status rejection
+  - slave-turn publication permission rejection
 - module black-box plan:
   - status snapshot and progress query through node boundary
   - slave turn publication visible through subscription surface
@@ -27,5 +30,5 @@
   - transport heartbeat and reconnect timing policy not yet defined
 - sync status between design and implementation:
   - `LocalNodeRuntime` baseline implemented
-  - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, and direct-message guardrails
+  - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, direct-message guardrails, and explicit rejection for unauthorized source node/ip, empty task status, and unauthorized slave-turn publication
   - migrated mainline-call source and generated wiki are kept in sync with this test design

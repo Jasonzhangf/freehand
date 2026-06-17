@@ -9,11 +9,11 @@
   - `cargo run -p xtask -- gates check`
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
 - Latest local full gate:
-  - `make ci` -> passed after debug.core sink persistence/failure hardening
+  - `make ci` -> passed after node.master-slave explicit rejection hardening
 - Current verified head:
-  - `make ci` -> passed after debug.core sink persistence/failure hardening
+  - `make ci` -> passed after node.master-slave explicit rejection hardening
 - Current working slice:
-  - `debug.core` sink persistence/failure lock completed; next pending audit remains metadata producer wiring or debug/node owner gaps
+  - `node.master-slave` explicit rejection lock completed; next pending audit remains metadata producer wiring or debug path-policy gaps
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -44,6 +44,7 @@
   - `reason.session-history` now has explicit white-box regression coverage that empty rewrite reasons, forbidden rewrite base segments, invalid persisted json, persist/load file-io failures, and `ReasonTurnEngine::start_turn` session mismatches all fail explicitly
   - `metadata.core` now has explicit white-box regression coverage that missing `metadata_id`, owner feature id/crate name/module path/symbol path, missing `trace_id`, empty entry keys, empty `entries`, and validation-failed durable-ledger lines are rejected explicitly
   - `debug.core` now has explicit white-box regression coverage that file sinks append JSONL replay evidence, real file-sink io failures surface explicitly, and disabled hubs do not dispatch to subscribers or sinks
+  - `node.master-slave` now has explicit white-box regression coverage that unauthorized pair source node, unauthorized pair source ip, empty delegated task status, and pre-pair or intruder slave-turn publication all fail explicitly and do not materialize truth
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
@@ -85,7 +86,7 @@
   - provider raw ledgers remain debug-only and never participate in restore or session truth
   - if provider raw retention is enabled and the raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - Latest verification:
-  - `cargo test -p freehand-debug`
+  - `cargo test -p freehand-node`
   - `cargo run -p xtask -- mainlines generate`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`

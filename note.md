@@ -966,3 +966,27 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: node.master-slave explicit rejection slice
+  - owner route: `node.master-slave`
+  - audit target: node docs already claimed explicit pairing failure and unauthorized slave input errors, but owner white-box tests only locked token mismatch, one delegated-task unauthorized-source case, and direct-message preconditions
+  - chosen closure:
+    - add one white-box test for pairing rejection on unauthorized source ip
+    - add one white-box test for pairing rejection on unauthorized source node
+    - add one white-box test for empty delegated-task status
+    - add one white-box test for pre-pair and intruder slave-turn publication rejection
+    - sync function map / test design / migrated mainline JSON / generated wiki
+  - implementation:
+    - added `pairing_rejects_unauthorized_source_ip_explicitly`
+    - added `pairing_rejects_unauthorized_source_node_explicitly`
+    - added `delegated_task_rejects_empty_status_text_explicitly`
+    - added `publish_slave_turn_requires_authorized_pairing_source`
+    - synced `docs/function-maps/node.master-slave.md`
+    - synced `docs/testing/node.master-slave.md`
+    - synced `docs/mainline-calls/node.master-slave.json`
+    - regenerated `docs/wiki/node.master-slave.md`
+  - verification:
+    - `cargo test -p freehand-node`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

@@ -492,6 +492,38 @@ mod tests {
     }
 
     #[test]
+    fn pairing_rejects_unauthorized_source_ip_explicitly() {
+        let mut runtime = sample_runtime();
+        let err = runtime
+            .pair_slave(PairingRequest {
+                source_ip: Some("10.0.0.8".to_owned()),
+                ..pair_request()
+            })
+            .expect_err("unauthorized ip must reject");
+
+        assert_eq!(err, NodeRuntimeError::UnauthorizedPairSourceIp);
+        let snapshot = runtime.query_node_status().expect("status");
+        assert!(!snapshot.healthy);
+        assert_eq!(snapshot.pairing_state, "rejected");
+    }
+
+    #[test]
+    fn pairing_rejects_unauthorized_source_node_explicitly() {
+        let mut runtime = sample_runtime();
+        let err = runtime
+            .pair_slave(PairingRequest {
+                source_node_id: "intruder-node".to_owned(),
+                ..pair_request()
+            })
+            .expect_err("unauthorized source node must reject");
+
+        assert_eq!(err, NodeRuntimeError::UnauthorizedPairSourceNode);
+        let snapshot = runtime.query_node_status().expect("status");
+        assert!(!snapshot.healthy);
+        assert_eq!(snapshot.pairing_state, "rejected");
+    }
+
+    #[test]
     fn paired_slave_restricts_input_to_authorized_source() {
         let mut runtime = sample_runtime();
         runtime.pair_slave(pair_request()).expect("pair");
@@ -506,6 +538,30 @@ mod tests {
             )
             .expect_err("must reject");
         assert_eq!(err, NodeRuntimeError::UnauthorizedPairSourceNode);
+    }
+
+    #[test]
+    fn delegated_task_rejects_empty_status_text_explicitly() {
+        let mut runtime = sample_runtime();
+        runtime.pair_slave(pair_request()).expect("pair");
+
+        let err = runtime
+            .delegate_task(
+                "master-node",
+                DelegatedTask {
+                    session_id: SessionId::new("session-1"),
+                    turn_id: TurnId::new("turn-1"),
+                    status_text: " ".to_owned(),
+                },
+            )
+            .expect_err("empty task status must reject");
+
+        assert_eq!(err, NodeRuntimeError::EmptyTaskStatus);
+        assert!(
+            runtime
+                .query_task_progress(&TurnId::new("turn-1"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -565,6 +621,23 @@ mod tests {
             }
         }
         assert!(saw_turn, "expected turn projection on subscription");
+    }
+
+    #[test]
+    fn publish_slave_turn_requires_authorized_pairing_source() {
+        let mut runtime = sample_runtime();
+        let err = runtime
+            .publish_slave_turn("master-node", sample_slave_turn())
+            .expect_err("must reject before pair");
+        assert_eq!(err, NodeRuntimeError::SlaveNotPaired);
+        assert!(runtime.latest_slave_turn().is_none());
+
+        runtime.pair_slave(pair_request()).expect("pair");
+        let err = runtime
+            .publish_slave_turn("intruder-node", sample_slave_turn())
+            .expect_err("intruder must reject");
+        assert_eq!(err, NodeRuntimeError::UnauthorizedPairSourceNode);
+        assert!(runtime.latest_slave_turn().is_none());
     }
 
     #[test]
