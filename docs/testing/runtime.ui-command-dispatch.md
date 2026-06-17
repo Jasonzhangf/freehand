@@ -63,6 +63,7 @@
   - active live cancel blocks later provider success projection after cancellation
   - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
   - checkpoint rewind missing-manifest dispatch failure is covered as explicit target-not-found
+  - missing `CancelTurn`, empty `CancelLatestActiveTurn`, and wrong-node direct-message dispatch failures are covered as explicit target-not-found
   - node-backed direct-message dispatch is covered
   - explicit unsupported resume dispatch is covered
   - migrated mainline-call source and generated wiki are kept in sync with this test design

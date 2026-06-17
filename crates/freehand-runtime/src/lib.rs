@@ -4370,6 +4370,38 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
+    fn cancel_turn_missing_target_returns_target_not_found() {
+        let runtime = runtime();
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::CancelTurn {
+                    turn_id: TurnId::new("runtime-turn-missing"),
+                })
+                .expect("cancel envelope"),
+            )
+            .expect_err("missing turn must fail");
+        assert_eq!(
+            err,
+            UiCommandDispatchPortError::TargetNotFound("runtime-turn-missing".to_owned())
+        );
+    }
+
+    #[test]
+    fn cancel_latest_active_turn_without_any_turn_returns_target_not_found() {
+        let runtime = runtime();
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::CancelLatestActiveTurn {})
+                    .expect("cancel latest envelope"),
+            )
+            .expect_err("empty runtime must fail");
+        assert_eq!(
+            err,
+            UiCommandDispatchPortError::TargetNotFound("latest-active-turn".to_owned())
+        );
+    }
+
+    #[test]
     fn active_live_cancel_returns_before_provider_finishes_and_blocks_success_projection() {
         let _cwd_lock = cwd_lock()
             .lock()
@@ -4493,6 +4525,24 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .expect("receipt");
         assert_eq!(receipt.target_feature_id, "node.master-slave");
         assert_eq!(receipt.dispatch_status, "node_direct_message_dispatched");
+    }
+
+    #[test]
+    fn direct_message_wrong_slave_target_returns_target_not_found() {
+        let runtime = runtime();
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SendDirectMessageToSlave {
+                    node_id: "wrong-slave".to_owned(),
+                    text: "ping".to_owned(),
+                })
+                .expect("envelope"),
+            )
+            .expect_err("wrong node must fail");
+        assert_eq!(
+            err,
+            UiCommandDispatchPortError::TargetNotFound("wrong-slave".to_owned())
+        );
     }
 
     #[test]

@@ -90,3 +90,4 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - active live cancel now publishes cancelled UI projection immediately and later provider success cannot overwrite it
 - runtime dispatch now supports CancelLatestActiveTurn for current-turn stop without requiring the UI to know turn_id
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and terminal persistence
+- missing CancelTurn, empty CancelLatestActiveTurn, and wrong-node direct-message dispatch paths now stay explicit target-not-found failures

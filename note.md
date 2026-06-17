@@ -749,3 +749,26 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: runtime dispatch missing-target failure slice
+  - owner route: `runtime.ui-command-dispatch`
+  - audit target: runtime dispatch docs already required explicit target-not-found semantics for missing `CancelTurn`, empty `CancelLatestActiveTurn`, and wrong-node direct-message, but those negative paths were not individually regression-locked
+  - chosen closure:
+    - add dedicated negative tests for unknown `CancelTurn`
+    - add dedicated negative tests for empty-state `CancelLatestActiveTurn`
+    - add dedicated negative tests for wrong-node `SendDirectMessageToSlave`
+    - sync function map, test design, mainline JSON, and generated wiki with the now-landed missing-target coverage truth
+  - implementation:
+    - added `cancel_turn_missing_target_returns_target_not_found`
+    - added `cancel_latest_active_turn_without_any_turn_returns_target_not_found`
+    - added `direct_message_wrong_slave_target_returns_target_not_found`
+    - synced `docs/function-maps/runtime.ui-command-dispatch.md`, `docs/testing/runtime.ui-command-dispatch.md`, `docs/mainline-calls/runtime.ui-command-dispatch.json`
+  - verification target:
+    - `cargo fmt --all --check`
+    - `cargo test -p freehand-runtime cancel_turn_missing_target_returns_target_not_found -- --nocapture`
+    - `cargo test -p freehand-runtime cancel_latest_active_turn_without_any_turn_returns_target_not_found -- --nocapture`
+    - `cargo test -p freehand-runtime direct_message_wrong_slave_target_returns_target_not_found -- --nocapture`
+    - `cargo test -p freehand-runtime`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

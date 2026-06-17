@@ -34,6 +34,7 @@
   - `app.runtime-daemon` now has explicit HTTP black-box coverage that missing checkpoint rewind manifests surface `command_dispatch_target_not_found` instead of being projected as success
   - `app.runtime-daemon` now also has explicit startup black-box coverage that corrupt checkpoint projection bootstrap truth fails before transport serve
   - `app.webui-smoke` now has explicit HTTP black-box coverage that protocol command ingress surfaces both dispatch-port failures and dispatch-task join failures as explicit 500 failure payloads
+  - `runtime.ui-command-dispatch` now has explicit negative coverage that missing `CancelTurn`, empty `CancelLatestActiveTurn`, and wrong-node direct-message all stay `TargetNotFound` failures
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
@@ -81,6 +82,10 @@
   - `cargo test -p freehand-daemon`
   - `cargo test -p freehand-server transport_command_ingress_ -- --nocapture`
   - `cargo test -p freehand-server`
+  - `cargo test -p freehand-runtime cancel_turn_missing_target_returns_target_not_found -- --nocapture`
+  - `cargo test -p freehand-runtime cancel_latest_active_turn_without_any_turn_returns_target_not_found -- --nocapture`
+  - `cargo test -p freehand-runtime direct_message_wrong_slave_target_returns_target_not_found -- --nocapture`
+  - `cargo test -p freehand-runtime`
   - `cargo run -p xtask -- mainlines generate`
   - `cargo run -p xtask -- mainlines check`
   - `make ci`
