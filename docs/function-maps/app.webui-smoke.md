@@ -9,6 +9,7 @@
   - `build_webui_router`
   - `serve_webui_listener`
   - `handle_command_ingress`
+  - `handle_query_checkpoints`
 
 ## Request Mainline
 
@@ -19,6 +20,7 @@
 - app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets
 - app boundary keeps theme assets separate from WebUI layout assets
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
+- transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
 - transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing
 - front-end cancel button and Escape key send protocol-owned `CancelTurn` commands through command ingress
@@ -32,6 +34,7 @@
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
 - SSE subscribe routes now emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe must stay open on blank state until a turn exists
 - WebUI submit success path still actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing
+- WebUI checkpoint panel renders protocol checkpoint summaries from query state and keeps checkpoint files out of app-boundary truth
 - WebUI cancel path sends `CancelTurn` for the current active turn, clears pending local input only after dispatch, and refreshes protocol truth
 - WebUI cancel path uses `CancelTurn` when `turn_id` is known and `CancelLatestActiveTurn` during the submit-in-flight pre-SSE window
 - front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes, including the user prompt in the public conversation stream
@@ -70,8 +73,9 @@
 | 06 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate slave-card visibility by client kind | turn projection + client kind | client-specific projection | app boundary | protocol owner | bound |
 | 07 | `initializeThemeToggle` | `apps/freehand-server/assets/theme.js` | switch white/black visual theme only | UI theme choice | body theme class + persisted localStorage setting | WebUI shell | theme module | bound |
 | 08 | `subscription_event_stream` / `projection_to_sse_event` | `apps/freehand-server/src/lib.rs` | convert protocol-owned subscription updates into continuous HTTP SSE delivery | `UiSubscriptionEvent` receiver + selector | streamed SSE events | subscribe routes | protocol state | bound |
-| 09 | `refreshTurn` / `renderMessages` / submit handler | `apps/freehand-server/assets/webui.js` | consume protocol query/SSE public turn payloads, re-query latest turn after command receipt, and render semantic cards without owning filtering semantics | `UiPublicTurnProjection` JSON + command dispatch receipt | DOM message blocks + command status | WebUI shell | existing protocol endpoints | bound |
-| 10 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` for the active protocol turn from button or Escape key | latest protocol turn id | command dispatch receipt + refreshed projection | WebUI shell | `/ui/command` | bound |
+| 09 | `refreshTurn` / `renderMessages` / `submitUserInput` | `apps/freehand-server/assets/webui.js` | consume protocol query/SSE public turn payloads, re-query latest turn after command receipt, and render semantic cards without owning filtering semantics | `UiPublicTurnProjection` JSON + command dispatch receipt | DOM message blocks + command status | WebUI shell | existing protocol endpoints | bound |
+| 10 | `handle_query_checkpoints` / `refreshCheckpoints` | `apps/freehand-server/src/lib.rs` / `apps/freehand-server/assets/webui.js` | serve and render read-only checkpoint summaries from protocol state | protocol checkpoint snapshot | HTTP JSON checkpoint snapshot + secondary inspector cards | WebUI shell | ui.protocol state | bound |
+| 11 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` for the active protocol turn from button or Escape key | latest protocol turn id | command dispatch receipt + refreshed projection | WebUI shell | `/ui/command` | bound |
 
 ## Sync Status Against Code
 
@@ -85,6 +89,7 @@
 - protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
 - WebUI submit path still explicitly refreshes latest turn truth after a successful command receipt
+- WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files
 - WebUI Cancel button and Escape key now send `CancelTurn` through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics

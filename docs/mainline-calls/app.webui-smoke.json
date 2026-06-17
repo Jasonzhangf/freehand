@@ -152,7 +152,7 @@
     },
     {
       "step": "09",
-      "symbol_path": "refreshTurn / renderMessages / submit handler",
+      "symbol_path": "refreshTurn / renderMessages / submitUserInput",
       "file_path": "apps/freehand-server/assets/webui.js",
       "responsibility": "consume protocol query and SSE public turn payloads, re-query latest turn after command receipt, and render semantic cards without owning filtering semantics",
       "input_semantic": "`UiPublicTurnProjection` JSON plus command dispatch receipt",

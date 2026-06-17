@@ -69,3 +69,14 @@ If a layer is intentionally not yet present for a feature, that absence must be 
 - feature map must link the mainline-call source and generated wiki path
 
 This keeps generated wiki artifacts as compiled review surfaces over one machine-readable truth instead of independent hand-maintained docs.
+
+## Mainline Call-Table Binding Gate
+
+`xtask gates check` validates every migrated mainline-call row with `binding_status = "bound"`:
+
+- each `file_path` segment must point to an existing repo file
+- each `symbol_path` segment must resolve in one of the listed files
+- Rust-style `Type::method` entries may resolve through the method tail, such as `method`, because source files define methods as `fn method`
+- `binding_status = "pending"` remains explicit and is not treated as a bound symbol
+
+This keeps mainline call maps code-bound instead of becoming stale review prose.

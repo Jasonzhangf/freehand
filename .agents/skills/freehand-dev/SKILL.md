@@ -141,6 +141,7 @@ Use this skill for any non-trivial work in this repo.
 - function-call tables must bind to code symbols or explicitly say implementation binding is still pending.
 - generated wiki must come from the machine-readable mainline call source; do not hand-edit generated wiki files.
 - `xtask gates check` validates migrated mainline-call sources as compiled manifests: JSON path, `feature_id`, function map, test design, generated wiki, and feature-map links must cross-link deterministically.
+- `xtask gates check` validates migrated `bound` call-table rows: listed source files must exist and listed symbols must resolve in those files; use `binding pending`/`pending` only for unlanded bindings.
 - New features and bug fixes both require lifecycle thinking, not just local code patches.
 - In provider work, preserve raw provider events in debug mode and rely on unified semantic events for normal operation.
 - In provider work, read local official protocol snapshots under `docs/references/provider-protocols/` before inventing wire behavior.
@@ -212,6 +213,7 @@ Use this skill for any non-trivial work in this repo.
 - When request/response/error mainlines or shared function usage change, update the function-map doc in the same change set.
 - When migrated mainline-call truth changes, update `docs/mainline-calls/**` and regenerate `docs/wiki/**` in the same change set.
 - When adding or editing a migrated feature, keep the mainline JSON path and its internal `function_map_doc`, `test_design_doc`, `generated_wiki_doc`, and feature-map links canonical or the workspace gate must fail.
+- When adding or editing a migrated call table, keep every `bound` row tied to real file paths and resolvable symbols; do not use prose such as "handler" as a symbol path.
 - When tool surface or tool execution truth changes, update tool design, function map, test design, and runtime exposure checks in the same change set.
 - When `tool.registry` changes affect live provider exposure, run both owner/workspace gates and one real config-selected `reason-live` smoke when credentials are available; selected-agent bootstrap still requires the configured pair-token env even for CLI live-turn verification.
 - When context-segment admission, cache-shape policy, or subagent context flow changes, update `reason.context-planner` design, test design, function map, and memory in the same task.

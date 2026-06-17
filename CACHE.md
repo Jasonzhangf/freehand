@@ -6,7 +6,7 @@
   - `cargo fmt --all --check`
   - `cargo build --workspace`
   - `cargo clippy --workspace --all-targets -- -D warnings`
-  - `cargo test --workspace` -> 224 passed
+  - `cargo test --workspace` -> 226 passed
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - Real provider daemon smoke passed on 2026-06-17:
@@ -32,5 +32,6 @@
 - Stability gate update:
   - `xtask gates check` now validates migrated mainline manifests as cross-linked compiled review surfaces
   - each `docs/mainline-calls/<feature_id>.json` must match canonical function map, test design, generated wiki, and feature-map links
+  - `xtask gates check` now validates migrated mainline `bound` call-table rows against existing source files and resolvable symbols
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.

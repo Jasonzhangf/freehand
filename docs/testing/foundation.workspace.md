@@ -14,10 +14,12 @@
   - mainline JSON parse/render logic
   - generated-wiki freshness logic
   - mainline manifest cross-link logic between JSON, feature map, function map, test design, and generated wiki path
+  - mainline call-table file and symbol binding logic for migrated `bound` rows
 - module black-box plan:
   - `xtask gates check` smoke from repo root
   - `xtask mainlines check` smoke from repo root
   - `cargo test -p xtask` manifest-link positive and negative tests
+  - `cargo test -p xtask` call-table binding positive and negative tests
 - project black-box impact:
   - full workspace `make ci` gate smoke
   - machine-readable mainline truth remains the only source for generated wiki artifacts
@@ -29,4 +31,5 @@
   - baseline aligned with current harness
   - mainline generation and freshness checks are implemented in `xtask`
   - mainline manifest cross-link checks are implemented in `xtask`
+  - mainline call-table binding checks are implemented in `xtask`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

@@ -197,6 +197,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_orchestrator_policy_docs(&root)?;
     verify_generated_wiki(&root)?;
     verify_mainline_manifest_links(&root)?;
+    verify_mainline_call_table_bindings(&root)?;
     verify_webui_app_boundary(&root)?;
     verify_runtime_daemon_boundary(&root)?;
     Ok(())
@@ -258,6 +259,7 @@ fn verify_skill_rules(root: &Path) -> Result<(), String> {
         "response mainline",
         "function-call tables",
         "compiled manifests",
+        "resolvable symbols",
         "Do not add temporary helpers to `crates/freehand-reason` or `crates/freehand-node`.",
         "module white-box tests",
         "module black-box tests",
@@ -355,6 +357,9 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
                 "test_design_doc",
                 "generated_wiki_doc",
                 "compiled review surfaces",
+                "Mainline Call-Table Binding Gate",
+                "binding_status = \"bound\"",
+                "symbol_path",
             ],
         ),
         (
@@ -701,6 +706,103 @@ fn verify_mainline_manifest_links(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_mainline_call_table_bindings(root: &Path) -> Result<(), String> {
+    for source_path in mainline_source_paths(root)? {
+        let doc = load_mainline_doc(&source_path)?;
+        for row in &doc.call_table {
+            match row.binding_status.as_str() {
+                "pending" => continue,
+                "bound" => {}
+                status => {
+                    return Err(format!(
+                        "mainline `{}` step `{}` has unsupported binding_status `{}`",
+                        doc.feature_id, row.step, status
+                    ));
+                }
+            }
+
+            let file_paths = split_binding_segments(&row.file_path);
+            let symbol_paths = split_binding_segments(&row.symbol_path);
+            if file_paths.is_empty() {
+                return Err(format!(
+                    "mainline `{}` step `{}` has no file_path binding",
+                    doc.feature_id, row.step
+                ));
+            }
+            if symbol_paths.is_empty() {
+                return Err(format!(
+                    "mainline `{}` step `{}` has no symbol_path binding",
+                    doc.feature_id, row.step
+                ));
+            }
+
+            for file_path in &file_paths {
+                let full_path = root.join(file_path);
+                if !full_path.is_file() {
+                    return Err(format!(
+                        "mainline `{}` step `{}` references missing file `{}`",
+                        doc.feature_id, row.step, file_path
+                    ));
+                }
+            }
+
+            for symbol_path in &symbol_paths {
+                if !symbol_resolves_in_files(root, &file_paths, symbol_path)? {
+                    return Err(format!(
+                        "mainline `{}` step `{}` references missing symbol `{}` in `{}`",
+                        doc.feature_id, row.step, symbol_path, row.file_path
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn split_binding_segments(value: &str) -> Vec<String> {
+    value
+        .split(" / ")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn symbol_resolves_in_files(
+    root: &Path,
+    file_paths: &[String],
+    symbol: &str,
+) -> Result<bool, String> {
+    let candidates = symbol_lookup_candidates(symbol);
+    for file_path in file_paths {
+        let full_path = root.join(file_path);
+        let text = fs::read_to_string(&full_path)
+            .map_err(|err| format!("read source file {}: {err}", full_path.display()))?;
+        if candidates
+            .iter()
+            .any(|candidate| text.contains(candidate.as_str()))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn symbol_lookup_candidates(symbol: &str) -> Vec<String> {
+    let mut candidates = vec![symbol.to_owned()];
+    if let Some(last) = symbol
+        .rsplit("::")
+        .next()
+        .filter(|last| *last != symbol && !last.is_empty())
+    {
+        candidates.push(last.to_owned());
+    }
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
 fn mainline_source_paths(root: &Path) -> Result<Vec<PathBuf>, String> {
     let docs_dir = root.join("docs/mainline-calls");
     let mut source_paths = Vec::new();
@@ -939,6 +1041,92 @@ mod tests {
         assert!(err.contains("docs/architecture/feature-map.md"), "{err}");
     }
 
+    #[test]
+    fn mainline_call_table_bindings_accept_method_tail_and_file_presence() {
+        let root = test_repo_root("binding-pass");
+        create_dirs(&root);
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub struct Demo;\nimpl Demo { pub fn run(&self) {} }\npub fn helper() {}\n",
+        )
+        .expect("write source");
+        fs::write(
+            root.join("docs/mainline-calls/demo.feature.json"),
+            r#"{
+  "feature_id": "demo.feature",
+  "owner_crate": "demo",
+  "owner_module": "demo/src/lib.rs",
+  "function_map_doc": "docs/function-maps/demo.feature.md",
+  "test_design_doc": "docs/testing/demo.feature.md",
+  "mainline_call_doc": "docs/mainline-calls/demo.feature.json",
+  "generated_wiki_doc": "docs/wiki/demo.feature.md",
+  "request_mainline": [],
+  "response_mainline": [],
+  "error_mainline": [],
+  "shared_functions": [],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "Demo::run / helper",
+      "file_path": "src/lib.rs",
+      "responsibility": "demo",
+      "input_semantic": "demo",
+      "output_semantic": "demo",
+      "caller": "demo",
+      "callee": "demo",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": []
+}"#,
+        )
+        .expect("write mainline json");
+
+        verify_mainline_call_table_bindings(&root)
+            .expect("method tail and helper symbol should pass");
+    }
+
+    #[test]
+    fn mainline_call_table_bindings_reject_missing_symbol() {
+        let root = test_repo_root("binding-missing-symbol");
+        create_dirs(&root);
+        fs::write(root.join("src/lib.rs"), "pub fn present() {}\n").expect("write source");
+        fs::write(
+            root.join("docs/mainline-calls/demo.feature.json"),
+            r#"{
+  "feature_id": "demo.feature",
+  "owner_crate": "demo",
+  "owner_module": "demo/src/lib.rs",
+  "function_map_doc": "docs/function-maps/demo.feature.md",
+  "test_design_doc": "docs/testing/demo.feature.md",
+  "mainline_call_doc": "docs/mainline-calls/demo.feature.json",
+  "generated_wiki_doc": "docs/wiki/demo.feature.md",
+  "request_mainline": [],
+  "response_mainline": [],
+  "error_mainline": [],
+  "shared_functions": [],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "missing_symbol",
+      "file_path": "src/lib.rs",
+      "responsibility": "demo",
+      "input_semantic": "demo",
+      "output_semantic": "demo",
+      "caller": "demo",
+      "callee": "demo",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": []
+}"#,
+        )
+        .expect("write mainline json");
+
+        let err = verify_mainline_call_table_bindings(&root).expect_err("missing symbol must fail");
+        assert!(err.contains("missing symbol"), "{err}");
+    }
+
     enum FixtureMode {
         Aligned,
         WrongFunctionMapPath,
@@ -1011,6 +1199,7 @@ mod tests {
 
     fn create_dirs(root: &Path) {
         for rel in [
+            "src",
             "docs/architecture",
             "docs/function-maps",
             "docs/testing",

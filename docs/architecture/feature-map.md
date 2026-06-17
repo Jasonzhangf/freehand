@@ -78,6 +78,7 @@ If a problem does not fit this table, update this routing index before making co
   - xtask gate rule tests
   - xtask mainline render/generation tests
   - xtask mainline manifest cross-link tests
+  - xtask mainline call-table binding tests
 - required_module_black_box_tests:
   - xtask gate smoke
   - xtask mainlines check smoke
@@ -98,6 +99,7 @@ If a problem does not fit this table, update this routing index before making co
   - mainline generation shape changes
   - generated wiki freshness policy changes
   - mainline manifest cross-link policy changes
+  - mainline call-table binding policy changes
 - lifecycle_checks:
   - information sufficient
   - logic closed-loop

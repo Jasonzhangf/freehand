@@ -228,6 +228,11 @@
   - evidence: existing gate enforces required files, policy snippets, workspace members, app dependency boundaries, and generated wiki freshness
   - identified low-noise gap: migrated mainline JSON sources are generated into wiki, but gate does not yet validate the compiled-manifest cross-links back to feature map, function map, and test design
   - chosen fix: add `xtask` mainline manifest link validation with positive and negative tests, keeping product behavior unchanged
+- 2026-06-17: stability-quality symbol-binding gate slice
+  - rooted from owner map: `foundation.workspace`, with one app.webui-smoke doc drift found during read-only audit
+  - full-symbol text check was too strict for Rust `Type::method` rows because source files contain `fn method`; normalized last-segment method matching leaves one real drift
+  - real drift: `app.webui-smoke` step 09 used natural-language `submit handler`, and its human function map missed the checkpoint-query step present in mainline JSON
+  - chosen fix: normalize the WebUI call map symbol to `submitUserInput`, sync app.webui-smoke function map, and add an xtask gate that bound call-table files exist and symbols resolve to source text
 - 2026-06-15: completion schema loop requirement confirmed
   - must guide schema in prompt/context
   - must validate schema structurally and semantically

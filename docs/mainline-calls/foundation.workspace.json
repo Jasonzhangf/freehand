@@ -12,11 +12,13 @@
     "repo root may invoke `xtask mainlines check`",
     "gate runner verifies required files, workspace members, policy doc snippets, and generated wiki freshness",
     "gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path",
+    "gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols",
     "mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`"
   ],
   "response_mainline": [
     "gate returns success when required repo truth, workspace structure, and generated wiki freshness are present",
     "gate returns success when migrated mainline manifests are deterministically linked to their owner docs",
+    "gate returns success when migrated mainline call-table bindings resolve to source files and source symbols",
     "gate returns explicit failure with missing path, missing policy snippet, or stale generated wiki",
     "mainline generation writes `docs/wiki/*.md` and `docs/wiki/README.md` from JSON truth",
     "mainline freshness check returns success only when current generated wiki matches current JSON source"
@@ -24,6 +26,7 @@
   "error_mainline": [
     "missing file or missing required snippet surfaces as gate failure",
     "mismatched mainline manifest source path, function map path, test design path, generated wiki path, or feature-map link surfaces as gate failure",
+    "missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure",
     "invalid JSON mainline source surfaces as generation/check failure",
     "stale generated wiki surfaces as explicit freshness failure",
     "no fallback path exists"
@@ -172,11 +175,22 @@
       "caller": "run_gates_check",
       "callee": "filesystem and mainline loader",
       "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "verify_mainline_call_table_bindings",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "validate migrated mainline call-table file and symbol bindings",
+      "input_semantic": "JSON mainline truth plus source files",
+      "output_semantic": "pass/fail",
+      "caller": "run_gates_check",
+      "callee": "filesystem and symbol resolver",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
     "workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code",
-    "current gate baseline enforces required files, policy docs, generated wiki freshness, and migrated mainline manifest cross-links",
+    "current gate baseline enforces required files, policy docs, generated wiki freshness, migrated mainline manifest cross-links, and migrated mainline call-table bindings",
     "generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes"
   ]
 }
