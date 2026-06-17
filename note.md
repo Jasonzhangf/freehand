@@ -847,3 +847,26 @@
     - `make ci`
   - verification note:
     - do not parallel-run multiple `cargo test` processes that share time-stamp-based temp runtime helpers; a parallel spot-check polluted one run with another test's ledger and produced a false `LedgerSequenceGap`
+- 2026-06-18: reason.persistence snapshot-integrity slice
+  - owner route: `reason.persistence`
+  - audit target: function map and test design already claimed explicit rejection for invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate ledger sequence numbers, but owner white-box coverage still relied on indirect code-reading proof
+  - chosen closure:
+    - add one white-box test for corrupt session-history JSON with valid cursor
+    - add one white-box test for invalid cursor/active-turn coherence
+    - add one white-box test for duplicate reason-ledger sequence number
+  - implementation:
+    - added `restore_rejects_invalid_persisted_snapshot_json_explicitly`
+    - added `restore_rejects_invalid_snapshot_coherence_explicitly`
+    - added `restore_rejects_duplicate_reason_ledger_sequence_explicitly`
+    - synced `docs/testing/reason.persistence.md`
+    - synced `docs/function-maps/reason.persistence.md`
+  - verification:
+    - `cargo test -p freehand-reason restore_rejects_invalid_persisted_snapshot_json_explicitly -- --nocapture`
+    - `cargo test -p freehand-reason restore_rejects_invalid_snapshot_coherence_explicitly -- --nocapture`
+    - `cargo test -p freehand-reason restore_rejects_duplicate_reason_ledger_sequence_explicitly -- --nocapture`
+    - `cargo test -p freehand-reason`
+    - `cargo test -p freehand-testkit`
+    - `cargo test -p freehand-cli`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

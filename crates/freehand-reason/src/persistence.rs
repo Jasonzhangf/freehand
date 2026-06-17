@@ -1025,6 +1025,63 @@ mod tests {
     }
 
     #[test]
+    fn restore_rejects_invalid_persisted_snapshot_json_explicitly() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let session_id = SessionId::new("session-1");
+        ensure_parent_dir(&coordinator.session_history_path(&session_id)).expect("parent");
+        fs::write(
+            coordinator.session_history_path(&session_id),
+            "{not-valid-json}\n",
+        )
+        .expect("write invalid history");
+        write_json_atomic(
+            &coordinator.cursor_path(&session_id),
+            &ReasonPersistenceCursor::default(),
+        )
+        .expect("write cursor");
+
+        let err = coordinator
+            .restore(&session_id)
+            .expect_err("invalid persisted snapshot json must fail recovery");
+        assert!(matches!(err, ReasonPersistenceError::JsonParseFailed(_)));
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn restore_rejects_invalid_snapshot_coherence_explicitly() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let session_id = SessionId::new("session-1");
+        let history = session_history();
+        write_json_atomic(&coordinator.session_history_path(&session_id), &history)
+            .expect("write history");
+        write_json_atomic(
+            &coordinator.cursor_path(&session_id),
+            &ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 1,
+                latest_turn_id: Some(TurnId::new("turn-1")),
+                active_turn_id: Some(TurnId::new("turn-1")),
+            },
+        )
+        .expect("write incoherent cursor");
+
+        let err = coordinator
+            .restore(&session_id)
+            .expect_err("invalid snapshot coherence must fail recovery");
+        assert_eq!(
+            err,
+            ReasonPersistenceError::InvalidCursorCoherence(
+                "cursor references active turn but active-turn snapshot is missing".to_owned()
+            )
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
     fn restore_rejects_reason_ledger_sequence_gap_explicitly() {
         let runtime_home = temp_runtime_home();
         let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
@@ -1062,6 +1119,68 @@ mod tests {
             ReasonPersistenceError::LedgerSequenceGap {
                 expected: 1,
                 actual: 2,
+            }
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn restore_rejects_duplicate_reason_ledger_sequence_explicitly() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+        let turn = started_turn(&mut history);
+        let turn_id = turn.request.turn_id.clone();
+        let snapshot = ActiveTurnSnapshot {
+            turn,
+            schema_rejections: 0,
+        };
+        let first_row = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 1,
+            session_id: history.session_id().clone(),
+            turn_id: Some(turn_id.clone()),
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 1,
+                latest_turn_id: Some(turn_id.clone()),
+                active_turn_id: Some(turn_id.clone()),
+            },
+            session_history: history.clone(),
+            payload: ReasonLedgerPayload::TurnStarted {
+                snapshot: snapshot.clone(),
+            },
+        };
+        let duplicate_row = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 1,
+            session_id: history.session_id().clone(),
+            turn_id: Some(turn_id.clone()),
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 1,
+                latest_turn_id: Some(turn_id),
+                active_turn_id: Some(TurnId::new("turn-1")),
+            },
+            session_history: history,
+            payload: ReasonLedgerPayload::TurnStarted { snapshot },
+        };
+        coordinator
+            .append_row_only(&first_row.session_id, &first_row)
+            .expect("append first row");
+        coordinator
+            .append_row_only(&duplicate_row.session_id, &duplicate_row)
+            .expect("append duplicate row");
+
+        let err = coordinator
+            .restore(&first_row.session_id)
+            .expect_err("duplicate sequence must fail recovery");
+        assert_eq!(
+            err,
+            ReasonPersistenceError::LedgerSequenceGap {
+                expected: 2,
+                actual: 1,
             }
         );
 

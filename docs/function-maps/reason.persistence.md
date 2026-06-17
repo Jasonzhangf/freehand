@@ -105,4 +105,5 @@
 - CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer
 - live Anthropic runtime path now records provider raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` while keeping those ledgers outside recovery truth
 - explicit owner-bound regression coverage now locks ledger sequence gaps plus provider-raw-only and UI-sidecar-only missing-recovery rejection
+- explicit owner-bound regression coverage now also locks invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate-sequence recovery rejection
 - migrated mainline-call source now lives at `docs/mainline-calls/reason.persistence.json` and generated wiki lives at `docs/wiki/reason.persistence.md`

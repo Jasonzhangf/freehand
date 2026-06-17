@@ -11,10 +11,12 @@
   - provider raw ledgers remain debug-only and never become session truth
 - white-box plan:
   - session snapshot render/load tests
+  - invalid persisted snapshot JSON rejection tests
   - invalid snapshot coherence rejection tests
   - persistence cursor serialization tests
   - reason-ledger sequence monotonicity tests
   - reason-ledger sequence gap rejection tests
+  - duplicate reason-ledger sequence rejection tests
   - snapshot-plus-tail replay tests
   - ledger-only rebuild tests
   - atomic snapshot replace tests
@@ -47,4 +49,5 @@
   - shared harness and CLI smoke are implemented
   - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
   - runtime white-box coverage now explicitly locks ledger sequence-gap rejection plus provider-raw-only and UI-sidecar-only missing-recovery rejection
+  - runtime white-box coverage now explicitly locks invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate-sequence recovery rejection
   - migrated mainline-call source and generated wiki are kept in sync with this test design
