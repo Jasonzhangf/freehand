@@ -12,7 +12,6 @@
   - write-file preview create/overwrite parity tests
   - edit-file preview exact-match parity tests
   - multi-edit preview ordered-transform parity tests
-  - delete-range preview anchor parity tests
   - preview path-lock and parent-directory parity tests
   - preview invalid-argument rejection parity tests
 - module black-box plan:
@@ -25,9 +24,9 @@
   - `~/.freehand/state/checkpoints`
   - `~/.freehand/ledgers/checkpoints`
 - known gaps:
-  - no code-bound preview implementation is landed yet
+  - `delete_range` preview remains pending until its anchor semantics are locked in code
   - no current live runtime path consumes preview before writable execution
 - sync status between design and implementation:
-  - design is locked
-  - code binding is still pending
+  - code-bound preview implementation is landed for `write_file`, `edit_file`, and `multi_edit`
+  - owner tests now lock preview/execute parity for those three tools
   - migrated mainline-call source and generated wiki must stay in sync with this test design

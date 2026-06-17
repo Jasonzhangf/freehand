@@ -32,32 +32,45 @@ Generated from `docs/mainline-calls/tool.preview.json`. Do not edit by hand.
 
 ## Shared Multi-Reference Functions
 
-- `pending: exact transform helper shared by preview and execute`
+- `plan_write_file`
   - owner: `crates/freehand-tools/src/lib.rs`
-  - purpose: guarantee one semantic transform path for writable tools
-  - allowed callers: writable preview paths, writable execute paths
-  - related tests: preview/execute parity tests
-  - why shared: preview and execute must not diverge into duplicated semantics
-- `pending: preview change renderer`
-  - owner: `crates/freehand-tools/src/lib.rs or crates/freehand-blocks`
-  - purpose: project canonical preview truth into unified diff or compact text without changing semantics
-  - allowed callers: runtime debug projection, future UI projections, tests
-  - related tests: preview projection smoke
-  - why shared: rendering should stay downstream from canonical preview truth
+  - purpose: calculate write-file preview truth and the exact persisted post-image used by execute
+  - allowed callers: BuiltinToolRegistry::preview, execute_write_file, tests
+  - related tests: write-file preview parity tests
+  - why shared: preview and execute must share one create/overwrite transform path
+- `plan_edit_file`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: calculate edit-file preview truth and the exact persisted post-image used by execute
+  - allowed callers: BuiltinToolRegistry::preview, execute_edit_file, tests
+  - related tests: edit-file preview parity tests
+  - why shared: preview and execute must share one exact-match edit path
+- `plan_multi_edit`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: calculate ordered multi-edit preview truth and the exact persisted post-image used by execute
+  - allowed callers: BuiltinToolRegistry::preview, execute_multi_edit, tests
+  - related tests: multi-edit preview parity tests
+  - why shared: preview and execute must share one ordered edit path
+- `parse_multi_edit_steps`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: parse and validate multi-edit step arguments before preview or execute proceeds
+  - allowed callers: plan_multi_edit, tests
+  - related tests: multi-edit invalid-argument rejection tests
+  - why shared: edit-step parsing must not diverge between preview and execute
 
 ## Function Call Table
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `pending: BuiltinToolRegistry preview dispatch` | `crates/freehand-tools/src/lib.rs` | route writable tool preview requests into the single owner preview path | writable tool call | preview request dispatch | runtime checkpoint owner | tool preview owner | pending |
-| 02 | `pending: write_file preview entry` | `crates/freehand-tools/src/lib.rs` | compute create/overwrite preview without writing | path plus content | canonical file-change truth | preview dispatch | write tool preview owner | pending |
-| 03 | `pending: edit_file preview entry` | `crates/freehand-tools/src/lib.rs` | compute exact-match edit preview without writing | path plus old_string plus new_string | canonical file-change truth | preview dispatch | edit tool preview owner | pending |
-| 04 | `pending: multi_edit preview entry` | `crates/freehand-tools/src/lib.rs` | compute ordered multi-edit preview without writing | path plus ordered edits | canonical file-change truth | preview dispatch | multi-edit preview owner | pending |
+| 01 | `BuiltinToolRegistry::preview` | `crates/freehand-tools/src/lib.rs` | route writable tool preview requests into the single owner preview path | writable tool call | preview request dispatch | runtime checkpoint owner and tests | tool preview owner | bound |
+| 02 | `plan_write_file` | `crates/freehand-tools/src/lib.rs` | compute create/overwrite preview without writing and return the exact post-image later persisted by execute | path plus content | canonical file-change truth | preview dispatch and execute | write tool preview owner | bound |
+| 03 | `plan_edit_file` | `crates/freehand-tools/src/lib.rs` | compute exact-match edit preview without writing and return the exact post-image later persisted by execute | path plus old_string plus new_string | canonical file-change truth | preview dispatch and execute | edit tool preview owner | bound |
+| 04 | `plan_multi_edit` | `crates/freehand-tools/src/lib.rs` | compute ordered multi-edit preview without writing and return the exact post-image later persisted by execute | path plus ordered edits | canonical file-change truth | preview dispatch and execute | multi-edit preview owner | bound |
 | 05 | `pending: delete_range preview entry` | `crates/freehand-tools/src/lib.rs` | compute anchor-based delete preview without writing | path plus range anchors | canonical file-change truth | preview dispatch | delete-range preview owner | pending |
 
 ## Sync Status Against Mainline Call
 
-- design truth is locked
-- current code has writable execute paths but no code-bound preview owner path yet
-- current live writable tool path therefore lacks checkpoint-ready preview semantics
+- `BuiltinToolRegistry::preview` is now code-bound for `write_file`, `edit_file`, and `multi_edit`
+- preview/execute parity now runs through one shared transform path for those three writable tools
+- `delete_range` preview is still pending because its anchor semantics are not locked in code yet
+- current live runtime path does not yet consume preview before writable execution
 - generated wiki must be regenerated from `docs/mainline-calls/tool.preview.json` when this function-map truth changes

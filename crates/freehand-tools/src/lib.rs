@@ -9,7 +9,10 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::render_tool_arguments_json;
-use freehand_contracts::{ReasonReq04ToolCall, ToolArgument};
+use freehand_contracts::{
+    ReasonReq04ToolCall, ToolArgument, ToolPreviewChangeKind, ToolPreviewContract,
+    ToolPreviewFileChange,
+};
 use freehand_provider_core::ProviderToolDefinition;
 use glob::Pattern;
 use regex::Regex;
@@ -27,6 +30,20 @@ pub struct BuiltinToolSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolExecutionOutput {
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileMutationPlan {
+    path: PathBuf,
+    preview_change: ToolPreviewFileChange,
+    success_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MultiEditStep {
+    old_string: String,
+    new_string: String,
+    replace_all: bool,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -111,6 +128,36 @@ impl BuiltinToolRegistry {
             "complete_step" => execute_complete_step(&call.tool_call.arguments),
             _ => Err(ToolRegistryError::UnimplementedTool(name.to_owned())),
         }
+    }
+
+    pub fn preview(
+        &self,
+        call: &ReasonReq04ToolCall,
+    ) -> Result<ToolPreviewContract, ToolRegistryError> {
+        let name = call.tool_call.tool_name.as_str();
+        let spec = self
+            .tools
+            .get(name)
+            .ok_or_else(|| ToolRegistryError::UnknownTool(name.to_owned()))?;
+        if !spec.implemented {
+            return Err(ToolRegistryError::UnimplementedTool(name.to_owned()));
+        }
+        let change = match name {
+            "write_file" => plan_write_file(&call.tool_call.arguments)?.preview_change,
+            "edit_file" => plan_edit_file(&call.tool_call.arguments)?.preview_change,
+            "multi_edit" => plan_multi_edit(&call.tool_call.arguments)?.preview_change,
+            _ => {
+                return Err(ToolRegistryError::InvalidArguments {
+                    tool: name.to_owned(),
+                    message: "preview is only supported for writable file-mutation tools"
+                        .to_owned(),
+                });
+            }
+        };
+        Ok(ToolPreviewContract {
+            tool_call_id: call.tool_call.tool_call_id.clone(),
+            changes: vec![change],
+        })
     }
 }
 
@@ -662,6 +709,32 @@ fn execute_read_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
 fn execute_write_file(
     arguments: &[ToolArgument],
 ) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let plan = plan_write_file(arguments)?;
+    write_plan(&plan, "write_file")?;
+    Ok(ToolExecutionOutput {
+        text: plan.success_text,
+    })
+}
+
+fn execute_edit_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let plan = plan_edit_file(arguments)?;
+    write_plan(&plan, "edit_file")?;
+    Ok(ToolExecutionOutput {
+        text: plan.success_text,
+    })
+}
+
+fn execute_multi_edit(
+    arguments: &[ToolArgument],
+) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let plan = plan_multi_edit(arguments)?;
+    write_plan(&plan, "multi_edit")?;
+    Ok(ToolExecutionOutput {
+        text: plan.success_text,
+    })
+}
+
+fn plan_write_file(arguments: &[ToolArgument]) -> Result<FileMutationPlan, ToolRegistryError> {
     let path = required_string(arguments, "write_file", "path")?;
     let content = required_present_string(arguments, "write_file", "content")?;
     let root = locked_workspace_root("write_file")?;
@@ -672,39 +745,108 @@ fn execute_write_file(
             message: format!("`{}` is a directory", relative_display(&root, &path)),
         });
     }
-    let existed = path.exists();
-    write_text_atomic(&path, content, "write_file")?;
-    Ok(ToolExecutionOutput {
-        text: format!(
+    let before_text = if path.exists() {
+        Some(read_text_file(&path, "write_file")?)
+    } else {
+        None
+    };
+    let kind = if before_text.is_some() {
+        ToolPreviewChangeKind::Modify
+    } else {
+        ToolPreviewChangeKind::Create
+    };
+    Ok(FileMutationPlan {
+        success_text: format!(
             "{} `{}` ({} bytes)",
-            if existed { "Overwrote" } else { "Created" },
+            if before_text.is_some() {
+                "Overwrote"
+            } else {
+                "Created"
+            },
             relative_display(&root, &path),
             content.len()
         ),
+        path: path.clone(),
+        preview_change: ToolPreviewFileChange {
+            locked_path: path.to_string_lossy().into_owned(),
+            kind,
+            before_text,
+            after_text: Some(content.to_owned()),
+        },
     })
 }
 
-fn execute_edit_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
+fn plan_edit_file(arguments: &[ToolArgument]) -> Result<FileMutationPlan, ToolRegistryError> {
     let path = required_string(arguments, "edit_file", "path")?;
     let old_string = required_non_empty_string(arguments, "edit_file", "old_string")?;
     let new_string = required_present_string(arguments, "edit_file", "new_string")?;
     let root = locked_workspace_root("edit_file")?;
     let path = resolve_locked_path(&root, path, "edit_file", "path")?;
-    let original = read_text_file(&path, "edit_file")?;
-    let updated = replace_exactly_once(&original, old_string, new_string, "edit_file")?;
-    write_text_atomic(&path, &updated, "edit_file")?;
-    Ok(ToolExecutionOutput {
-        text: format!(
+    let before_text = read_text_file(&path, "edit_file")?;
+    let after_text = replace_exactly_once(&before_text, old_string, new_string, "edit_file")?;
+    Ok(FileMutationPlan {
+        success_text: format!(
             "Edited `{}` by replacing 1 exact occurrence.",
             relative_display(&root, &path)
         ),
+        path: path.clone(),
+        preview_change: ToolPreviewFileChange {
+            locked_path: path.to_string_lossy().into_owned(),
+            kind: ToolPreviewChangeKind::Modify,
+            before_text: Some(before_text),
+            after_text: Some(after_text),
+        },
     })
 }
 
-fn execute_multi_edit(
-    arguments: &[ToolArgument],
-) -> Result<ToolExecutionOutput, ToolRegistryError> {
+fn plan_multi_edit(arguments: &[ToolArgument]) -> Result<FileMutationPlan, ToolRegistryError> {
     let path = required_string(arguments, "multi_edit", "path")?;
+    let steps = parse_multi_edit_steps(arguments)?;
+    let root = locked_workspace_root("multi_edit")?;
+    let path = resolve_locked_path(&root, path, "multi_edit", "path")?;
+    let before_text = read_text_file(&path, "multi_edit")?;
+    let mut after_text = before_text.clone();
+    let mut total_replacements = 0usize;
+    for (index, step) in steps.iter().enumerate() {
+        let replacements = if step.replace_all {
+            replace_all_occurrences(
+                &mut after_text,
+                &step.old_string,
+                &step.new_string,
+                "multi_edit",
+                index,
+            )?
+        } else {
+            after_text = replace_exactly_once(
+                &after_text,
+                &step.old_string,
+                &step.new_string,
+                "multi_edit",
+            )?;
+            1
+        };
+        total_replacements += replacements;
+    }
+    Ok(FileMutationPlan {
+        success_text: format!(
+            "Edited `{}` with {} edit(s) and {} replacement(s).",
+            relative_display(&root, &path),
+            steps.len(),
+            total_replacements
+        ),
+        path: path.clone(),
+        preview_change: ToolPreviewFileChange {
+            locked_path: path.to_string_lossy().into_owned(),
+            kind: ToolPreviewChangeKind::Modify,
+            before_text: Some(before_text),
+            after_text: Some(after_text),
+        },
+    })
+}
+
+fn parse_multi_edit_steps(
+    arguments: &[ToolArgument],
+) -> Result<Vec<MultiEditStep>, ToolRegistryError> {
     let edits = argument_value(arguments, "edits")
         .and_then(Value::as_array)
         .ok_or_else(|| ToolRegistryError::InvalidArguments {
@@ -717,52 +859,42 @@ fn execute_multi_edit(
             message: "`edits` must contain at least one item".to_owned(),
         });
     }
-    let root = locked_workspace_root("multi_edit")?;
-    let path = resolve_locked_path(&root, path, "multi_edit", "path")?;
-    let mut content = read_text_file(&path, "multi_edit")?;
-    let mut total_replacements = 0usize;
-    for (index, edit) in edits.iter().enumerate() {
-        let object = edit
-            .as_object()
-            .ok_or_else(|| invalid_tool_argument("multi_edit", index, "edit must be an object"))?;
-        let old_string = object
-            .get("old_string")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if old_string.is_empty() {
-            return Err(invalid_tool_argument(
-                "multi_edit",
-                index,
-                "`old_string` is required",
-            ));
-        }
-        let new_string = object
-            .get("new_string")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                invalid_tool_argument("multi_edit", index, "`new_string` is required")
+
+    edits
+        .iter()
+        .enumerate()
+        .map(|(index, edit)| {
+            let object = edit.as_object().ok_or_else(|| {
+                invalid_tool_argument("multi_edit", index, "edit must be an object")
             })?;
-        let replace_all = object
-            .get("replace_all")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let replacements = if replace_all {
-            replace_all_occurrences(&mut content, old_string, new_string, "multi_edit", index)?
-        } else {
-            content = replace_exactly_once(&content, old_string, new_string, "multi_edit")?;
-            1
-        };
-        total_replacements += replacements;
-    }
-    write_text_atomic(&path, &content, "multi_edit")?;
-    Ok(ToolExecutionOutput {
-        text: format!(
-            "Edited `{}` with {} edit(s) and {} replacement(s).",
-            relative_display(&root, &path),
-            edits.len(),
-            total_replacements
-        ),
-    })
+            let old_string = object
+                .get("old_string")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if old_string.is_empty() {
+                return Err(invalid_tool_argument(
+                    "multi_edit",
+                    index,
+                    "`old_string` is required",
+                ));
+            }
+            let new_string = object
+                .get("new_string")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    invalid_tool_argument("multi_edit", index, "`new_string` is required")
+                })?;
+            let replace_all = object
+                .get("replace_all")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            Ok(MultiEditStep {
+                old_string: old_string.to_owned(),
+                new_string: new_string.to_owned(),
+                replace_all,
+            })
+        })
+        .collect()
 }
 
 fn execute_glob(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
@@ -1259,6 +1391,16 @@ fn render_shell_output_suffix(output: &str) -> String {
     }
 }
 
+fn write_plan(plan: &FileMutationPlan, tool: &str) -> Result<(), ToolRegistryError> {
+    let content = plan.preview_change.after_text.as_deref().ok_or_else(|| {
+        ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: "preview plan is missing post-image text".to_owned(),
+        }
+    })?;
+    write_text_atomic(&plan.path, content, tool)
+}
+
 fn write_text_atomic(path: &Path, content: &str, tool: &str) -> Result<(), ToolRegistryError> {
     let parent = path
         .parent()
@@ -1626,6 +1768,90 @@ mod tests {
     }
 
     #[test]
+    fn write_file_preview_matches_execute_for_create_and_overwrite() {
+        with_temp_workspace(|root| {
+            fs::create_dir_all(root.join("docs")).expect("create docs");
+            fs::write(root.join("docs/existing.txt"), "old").expect("seed existing");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let canonical_root = fs::canonicalize(root).expect("canonical root");
+
+            let create_call = tool_call(
+                "write_file",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("docs/new.txt"),
+                    },
+                    ToolArgument {
+                        name: "content".to_owned(),
+                        value: json!("hello"),
+                    },
+                ],
+            );
+            let create_preview = registry.preview(&create_call).expect("create preview");
+            assert_eq!(
+                create_preview.changes,
+                vec![ToolPreviewFileChange {
+                    locked_path: canonical_root
+                        .join("docs/new.txt")
+                        .to_string_lossy()
+                        .into_owned(),
+                    kind: ToolPreviewChangeKind::Create,
+                    before_text: None,
+                    after_text: Some("hello".to_owned()),
+                }]
+            );
+            registry.execute(&create_call).expect("create executes");
+            assert_eq!(
+                fs::read_to_string(root.join("docs/new.txt")).expect("read new"),
+                create_preview.changes[0]
+                    .after_text
+                    .as_deref()
+                    .expect("create after text")
+            );
+
+            let overwrite_call = tool_call(
+                "write_file",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("docs/existing.txt"),
+                    },
+                    ToolArgument {
+                        name: "content".to_owned(),
+                        value: json!("updated"),
+                    },
+                ],
+            );
+            let overwrite_preview = registry
+                .preview(&overwrite_call)
+                .expect("overwrite preview");
+            assert_eq!(
+                overwrite_preview.changes,
+                vec![ToolPreviewFileChange {
+                    locked_path: canonical_root
+                        .join("docs/existing.txt")
+                        .to_string_lossy()
+                        .into_owned(),
+                    kind: ToolPreviewChangeKind::Modify,
+                    before_text: Some("old".to_owned()),
+                    after_text: Some("updated".to_owned()),
+                }]
+            );
+            registry
+                .execute(&overwrite_call)
+                .expect("overwrite executes");
+            assert_eq!(
+                fs::read_to_string(root.join("docs/existing.txt")).expect("read overwritten"),
+                overwrite_preview.changes[0]
+                    .after_text
+                    .as_deref()
+                    .expect("overwrite after text")
+            );
+        });
+    }
+
+    #[test]
     fn write_file_rejects_escape_and_missing_parent() {
         with_temp_workspace(|root| {
             let parent = root.parent().expect("parent");
@@ -1701,6 +1927,55 @@ mod tests {
             assert_eq!(
                 fs::read_to_string(root.join("notes.txt")).expect("read edited"),
                 "alpha\ngamma\n"
+            );
+        });
+    }
+
+    #[test]
+    fn edit_file_preview_matches_execute() {
+        with_temp_workspace(|root| {
+            fs::write(root.join("notes.txt"), "alpha\nbeta\n").expect("write notes");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let canonical_root = fs::canonicalize(root).expect("canonical root");
+            let call = tool_call(
+                "edit_file",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("notes.txt"),
+                    },
+                    ToolArgument {
+                        name: "old_string".to_owned(),
+                        value: json!("beta"),
+                    },
+                    ToolArgument {
+                        name: "new_string".to_owned(),
+                        value: json!("gamma"),
+                    },
+                ],
+            );
+
+            let preview = registry.preview(&call).expect("edit preview");
+            assert_eq!(
+                preview.changes,
+                vec![ToolPreviewFileChange {
+                    locked_path: canonical_root
+                        .join("notes.txt")
+                        .to_string_lossy()
+                        .into_owned(),
+                    kind: ToolPreviewChangeKind::Modify,
+                    before_text: Some("alpha\nbeta\n".to_owned()),
+                    after_text: Some("alpha\ngamma\n".to_owned()),
+                }]
+            );
+
+            registry.execute(&call).expect("edit execute");
+            assert_eq!(
+                fs::read_to_string(root.join("notes.txt")).expect("read edited"),
+                preview.changes[0]
+                    .after_text
+                    .as_deref()
+                    .expect("edit after text")
             );
         });
     }
@@ -1792,6 +2067,61 @@ mod tests {
             assert_eq!(
                 fs::read_to_string(root.join("notes.txt")).expect("read multi edited"),
                 "start\ndone\ndone\n"
+            );
+        });
+    }
+
+    #[test]
+    fn multi_edit_preview_matches_execute() {
+        with_temp_workspace(|root| {
+            fs::write(root.join("notes.txt"), "alpha\nbeta\nbeta\n").expect("write notes");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let canonical_root = fs::canonicalize(root).expect("canonical root");
+            let call = tool_call(
+                "multi_edit",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("notes.txt"),
+                    },
+                    ToolArgument {
+                        name: "edits".to_owned(),
+                        value: json!([
+                            {
+                                "old_string": "alpha",
+                                "new_string": "start"
+                            },
+                            {
+                                "old_string": "beta",
+                                "new_string": "done",
+                                "replace_all": true
+                            }
+                        ]),
+                    },
+                ],
+            );
+
+            let preview = registry.preview(&call).expect("multi-edit preview");
+            assert_eq!(
+                preview.changes,
+                vec![ToolPreviewFileChange {
+                    locked_path: canonical_root
+                        .join("notes.txt")
+                        .to_string_lossy()
+                        .into_owned(),
+                    kind: ToolPreviewChangeKind::Modify,
+                    before_text: Some("alpha\nbeta\nbeta\n".to_owned()),
+                    after_text: Some("start\ndone\ndone\n".to_owned()),
+                }]
+            );
+
+            registry.execute(&call).expect("multi-edit execute");
+            assert_eq!(
+                fs::read_to_string(root.join("notes.txt")).expect("read multi edited"),
+                preview.changes[0]
+                    .after_text
+                    .as_deref()
+                    .expect("multi-edit after text")
             );
         });
     }
@@ -1958,6 +2288,28 @@ mod tests {
         assert_eq!(
             registry.execute(&tool_call("web_fetch", vec![])),
             Err(ToolRegistryError::UnimplementedTool("web_fetch".to_owned()))
+        );
+    }
+
+    #[test]
+    fn preview_rejects_non_mutation_tools_and_unimplemented_preview_tools() {
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        assert_eq!(
+            registry.preview(&tool_call("web_fetch", vec![])),
+            Err(ToolRegistryError::UnimplementedTool("web_fetch".to_owned()))
+        );
+        assert_eq!(
+            registry.preview(&tool_call(
+                "read_file",
+                vec![ToolArgument {
+                    name: "path".to_owned(),
+                    value: json!("notes.txt"),
+                }],
+            )),
+            Err(ToolRegistryError::InvalidArguments {
+                tool: "read_file".to_owned(),
+                message: "preview is only supported for writable file-mutation tools".to_owned(),
+            })
         );
     }
 

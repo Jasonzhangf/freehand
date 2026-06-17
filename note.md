@@ -506,3 +506,8 @@
   - `tool.preview` is now locked as the owner for no-write writable-tool preview truth and preview/execute parity
   - `runtime.checkpoint-rewind` is now locked as the owner for workspace snapshot, restore manifest, and explicit rewind lifecycle
   - current closeout direction is checkpointed writable mutation first; error-driven rewrite summarization stays under `reason.rewrite-policy` / `reason.context-planner`
+- 2026-06-17: tool.preview first code slice landed
+  - added shared preview contracts in `freehand-contracts`
+  - `BuiltinToolRegistry::preview` is now bound for `write_file`, `edit_file`, and `multi_edit`
+  - execute paths now reuse the same `plan_*` semantic transform helpers as preview
+  - `delete_range` preview and runtime checkpoint consumption remain pending

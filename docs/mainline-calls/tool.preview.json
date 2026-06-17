@@ -27,77 +27,105 @@
   ],
   "shared_functions": [
     {
-      "symbol": "pending: exact transform helper shared by preview and execute",
+      "symbol": "plan_write_file",
       "owner": "crates/freehand-tools/src/lib.rs",
-      "purpose": "guarantee one semantic transform path for writable tools",
+      "purpose": "calculate write-file preview truth and the exact persisted post-image used by execute",
       "allowed_callers": [
-        "writable preview paths",
-        "writable execute paths"
-      ],
-      "related_tests": [
-        "preview/execute parity tests"
-      ],
-      "why_shared": "preview and execute must not diverge into duplicated semantics"
-    },
-    {
-      "symbol": "pending: preview change renderer",
-      "owner": "crates/freehand-tools/src/lib.rs or crates/freehand-blocks",
-      "purpose": "project canonical preview truth into unified diff or compact text without changing semantics",
-      "allowed_callers": [
-        "runtime debug projection",
-        "future UI projections",
+        "BuiltinToolRegistry::preview",
+        "execute_write_file",
         "tests"
       ],
       "related_tests": [
-        "preview projection smoke"
+        "write-file preview parity tests"
       ],
-      "why_shared": "rendering should stay downstream from canonical preview truth"
+      "why_shared": "preview and execute must share one create/overwrite transform path"
+    },
+    {
+      "symbol": "plan_edit_file",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "calculate edit-file preview truth and the exact persisted post-image used by execute",
+      "allowed_callers": [
+        "BuiltinToolRegistry::preview",
+        "execute_edit_file",
+        "tests"
+      ],
+      "related_tests": [
+        "edit-file preview parity tests"
+      ],
+      "why_shared": "preview and execute must share one exact-match edit path"
+    },
+    {
+      "symbol": "plan_multi_edit",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "calculate ordered multi-edit preview truth and the exact persisted post-image used by execute",
+      "allowed_callers": [
+        "BuiltinToolRegistry::preview",
+        "execute_multi_edit",
+        "tests"
+      ],
+      "related_tests": [
+        "multi-edit preview parity tests"
+      ],
+      "why_shared": "preview and execute must share one ordered edit path"
+    },
+    {
+      "symbol": "parse_multi_edit_steps",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "parse and validate multi-edit step arguments before preview or execute proceeds",
+      "allowed_callers": [
+        "plan_multi_edit",
+        "tests"
+      ],
+      "related_tests": [
+        "multi-edit invalid-argument rejection tests"
+      ],
+      "why_shared": "edit-step parsing must not diverge between preview and execute"
     }
   ],
   "call_table": [
     {
       "step": "01",
-      "symbol_path": "pending: BuiltinToolRegistry preview dispatch",
+      "symbol_path": "BuiltinToolRegistry::preview",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "responsibility": "route writable tool preview requests into the single owner preview path",
       "input_semantic": "writable tool call",
       "output_semantic": "preview request dispatch",
-      "caller": "runtime checkpoint owner",
+      "caller": "runtime checkpoint owner and tests",
       "callee": "tool preview owner",
-      "binding_status": "pending"
+      "binding_status": "bound"
     },
     {
       "step": "02",
-      "symbol_path": "pending: write_file preview entry",
+      "symbol_path": "plan_write_file",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "compute create/overwrite preview without writing",
+      "responsibility": "compute create/overwrite preview without writing and return the exact post-image later persisted by execute",
       "input_semantic": "path plus content",
       "output_semantic": "canonical file-change truth",
-      "caller": "preview dispatch",
+      "caller": "preview dispatch and execute",
       "callee": "write tool preview owner",
-      "binding_status": "pending"
+      "binding_status": "bound"
     },
     {
       "step": "03",
-      "symbol_path": "pending: edit_file preview entry",
+      "symbol_path": "plan_edit_file",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "compute exact-match edit preview without writing",
+      "responsibility": "compute exact-match edit preview without writing and return the exact post-image later persisted by execute",
       "input_semantic": "path plus old_string plus new_string",
       "output_semantic": "canonical file-change truth",
-      "caller": "preview dispatch",
+      "caller": "preview dispatch and execute",
       "callee": "edit tool preview owner",
-      "binding_status": "pending"
+      "binding_status": "bound"
     },
     {
       "step": "04",
-      "symbol_path": "pending: multi_edit preview entry",
+      "symbol_path": "plan_multi_edit",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "compute ordered multi-edit preview without writing",
+      "responsibility": "compute ordered multi-edit preview without writing and return the exact post-image later persisted by execute",
       "input_semantic": "path plus ordered edits",
       "output_semantic": "canonical file-change truth",
-      "caller": "preview dispatch",
+      "caller": "preview dispatch and execute",
       "callee": "multi-edit preview owner",
-      "binding_status": "pending"
+      "binding_status": "bound"
     },
     {
       "step": "05",
@@ -112,9 +140,10 @@
     }
   ],
   "sync_status": [
-    "design truth is locked",
-    "current code has writable execute paths but no code-bound preview owner path yet",
-    "current live writable tool path therefore lacks checkpoint-ready preview semantics",
+    "`BuiltinToolRegistry::preview` is now code-bound for `write_file`, `edit_file`, and `multi_edit`",
+    "preview/execute parity now runs through one shared transform path for those three writable tools",
+    "`delete_range` preview is still pending because its anchor semantics are not locked in code yet",
+    "current live runtime path does not yet consume preview before writable execution",
     "generated wiki must be regenerated from `docs/mainline-calls/tool.preview.json` when this function-map truth changes"
   ]
 }

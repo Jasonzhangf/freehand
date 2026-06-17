@@ -151,6 +151,27 @@ pub struct ToolResultContract {
     pub output: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolPreviewChangeKind {
+    Create,
+    Modify,
+    Delete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolPreviewFileChange {
+    pub locked_path: String,
+    pub kind: ToolPreviewChangeKind,
+    pub before_text: Option<String>,
+    pub after_text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolPreviewContract {
+    pub tool_call_id: ToolCallId,
+    pub changes: Vec<ToolPreviewFileChange>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReasonReq05ToolResultReentry {
     pub session_id: SessionId,
@@ -565,5 +586,30 @@ mod tests {
         let json = serde_json::to_string(&tool_call).expect("serialize");
         let decoded: ToolCallContract = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(decoded, tool_call);
+    }
+
+    #[test]
+    fn tool_preview_contract_round_trip_preserves_change_images() {
+        let preview = ToolPreviewContract {
+            tool_call_id: ToolCallId::new("tool-1"),
+            changes: vec![
+                ToolPreviewFileChange {
+                    locked_path: "/tmp/workspace/docs/new.txt".to_owned(),
+                    kind: ToolPreviewChangeKind::Create,
+                    before_text: None,
+                    after_text: Some("hello".to_owned()),
+                },
+                ToolPreviewFileChange {
+                    locked_path: "/tmp/workspace/docs/old.txt".to_owned(),
+                    kind: ToolPreviewChangeKind::Modify,
+                    before_text: Some("old".to_owned()),
+                    after_text: Some("new".to_owned()),
+                },
+            ],
+        };
+
+        let json = serde_json::to_string(&preview).expect("serialize");
+        let decoded: ToolPreviewContract = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded, preview);
     }
 }

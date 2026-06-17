@@ -7,10 +7,12 @@
   - replay and persistence boundaries remain stable
   - IDs and error contracts remain cross-module safe
   - structured tool arguments and extended usage fields survive round-trip
+  - writable tool preview contracts remain replay-safe across tool/runtime boundaries
   - typed context segment and provider-input segment contracts remain stable
 - white-box plan:
   - serialization, IDs, error base and cross-module contracts
   - structured tool argument round-trip
+  - writable preview contract round-trip
   - usage total/reasoning/finish-reason round-trip
   - context-composed request validation
   - provider payload segment validation
@@ -25,5 +27,5 @@
 - known gaps:
   - versioning policy tests not yet defined
 - sync status between design and implementation:
-  - shared IDs, typed context segments, request/response/error contracts, and serialization baseline landed
+- shared IDs, typed context segments, request/response/error contracts, preview contracts, and serialization baseline landed
   - migrated mainline-call source and generated wiki are kept in sync with this test design

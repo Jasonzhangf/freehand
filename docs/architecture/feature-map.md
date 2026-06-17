@@ -549,7 +549,6 @@ If a problem does not fit this table, update this routing index before making co
   - write-file preview parity tests
   - edit-file preview parity tests
   - multi-edit preview parity tests
-  - delete-range preview parity tests
   - preview path-lock rejection tests
   - preview invalid-argument rejection tests
 - required_module_black_box_tests:

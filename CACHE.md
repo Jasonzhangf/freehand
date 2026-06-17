@@ -222,6 +222,10 @@
   - new features: `tool.preview` and `runtime.checkpoint-rewind`
   - runtime home now reserves `~/.freehand/state/checkpoints` and `~/.freehand/ledgers/checkpoints`
   - workspace gates and generated wiki now require the new docs/mainline/wiki set
+- 2026-06-17: `tool.preview` first implementation slice landed
+  - shared preview contracts added in `freehand-contracts`
+  - `BuiltinToolRegistry::preview` now works for `write_file`, `edit_file`, and `multi_edit`
+  - next concrete step is `runtime.checkpoint-rewind` pre-execute snapshot wiring
 - 2026-06-16: `tool.registry` harness rule locked
   - `freehand-tools` is the only owner for built-in tool specs and execution truth
   - every tool must have explicit spec + implemented state before runtime/provider exposure
