@@ -1,0 +1,109 @@
+{
+  "feature_id": "app.cli-live-turn",
+  "owner_crate": "apps/freehand-cli",
+  "owner_module": "apps/freehand-cli/src/main.rs",
+  "function_map_doc": "docs/function-maps/app.cli-live-turn.md",
+  "test_design_doc": "docs/testing/app.cli-live-turn.md",
+  "mainline_call_doc": "docs/mainline-calls/app.cli-live-turn.json",
+  "generated_wiki_doc": "docs/wiki/app.cli-live-turn.md",
+  "request_mainline": [
+    "operator invokes `freehand-cli reason-live`",
+    "CLI loads default config and selects one agent plus bound provider",
+    "CLI derives the runtime home from the default config path and passes it to the shared live bridge",
+    "CLI uses a stable default session id per selected agent unless an explicit session flag is provided",
+    "CLI delegates the live turn to the runtime-owned live bridge through `freehand-runtime`"
+  ],
+  "response_mainline": [
+    "CLI prints one safe summary of visible text, reasoning-event count, usage, broadcast count, completion rounds, schema rejection count, tool execution count, restore status, and terminal truth",
+    "provider wire payloads and secrets never appear in CLI output"
+  ],
+  "error_mainline": [
+    "invalid command shape returns explicit usage",
+    "unsupported provider selection returns explicit bridge error",
+    "provider execution failures return explicit live-turn errors",
+    "persistence restore or write failures return explicit live-turn errors"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "run_live_reason_turn",
+      "owner": "crates/freehand-runtime/src/lib.rs",
+      "purpose": "bridge config-selected provider execution into one live request with persistence and tool-loop support without leaking provider DTOs into app code",
+      "allowed_callers": [
+        "runtime dispatch",
+        "CLI",
+        "daemon",
+        "project tests"
+      ],
+      "related_tests": [
+        "CLI live-turn smoke tests",
+        "live bridge mock tests",
+        "daemon live-command smoke tests"
+      ],
+      "why_shared": "app boundary and runtime dispatch must reuse one live bridge path"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "run",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "parse CLI command and dispatch config summary, smoke, or live turn",
+      "input_semantic": "CLI args",
+      "output_semantic": "selected command path",
+      "caller": "shell/operator",
+      "callee": "CLI dispatcher",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "load_default_config",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "load runtime config from `~/.freehand/config.toml`",
+      "input_semantic": "runtime home config path",
+      "output_semantic": "selected config truth",
+      "caller": "CLI dispatcher",
+      "callee": "config owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "default_config_path",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "derive runtime home from config truth",
+      "input_semantic": "default config path",
+      "output_semantic": "runtime home parent",
+      "caller": "CLI live runner",
+      "callee": "config owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "run_reason_live",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "run one config-selected provider live request through app boundary",
+      "input_semantic": "selected agent plus prompt plus stream/session flags",
+      "output_semantic": "terminal-facing live summary",
+      "caller": "CLI dispatcher",
+      "callee": "app live runner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "run_live_reason_turn",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "bridge selected provider execution into one persisted tool-capable live request",
+      "input_semantic": "selected config plus live turn request",
+      "output_semantic": "turn truth plus broadcasts plus persistence/tool summary",
+      "caller": "app live runner",
+      "callee": "runtime bridge",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "CLI live-turn command is implemented",
+    "CLI live-turn path reuses the runtime-owned bridge",
+    "CLI output strips completion tagged JSON from visible text projection and reports completion loop counts",
+    "CLI live-turn now reports runtime-home persistence restore status and tool execution summary",
+    "generated wiki must be regenerated from `docs/mainline-calls/app.cli-live-turn.json` when this function-map truth changes"
+  ]
+}

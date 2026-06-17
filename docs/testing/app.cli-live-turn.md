@@ -18,6 +18,7 @@
   - CLI live-turn unsupported-provider smoke
 - project black-box impact:
   - one app entrypoint can now drive config-selected provider execution into a persisted tool-capable live reason request
+  - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - temp `HOME` with `~/.freehand/config.toml`
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
@@ -26,5 +27,6 @@
   - `~/.freehand/ledgers/reason`
 - sync status between design and implementation:
   - CLI live-turn baseline currently exists against local mock servers
-  - migration from `freehand-testkit` bridge to runtime-owned bridge is pending implementation
+  - runtime-owned live bridge baseline is implemented in `freehand-runtime`
   - CLI output must continue stripping tagged completion JSON and reporting `rounds`, `schema_rejections`, final terminal projection, tool count, and restore status after migration
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

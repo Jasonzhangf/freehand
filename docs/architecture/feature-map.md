@@ -197,6 +197,8 @@ If a problem does not fit this table, update this routing index before making co
 - forbidden_paths: `crates/freehand-reason/**` semantic-owner changes unrelated to provider-neutral consumption
 - required_checks:
   - `cargo test -p freehand-cli`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
   - none beyond argument dispatch helpers
 - required_module_black_box_tests:
@@ -208,6 +210,8 @@ If a problem does not fit this table, update this routing index before making co
   - app boundary config-selected anthropic provider drives one real turn through live bridge
 - test_design_doc: `docs/testing/app.cli-live-turn.md`
 - function_map_doc: `docs/function-maps/app.cli-live-turn.md`
+- mainline_call_doc: `docs/mainline-calls/app.cli-live-turn.json`
+- generated_wiki_doc: `docs/wiki/app.cli-live-turn.md`
 - debug_artifacts:
   - CLI live-turn stdout fixtures
 - runtime_paths:
@@ -218,11 +222,13 @@ If a problem does not fit this table, update this routing index before making co
   - CLI live-turn command shape changes
   - live bridge summary projection changes
   - config-selected anthropic path changes
+  - generated wiki freshness policy changes
 - lifecycle_checks:
   - CLI remains app boundary only
   - live turn still routes through runtime-owned live bridge instead of duplicating provider/runtime semantics
   - config-selected anthropic path remains closed-loop
   - completion loop projections stay on the app boundary and do not leak tagged schema text
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `app.webui-smoke`
 
