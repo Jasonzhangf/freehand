@@ -16,6 +16,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
 - the first tool-capable request exposes a Reasonix-aligned runtime tool registry through provider-neutral request metadata
+- the same runtime tool registry exports one deterministic implemented-schema fingerprint that is stamped into planner diagnostics before provider request build
 - Anthropic live executor runs the HTTP/SSE request and returns provider-neutral semantic outputs for each round
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
 - completed provider tool calls are executed by `freehand-tools`; writable tool calls first go through runtime checkpoint preview/snapshot/execute gating, then are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a tool result exchange
@@ -67,7 +68,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `run_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | compose config-selected provider execution with one reason turn | selected agent config plus prompt plus stream mode | turn truth plus broadcast capture plus output summary | CLI/runtime dispatch/tests | live bridge owner | bound |
 | 02 | `ReasonPersistence::restore` | `crates/freehand-reason/src/persistence.rs` | restore existing authoritative session truth | runtime home plus agent plus session id | session history plus prior turns or explicit missing truth | live bridge | persistence owner | bound |
-| 03 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create one round turn and provider payload | session history plus prompt | initialized turn record | live bridge | reason owner | bound |
+| 03 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create one round turn and provider payload while stamping runtime-owned tool-schema fingerprint into planner diagnostics | session history plus prompt plus optional tool-schema fingerprint | initialized turn record | live bridge | reason owner | bound |
 | 04 | `ReasonPersistence::record_turn_started` | `crates/freehand-reason/src/persistence.rs` | persist live round start | session history plus active turn | reason ledger row plus active-turn snapshot | live bridge | persistence owner | bound |
 | 05 | `build_semantic_request` | `crates/freehand-provider-core/src/lib.rs` | build provider-neutral request | provider descriptor plus provider payload | provider semantic request | live bridge | provider semantic owner | bound |
 | 06 | `AnthropicExecutor::execute_once` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one non-stream Anthropic request | provider semantic request plus auth/base URL | provider semantic outputs | live bridge | anthropic executor | bound |
@@ -84,7 +85,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 ## Sync Status Against Mainline Call
 
 - current live path supports Anthropic `messages` only
-- runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, and checkpoint gating without duplicating adapter semantics
+- runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, and checkpoint gating without duplicating adapter semantics
 - provider-output apply failure classification is code-bound; current failure trigger coverage lives in `reason.turn` metadata-producer tests until runtime metadata-center wiring lands
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`
 - generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes

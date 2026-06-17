@@ -16,8 +16,9 @@
   - invalid schema retry exhaustion writes failed terminal outcome
   - start-turn request payload preserves typed context segments through provider payload contract
   - start-turn rewrite mode/version are sourced from session history truth
+  - start-turn optional tool-schema fingerprint is forwarded into planner diagnostics without moving tool schema truth into reason owners
 - white-box plan:
-  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, cancelled terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability, debug emission, metadata provenance writes, metadata write failure stop path
+  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, cancelled terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability, tool-schema fingerprint forwarding, debug emission, metadata provenance writes, metadata write failure stop path
 - module black-box plan:
   - reason turn boundary emits semantic stream and handles rejection/retry behavior
   - reason turn boundary emits debug observations through `debug.core`
@@ -39,6 +40,7 @@
   - metadata producer coverage currently starts with `reason.turn`; broader runtime/provider/debug producers remain out of scope
 - sync status between design and implementation:
   - turn truth, typed request payload baseline, completion parsing/validation, tool-result re-entry, non-blocking broadcast baseline, and session-history rewrite-state sourcing landed
+  - turn startup now forwards optional tool-schema fingerprint input into planner diagnostics while keeping request content and tool registry ownership separate
   - rewrite trigger policy exists in `freehand-blocks`, and `ReasonRewriteRuntime` now wires policy-approved rewrite gates into session history
   - provider usage can feed rewrite policy through shared prompt-token conversion
   - debug emission to `debug.core` is landed for start-turn, provider-output, completion, and fail-turn milestones

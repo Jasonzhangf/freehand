@@ -14,6 +14,7 @@
     "turn orchestration manages tool re-entry and delegates context planning to `reason.context-planner`",
     "current code baseline now calls `plan_context`, carries typed `context_segments`, stores planner diagnostics separately, and derives provider payload from `input_segments`",
     "stable-prefix and volatile-tail separation now exists at planner baseline level, and rewrite sourcing now comes from `SessionHistory`",
+    "runtime owners may supply a tool-schema fingerprint to turn startup so planner diagnostics stay aligned with tool registry truth without making reason own tool schemas",
     "metadata and request-chain content must stay separate types; `freehand-reason` owns request-content composition truth",
     "turn startup writes internal control metadata through `metadata.core` after request/provider payload construction and before session-history commit"
   ],
@@ -252,6 +253,7 @@
   "sync_status": [
     "turn startup, provider-output materialization, completion parsing/validation, failed terminal writing, and session projection are bound in code",
     "planner baseline is implemented and called from turn startup",
+    "turn startup now forwards optional tool-schema fingerprint input into planner diagnostics while keeping request content and tool registry ownership separate",
     "`reason.session-history` now owns rewrite version and explicit rewrite-gate orchestration for turn startup",
     "`ReasonRewriteRuntime` now provides the baseline consumer path for calling `reason.rewrite-policy` and then triggering compaction/rollback/resume gates",
     "provider usage conversion into rewrite policy is bound",

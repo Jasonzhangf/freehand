@@ -99,6 +99,14 @@ impl BuiltinToolRegistry {
             .collect()
     }
 
+    pub fn implemented_schema_fingerprint(&self) -> String {
+        self.implemented_definitions()
+            .iter()
+            .map(canonicalize_tool_definition)
+            .collect::<Vec<_>>()
+            .join("\n--\n")
+    }
+
     pub fn read_only(&self, name: &str) -> Option<bool> {
         self.tools.get(name).map(|spec| spec.read_only)
     }
@@ -1519,6 +1527,50 @@ pub fn rendered_tool_arguments(arguments: &[ToolArgument]) -> Result<String, Too
     })
 }
 
+fn canonicalize_tool_definition(definition: &ProviderToolDefinition) -> String {
+    format!(
+        "{}|{}|{}",
+        definition.name,
+        definition.description,
+        canonicalize_json(&definition.input_schema)
+    )
+}
+
+fn canonicalize_json(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => serde_json::to_string(value).expect("json string canonicalization"),
+        Value::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(canonicalize_json)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Value::Object(map) => {
+            let mut keys = map.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+            let pairs = keys
+                .into_iter()
+                .map(|key| {
+                    let value = map
+                        .get(&key)
+                        .expect("canonicalize object value for existing key");
+                    format!(
+                        "{}:{}",
+                        serde_json::to_string(&key).expect("json object key canonicalization"),
+                        canonicalize_json(value)
+                    )
+                })
+                .collect::<Vec<_>>();
+            format!("{{{}}}", pairs.join(","))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1552,6 +1604,49 @@ mod tests {
         assert_eq!(registry.read_only("grep"), Some(true));
         assert_eq!(registry.read_only("ls"), Some(true));
         assert_eq!(registry.read_only("todo_write"), Some(true));
+    }
+
+    #[test]
+    fn implemented_schema_fingerprint_is_stable_across_registration_order() {
+        let canonical = BuiltinToolRegistry::reasonix_aligned();
+        let mut reversed = BuiltinToolRegistry {
+            tools: BTreeMap::new(),
+        };
+        let mut specs = reasonix_aligned_builtin_specs();
+        specs.reverse();
+        for spec in specs {
+            reversed.register(spec);
+        }
+
+        assert_eq!(
+            canonical.implemented_schema_fingerprint(),
+            reversed.implemented_schema_fingerprint()
+        );
+    }
+
+    #[test]
+    fn implemented_schema_fingerprint_changes_when_implemented_schema_changes() {
+        let baseline = BuiltinToolRegistry::reasonix_aligned();
+        let mut changed = baseline.clone();
+        changed.register(spec(
+            "alpha_tool",
+            true,
+            true,
+            "Added implemented schema for planner diagnostics drift coverage.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "recursive": {"type": "boolean"}
+                },
+                "required": ["path"]
+            }),
+        ));
+
+        assert_ne!(
+            baseline.implemented_schema_fingerprint(),
+            changed.implemented_schema_fingerprint()
+        );
     }
 
     #[test]

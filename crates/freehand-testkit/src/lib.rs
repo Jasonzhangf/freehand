@@ -143,6 +143,7 @@ impl ReasonRuntimeHarness {
                     agent_id,
                     user_text: start.user_text,
                     planned_context_segments: start.planned_context_segments,
+                    tool_schema_fingerprint: None,
                     model: start.model,
                 },
             )
@@ -328,6 +329,7 @@ pub fn run_reason_persistence_smoke(
                 agent_id: agent_id.clone(),
                 user_text: "persist the latest terminal summary".to_owned(),
                 planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
                 model: "smoke-model".to_owned(),
             },
         )

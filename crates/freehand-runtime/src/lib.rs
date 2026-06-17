@@ -725,6 +725,7 @@ where
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
+    let tool_schema_fingerprint = tool_registry.implemented_schema_fingerprint();
 
     loop {
         ensure_live_not_cancelled(&request)?;
@@ -742,6 +743,7 @@ where
                     agent_id: agent_id.clone(),
                     user_text: next_prompt.clone(),
                     planned_context_segments: carryover_segments.clone(),
+                    tool_schema_fingerprint: Some(tool_schema_fingerprint.clone()),
                     model: selected.provider.default_model.clone(),
                 },
             )
@@ -1276,6 +1278,7 @@ impl RuntimeCommandDispatcher {
                     agent_id: state.config.reason_agent_id.clone(),
                     user_text: text,
                     planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
                     model: state.config.model.clone(),
                 },
             )
@@ -2318,6 +2321,15 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    fn fnv1a_hex_for_test(input: &str) -> String {
+        let mut hash = 0xcbf29ce484222325u64;
+        for byte in input.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        format!("{hash:016x}")
+    }
+
     struct RestoreCwd {
         original: PathBuf,
     }
@@ -2650,6 +2662,35 @@ mod tests {
                 .broadcasts
                 .iter()
                 .any(|event| matches!(event, ReasonBroadcastEvent::Usage(_)))
+        );
+    }
+
+    #[test]
+    fn live_bridge_stamps_tool_schema_fingerprint_into_planner_diagnostics() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, _rx, handle) =
+            spawn_mock_server(200, "application/json", complete_single_response("pong"));
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            live_request(false),
+        )
+        .expect("live bridge");
+        handle.join().expect("join");
+
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        let expected = fnv1a_hex_for_test(&registry.implemented_schema_fingerprint());
+        let empty = fnv1a_hex_for_test("");
+
+        assert_eq!(
+            outcome.turn.planned_context.diagnostics.tool_schema_hash,
+            expected
+        );
+        assert_ne!(
+            outcome.turn.planned_context.diagnostics.tool_schema_hash,
+            empty
         );
     }
 

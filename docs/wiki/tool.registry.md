@@ -12,6 +12,7 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 
 - runtime asks the tool owner for a per-run registry
 - registry exports provider-neutral tool definitions without importing provider adapter DTOs
+- registry can export one stable implemented-tool schema fingerprint for planner/cache diagnostics without leaking provider DTOs into reason owners
 - registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner
 - foreground `bash` starts in one locked workspace root: the canonical process current working directory
 - path-based read-only tools resolve against one locked workspace root: the canonical process current working directory
@@ -76,6 +77,12 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
   - allowed callers: provider adapters, tool registry diagnostics, tests
   - related tests: tool argument JSON render tests, tool registry execution tests
   - why shared: keeps tool argument conversion as a shared block instead of per-crate helpers
+- `BuiltinToolRegistry::implemented_schema_fingerprint`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: expose a deterministic implemented-tool schema fingerprint for planner/cache diagnostics consumers
+  - allowed callers: runtime live bridge, tests
+  - related tests: registry fingerprint stability tests, runtime live bridge planner diagnostics tests
+  - why shared: keeps tool-schema truth and canonicalization in the tool owner instead of runtime/reason duplication
 
 ## Function Call Table
 
@@ -84,22 +91,24 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 | 01 | `BuiltinToolRegistry::reasonix_aligned` | `crates/freehand-tools/src/lib.rs` | create per-run built-in registry aligned with Reasonix names and schemas | none | registry | runtime live bridge/tests | tool owner | bound |
 | 02 | `reasonix_aligned_builtin_specs` | `crates/freehand-tools/src/lib.rs` | declare built-in tool metadata, schema, read-only state, and implementation state | static registry truth | tool specs | registry constructor/tests | tool owner | bound |
 | 03 | `BuiltinToolRegistry::implemented_definitions` | `crates/freehand-tools/src/lib.rs` | export currently executable provider-neutral tool schemas | registry | provider tool definitions | runtime live bridge | tool owner | bound |
-| 04 | `BuiltinToolRegistry::execute` | `crates/freehand-tools/src/lib.rs` | dispatch completed tool calls into the single owner implementation set | ReasonReq04ToolCall | tool execution output | runtime live bridge | tool owner | bound |
-| 05 | `execute_bash` | `crates/freehand-tools/src/lib.rs` | run one foreground shell command from the locked workspace root with timeout and explicit failure reporting | command plus optional timeout_seconds | combined stdout/stderr text | registry execute | command tool owner | bound |
-| 06 | `execute_read_file` | `crates/freehand-tools/src/lib.rs` | read UTF-8 text from one locked in-root file with line-windowing | path plus optional offset plus optional limit | numbered text window | registry execute | read-only file tool owner | bound |
-| 07 | `execute_write_file` | `crates/freehand-tools/src/lib.rs` | create or overwrite one UTF-8 text file inside the locked root | path plus content | write summary | registry execute | file-mutation tool owner | bound |
-| 08 | `execute_edit_file` | `crates/freehand-tools/src/lib.rs` | replace one exact text occurrence in one locked in-root file | path plus old_string plus new_string | edit summary | registry execute | file-mutation tool owner | bound |
-| 09 | `execute_multi_edit` | `crates/freehand-tools/src/lib.rs` | apply ordered exact text edits and write once at the end | path plus ordered edits | edit summary | registry execute | file-mutation tool owner | bound |
-| 10 | `execute_glob` | `crates/freehand-tools/src/lib.rs` | match in-root files by glob pattern with recursive filename fallback | pattern | newline-separated match list | registry execute | read-only search tool owner | bound |
-| 11 | `execute_grep` | `crates/freehand-tools/src/lib.rs` | search in-root UTF-8 text files by regex | pattern plus optional path | path:line:text matches | registry execute | read-only search tool owner | bound |
-| 12 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list directory entries or recursive tree under locked root | optional path plus optional recursive | newline-separated directory listing | registry execute | read-only file tool owner | bound |
+| 04 | `BuiltinToolRegistry::implemented_schema_fingerprint` | `crates/freehand-tools/src/lib.rs` | export deterministic implemented-tool schema fingerprint for planner/cache diagnostics | registry | stable tool-schema fingerprint string | runtime live bridge | tool owner | bound |
+| 05 | `BuiltinToolRegistry::execute` | `crates/freehand-tools/src/lib.rs` | dispatch completed tool calls into the single owner implementation set | ReasonReq04ToolCall | tool execution output | runtime live bridge | tool owner | bound |
+| 06 | `execute_bash` | `crates/freehand-tools/src/lib.rs` | run one foreground shell command from the locked workspace root with timeout and explicit failure reporting | command plus optional timeout_seconds | combined stdout/stderr text | registry execute | command tool owner | bound |
+| 07 | `execute_read_file` | `crates/freehand-tools/src/lib.rs` | read UTF-8 text from one locked in-root file with line-windowing | path plus optional offset plus optional limit | numbered text window | registry execute | read-only file tool owner | bound |
+| 08 | `execute_write_file` | `crates/freehand-tools/src/lib.rs` | create or overwrite one UTF-8 text file inside the locked root | path plus content | write summary | registry execute | file-mutation tool owner | bound |
+| 09 | `execute_edit_file` | `crates/freehand-tools/src/lib.rs` | replace one exact text occurrence in one locked in-root file | path plus old_string plus new_string | edit summary | registry execute | file-mutation tool owner | bound |
+| 10 | `execute_multi_edit` | `crates/freehand-tools/src/lib.rs` | apply ordered exact text edits and write once at the end | path plus ordered edits | edit summary | registry execute | file-mutation tool owner | bound |
+| 11 | `execute_glob` | `crates/freehand-tools/src/lib.rs` | match in-root files by glob pattern with recursive filename fallback | pattern | newline-separated match list | registry execute | read-only search tool owner | bound |
+| 12 | `execute_grep` | `crates/freehand-tools/src/lib.rs` | search in-root UTF-8 text files by regex | pattern plus optional path | path:line:text matches | registry execute | read-only search tool owner | bound |
+| 13 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list directory entries or recursive tree under locked root | optional path plus optional recursive | newline-separated directory listing | registry execute | read-only file tool owner | bound |
 
 ## Sync Status Against Mainline Call
 
 - Reasonix-aligned built-in names and schemas are bound in `freehand-tools`
 - current implemented tool set is: `bash`, `read_file`, `write_file`, `edit_file`, `multi_edit`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`
+- implemented tool schema fingerprint export is now bound in `freehand-tools` and is the owner path for planner/cache diagnostics consumers
 - first-version path tools are locked to the canonical process current working directory and reject path escape outside that root
 - first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing
 - first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path
-- checkpointed live writable execution now depends on `tool.preview` and `runtime.checkpoint-rewind`, which are design-locked but not yet code-bound
+- checkpointed live writable execution now depends on the code-bound `tool.preview` and `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts
 - `bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools remain registered but explicitly unimplemented until their lifecycle/gates are designed

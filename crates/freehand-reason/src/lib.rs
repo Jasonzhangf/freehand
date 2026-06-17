@@ -55,6 +55,7 @@ pub struct TurnStartInput {
     pub agent_id: AgentId,
     pub user_text: String,
     pub planned_context_segments: Vec<ContextSegment>,
+    pub tool_schema_fingerprint: Option<String>,
     pub model: String,
 }
 
@@ -185,7 +186,7 @@ impl ReasonTurnEngine {
             },
             rewrite_mode: history.current_rewrite_mode(),
             rewrite_version: history.rewrite_version(),
-            tool_schema_fingerprint: None,
+            tool_schema_fingerprint: input.tool_schema_fingerprint.clone(),
         })
         .map_err(|err| ReasonTurnError::ContextPlanningFailed(err.to_string()))?;
         let request = ReasonReq02ContextComposedInput {
@@ -740,6 +741,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             user_text: "hello".to_owned(),
             planned_context_segments: Vec::new(),
+            tool_schema_fingerprint: None,
             model: "gpt-test".to_owned(),
         }
     }
@@ -1004,6 +1006,37 @@ mod tests {
         assert_eq!(
             history.current_rewrite_mode(),
             ContextRewriteMode::OrdinaryTurn
+        );
+    }
+
+    #[test]
+    fn start_turn_forwards_tool_schema_fingerprint_to_planner_diagnostics() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let turn_without = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn without fingerprint");
+
+        let mut history_with = session_history();
+        let turn_with = engine
+            .start_turn(
+                &mut history_with,
+                TurnStartInput {
+                    turn_id: TurnId::new("turn-2"),
+                    trace_id: TraceId::new("trace-2"),
+                    tool_schema_fingerprint: Some("tool-registry-v1".to_owned()),
+                    ..start_input()
+                },
+            )
+            .expect("turn with fingerprint");
+
+        assert_ne!(
+            turn_without.planned_context.diagnostics.tool_schema_hash,
+            turn_with.planned_context.diagnostics.tool_schema_hash
+        );
+        assert_eq!(
+            turn_without.planned_context.diagnostics.stable_prefix_hash,
+            turn_with.planned_context.diagnostics.stable_prefix_hash
         );
     }
 

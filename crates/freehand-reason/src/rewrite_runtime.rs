@@ -336,6 +336,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             user_text: "continue".to_owned(),
             planned_context_segments: Vec::new(),
+            tool_schema_fingerprint: None,
             model: "model-a".to_owned(),
         }
     }

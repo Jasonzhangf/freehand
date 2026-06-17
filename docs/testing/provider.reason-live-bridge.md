@@ -27,6 +27,7 @@
   - restore-before-turn path
   - live turn start/provider-output/schema-rejection/terminal persistence writes
   - registry-backed tool schema export path
+  - registry-backed tool schema fingerprint reaches planner diagnostics
   - implemented registry read-only tool execution path
   - writable tool checkpoint creation and rewind-safe manifest/ledger path
   - previewless writable-tool rejection path
@@ -53,6 +54,7 @@
 - sync status between design and implementation:
   - anthropic-only live bridge owner is now `freehand-runtime`
   - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, and persistence restore
+  - runtime live bridge now injects tool owner schema fingerprint into reason planner diagnostics before provider request build
   - runtime dispatch and daemon black-box coverage are landed against local mock providers
   - provider-output apply failure classification is code-bound as `ProviderOutputApplyFailed`; current failure trigger coverage lives in `reason.turn` metadata-producer tests until runtime metadata-center wiring lands
 - mainline/wiki sync:

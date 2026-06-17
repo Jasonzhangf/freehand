@@ -21,6 +21,7 @@ Generated from `docs/mainline-calls/reason.context-planner.json`. Do not edit by
 
 - planner output becomes provider-neutral request content for the current turn
 - planner also returns cache-shape diagnostics through metadata-side outputs
+- cache-shape diagnostics now include tool-schema hash derived from tool owner truth when a runtime owner supplies a fingerprint
 - provider renderers consume only planned request content plus explicit provider config
 - downstream response handling does not mutate the stable prefix except through explicit rewrite events
 
@@ -77,5 +78,5 @@ Generated from `docs/mainline-calls/reason.context-planner.json`. Do not edit by
 - current baseline enforces segment ordering, segment-contract validation, token-budget rejection, user-turn append ownership, raw-subagent-transcript rejection by provenance, and rewrite-base validation for session history
 - current baseline emits cache diagnostics separated from request content for both ordinary turns and explicit rewrite ledger events
 - rewrite-mode and rewrite-version are now sourced from persistent `SessionHistory` truth instead of turn-local constants
-- remaining gap: tool-schema fingerprint is still not wired from runtime tool truth into planner diagnostics
+- runtime live bridge now wires deterministic tool-schema fingerprint truth from `tool.registry` into planner diagnostics without moving tool schema semantics into reason owners
 - generated wiki must be regenerated from `docs/mainline-calls/reason.context-planner.json` when this function-map truth changes

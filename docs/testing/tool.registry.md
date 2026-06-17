@@ -10,6 +10,8 @@
   - unknown tools fail explicitly
 - white-box plan:
   - registry name/schema export tests
+  - implemented schema fingerprint stability tests
+  - implemented schema fingerprint change detection tests
 - `read_only` metadata tests
 - `bash` success-path, workspace-cwd, timeout, and non-zero-exit tests
 - live runtime checkpoint routing must not treat non-file-mutation tools such as `bash` as preview/checkpointable file mutations
@@ -38,8 +40,9 @@
   - provider mock tool-use fixtures
   - `~/.freehand/ledgers/reason`
 - known gaps:
-  - writable tool live exposure still needs `tool.preview` plus `runtime.checkpoint-rewind` owner paths before checkpointed mutation closeout
   - `bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
 - sync status between design and implementation:
   - registry-backed foreground `bash`, read-only file/search, and first text-mutation tools are landed
+  - implemented tool schema fingerprint export is landed for planner/cache diagnostics consumers
+  - writable tool live exposure is routed through the code-bound `tool.preview` plus `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts
   - runtime and daemon smokes now consume real registry tools instead of a forced demo first tool

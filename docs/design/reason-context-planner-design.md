@@ -28,7 +28,7 @@ Current landed baseline includes:
 Remaining gap:
 
 - final CLI/server runtime loop wiring for real usage metrics and persisted recovery payloads is not yet bound
-- tool-schema fingerprint is not yet supplied from runtime tool truth
+- planner diagnostics now accept runtime-supplied tool-schema fingerprint truth; broader runtime metrics/recovery wiring remains the remaining gap
 
 ## Owner
 

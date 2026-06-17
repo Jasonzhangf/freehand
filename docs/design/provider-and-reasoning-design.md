@@ -53,11 +53,11 @@ Current implementation baseline:
 - current code now sources rewrite mode/version from session-history truth instead of hardcoded turn-local constants
 - current code now has a dedicated `reason.rewrite-policy` owner path in `freehand-blocks` for compaction and recovery trigger decisions
 - current code now has `ReasonRewriteRuntime` as the single baseline consumer that can call session-history rewrite gates from policy decisions
-- current code now has an Anthropic-only live bridge in `freehand-testkit` that routes selected config into one real reason turn without adding provider adapter dependencies to `freehand-reason`
+- current code now has an Anthropic-only live bridge in `freehand-runtime` that routes selected config into one real reason turn without adding provider adapter dependencies to `freehand-reason`
+- current code now stamps runtime-owned tool-schema fingerprint truth into planner diagnostics before provider request build
 
 Current implementation gap:
 
-- current code does not yet wire tool-schema fingerprint into planner diagnostics from runtime tool truth
 - production server-grade multi-provider runtime loop wiring for real usage metrics and recovery payloads remains pending
 
 `freehand-reason` and provider crates must stay independently owned and independently testable.

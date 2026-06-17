@@ -57,7 +57,7 @@ Current implementation baseline:
 Current implementation gap:
 
 - final CLI/server runtime loop wiring for `reason.rewrite-policy` remains outside this baseline
-- tool-schema fingerprint is still not wired into planner diagnostics
+- tool-schema fingerprint wiring into planner diagnostics is landed; broader runtime usage/recovery loop closeout remains pending
 
 ### Multi-subscriber policy
 

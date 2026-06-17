@@ -250,6 +250,12 @@
   - implementation status: `DebugObservationFailure` and `DebugHub::subscribe_failures` landed in `freehand-debug`; `reason.turn` now has a producer smoke proving sink failure is surfaced while turn truth stays unchanged
   - doc sync: updated debug/reason function maps, test designs, mainline JSON, generated wiki, design docs, feature map, CACHE, MEMORY
   - verification: `cargo test -p freehand-debug`; `cargo test -p freehand-reason`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `cargo fmt --all --check`; `make ci`
+- 2026-06-18: tool-schema fingerprint planner-diagnostics slice
+  - rooted from owner map: `tool.registry` -> `reason.turn` -> `provider.reason-live-bridge` with planner-consumer sync in `reason.context-planner`
+  - chosen fix: keep implemented-tool schema canonicalization and fingerprint truth in `freehand-tools`, forward optional fingerprint through `TurnStartInput`, and stamp it from the runtime live bridge before provider request build
+  - implementation status: `BuiltinToolRegistry::implemented_schema_fingerprint` landed with stability/change tests; `ReasonTurnEngine::start_turn` forwards `tool_schema_fingerprint`; runtime live bridge computes registry fingerprint and injects it into each live round
+  - doc sync: updated feature docs, mainline JSON, generated wiki, and stale metadata/testing wording; refreshed design docs so the remaining gap is now runtime metrics/recovery closeout rather than fingerprint wiring
+  - verification: `cargo test -p freehand-tools -p freehand-blocks -p freehand-reason -p freehand-runtime`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `make ci`
 - 2026-06-15: completion schema loop requirement confirmed
   - must guide schema in prompt/context
   - must validate schema structurally and semantically

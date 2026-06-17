@@ -9,7 +9,7 @@
   - `cargo run -p xtask -- gates check`
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
 - Latest local full gate:
-  - `make ci` -> passed after `foundation.workspace` metadata/request isolation gate closeout
+  - `make ci` -> passed after tool-schema fingerprint wiring and mainline/wiki/doc sync
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -49,5 +49,11 @@
   - `reason.turn` is now the first metadata producer for start-turn and provider-output application
   - durable metadata ledger append/reload is now implemented in `metadata.core`
   - broader runtime/provider/debug producer wiring is still pending
+- Latest landed stability slice:
+  - `tool.registry` now owns deterministic implemented-tool schema fingerprint export through `BuiltinToolRegistry::implemented_schema_fingerprint`
+  - `reason.turn` forwards optional `tool_schema_fingerprint` into planner diagnostics without mixing tool truth into request content
+  - runtime live bridge now stamps tool owner fingerprint truth into live-round planner diagnostics before provider request build
+  - `docs/mainline-calls/**`, `docs/wiki/**`, and design/testing docs are synced so the prior “fingerprint not wired” gap is closed
+  - `docs/testing/metadata.core.md` no longer claims missing architecture-scan coverage; repo-wide metadata/request isolation gate is now the documented enforcement
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.

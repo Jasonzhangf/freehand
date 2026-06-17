@@ -15,6 +15,7 @@
   - subagent conclusion admission tests
   - raw subagent transcript rejection tests
   - cache-shape hash drift tests
+  - tool-schema hash drift tests
   - rewrite-version bump tests
   - rewrite-base validation tests
 - module black-box plan:
@@ -36,5 +37,5 @@
   - design locked
   - planner baseline implemented in `freehand-blocks`
   - session-history rewrite-mode/version wiring is landed
-  - runtime tool-schema fingerprint wiring is still pending
+  - runtime tool-schema fingerprint wiring is landed through reason turn input and the runtime live bridge
   - migrated mainline-call source and generated wiki are kept in sync with this test design

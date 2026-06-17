@@ -30,9 +30,9 @@
   - `~/.freehand/replays/metadata`
 - known gaps:
   - runtime/provider/debug producers are not yet wired to the metadata center
-  - no architecture scan yet detects metadata-like ad hoc structs outside the owner crate
 - sync status between design and implementation:
   - crate/test baseline is landed
   - metadata center validation, in-memory write/query behavior, and durable ledger behavior are implemented and covered together
   - `reason.turn` producer tests prove owner/node provenance, request-text isolation, and durable persistence on start-turn and provider-output metadata
+  - repo-wide static metadata/request boundary gate in `xtask` now rejects stray `Metadata*` owner types outside `crates/freehand-metadata` and metadata/request field leakage
   - migrated mainline-call source and generated wiki are kept in sync with this test design

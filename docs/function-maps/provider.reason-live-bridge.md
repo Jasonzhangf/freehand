@@ -16,6 +16,7 @@
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
 - the first tool-capable request exposes a Reasonix-aligned runtime tool registry through provider-neutral request metadata
+- the same runtime tool registry exports one deterministic implemented-schema fingerprint that is stamped into planner diagnostics before provider request build
 - Anthropic live executor runs the HTTP/SSE request and returns provider-neutral semantic outputs for each round
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
 - completed provider tool calls are executed by `freehand-tools`; writable tool calls first go through runtime checkpoint preview/snapshot/execute gating, then are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a tool result exchange
@@ -84,7 +85,7 @@
 ## Sync Status Against Code
 
 - current live path supports Anthropic `messages` only
-- runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, and checkpoint gating without duplicating adapter semantics
+- runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, and checkpoint gating without duplicating adapter semantics
 - provider-output apply failure classification is code-bound; current failure trigger coverage lives in `reason.turn` metadata-producer tests until runtime metadata-center wiring lands
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`
 - the generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes

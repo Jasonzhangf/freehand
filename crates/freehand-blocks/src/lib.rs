@@ -1155,6 +1155,57 @@ mod tests {
     }
 
     #[test]
+    fn planner_diagnostics_drift_when_tool_schema_fingerprint_changes() {
+        let planned_a = plan_context(ContextPlannerInput {
+            candidate_segments: vec![segment(
+                "memory-a",
+                ContextSegmentKind::SessionMemory,
+                "memory-a",
+                8,
+                "memory",
+            )],
+            current_user_text: "hello".to_owned(),
+            user_segment_id: ContextSegmentId::new("turn-user-a"),
+            user_provenance: ContextProvenance {
+                source: "turn_input".to_owned(),
+                reference: None,
+            },
+            rewrite_mode: ContextRewriteMode::OrdinaryTurn,
+            rewrite_version: 0,
+            tool_schema_fingerprint: Some("tool-v1".to_owned()),
+        })
+        .expect("planned a");
+        let planned_b = plan_context(ContextPlannerInput {
+            candidate_segments: vec![segment(
+                "memory-a",
+                ContextSegmentKind::SessionMemory,
+                "memory-a",
+                8,
+                "memory",
+            )],
+            current_user_text: "hello".to_owned(),
+            user_segment_id: ContextSegmentId::new("turn-user-a"),
+            user_provenance: ContextProvenance {
+                source: "turn_input".to_owned(),
+                reference: None,
+            },
+            rewrite_mode: ContextRewriteMode::OrdinaryTurn,
+            rewrite_version: 0,
+            tool_schema_fingerprint: Some("tool-v2".to_owned()),
+        })
+        .expect("planned b");
+
+        assert_eq!(
+            planned_a.diagnostics.stable_prefix_hash,
+            planned_b.diagnostics.stable_prefix_hash
+        );
+        assert_ne!(
+            planned_a.diagnostics.tool_schema_hash,
+            planned_b.diagnostics.tool_schema_hash
+        );
+    }
+
+    #[test]
     fn rewrite_base_rejects_turn_volatile_segments() {
         let err = validate_rewrite_base_segments(&[segment(
             "tool-evidence",
