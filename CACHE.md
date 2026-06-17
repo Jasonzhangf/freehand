@@ -261,3 +261,6 @@
 - 2026-06-17: `reason.session-history` migrated into the mainline/wiki chain
   - `docs/mainline-calls/reason.session-history.json` is now the machine-readable session-history mainline truth
   - `docs/wiki/reason.session-history.md` is generated from it
+- 2026-06-17: `reason.rewrite-policy` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/reason.rewrite-policy.json` is now the machine-readable rewrite-policy mainline truth
+  - `docs/wiki/reason.rewrite-policy.md` is generated from it

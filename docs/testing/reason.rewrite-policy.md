@@ -46,3 +46,4 @@
   - white-box coverage lives in the owner crate tests
   - runtime consumer coverage lives in `freehand-reason` tests
   - project black-box harness coverage lives in `freehand-testkit` tests
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

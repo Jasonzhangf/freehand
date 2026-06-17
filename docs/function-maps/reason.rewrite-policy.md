@@ -97,3 +97,4 @@
 - provider usage to prompt-pressure conversion is bound through `prompt_tokens_from_usage`
 - project black-box harness is implemented in `freehand-testkit`
 - remaining gap: production CLI/server loop must supply real provider usage events, stale-prune payloads, rollback snapshots, and rebuild sources
+- migrated mainline-call source now lives at `docs/mainline-calls/reason.rewrite-policy.json` and generated wiki lives at `docs/wiki/reason.rewrite-policy.md`

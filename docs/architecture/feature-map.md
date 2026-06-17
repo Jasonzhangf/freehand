@@ -722,7 +722,7 @@ If a problem does not fit this table, update this routing index before making co
 ### `reason.rewrite-policy`
 
 - owner: `crates/freehand-blocks`
-- allowed_paths: `crates/freehand-blocks/**`, `crates/freehand-contracts/**`, `crates/freehand-reason/**`, `docs/architecture/**`, `docs/design/**`
+- allowed_paths: `crates/freehand-blocks/**`, `crates/freehand-contracts/**`, `crates/freehand-reason/**`, `crates/freehand-testkit/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
 - forbidden_paths: `crates/freehand-provider-*/**`, `crates/freehand-ui-protocol/**`
 - required_checks:
   - `cargo test -p freehand-blocks`
@@ -741,6 +741,8 @@ If a problem does not fit this table, update this routing index before making co
   - missing recovery source blocks without mutating session truth
 - test_design_doc: `docs/testing/reason.rewrite-policy.md`
 - function_map_doc: `docs/function-maps/reason.rewrite-policy.md`
+- mainline_call_doc: `docs/mainline-calls/reason.rewrite-policy.json`
+- generated_wiki_doc: `docs/wiki/reason.rewrite-policy.md`
 - debug_artifacts:
   - rewrite-policy replay fixture path
 - runtime_paths:

@@ -21,3 +21,4 @@ Current migrated features:
 - `reason.turn`
 - `reason.persistence`
 - `reason.session-history`
+- `reason.rewrite-policy`
