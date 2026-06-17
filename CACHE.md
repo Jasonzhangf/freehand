@@ -279,3 +279,6 @@
 - 2026-06-17: `config.core` migrated into the mainline/wiki chain
   - `docs/mainline-calls/config.core.json` is now the machine-readable config-selection mainline truth
   - `docs/wiki/config.core.md` is generated from it
+- 2026-06-17: `contracts.core` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/contracts.core.json` is now the machine-readable shared-contract mainline truth
+  - `docs/wiki/contracts.core.md` is generated from it

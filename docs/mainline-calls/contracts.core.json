@@ -1,0 +1,186 @@
+{
+  "feature_id": "contracts.core",
+  "owner_crate": "crates/freehand-contracts",
+  "owner_module": "crates/freehand-contracts/src/lib.rs",
+  "function_map_doc": "docs/function-maps/contracts.core.md",
+  "test_design_doc": "docs/testing/contracts.core.md",
+  "mainline_call_doc": "docs/mainline-calls/contracts.core.json",
+  "generated_wiki_doc": "docs/wiki/contracts.core.md",
+  "request_mainline": [
+    "request-chain semantic nodes are defined and exported as cross-module contracts",
+    "typed context segments replace ad hoc context item pairs",
+    "provider payload semantic contract carries ordered `input_segments` rather than one rendered prompt string",
+    "request validators stay inside the contract owner and gate request boundaries before orchestrators or adapters proceed"
+  ],
+  "response_mainline": [
+    "response-chain semantic nodes are defined and exported as cross-module contracts",
+    "semantic response events remain serializable, replayable, and persistable across crate boundaries"
+  ],
+  "error_mainline": [
+    "error-chain semantic nodes and base error contracts are defined and exported as cross-module contracts",
+    "shared error contracts remain cross-module safe and replay-safe",
+    "no module may invent a second copy of request/response/error chain contracts outside this owner"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "validate_reason_req01",
+      "owner": "crates/freehand-contracts/src/lib.rs",
+      "purpose": "guard raw user-input requests against empty content before orchestration proceeds",
+      "allowed_callers": [
+        "request builders",
+        "orchestrators",
+        "tests"
+      ],
+      "related_tests": [
+        "shared contract serialization tests",
+        "request validation tests"
+      ],
+      "why_shared": "avoids duplicate non-empty request guards across multiple crates"
+    },
+    {
+      "symbol": "validate_reason_req02",
+      "owner": "crates/freehand-contracts/src/lib.rs",
+      "purpose": "validate typed context-composed requests, including user-turn segment admission",
+      "allowed_callers": [
+        "reason orchestrator",
+        "planner builders",
+        "tests"
+      ],
+      "related_tests": [
+        "context segment validation tests"
+      ],
+      "why_shared": "keeps request-side boundary checks centralized instead of revalidating them differently in each crate"
+    },
+    {
+      "symbol": "validate_reason_req03",
+      "owner": "crates/freehand-contracts/src/lib.rs",
+      "purpose": "validate provider payload semantic contract before adapter rendering",
+      "allowed_callers": [
+        "provider semantic boundary",
+        "tests"
+      ],
+      "related_tests": [
+        "provider semantic request validation tests"
+      ],
+      "why_shared": "keeps provider-boundary request checks centralized"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "ReasonReq01UserRawInput",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define raw request node",
+      "input_semantic": "request node spec",
+      "output_semantic": "serializable request contract",
+      "caller": "all owner crates",
+      "callee": "contract module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "ContextSegment",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define typed model-visible context node",
+      "input_semantic": "context segment spec",
+      "output_semantic": "serializable context contract",
+      "caller": "planner/reason/provider crates",
+      "callee": "contract module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "ReasonReq02ContextComposedInput",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define composed request node",
+      "input_semantic": "typed context-composed request spec",
+      "output_semantic": "serializable request contract",
+      "caller": "reason/provider crates",
+      "callee": "contract module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "ReasonReq03ProviderPayload",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define provider payload semantic node",
+      "input_semantic": "typed provider input segment spec",
+      "output_semantic": "serializable request contract",
+      "caller": "reason/provider crates",
+      "callee": "contract module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "ToolArgument",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define shared structured tool-argument node",
+      "input_semantic": "tool argument spec",
+      "output_semantic": "serializable JSON-capable argument contract",
+      "caller": "provider/reason/ui crates",
+      "callee": "contract module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "ReasonResp01SemanticEvent",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define semantic response node",
+      "input_semantic": "semantic event spec",
+      "output_semantic": "serializable response contract",
+      "caller": "reason/ui/node crates",
+      "callee": "contract module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "ErrorErr01RuntimeClassified",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define classified error node",
+      "input_semantic": "error policy spec",
+      "output_semantic": "serializable error contract",
+      "caller": "all owner crates",
+      "callee": "contract module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "validate_reason_req01",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "validate non-empty user input",
+      "input_semantic": "raw request contract",
+      "output_semantic": "validated request contract",
+      "caller": "request builders",
+      "callee": "shared validator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "validate_reason_req02",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "validate typed context-composed request",
+      "input_semantic": "composed request contract",
+      "output_semantic": "validated request contract",
+      "caller": "reason/planner",
+      "callee": "shared validator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "validate_reason_req03",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "validate provider payload contract",
+      "input_semantic": "provider payload contract",
+      "output_semantic": "validated provider payload",
+      "caller": "provider semantic boundary",
+      "callee": "shared validator",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "shared IDs, typed context segment contracts, request nodes, semantic response nodes, tool contracts, and error contracts are bound in code",
+    "request-side validation helpers remain single-owner contract guards and are reused across orchestrator boundaries",
+    "shared contract types remain serializable, replayable, and persistable by default",
+    "generated wiki must be regenerated from `docs/mainline-calls/contracts.core.json` when this function-map truth changes"
+  ]
+}

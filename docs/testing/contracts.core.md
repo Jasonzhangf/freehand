@@ -18,6 +18,7 @@
   - replay fixture decode and encode compatibility through public contract boundary
 - project black-box impact:
   - contracts remain compatible across owner crates that depend on them
+  - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - replay fixtures under contract fixtures
   - `~/.freehand/replays/contracts`
@@ -25,3 +26,4 @@
   - versioning policy tests not yet defined
 - sync status between design and implementation:
   - shared IDs, typed context segments, request/response/error contracts, and serialization baseline landed
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

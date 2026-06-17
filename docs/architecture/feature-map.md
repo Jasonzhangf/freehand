@@ -562,6 +562,8 @@ If a problem does not fit this table, update this routing index before making co
 - forbidden_paths: `crates/freehand-config/**`, `crates/freehand-ui-protocol/**`, `docs/debug/**` except references
 - required_checks:
   - `cargo test -p freehand-contracts`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
   - shared contract serialization tests
   - shared ID contract tests
@@ -572,6 +574,8 @@ If a problem does not fit this table, update this routing index before making co
   - cross-crate contract compatibility smoke
 - test_design_doc: `docs/testing/contracts.core.md`
 - function_map_doc: `docs/function-maps/contracts.core.md`
+- mainline_call_doc: `docs/mainline-calls/contracts.core.json`
+- generated_wiki_doc: `docs/wiki/contracts.core.md`
 - debug_artifacts:
   - shared contract replay fixture path
 - runtime_paths:
@@ -582,10 +586,12 @@ If a problem does not fit this table, update this routing index before making co
   - shared ID changes
   - error contract policy changes
   - serialization boundary changes
+  - generated wiki freshness policy changes
 - lifecycle_checks:
   - shared semantic ownership remains centralized
   - request/response/error contract paths are closed-loop
   - persistence and replay guarantees remain explicit
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `reason.turn`
 
