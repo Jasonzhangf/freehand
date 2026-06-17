@@ -28,6 +28,7 @@
   - cancelled live submit negative coverage proving later provider success cannot replace cancelled projection
   - live bridge cancellation checkpoint coverage before provider output, tool execution, and terminal write
   - checkpoint rewind dispatch coverage
+  - checkpoint rewind missing-manifest target-not-found coverage
   - live reason hook-to-ui-state coverage
   - live reason prompt-first projection coverage
   - live reason final projection keeps original user prompt after tool-result continuation
@@ -61,6 +62,7 @@
   - latest-active cancel is covered for current-turn stop without a UI-known `turn_id`
   - active live cancel blocks later provider success projection after cancellation
   - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
+  - checkpoint rewind missing-manifest dispatch failure is covered as explicit target-not-found
   - node-backed direct-message dispatch is covered
   - explicit unsupported resume dispatch is covered
   - migrated mainline-call source and generated wiki are kept in sync with this test design

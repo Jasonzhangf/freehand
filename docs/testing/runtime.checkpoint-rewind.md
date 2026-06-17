@@ -18,6 +18,7 @@
   - restore create / modify / delete state tests
   - no-preview writable-tool rejection tests
   - missing manifest / blob / ledger corruption rejection tests
+  - runtime bootstrap failure when checkpoint projection reads corrupt ledger truth
   - checkpoint list/query summary tests from manifest plus ledger truth
 - module black-box plan:
   - runtime writable tool loop creates checkpoint before execute
@@ -40,5 +41,6 @@
   - design is locked
   - runtime checkpoint store, live writable pre-execute checkpointing, and explicit rewind owner API are now code-bound
   - runtime tests now cover create-file rewind, modify-file rewind, and previewless writable-tool rejection
+  - runtime tests now also cover missing manifest rewind, missing blob rewind, corrupt checkpoint-ledger query failure, and corrupt checkpoint-ledger bootstrap failure
   - checkpoint summary query/projection is runtime-owned and code-bound
   - migrated mainline-call source and generated wiki must stay in sync with this test design

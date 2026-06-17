@@ -4008,6 +4008,120 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
+    fn rewind_checkpoint_rejects_missing_manifest_explicitly() {
+        let err = rewind_checkpoint(
+            temp_runtime_home(),
+            &AgentId::new("agent-live"),
+            &SessionId::new("session-live"),
+            "checkpoint-missing",
+        )
+        .expect_err("missing manifest must fail");
+
+        assert_eq!(
+            err,
+            RuntimeCheckpointError::MissingManifest("checkpoint-missing".to_owned())
+        );
+    }
+
+    #[test]
+    fn rewind_checkpoint_rejects_missing_blob_file_explicitly() {
+        with_temp_workspace(|root| {
+            let file_path = root.join("edit-target.txt");
+            fs::write(&file_path, "before\n").expect("seed file");
+
+            let (base_url, rx, handle) = spawn_sequence_server(
+                "application/json",
+                vec![
+                    tool_use_edit_file_response("edit-target.txt", "before", "after"),
+                    complete_single_response("edit done"),
+                ],
+            );
+            let request = live_request(false);
+            let runtime_home = request.runtime_home.clone();
+            let session_id = request.session_id.clone();
+
+            let outcome = run_live_reason_turn(
+                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+                request,
+            )
+            .expect("live bridge");
+            let _ = rx.recv().expect("first provider request");
+            let _ = rx.recv().expect("second provider request");
+            handle.join().expect("join");
+
+            assert_eq!(outcome.tool_executions, 1);
+            let rows = checkpoint_ledger_rows(&runtime_home, "agent-live", &session_id);
+            let checkpoint_id = rows[0].checkpoint_id.clone();
+
+            let store = RuntimeCheckpointStore::new(
+                &runtime_home,
+                &AgentId::new("agent-live"),
+                &session_id,
+            )
+            .expect("checkpoint store");
+            let manifest = store.load_manifest(&checkpoint_id).expect("manifest");
+            let blob = manifest.entries[0]
+                .blob_file
+                .clone()
+                .expect("modify checkpoint blob");
+            fs::remove_file(
+                runtime_home
+                    .join("state")
+                    .join("checkpoints")
+                    .join("agent-live")
+                    .join(session_id.as_str())
+                    .join(&checkpoint_id)
+                    .join(&blob),
+            )
+            .expect("remove blob");
+
+            let err = rewind_checkpoint(
+                &runtime_home,
+                &AgentId::new("agent-live"),
+                &session_id,
+                &checkpoint_id,
+            )
+            .expect_err("missing blob must fail");
+            assert_eq!(
+                err,
+                RuntimeCheckpointError::MissingBlob {
+                    checkpoint_id: checkpoint_id.clone(),
+                    blob: blob.clone(),
+                }
+            );
+            assert_eq!(
+                fs::read_to_string(&file_path).expect("post-failure file still modified"),
+                "after\n"
+            );
+        });
+    }
+
+    #[test]
+    fn list_checkpoints_rejects_corrupt_ledger_line_explicitly() {
+        let runtime_home = temp_runtime_home();
+        let session_id = SessionId::new("session-live");
+        let ledger_dir = runtime_home
+            .join("ledgers")
+            .join("checkpoints")
+            .join("agent-live");
+        fs::create_dir_all(&ledger_dir).expect("create ledger dir");
+        fs::write(
+            ledger_dir.join(format!("{}.jsonl", session_id.as_str())),
+            "{not-json}\n",
+        )
+        .expect("write corrupt ledger");
+
+        let err = list_checkpoints(&runtime_home, &AgentId::new("agent-live"), &session_id)
+            .expect_err("corrupt ledger must fail");
+        match err {
+            RuntimeCheckpointError::PersistenceFailed(message) => {
+                assert!(message.contains("checkpoint ledger line 1 failed to parse"));
+            }
+            other => panic!("unexpected corrupt-ledger error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn live_bridge_executes_bash_without_checkpoint_preview() {
         let _cwd_lock = cwd_lock()
             .lock()
@@ -4488,6 +4602,66 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 other => panic!("unexpected checkpoint query after rewind: {other:?}"),
             }
         });
+    }
+
+    #[test]
+    fn rewind_checkpoint_dispatch_maps_missing_manifest_to_target_not_found() {
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            temp_runtime_home(),
+            false,
+        )
+        .expect("runtime");
+
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::RewindCheckpoint {
+                    checkpoint_id: "checkpoint-missing".to_owned(),
+                })
+                .expect("envelope"),
+            )
+            .expect_err("missing checkpoint must fail");
+        assert_eq!(
+            err,
+            UiCommandDispatchPortError::TargetNotFound("checkpoint-missing".to_owned())
+        );
+    }
+
+    #[test]
+    fn bootstrap_with_corrupt_checkpoint_ledger_fails_explicitly() {
+        let runtime_home = temp_runtime_home();
+        let session_id = SessionId::new("runtime-session-agent-live");
+        let ledger_dir = runtime_home
+            .join("ledgers")
+            .join("checkpoints")
+            .join("agent-live");
+        fs::create_dir_all(&ledger_dir).expect("create ledger dir");
+        fs::write(
+            ledger_dir.join(format!("{}.jsonl", session_id.as_str())),
+            "{not-json}\n",
+        )
+        .expect("write corrupt ledger");
+
+        let err = match RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home,
+            false,
+        ) {
+            Ok(_) => panic!("bootstrap must fail"),
+            Err(err) => err,
+        };
+        match err {
+            RuntimeCommandDispatcherError::CheckpointProjectionBootstrap(message) => {
+                assert!(message.contains("checkpoint ledger line 1 failed to parse"));
+            }
+            other => panic!("unexpected bootstrap error: {other:?}"),
+        }
     }
 
     #[test]

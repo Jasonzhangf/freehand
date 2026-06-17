@@ -660,3 +660,31 @@
     - `cargo test -p freehand-runtime live_bridge_cancel_token_stops_ -- --nocapture`
     - `cargo test -p freehand-runtime`
     - `make ci`
+- 2026-06-18: checkpoint failure-path hardening slice
+  - owner route: `runtime.checkpoint-rewind` with dispatch projection sync in `runtime.ui-command-dispatch`
+  - audit target: writable-tool checkpointing is already live and side-effectful, but docs claimed explicit failure semantics for missing manifest, missing blob, corrupt ledger, and bootstrap projection failure without full owner-bound regression proof
+  - chosen closure:
+    - lock white-box rewind failure for missing manifest
+    - lock white-box rewind failure for missing blob file after a real modify checkpoint is created
+    - lock checkpoint query failure on corrupt ledger line
+    - lock runtime bootstrap failure when checkpoint projection refresh hits corrupt ledger truth
+    - lock dispatch projection that missing checkpoint rewind maps to `TargetNotFound`, not generic dispatch success/fallback
+  - implementation:
+    - added 5 runtime tests in `crates/freehand-runtime/src/lib.rs`
+    - no product behavior change; existing explicit error contracts were verified and now regression-locked
+  - docs synced:
+    - `docs/function-maps/runtime.checkpoint-rewind.md`
+    - `docs/testing/runtime.checkpoint-rewind.md`
+    - `docs/function-maps/runtime.ui-command-dispatch.md`
+    - `docs/testing/runtime.ui-command-dispatch.md`
+    - `docs/mainline-calls/runtime.checkpoint-rewind.json`
+    - `docs/mainline-calls/runtime.ui-command-dispatch.json`
+    - generated `docs/wiki/runtime.checkpoint-rewind.md`
+    - generated `docs/wiki/runtime.ui-command-dispatch.md`
+  - verification:
+    - `cargo test -p freehand-runtime rewind_checkpoint_ -- --nocapture`
+    - `cargo test -p freehand-runtime list_checkpoints_rejects_corrupt_ledger_line_explicitly -- --nocapture`
+    - `cargo test -p freehand-runtime bootstrap_with_corrupt_checkpoint_ledger_fails_explicitly -- --nocapture`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo test -p freehand-runtime`
+    - `make ci`

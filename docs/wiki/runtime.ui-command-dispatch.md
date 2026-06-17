@@ -80,6 +80,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - live provider submit now streams reason/debug updates into `UiProtocolState` before final receipt is returned
 - direct slave message dispatch routes through `node.master-slave`
 - explicit checkpoint rewind dispatch now routes through `runtime.checkpoint-rewind`
+- missing checkpoint rewind manifests now stay explicit target-not-found dispatch failures instead of being collapsed into generic success or fallback projection
 - resume dispatch remains an explicit unsupported runtime path
 - config-selected runtime bootstrap is now bound in code
 - config-selected runtime bootstrap uses explicit peer-topology config instead of synthetic paired node ids

@@ -76,5 +76,6 @@
 - design truth is locked
 - current runtime code has live tool execution with checkpoint + rewind owner path now code-bound
 - checkpoint summary query/projection is runtime-owned and code-bound
+- runtime error-path coverage now locks missing manifest, missing blob, and corrupt checkpoint-ledger failure projection without falling back to UI snapshot truth
 - current reason persistence remains authoritative for session/turn truth and is intentionally separate from checkpoint restore truth
 - generated wiki must be regenerated from `docs/mainline-calls/runtime.checkpoint-rewind.json` when this function-map truth changes

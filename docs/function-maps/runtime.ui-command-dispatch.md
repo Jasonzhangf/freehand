@@ -88,6 +88,7 @@
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and terminal persistence
 - direct slave message dispatch routes through `node.master-slave`
 - explicit checkpoint rewind dispatch now routes through `runtime.checkpoint-rewind`
+- missing checkpoint rewind manifests now stay explicit target-not-found dispatch failures instead of being collapsed into generic success or fallback projection
 - resume dispatch remains an explicit unsupported runtime path
 - config-selected runtime bootstrap is now bound in code
 - config-selected runtime bootstrap uses explicit peer-topology config instead of synthetic paired node ids
