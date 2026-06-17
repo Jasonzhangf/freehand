@@ -9,15 +9,19 @@
   "request_mainline": [
     "selected agent config enters the runtime-owned live bridge with one bound provider",
     "live bridge restores or creates the requested session through `ReasonPersistence` before round execution",
+    "live bridge bootstraps one shared metadata ledger for runtime-owned lifecycle facts plus delegated `reason.turn` producer writes",
     "bridge derives provider descriptor and executor config from selected provider truth",
     "`reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry",
     "provider semantic request is built from each round's turn-owned provider payload",
+    "runtime writes provider-request lifecycle metadata without request payload text before executor IO",
     "the first tool-capable request exposes a Reasonix-aligned runtime tool registry through provider-neutral request metadata",
     "the same runtime tool registry exports one deterministic implemented-schema fingerprint that is stamped into planner diagnostics before provider request build",
     "Anthropic live executor runs the HTTP/SSE request and returns provider-neutral semantic outputs for each round",
     "stream mode applies outputs incrementally through the executor callback path before the provider response completes",
     "completed provider tool calls are executed by `freehand-tools`; writable tool calls first go through runtime checkpoint preview/snapshot/execute gating, then are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a tool result exchange",
+    "runtime writes tool execution lifecycle metadata without tool-result content before tool-result re-entry",
     "completion schema is parsed from tagged text, validated, and either accepted, rejected with field-level feedback, or used to schedule the next round",
+    "runtime writes terminal lifecycle metadata before terminal persistence",
     "runtime dispatch callers may consume the same bridge through CLI or daemon command ingress without owning provider DTOs"
   ],
   "response_mainline": [
@@ -39,6 +43,7 @@
     "unknown tool names fail explicitly instead of being ignored",
     "registered but unimplemented tool names fail explicitly instead of being treated as successful fallback",
     "provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`",
+    "metadata ledger bootstrap and metadata write failures are returned as explicit `RuntimeLiveBridgeError::MetadataFailed` errors",
     "persistence restore/write failures fail the live bridge explicitly",
     "provider terminal metadata does not become final completion truth without accepted Freehand completion schema"
   ],
@@ -69,6 +74,20 @@
         "live bridge restore tests"
       ],
       "why_shared": "live and smoke recovery must use the same authoritative truth path"
+    },
+    {
+      "symbol": "MetadataCenter::with_ledger_path",
+      "owner": "crates/freehand-metadata/src/lib.rs",
+      "purpose": "bootstrap one shared durable metadata center for runtime-owned bridge lifecycle facts plus delegated `reason.turn` producer writes",
+      "allowed_callers": [
+        "runtime live bridge",
+        "tests"
+      ],
+      "related_tests": [
+        "live bridge metadata ledger smoke",
+        "live bridge metadata write failure smoke"
+      ],
+      "why_shared": "keeps metadata ledger bootstrap and replay inside `metadata.core` instead of runtime-local file maps"
     }
   ],
   "call_table": [
@@ -96,6 +115,28 @@
     },
     {
       "step": "03",
+      "symbol_path": "MetadataCenter::with_ledger_path",
+      "file_path": "crates/freehand-metadata/src/lib.rs",
+      "responsibility": "bootstrap shared runtime metadata ledger before live rounds start",
+      "input_semantic": "runtime home plus agent plus session id",
+      "output_semantic": "metadata center with replay-safe prior records or explicit metadata error",
+      "caller": "live bridge",
+      "callee": "metadata owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "write_live_bridge_metadata",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "write runtime-owned restore lifecycle metadata without request text",
+      "input_semantic": "restore outcome plus stream/provider facts",
+      "output_semantic": "durable runtime metadata record",
+      "caller": "live bridge",
+      "callee": "metadata owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
       "symbol_path": "ReasonTurnEngine::start_turn",
       "file_path": "crates/freehand-reason/src/lib.rs",
       "responsibility": "create one round turn and provider payload while stamping runtime-owned tool-schema fingerprint into planner diagnostics",
@@ -106,7 +147,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "04",
+      "step": "06",
       "symbol_path": "ReasonPersistence::record_turn_started",
       "file_path": "crates/freehand-reason/src/persistence.rs",
       "responsibility": "persist live round start",
@@ -117,7 +158,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "05",
+      "step": "07",
       "symbol_path": "build_semantic_request",
       "file_path": "crates/freehand-provider-core/src/lib.rs",
       "responsibility": "build provider-neutral request",
@@ -128,7 +169,18 @@
       "binding_status": "bound"
     },
     {
-      "step": "06",
+      "step": "08",
+      "symbol_path": "write_live_bridge_metadata",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "write runtime-owned provider-request lifecycle metadata without payload text",
+      "input_semantic": "round ordinal plus provider/model/tool-count control facts",
+      "output_semantic": "durable runtime metadata record",
+      "caller": "live bridge",
+      "callee": "metadata owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
       "symbol_path": "AnthropicExecutor::execute_once",
       "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
       "responsibility": "execute one non-stream Anthropic request",
@@ -139,7 +191,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "07",
+      "step": "10",
       "symbol_path": "AnthropicExecutor::execute_stream_with",
       "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
       "responsibility": "execute one stream Anthropic request and call back per semantic batch before completion",
@@ -150,7 +202,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "08",
+      "step": "11",
       "symbol_path": "ReasonTurnEngine::apply_provider_output",
       "file_path": "crates/freehand-reason/src/lib.rs",
       "responsibility": "write provider-neutral outputs into turn truth",
@@ -161,7 +213,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "09",
+      "step": "12",
       "symbol_path": "ReasonPersistence::record_provider_output_applied",
       "file_path": "crates/freehand-reason/src/persistence.rs",
       "responsibility": "persist live semantic output application",
@@ -172,7 +224,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "10",
+      "step": "13",
       "symbol_path": "BuiltinToolRegistry::reasonix_aligned / execute_registry_tool_call",
       "file_path": "crates/freehand-runtime/src/lib.rs",
       "responsibility": "export Reasonix-aligned tool schemas and route writable tool calls through runtime checkpoint gating before execute",
@@ -183,7 +235,18 @@
       "binding_status": "bound"
     },
     {
-      "step": "11",
+      "step": "14",
+      "symbol_path": "write_live_bridge_metadata",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "write runtime-owned tool execution metadata without tool-result content",
+      "input_semantic": "tool name plus tool call id plus round ordinal",
+      "output_semantic": "durable runtime metadata record",
+      "caller": "live bridge",
+      "callee": "metadata owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "15",
       "symbol_path": "parse_completion_submission_block",
       "file_path": "crates/freehand-blocks/src/lib.rs",
       "responsibility": "parse tagged completion schema from model text",
@@ -194,7 +257,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "12",
+      "step": "16",
       "symbol_path": "ReasonPersistence::record_completion_rejected",
       "file_path": "crates/freehand-reason/src/persistence.rs",
       "responsibility": "persist schema rejection evidence",
@@ -205,7 +268,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "13",
+      "step": "17",
       "symbol_path": "ReasonTurnEngine::submit_completion",
       "file_path": "crates/freehand-reason/src/lib.rs",
       "responsibility": "write accepted completed/blocked terminal truth",
@@ -216,7 +279,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "14",
+      "step": "18",
       "symbol_path": "ReasonTurnEngine::fail_turn",
       "file_path": "crates/freehand-reason/src/lib.rs",
       "responsibility": "write failed terminal truth after schema retry exhaustion",
@@ -227,7 +290,18 @@
       "binding_status": "bound"
     },
     {
-      "step": "15",
+      "step": "19",
+      "symbol_path": "write_live_bridge_metadata",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "write runtime-owned terminal lifecycle metadata before terminal persistence",
+      "input_semantic": "round/tool/schema-rejection counters plus final terminal status",
+      "output_semantic": "durable runtime metadata record",
+      "caller": "live bridge",
+      "callee": "metadata owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "20",
       "symbol_path": "ReasonPersistence::record_turn_closed",
       "file_path": "crates/freehand-reason/src/persistence.rs",
       "responsibility": "materialize terminal live turn",
@@ -240,8 +314,9 @@
   ],
   "sync_status": [
     "current live path supports Anthropic `messages` only",
-    "runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, and checkpoint gating without duplicating adapter semantics",
-    "provider-output apply failure classification is code-bound; current failure trigger coverage lives in `reason.turn` metadata-producer tests until runtime metadata-center wiring lands",
+    "runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, shared metadata-ledger producer wiring, and checkpoint gating without duplicating adapter semantics",
+    "runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage",
+    "runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation",
     "CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`",
     "generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes"
   ]

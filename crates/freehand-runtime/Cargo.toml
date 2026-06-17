@@ -9,6 +9,7 @@ freehand-blocks = { path = "../freehand-blocks" }
 freehand-config = { path = "../freehand-config" }
 freehand-contracts = { path = "../freehand-contracts" }
 freehand-debug = { path = "../freehand-debug" }
+freehand-metadata = { path = "../freehand-metadata" }
 freehand-node = { path = "../freehand-node" }
 freehand-provider-anthropic = { path = "../freehand-provider-anthropic" }
 freehand-provider-core = { path = "../freehand-provider-core" }

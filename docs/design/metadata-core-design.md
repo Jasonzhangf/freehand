@@ -2,7 +2,7 @@
 
 ## Status
 
-Baseline owner and contract are implemented. `reason.turn` is the first producer wired into `metadata.core`, and the metadata center now supports owner-controlled durable ledger append/reload.
+Baseline owner and contract are implemented. `reason.turn` and the runtime live bridge are now wired into `metadata.core`, and the metadata center now supports owner-controlled durable ledger append/reload.
 
 ## Purpose
 
@@ -101,7 +101,7 @@ Durable metadata ledgers live under:
 - `~/.freehand/ledgers/metadata`
 - `~/.freehand/replays/metadata`
 
-This baseline now implements validated in-memory admission, owner-controlled durable ledger append/reload, and first producer writes from `reason.turn`. Broader runtime/provider/debug producer wiring is still pending.
+This baseline now implements validated in-memory admission, owner-controlled durable ledger append/reload, producer writes from `reason.turn`, and runtime-owned bridge lifecycle writes from `provider.reason-live-bridge`. Broader provider/debug producer wiring is still pending.
 
 ## Update Trigger
 
@@ -110,5 +110,5 @@ Update this doc when:
 - metadata envelope fields change
 - writer owner or write-node provenance changes
 - metadata/request isolation policy changes
-- runtime producers start writing metadata
+- runtime producer ownership or lifecycle write points change
 - metadata ledger persistence is implemented

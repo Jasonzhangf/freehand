@@ -256,6 +256,13 @@
   - implementation status: `BuiltinToolRegistry::implemented_schema_fingerprint` landed with stability/change tests; `ReasonTurnEngine::start_turn` forwards `tool_schema_fingerprint`; runtime live bridge computes registry fingerprint and injects it into each live round
   - doc sync: updated feature docs, mainline JSON, generated wiki, and stale metadata/testing wording; refreshed design docs so the remaining gap is now runtime metrics/recovery closeout rather than fingerprint wiring
   - verification: `cargo test -p freehand-tools -p freehand-blocks -p freehand-reason -p freehand-runtime`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `make ci`
+- 2026-06-18: runtime live bridge metadata producer slice
+  - rooted from owner map: `metadata.core` owns envelope/ledger bootstrap truth; `provider.reason-live-bridge` owns runtime lifecycle producer writes
+  - chosen fix: runtime live bridge now bootstraps one shared metadata ledger under `~/.freehand/ledgers/metadata/<agent>/<session>.jsonl`, passes the same center into `reason.turn`, and writes runtime-owned restore/request/tool/terminal lifecycle records without request text or tool-result content
+  - negative rule locked: metadata ledger bootstrap or write failure is explicit `RuntimeLiveBridgeError::MetadataFailed`; live bridge does not silently continue or degrade
+  - white-box evidence: positive tests for single-shot runtime metadata persistence and tool-execution metadata, negative test for unwritable metadata ledger path
+  - doc sync: updated metadata/runtime/provider function maps, test designs, mainline JSON, generated wiki, metadata design doc, runtime directory doc, CACHE, MEMORY
+  - verification: `cargo fmt --all`; `cargo test -p freehand-runtime -p freehand-metadata -p freehand-reason`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `make ci`
 - 2026-06-15: completion schema loop requirement confirmed
   - must guide schema in prompt/context
   - must validate schema structurally and semantically

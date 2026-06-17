@@ -299,6 +299,7 @@ dependencies = [
  "freehand-config",
  "freehand-contracts",
  "freehand-debug",
+ "freehand-metadata",
  "freehand-node",
  "freehand-provider-anthropic",
  "freehand-provider-core",

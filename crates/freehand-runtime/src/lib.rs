@@ -25,6 +25,10 @@ use freehand_contracts::{
     ToolResultContract, TraceId, TurnId,
 };
 use freehand_debug::{DebugEvent, DebugHub};
+use freehand_metadata::{
+    MetadataCenter, MetadataEntry, MetadataEnvelope, MetadataError, MetadataId, MetadataKind,
+    MetadataSubject, MetadataWriteNode, MetadataWriteOwner,
+};
 use freehand_node::{
     LocalNodeRuntime, MasterNodeConfig, NodeRuntimeError, PairingRequest, PairingTransport,
     SlaveNodeConfig,
@@ -48,6 +52,7 @@ use freehand_ui_protocol::{
     turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
@@ -97,6 +102,8 @@ pub enum RuntimeLiveBridgeError {
     AnthropicExecutorFailed(String),
     #[error("reason persistence failed: {0}")]
     ReasonPersistenceFailed(String),
+    #[error("metadata failed: {0}")]
+    MetadataFailed(String),
     #[error("writable tool checkpoint failed: {0}")]
     ToolCheckpointFailed(String),
     #[error("live tool execution failed: {0}")]
@@ -701,7 +708,56 @@ where
         };
     let debug_hub = Arc::new(DebugHub::new(true));
     let debug_receiver = debug_hub.subscribe(64);
-    let engine = ReasonTurnEngine::with_debug_hub(Arc::clone(&debug_hub));
+    let metadata_center = Arc::new(Mutex::new(
+        MetadataCenter::with_ledger_path(metadata_ledger_path(
+            &request.runtime_home,
+            &agent_id,
+            &request.session_id,
+        ))
+        .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))?,
+    ));
+    write_live_bridge_metadata(
+        &metadata_center,
+        &agent_id,
+        &request.session_id,
+        RuntimeMetadataWriteSpec {
+            turn_id: None,
+            trace_id: &request.trace_id,
+            kind: MetadataKind::RuntimeState,
+            pipeline_node: "RuntimeLive01RestoreResolved",
+            metadata_suffix: "restore_resolved".to_owned(),
+            symbol_path: "run_live_anthropic_reason_turn",
+            entries: vec![
+                MetadataEntry {
+                    key: "runtime.restore_status".to_owned(),
+                    value: json!(match restore_status {
+                        LiveReasonRestoreStatus::CreatedNew => "created_new",
+                        LiveReasonRestoreStatus::RestoredExisting => "restored_existing",
+                    }),
+                },
+                MetadataEntry {
+                    key: "runtime.restored_closed_turns".to_owned(),
+                    value: json!(restored_closed_turns),
+                },
+                MetadataEntry {
+                    key: "runtime.stream".to_owned(),
+                    value: json!(request.stream),
+                },
+                MetadataEntry {
+                    key: "provider.family".to_owned(),
+                    value: json!("anthropic"),
+                },
+                MetadataEntry {
+                    key: "provider.protocol".to_owned(),
+                    value: json!("messages"),
+                },
+            ],
+        },
+    )?;
+    let engine = ReasonTurnEngine::with_debug_hub_and_metadata_center(
+        Arc::clone(&debug_hub),
+        Arc::clone(&metadata_center),
+    );
     let receiver = engine.subscribe(64);
     let mut executor = AnthropicExecutor::new(AnthropicExecutorConfig {
         base_url: selected.provider.base_url.clone(),
@@ -762,6 +818,49 @@ where
         semantic_request.tools = tool_registry.implemented_definitions();
         semantic_request.tool_choice = None;
         semantic_request.tool_exchanges = tool_exchanges.clone();
+        write_live_bridge_metadata(
+            &metadata_center,
+            &agent_id,
+            &request.session_id,
+            RuntimeMetadataWriteSpec {
+                turn_id: Some(&turn.request.turn_id),
+                trace_id: &turn.request.trace_id,
+                kind: MetadataKind::Provider,
+                pipeline_node: "RuntimeLive02ProviderRequestBuilt",
+                metadata_suffix: "provider_request_built".to_owned(),
+                symbol_path: "run_live_anthropic_reason_turn",
+                entries: vec![
+                    MetadataEntry {
+                        key: "bridge.round_ordinal".to_owned(),
+                        value: json!(round),
+                    },
+                    MetadataEntry {
+                        key: "runtime.stream".to_owned(),
+                        value: json!(request.stream),
+                    },
+                    MetadataEntry {
+                        key: "provider.family".to_owned(),
+                        value: json!("anthropic"),
+                    },
+                    MetadataEntry {
+                        key: "provider.protocol".to_owned(),
+                        value: json!("messages"),
+                    },
+                    MetadataEntry {
+                        key: "reason.model".to_owned(),
+                        value: json!(selected.provider.default_model.as_str()),
+                    },
+                    MetadataEntry {
+                        key: "tool.definition_count".to_owned(),
+                        value: json!(semantic_request.tools.len()),
+                    },
+                    MetadataEntry {
+                        key: "tool.exchange_count".to_owned(),
+                        value: json!(semantic_request.tool_exchanges.len()),
+                    },
+                ],
+            },
+        )?;
 
         if request.stream {
             let mut stream_persistence_error = None::<RuntimeLiveBridgeError>;
@@ -835,6 +934,36 @@ where
                     &turn,
                     &tool_call,
                 )?;
+                write_live_bridge_metadata(
+                    &metadata_center,
+                    &agent_id,
+                    &request.session_id,
+                    RuntimeMetadataWriteSpec {
+                        turn_id: Some(&turn.request.turn_id),
+                        trace_id: &turn.request.trace_id,
+                        kind: MetadataKind::Routing,
+                        pipeline_node: "RuntimeLive03ToolExecuted",
+                        metadata_suffix: format!(
+                            "tool_executed:{}",
+                            tool_call.tool_call.tool_call_id.as_str()
+                        ),
+                        symbol_path: "run_live_anthropic_reason_turn",
+                        entries: vec![
+                            MetadataEntry {
+                                key: "bridge.round_ordinal".to_owned(),
+                                value: json!(round),
+                            },
+                            MetadataEntry {
+                                key: "tool.name".to_owned(),
+                                value: json!(tool_call.tool_call.tool_name.as_str()),
+                            },
+                            MetadataEntry {
+                                key: "tool.call_id".to_owned(),
+                                value: json!(tool_call.tool_call.tool_call_id.as_str()),
+                            },
+                        ],
+                    },
+                )?;
                 ensure_live_not_cancelled(&request)?;
                 let output = ProviderSemanticOutput::ToolResultReentry(tool_result.clone());
                 engine
@@ -881,6 +1010,43 @@ where
                         .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                     drain_debug_events(&debug_receiver, &mut on_debug);
+                    write_live_bridge_metadata(
+                        &metadata_center,
+                        &agent_id,
+                        &request.session_id,
+                        RuntimeMetadataWriteSpec {
+                            turn_id: Some(&turn.request.turn_id),
+                            trace_id: &turn.request.trace_id,
+                            kind: MetadataKind::RuntimeState,
+                            pipeline_node: "RuntimeLive04TurnClosed",
+                            metadata_suffix: "turn_closed".to_owned(),
+                            symbol_path: "run_live_anthropic_reason_turn",
+                            entries: vec![
+                                MetadataEntry {
+                                    key: "bridge.rounds".to_owned(),
+                                    value: json!(round),
+                                },
+                                MetadataEntry {
+                                    key: "bridge.schema_rejections".to_owned(),
+                                    value: json!(schema_rejections.len()),
+                                },
+                                MetadataEntry {
+                                    key: "bridge.tool_executions".to_owned(),
+                                    value: json!(tool_executions),
+                                },
+                                MetadataEntry {
+                                    key: "terminal.status".to_owned(),
+                                    value: json!(format!(
+                                        "{:?}",
+                                        turn.terminal_event
+                                            .as_ref()
+                                            .expect("terminal event after completion")
+                                            .status
+                                    )),
+                                },
+                            ],
+                        },
+                    )?;
                     persistence
                         .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
                         .map_err(|err| {
@@ -928,6 +1094,43 @@ where
                     );
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                     drain_debug_events(&debug_receiver, &mut on_debug);
+                    write_live_bridge_metadata(
+                        &metadata_center,
+                        &agent_id,
+                        &request.session_id,
+                        RuntimeMetadataWriteSpec {
+                            turn_id: Some(&turn.request.turn_id),
+                            trace_id: &turn.request.trace_id,
+                            kind: MetadataKind::RuntimeState,
+                            pipeline_node: "RuntimeLive04TurnClosed",
+                            metadata_suffix: "turn_closed".to_owned(),
+                            symbol_path: "run_live_anthropic_reason_turn",
+                            entries: vec![
+                                MetadataEntry {
+                                    key: "bridge.rounds".to_owned(),
+                                    value: json!(round),
+                                },
+                                MetadataEntry {
+                                    key: "bridge.schema_rejections".to_owned(),
+                                    value: json!(schema_rejections.len()),
+                                },
+                                MetadataEntry {
+                                    key: "bridge.tool_executions".to_owned(),
+                                    value: json!(tool_executions),
+                                },
+                                MetadataEntry {
+                                    key: "terminal.status".to_owned(),
+                                    value: json!(format!(
+                                        "{:?}",
+                                        turn.terminal_event
+                                            .as_ref()
+                                            .expect("terminal event after failure")
+                                            .status
+                                    )),
+                                },
+                            ],
+                        },
+                    )?;
                     persistence
                         .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
                         .map_err(|err| {
@@ -1689,6 +1892,70 @@ fn provider_ctx(turn: &TurnRecord) -> freehand_provider_core::ProviderEventConte
     }
 }
 
+struct RuntimeMetadataWriteSpec<'a> {
+    turn_id: Option<&'a TurnId>,
+    trace_id: &'a TraceId,
+    kind: MetadataKind,
+    pipeline_node: &'a str,
+    metadata_suffix: String,
+    symbol_path: &'a str,
+    entries: Vec<MetadataEntry>,
+}
+
+fn metadata_ledger_path(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+) -> PathBuf {
+    runtime_home
+        .join("ledgers")
+        .join("metadata")
+        .join(agent_id.as_str())
+        .join(format!("{}.jsonl", session_id.as_str()))
+}
+
+fn write_live_bridge_metadata(
+    center: &Arc<Mutex<MetadataCenter>>,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    spec: RuntimeMetadataWriteSpec<'_>,
+) -> Result<(), RuntimeLiveBridgeError> {
+    let envelope = MetadataEnvelope::new(
+        MetadataId::new(format!(
+            "{}:{}:{}",
+            spec.trace_id.as_str(),
+            spec.pipeline_node,
+            spec.metadata_suffix
+        )),
+        spec.kind,
+        MetadataWriteOwner {
+            feature_id: FeatureId::new("provider.reason-live-bridge"),
+            crate_name: "freehand-runtime".to_owned(),
+            module_path: "freehand_runtime".to_owned(),
+            symbol_path: spec.symbol_path.to_owned(),
+        },
+        MetadataWriteNode {
+            pipeline_node: spec.pipeline_node.to_owned(),
+            runtime_node_id: None,
+        },
+        MetadataSubject {
+            agent_id: Some(agent_id.clone()),
+            session_id: Some(session_id.clone()),
+            turn_id: spec.turn_id.cloned(),
+            trace_id: spec.trace_id.clone(),
+        },
+        spec.entries,
+    )
+    .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))?;
+    center
+        .lock()
+        .map_err(|err: std::sync::PoisonError<_>| {
+            RuntimeLiveBridgeError::MetadataFailed(err.to_string())
+        })?
+        .write(envelope)
+        .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))
+}
+
 fn map_anthropic_executor_error(err: AnthropicExecutorError) -> RuntimeLiveBridgeError {
     RuntimeLiveBridgeError::AnthropicExecutorFailed(err.to_string())
 }
@@ -2173,6 +2440,7 @@ fn runtime_turn_position(turn_id: &TurnId) -> (u64, u64, String) {
 mod tests {
     use super::*;
     use freehand_contracts::{SemanticEventKind, TerminalStatus};
+    use freehand_metadata::MetadataEnvelope;
     use freehand_ui_protocol::{UiQueryResult, build_command_dispatch_envelope};
     use serde_json::json;
     use std::fs;
@@ -2353,6 +2621,22 @@ mod tests {
         let raw = fs::read_to_string(path).expect("read checkpoint ledger");
         raw.lines()
             .map(|line| serde_json::from_str(line).expect("decode ledger row"))
+            .collect()
+    }
+
+    fn metadata_ledger_records(
+        runtime_home: &Path,
+        agent_id: &str,
+        session_id: &SessionId,
+    ) -> Vec<MetadataEnvelope> {
+        let path = runtime_home
+            .join("ledgers")
+            .join("metadata")
+            .join(agent_id)
+            .join(format!("{}.jsonl", session_id.as_str()));
+        let raw = fs::read_to_string(path).expect("read metadata ledger");
+        raw.lines()
+            .map(|line| serde_json::from_str(line).expect("decode metadata ledger row"))
             .collect()
     }
 
@@ -2626,10 +2910,13 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (base_url, rx, handle) =
             spawn_mock_server(200, "application/json", complete_single_response("pong"));
+        let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
 
         let outcome = run_live_reason_turn(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            live_request(false),
+            request,
         )
         .expect("live bridge");
         let raw_request = rx.recv().expect("request");
@@ -2663,6 +2950,28 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, ReasonBroadcastEvent::Usage(_)))
         );
+
+        let metadata = metadata_ledger_records(&runtime_home, "agent-live", &session_id);
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "provider.reason-live-bridge"
+                && record.write_node.pipeline_node == "RuntimeLive01RestoreResolved"
+        }));
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "provider.reason-live-bridge"
+                && record.write_node.pipeline_node == "RuntimeLive02ProviderRequestBuilt"
+        }));
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "provider.reason-live-bridge"
+                && record.write_node.pipeline_node == "RuntimeLive04TurnClosed"
+        }));
+        assert!(metadata.iter().all(
+            |record| serde_json::to_string(record).expect("encode metadata")
+                != outcome.turn.request.user_text
+        ));
+        assert!(metadata.iter().all(|record| {
+            let encoded = serde_json::to_string(record).expect("encode metadata");
+            !encoded.contains("reply exactly pong")
+        }));
     }
 
     #[test]
@@ -2949,6 +3258,41 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             Some(TerminalStatus::Success)
         );
         assert!(restored.cursor.last_applied_reason_seq >= 4);
+
+        let metadata = metadata_ledger_records(&runtime_home, "agent-live", &session_id);
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "provider.reason-live-bridge"
+                && record.write_node.pipeline_node == "RuntimeLive03ToolExecuted"
+                && record
+                    .entries
+                    .iter()
+                    .any(|entry| entry.key == "tool.name" && entry.value == json!("read_file"))
+        }));
+    }
+
+    #[test]
+    fn live_bridge_fails_explicitly_when_runtime_metadata_ledger_is_not_writable() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let request = live_request(false);
+        let metadata_path = metadata_ledger_path(
+            &request.runtime_home,
+            &AgentId::new("agent-live"),
+            &request.session_id,
+        );
+        fs::create_dir_all(&metadata_path).expect("poison metadata path as directory");
+
+        let err = run_live_reason_turn(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            request,
+        )
+        .expect_err("must fail when metadata ledger is unwritable");
+
+        assert!(matches!(err, RuntimeLiveBridgeError::MetadataFailed(_)));
     }
 
     #[test]

@@ -89,5 +89,6 @@
 - metadata envelope, writer owner, write node, subject, validation, in-memory center, and durable-ledger restore/append are bound in code
 - first producer integration is wired from `reason.turn` through `ReasonTurnEngine::start_turn` and `ReasonTurnEngine::apply_provider_output`
 - `reason.turn` producer tests now prove durable-ledger persistence without request-text leakage when a ledger-backed center is supplied
-- broader runtime/provider/debug producers remain pending
+- runtime live bridge producer integration is now wired through `freehand-runtime` and shares the same durable metadata ledger path with `reason.turn`
+- broader provider/debug producers remain pending
 - generated wiki must be regenerated from `docs/mainline-calls/metadata.core.json` when this function-map truth changes

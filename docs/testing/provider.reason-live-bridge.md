@@ -17,6 +17,9 @@
 - white-box plan:
   - provider descriptor derivation
   - unsupported provider rejection
+  - metadata center bootstrap from `~/.freehand/ledgers/metadata`
+  - runtime-owned restore/request/tool/terminal lifecycle metadata writes
+  - runtime-owned metadata write failure is explicit and aborts the live bridge
   - single-shot live-bridge mock path
   - SSE live-bridge mock path
   - broadcast capture path
@@ -49,13 +52,14 @@
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
   - local mock transcript fixtures when added
+  - `~/.freehand/ledgers/metadata`
   - `~/.freehand/ledgers/providers/anthropic`
   - `~/.freehand/ledgers/reason`
 - sync status between design and implementation:
   - anthropic-only live bridge owner is now `freehand-runtime`
-  - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, and persistence restore
+  - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, persistence restore, and runtime metadata producer wiring
   - runtime live bridge now injects tool owner schema fingerprint into reason planner diagnostics before provider request build
   - runtime dispatch and daemon black-box coverage are landed against local mock providers
-  - provider-output apply failure classification is code-bound as `ProviderOutputApplyFailed`; current failure trigger coverage lives in `reason.turn` metadata-producer tests until runtime metadata-center wiring lands
+  - runtime live bridge now writes restore/request/tool/terminal lifecycle metadata through `metadata.core` and fails explicitly on metadata write errors
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates
