@@ -294,6 +294,7 @@ If a problem does not fit this table, update this routing index before making co
   - daemon restart latest-turn query/SSE restore smoke
   - daemon restart next-turn-id continuation smoke
   - daemon provider failure HTTP smoke
+  - daemon checkpoint rewind HTTP smoke
   - daemon direct-message dispatch smoke
   - daemon slave-mode startup rejection smoke
 - required_project_black_box_tests:
@@ -587,6 +588,7 @@ If a problem does not fit this table, update this routing index before making co
   - command/projection mapping tests
   - ingress acceptance/rejection tests
   - command dispatch routing tests
+  - checkpoint rewind ingress validation and owner-routing tests
   - subscription selector and match tests
   - public turn projection tests
   - client-specific projection gating tests
@@ -944,6 +946,7 @@ If a problem does not fit this table, update this routing index before making co
   - config-selected runtime bootstrap tests
   - submit-input dispatch routing tests
   - cancel-turn dispatch tests
+  - rewind-checkpoint dispatch tests
   - direct-message dispatch tests
   - resume-turn unsupported dispatch tests
   - runtime ui-state projection update tests
@@ -951,6 +954,7 @@ If a problem does not fit this table, update this routing index before making co
   - command dispatch receipt smoke
   - command dispatch owner-routing smoke
   - reason-backed turn projection smoke
+  - checkpoint rewind receipt smoke
   - node-backed direct-message smoke
   - config-selected runtime bootstrap smoke
 - required_project_black_box_tests:

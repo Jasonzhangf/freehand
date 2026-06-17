@@ -16,6 +16,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - if persisted runtime turn truth exists, daemon bootstrap restores it through the injected runtime owner before serving query and SSE routes
 - daemon injects the runtime dispatcher and its shared UI state into the protocol-only HTTP and SSE transport
 - mutation commands travel through protocol-owned ingress validation and dispatch envelope building before runtime dispatch
+- explicit checkpoint rewind can travel through the same HTTP command ingress without adding app-owned business logic
 
 ## Response Mainline
 
@@ -23,6 +24,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - daemon serves query and continuous SSE projections from the runtime-owned shared UI state
 - daemon restart can serve restored terminal projection before any new submit arrives
 - daemon SSE subscriptions stay open across later runtime turn updates and observe the same protocol-owned projections as query consumers
+- daemon can rewind a previously checkpointed writable-tool mutation through runtime owner dispatch while leaving turn/session/UI truth untouched
 - daemon remains a host process and does not own reason or node semantics itself
 
 ## Error Mainline
@@ -68,6 +70,6 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 
 - daemon bootstrap is bound in code
 - daemon now injects `RuntimeCommandDispatcher` into shared protocol-only HTTP and SSE transport
-- provider-backed submit, query, continuous-SSE restore, provider-failure surfacing, restart resume of turn-id allocation, and direct-message HTTP smoke are covered through the daemon app boundary
+- provider-backed submit, query, continuous-SSE restore, provider-failure surfacing, restart resume of turn-id allocation, direct-message HTTP smoke, and checkpoint rewind HTTP smoke are covered through the daemon app boundary
 - config-selected bootstrap is now bound in code and uses configured peer topology
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

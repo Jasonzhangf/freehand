@@ -17,6 +17,7 @@
   - persisted latest-turn restore coverage
   - next runtime turn ordinal restore coverage
   - submit/cancel reason dispatch coverage
+  - checkpoint rewind dispatch coverage
   - live reason hook-to-ui-state coverage
   - node direct-message dispatch coverage
   - unsupported/missing-target dispatch failure coverage
@@ -26,6 +27,7 @@
   - runtime-derived UI latest-turn smoke
   - config-selected runtime bootstrap smoke
   - config-selected live restart/restore smoke
+  - runtime checkpoint rewind receipt smoke
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
 - fixtures / replay inputs / runtime evidence paths:

@@ -1244,6 +1244,32 @@ impl RuntimeCommandDispatcher {
             dispatch_status: "node_direct_message_dispatched".to_owned(),
         })
     }
+
+    fn dispatch_rewind_checkpoint(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        checkpoint_id: String,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let live = state.config.live.as_ref().ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "rewind dispatch requires a live runtime home".to_owned(),
+            )
+        })?;
+        rewind_checkpoint(
+            &live.runtime_home,
+            &state.config.reason_agent_id,
+            &state.config.session_id,
+            &checkpoint_id,
+        )
+        .map_err(map_checkpoint_dispatch_error)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!("runtime_checkpoint_rewound checkpoint_id={checkpoint_id}"),
+        })
+    }
 }
 
 impl UiCommandDispatchPort for RuntimeCommandDispatcher {
@@ -1262,6 +1288,9 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             UiCommand::ResumeTurn { turn_id } => self.dispatch_resume_turn(envelope, turn_id),
             UiCommand::SendDirectMessageToSlave { node_id, text } => {
                 self.dispatch_direct_message(&mut state, envelope, node_id, text)
+            }
+            UiCommand::RewindCheckpoint { checkpoint_id } => {
+                self.dispatch_rewind_checkpoint(&mut state, envelope, checkpoint_id)
             }
             _ => Err(UiCommandDispatchPortError::Unsupported(
                 "command is not a runtime dispatch target".to_owned(),
@@ -1287,6 +1316,15 @@ fn map_node_dispatch_error(err: NodeRuntimeError) -> UiCommandDispatchPortError 
         | NodeRuntimeError::EmptyPairToken => {
             UiCommandDispatchPortError::TargetNotFound(err.to_string())
         }
+    }
+}
+
+fn map_checkpoint_dispatch_error(err: RuntimeCheckpointError) -> UiCommandDispatchPortError {
+    match err {
+        RuntimeCheckpointError::MissingManifest(checkpoint_id) => {
+            UiCommandDispatchPortError::TargetNotFound(checkpoint_id)
+        }
+        other => UiCommandDispatchPortError::DispatchFailed(other.to_string()),
     }
 }
 
@@ -2785,6 +2823,89 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .expect("receipt");
         assert_eq!(receipt.target_feature_id, "node.master-slave");
         assert_eq!(receipt.dispatch_status, "node_direct_message_dispatched");
+    }
+
+    #[test]
+    fn rewind_checkpoint_dispatch_rejects_non_live_runtime() {
+        let runtime = runtime();
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::RewindCheckpoint {
+                    checkpoint_id: "checkpoint-1".to_owned(),
+                })
+                .expect("envelope"),
+            )
+            .expect_err("rewind should fail");
+        assert_eq!(
+            err,
+            UiCommandDispatchPortError::Unsupported(
+                "rewind dispatch requires a live runtime home".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn rewind_checkpoint_dispatch_restores_workspace_file_state() {
+        with_temp_workspace(|root| {
+            fs::create_dir_all(root.join("scratch")).expect("create parent directory");
+            let (base_url, rx, handle) = spawn_sequence_server(
+                "application/json",
+                vec![
+                    tool_use_write_file_response("scratch/rewind.txt", "rewind me\n"),
+                    complete_single_response("write done"),
+                ],
+            );
+            let runtime_home = temp_runtime_home();
+            let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+                runtime_home.clone(),
+                false,
+            )
+            .expect("runtime");
+
+            let receipt = runtime
+                .dispatch(
+                    build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                        text: "create checkpoint".to_owned(),
+                    })
+                    .expect("envelope"),
+                )
+                .expect("submit receipt");
+            assert!(
+                receipt
+                    .dispatch_status
+                    .contains("reason_live_turn_completed")
+            );
+            let _ = rx.recv().expect("first provider request");
+            let _ = rx.recv().expect("second provider request");
+            handle.join().expect("join");
+
+            let file_path = root.join("scratch/rewind.txt");
+            assert_eq!(
+                fs::read_to_string(&file_path).expect("written file"),
+                "rewind me\n"
+            );
+            let rows = checkpoint_ledger_rows(
+                &runtime_home,
+                "agent-live",
+                &SessionId::new("runtime-session-agent-live"),
+            );
+            let checkpoint_id = rows.first().expect("created row").checkpoint_id.clone();
+
+            let rewind = runtime
+                .dispatch(
+                    build_command_dispatch_envelope(&UiCommand::RewindCheckpoint {
+                        checkpoint_id: checkpoint_id.clone(),
+                    })
+                    .expect("envelope"),
+                )
+                .expect("rewind receipt");
+            assert_eq!(
+                rewind.dispatch_status,
+                format!("runtime_checkpoint_rewound checkpoint_id={checkpoint_id}")
+            );
+            assert!(!file_path.exists());
+        });
     }
 
     #[test]

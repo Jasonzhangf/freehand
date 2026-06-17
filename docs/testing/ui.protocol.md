@@ -21,6 +21,7 @@
   - command/projection mapping, status query, terminal projection, slave subscription semantics
   - command ingress acceptance and rejection mapping
   - command dispatch routing mapping
+  - checkpoint rewind ingress validation and owner-routing mapping
   - client-specific projection gating
   - debug-state query and subscription routing
   - protocol-owned subscription channel fanout
@@ -54,6 +55,7 @@
   - command/query/subscribe/projection baseline landed
   - command ingress ack/rejection baseline landed
   - command dispatch envelope routing baseline landed
+  - checkpoint rewind command ingress and runtime owner routing are landed
   - protocol-owned continuous subscription channel landed
   - incremental turn projection update methods from shared contracts landed
   - minimal per-turn debug-state query/subscribe baseline landed

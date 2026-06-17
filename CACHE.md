@@ -231,6 +231,11 @@
   - live writable `write_file` and `edit_file` paths now create checkpoint manifests under `~/.freehand/state/checkpoints` and lifecycle ledgers under `~/.freehand/ledgers/checkpoints`
   - writable tools without preview support are now rejected explicitly on the live runtime path
   - workspace verification passed: `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
+- 2026-06-17: checkpoint rewind ingress/E2E closeout landed
+  - `ui.protocol` now exposes `RewindCheckpoint { checkpoint_id }` as a mutation-intent command
+  - `runtime.ui-command-dispatch` now routes rewind to `runtime.checkpoint-rewind`
+  - `freehand-daemon` HTTP black-box now proves writable submit -> checkpoint ledger -> rewind command -> workspace restore
+  - workspace verification passed again: `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
 - 2026-06-16: `tool.registry` harness rule locked
   - `freehand-tools` is the only owner for built-in tool specs and execution truth
   - every tool must have explicit spec + implemented state before runtime/provider exposure

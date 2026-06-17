@@ -264,6 +264,11 @@
   - checkpoint truth will live under `~/.freehand/state/checkpoints` and `~/.freehand/ledgers/checkpoints`
   - explicit rewind owner API will land in runtime first; UI/command ingress wiring remains non-goal for this slice
   - writable tools without preview support must be rejected explicitly on the live runtime path
+- 2026-06-17: runtime.checkpoint-rewind ingress closeout
+  - added `UiCommand::RewindCheckpoint { checkpoint_id }`
+  - protocol owner now validates non-empty checkpoint ids and routes rewind to `runtime.checkpoint-rewind`
+  - `RuntimeCommandDispatcher` now dispatches rewind through runtime owner path and leaves turn/session/UI truth untouched
+  - daemon HTTP black-box now proves writable submit -> checkpoint created -> rewind command -> workspace restored
 - 2026-06-16: tool registry harness closeout
   - `freehand-tools` already owns Reasonix-aligned tool registry baseline
   - missing durable truth was the top-level design + workflow lock

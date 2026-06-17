@@ -35,6 +35,7 @@
 - UI acts as an input ingress only; command submission does not make UI a truth writer
 - command ingress acceptance is explicit and route-scoped: only mutation-intent commands may enter the ingress transport path
 - accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary
+- runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - query and subscribe stay separate
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 
@@ -58,6 +59,7 @@
 
 - invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors
 - query/subscribe commands sent to command-ingress route are explicit protocol misuse errors
+- empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch
 - source identity fields remain explicit across success and error paths
 - UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors
 
@@ -127,6 +129,7 @@
 
 - command validation, query selection, subscription routing, turn projection, and debug-state projection are bound in code
 - command ingress acceptance, dispatch-envelope routing, and rejection payload mapping are now bound in code
+- checkpoint rewind is now a protocol-owned mutation-intent command routed to `runtime.checkpoint-rewind`
 - client-specific projection gating is now also bound in code
 - `UiProtocolState` now owns a continuous subscription channel plus incremental shared-contract turn projection updates
 - debug-state projection consumes `freehand-debug::DebugStateSnapshot` instead of a UI-owned duplicate DTO

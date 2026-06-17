@@ -72,6 +72,9 @@ pub enum UiCommand {
         node_id: String,
         text: String,
     },
+    RewindCheckpoint {
+        checkpoint_id: String,
+    },
     CancelTurn {
         turn_id: TurnId,
     },
@@ -269,6 +272,8 @@ pub enum UiProtocolError {
     EmptyUserInput,
     #[error("direct slave message requires non-empty text")]
     EmptySlaveMessage,
+    #[error("rewind checkpoint command requires non-empty checkpoint id")]
+    EmptyCheckpointId,
     #[error("command ingress route only accepts mutation-intent commands")]
     IngressCommandKindMismatch,
     #[error("stream kind mismatch for requested projection")]
@@ -557,6 +562,9 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::SendDirectMessageToSlave { text, .. } if text.trim().is_empty() => {
             Err(UiProtocolError::EmptySlaveMessage)
         }
+        UiCommand::RewindCheckpoint { checkpoint_id } if checkpoint_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyCheckpointId)
+        }
         _ => Ok(()),
     }
 }
@@ -578,6 +586,7 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
     let code = match err {
         UiProtocolError::EmptyUserInput => "empty_user_input",
         UiProtocolError::EmptySlaveMessage => "empty_slave_message",
+        UiProtocolError::EmptyCheckpointId => "empty_checkpoint_id",
         UiProtocolError::IngressCommandKindMismatch => "ingress_command_kind_mismatch",
         UiProtocolError::StreamKindMismatch => "stream_kind_mismatch",
     };
@@ -743,6 +752,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",
         UiCommand::SendDirectMessageToSlave { .. } => "send_direct_message_to_slave",
+        UiCommand::RewindCheckpoint { .. } => "rewind_checkpoint",
         UiCommand::CancelTurn { .. } => "cancel_turn",
         UiCommand::ResumeTurn { .. } => "resume_turn",
     }
@@ -753,6 +763,7 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
         command,
         UiCommand::SubmitUserInput { .. }
             | UiCommand::SendDirectMessageToSlave { .. }
+            | UiCommand::RewindCheckpoint { .. }
             | UiCommand::CancelTurn { .. }
             | UiCommand::ResumeTurn { .. }
     )
@@ -763,6 +774,9 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         UiCommand::SubmitUserInput { .. }
         | UiCommand::CancelTurn { .. }
         | UiCommand::ResumeTurn { .. } => ("reason.turn", "crates/freehand-reason"),
+        UiCommand::RewindCheckpoint { .. } => {
+            ("runtime.checkpoint-rewind", "crates/freehand-runtime")
+        }
         UiCommand::SendDirectMessageToSlave { .. } => ("node.master-slave", "crates/freehand-node"),
         _ => ("ui.protocol", "crates/freehand-ui-protocol"),
     }
@@ -1205,6 +1219,27 @@ mod tests {
     }
 
     #[test]
+    fn command_ingress_accepts_rewind_checkpoint() {
+        let ack = accept_command_ingress(&UiCommand::RewindCheckpoint {
+            checkpoint_id: "checkpoint-1".to_owned(),
+        })
+        .expect("ack");
+        assert!(ack.accepted);
+        assert_eq!(ack.command_kind, "rewind_checkpoint");
+    }
+
+    #[test]
+    fn command_ingress_rejects_empty_checkpoint_id() {
+        let err = accept_command_ingress(&UiCommand::RewindCheckpoint {
+            checkpoint_id: "   ".to_owned(),
+        })
+        .expect_err("must reject");
+        assert_eq!(err, UiProtocolError::EmptyCheckpointId);
+        let rejection = protocol_rejection(err);
+        assert_eq!(rejection.code, "empty_checkpoint_id");
+    }
+
+    #[test]
     fn command_ingress_rejects_query_commands() {
         let err =
             accept_command_ingress(&UiCommand::QueryLatestActiveTurn).expect_err("must reject");
@@ -1233,6 +1268,17 @@ mod tests {
         .expect("envelope");
         assert_eq!(envelope.target_feature_id, "node.master-slave");
         assert_eq!(envelope.target_owner_module, "crates/freehand-node");
+    }
+
+    #[test]
+    fn command_dispatch_envelope_routes_rewind_checkpoint_to_runtime_owner() {
+        let envelope = build_command_dispatch_envelope(&UiCommand::RewindCheckpoint {
+            checkpoint_id: "checkpoint-1".to_owned(),
+        })
+        .expect("envelope");
+        assert_eq!(envelope.ingress.command_kind, "rewind_checkpoint");
+        assert_eq!(envelope.target_feature_id, "runtime.checkpoint-rewind");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-runtime");
     }
 
     #[test]

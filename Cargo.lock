@@ -198,6 +198,7 @@ dependencies = [
  "freehand-server",
  "freehand-ui-protocol",
  "reqwest",
+ "serde_json",
  "serial_test",
  "tokio",
 ]

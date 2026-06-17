@@ -25,6 +25,7 @@
   - daemon restart next-turn-id continuation smoke
   - daemon provider failure HTTP smoke
   - daemon direct-message dispatch HTTP smoke
+  - daemon checkpoint rewind HTTP smoke
   - daemon slave-mode startup rejection smoke
 - project black-box impact:
   - closes the first real runtime host gap without polluting the protocol-only app boundary
@@ -37,6 +38,6 @@
   - real websocket pairing transport is not wired yet; current daemon uses runtime-owned local node semantics
 - sync status between design and implementation:
   - daemon bootstrap helper is landed
-  - runtime-backed submit/query/restart-restore/continuous-SSE/provider-failure/direct-message HTTP smoke is landed
+  - runtime-backed submit/query/restart-restore/continuous-SSE/provider-failure/direct-message/checkpoint-rewind HTTP smoke is landed
   - config-selected bootstrap smoke is landed and uses configured peer topology
   - migrated mainline-call source and generated wiki are kept in sync with this test design

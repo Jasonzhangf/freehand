@@ -15,13 +15,14 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - config-selected bootstrap consumes local node id, paired node id, paired allowed IP, and paired token env from `config.core`
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
 - runtime dispatch owner reads the declared owner target from the envelope
-- runtime dispatch routes the command into reason or node owner adapters without letting the app own those semantics
+- runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 
 ## Response Mainline
 
 - reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections
 - live provider-backed submit incrementally writes reason/debug projection updates into `UiProtocolState` while the turn is still running
 - node-backed direct-message commands return dispatch receipts after owner validation
+- runtime-backed rewind commands restore checkpointed workspace state without mutating reason/session/UI truth directly
 - config-selected runtime bootstrap returns one dispatcher for the requested agent
 - live bootstrap rehydrates `UiProtocolState` from persisted turn truth and resumes runtime turn-id allocation from persisted ordinals
 - runtime-owned UI state reflects derived projections only, not authoritative turn truth
@@ -30,6 +31,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 
 - unsupported runtime command paths return explicit dispatch-port failures
 - missing turn targets for cancel/resume return explicit dispatch-port failures
+- missing checkpoint manifests return explicit dispatch target-not-found failures
 - wrong slave target node returns explicit dispatch-port failures
 - missing config, invalid agent selection, paired-token mismatch, or slave-mode host selection return explicit bootstrap failures
 - invalid persisted recovery truth returns explicit runtime bootstrap failure
@@ -66,6 +68,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - provider-backed submit input and cancel dispatch through `reason.turn` and update derived UI turn projections
 - live provider submit now streams reason/debug updates into `UiProtocolState` before final receipt is returned
 - direct slave message dispatch routes through `node.master-slave`
+- explicit checkpoint rewind dispatch now routes through `runtime.checkpoint-rewind`
 - resume dispatch remains an explicit unsupported runtime path
 - config-selected runtime bootstrap is now bound in code
 - config-selected runtime bootstrap uses explicit peer-topology config instead of synthetic paired node ids

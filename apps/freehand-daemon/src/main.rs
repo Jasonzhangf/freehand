@@ -71,6 +71,7 @@ mod tests {
     use freehand_contracts::TurnId;
     use freehand_ui_protocol::{UiCommand, UiCommandDispatchReceipt, UiPublicTurnProjection};
     use reqwest::Client;
+    use serde_json::Value;
     use serial_test::serial;
     use std::env;
     use std::ffi::OsString;
@@ -78,8 +79,8 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener as StdTcpListener;
     use std::path::PathBuf;
-    use std::sync::Mutex;
     use std::sync::mpsc;
+    use std::sync::{Mutex, OnceLock};
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tokio::sync::oneshot;
@@ -174,6 +175,71 @@ mod tests {
         }
     }
 
+    fn enter_temp_workspace() -> TempWorkspace<'static> {
+        let lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original = env::current_dir().expect("current dir");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = env::temp_dir().join(format!(
+            "freehand-daemon-workspace-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("create temp workspace");
+        env::set_current_dir(&root).expect("set cwd");
+        TempWorkspace {
+            root,
+            original,
+            _lock: lock,
+        }
+    }
+
+    fn cwd_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct TempWorkspace<'a> {
+        root: PathBuf,
+        original: PathBuf,
+        _lock: std::sync::MutexGuard<'a, ()>,
+    }
+
+    impl TempWorkspace<'_> {
+        fn root(&self) -> &std::path::Path {
+            &self.root
+        }
+    }
+
+    impl Drop for TempWorkspace<'_> {
+        fn drop(&mut self) {
+            let _ = env::set_current_dir(&self.original);
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn checkpoint_id_from_home(home: &std::path::Path) -> String {
+        let path = home
+            .join(".freehand")
+            .join("ledgers")
+            .join("checkpoints")
+            .join("master")
+            .join("runtime-session-master.jsonl");
+        let raw = fs::read_to_string(path).expect("read checkpoint ledger");
+        raw.lines()
+            .next()
+            .and_then(|line| serde_json::from_str::<Value>(line).ok())
+            .and_then(|row| {
+                row.get("checkpoint_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .expect("checkpoint id")
+    }
+
     #[tokio::test]
     #[serial]
     async fn daemon_submit_input_updates_runtime_backed_latest_turn_query() {
@@ -263,6 +329,67 @@ mod tests {
         provider_handle.join().expect("join provider");
 
         server.stop().await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn daemon_rewind_checkpoint_dispatch_restores_workspace_state() {
+        let workspace = enter_temp_workspace();
+        fs::create_dir_all(workspace.root().join("scratch")).expect("create parent dir");
+        let (provider_url, request_rx, provider_handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_write_file_response("scratch/daemon-rewind.txt", "daemon rewind\n"),
+                complete_single_response("write done"),
+            ],
+        );
+        let server = TestServer::spawn(master_config_text(&provider_url)).await;
+        let client = Client::builder().build().expect("client");
+
+        let submitted = client
+            .post(format!("{}/ui/command", server.base_url))
+            .json(&UiCommand::SubmitUserInput {
+                text: "create writable checkpoint".to_owned(),
+            })
+            .send()
+            .await
+            .expect("submit response");
+        assert_eq!(submitted.status(), reqwest::StatusCode::ACCEPTED);
+        let submitted: UiCommandDispatchReceipt = submitted.json().await.expect("receipt json");
+        assert!(
+            submitted
+                .dispatch_status
+                .contains("reason_live_turn_completed")
+        );
+        let _ = request_rx.recv().expect("first request");
+        let _ = request_rx.recv().expect("second request");
+        provider_handle.join().expect("join provider");
+
+        let file_path = workspace.root().join("scratch/daemon-rewind.txt");
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("written file"),
+            "daemon rewind\n"
+        );
+        let checkpoint_id = checkpoint_id_from_home(&server.home);
+
+        let rewind = client
+            .post(format!("{}/ui/command", server.base_url))
+            .json(&UiCommand::RewindCheckpoint {
+                checkpoint_id: checkpoint_id.clone(),
+            })
+            .send()
+            .await
+            .expect("rewind response");
+        assert_eq!(rewind.status(), reqwest::StatusCode::ACCEPTED);
+        let rewind: UiCommandDispatchReceipt = rewind.json().await.expect("rewind receipt json");
+        assert_eq!(
+            rewind.dispatch_status,
+            format!("runtime_checkpoint_rewound checkpoint_id={checkpoint_id}")
+        );
+        assert!(!file_path.exists());
+
+        server.stop().await;
+        drop(workspace);
     }
 
     #[tokio::test]
@@ -734,6 +861,23 @@ api_key = "test-api-key"
 
     fn tool_use_single_response() -> String {
         r#"{"content":[{"type":"tool_use","id":"toolu_read_1","name":"read_file","input":{"path":"Cargo.toml","offset":0,"limit":2}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
+    }
+
+    fn tool_use_write_file_response(path: &str, content: &str) -> String {
+        serde_json::json!({
+            "content": [{
+                "type": "tool_use",
+                "id": "toolu_write_1",
+                "name": "write_file",
+                "input": {
+                    "path": path,
+                    "content": content
+                }
+            }],
+            "usage": {"input_tokens": 20, "output_tokens": 16},
+            "stop_reason": "tool_use"
+        })
+        .to_string()
     }
 
     fn restore_env(old_home: Option<OsString>, token_name: &str, old_token: Option<OsString>) {
