@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -200,6 +201,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_workspace_members(&root)?;
     verify_skill_rules(&root)?;
     verify_orchestrator_policy_docs(&root)?;
+    verify_feature_map_unique_entries(&root)?;
     verify_generated_wiki(&root)?;
     verify_mainline_manifest_links(&root)?;
     verify_mainline_call_table_bindings(&root)?;
@@ -592,6 +594,31 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
             }
         }
     }
+    Ok(())
+}
+
+fn verify_feature_map_unique_entries(root: &Path) -> Result<(), String> {
+    let feature_map_path = root.join("docs/architecture/feature-map.md");
+    let feature_map = fs::read_to_string(&feature_map_path)
+        .map_err(|err| format!("read feature map {}: {err}", feature_map_path.display()))?;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+
+    for line in feature_map.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("### `") || !trimmed.ends_with('`') {
+            continue;
+        }
+        let feature_id = &trimmed[5..trimmed.len() - 1];
+        *counts.entry(feature_id.to_owned()).or_default() += 1;
+    }
+
+    if let Some((feature_id, count)) = counts.into_iter().find(|(_, count)| *count > 1) {
+        return Err(format!(
+            "feature map duplicate seed entry for `{feature_id}` in {} ({count} entries)",
+            feature_map_path.display()
+        ));
+    }
+
     Ok(())
 }
 
@@ -1429,6 +1456,25 @@ mod tests {
     }
 
     #[test]
+    fn feature_map_unique_entries_accept_single_seed_entry() {
+        let root = test_repo_root("feature-map-unique");
+        write_feature_map_fixture(&root, FeatureMapFixtureMode::Aligned);
+
+        verify_feature_map_unique_entries(&root).expect("unique feature-map entries should pass");
+    }
+
+    #[test]
+    fn feature_map_unique_entries_reject_duplicate_seed_entry() {
+        let root = test_repo_root("feature-map-duplicate");
+        write_feature_map_fixture(&root, FeatureMapFixtureMode::DuplicateSeedEntry);
+
+        let err = verify_feature_map_unique_entries(&root)
+            .expect_err("duplicate feature-map seed entry must fail");
+        assert!(err.contains("demo.feature"), "{err}");
+        assert!(err.contains("duplicate seed entry"), "{err}");
+    }
+
+    #[test]
     fn metadata_request_boundaries_accept_aligned_sources() {
         let root = test_repo_root("metadata-boundary-aligned");
         write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::Aligned);
@@ -1499,6 +1545,11 @@ mod tests {
         Aligned,
         MakeCiMissingMainlines,
         CiWorkflowPartialGate,
+    }
+
+    enum FeatureMapFixtureMode {
+        Aligned,
+        DuplicateSeedEntry,
     }
 
     enum MetadataBoundaryFixtureMode {
@@ -1620,6 +1671,20 @@ ci: build fmt clippy test gates\n"
             "name: release\njobs:\n  release:\n    steps:\n      - name: Full gate\n        run: make ci\n",
         )
         .expect("write release workflow fixture");
+    }
+
+    fn write_feature_map_fixture(root: &Path, mode: FeatureMapFixtureMode) {
+        create_dirs(root);
+        let feature_map = match mode {
+            FeatureMapFixtureMode::Aligned => {
+                "## Seed Entries\n\n### `demo.feature`\n\n- owner: `demo`\n".to_owned()
+            }
+            FeatureMapFixtureMode::DuplicateSeedEntry => {
+                "## Seed Entries\n\n### `demo.feature`\n\n- owner: `demo`\n\n### `demo.feature`\n\n- owner: `demo-again`\n".to_owned()
+            }
+        };
+        fs::write(root.join("docs/architecture/feature-map.md"), feature_map)
+            .expect("write feature-map fixture");
     }
 
     fn create_dirs(root: &Path) {

@@ -35,6 +35,7 @@
   - `app.runtime-daemon` now also has explicit startup black-box coverage that corrupt checkpoint projection bootstrap truth fails before transport serve
   - `app.webui-smoke` now has explicit HTTP black-box coverage that protocol command ingress surfaces both dispatch-port failures and dispatch-task join failures as explicit 500 failure payloads
   - `runtime.ui-command-dispatch` now has explicit negative coverage that missing `CancelTurn`, empty `CancelLatestActiveTurn`, and wrong-node direct-message all stay `TargetNotFound` failures
+  - `foundation.workspace` now has an explicit gate that rejects duplicate `feature-map` seed entries for one `feature_id`
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
@@ -86,12 +87,16 @@
   - `cargo test -p freehand-runtime cancel_latest_active_turn_without_any_turn_returns_target_not_found -- --nocapture`
   - `cargo test -p freehand-runtime direct_message_wrong_slave_target_returns_target_not_found -- --nocapture`
   - `cargo test -p freehand-runtime`
+  - `cargo test -p xtask feature_map_unique_entries_accept_single_seed_entry -- --nocapture`
+  - `cargo test -p xtask feature_map_unique_entries_reject_duplicate_seed_entry -- --nocapture`
+  - `cargo test -p xtask`
   - `cargo run -p xtask -- mainlines generate`
   - `cargo run -p xtask -- mainlines check`
   - `make ci`
 - Latest landed docs/gate sync:
   - `docs/architecture/feature-map.md` no longer carries duplicate `app.webui-smoke` owner entries
   - `docs/mainline-calls/app.webui-smoke.json` step 12 is now code-bound to `handle_command_ingress`; the first gate failure on prose symbol binding was fixed and reverified
+  - `xtask gates check` now rejects duplicate `### \`<feature_id>\`` seed entries in `docs/architecture/feature-map.md`
 - metadata docs/mainlines/wiki/runtime directory docs are synced so broader pending producers are now provider/debug only, not runtime live bridge
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.

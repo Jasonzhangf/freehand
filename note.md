@@ -772,3 +772,24 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: feature-map duplicate entry gate slice
+  - owner route: `foundation.workspace`
+  - audit target: `docs/architecture/feature-map.md` previously allowed duplicate seed entries for the same `feature_id`; we manually removed a duplicate `app.webui-smoke` block, but `xtask gates check` had no automated defense against the same drift reappearing
+  - chosen closure:
+    - add one low-noise `xtask` verifier that scans `### \`<feature_id>\`` seed entries and rejects duplicates
+    - add positive and negative `cargo test -p xtask` fixtures for unique vs duplicated feature-map seed entries
+    - sync `foundation.workspace` function map, test design, mainline JSON, generated wiki, `docs/architecture/dev-gates.md`, and local skill rules to document the new gate
+  - implementation:
+    - added `verify_feature_map_unique_entries` to `run_gates_check`
+    - added `feature_map_unique_entries_accept_single_seed_entry`
+    - added `feature_map_unique_entries_reject_duplicate_seed_entry`
+    - synced `docs/function-maps/foundation.workspace.md`, `docs/testing/foundation.workspace.md`, `docs/mainline-calls/foundation.workspace.json`, `docs/architecture/dev-gates.md`, `.agents/skills/freehand-dev/SKILL.md`
+  - verification target:
+    - `cargo fmt --all --check`
+    - `cargo test -p xtask feature_map_unique_entries_accept_single_seed_entry -- --nocapture`
+    - `cargo test -p xtask feature_map_unique_entries_reject_duplicate_seed_entry -- --nocapture`
+    - `cargo test -p xtask`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

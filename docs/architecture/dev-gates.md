@@ -79,6 +79,15 @@ If a layer is intentionally not yet present for a feature, that absence must be 
 
 This keeps generated wiki artifacts as compiled review surfaces over one machine-readable truth instead of independent hand-maintained docs.
 
+## Feature-Map Uniqueness Gate
+
+`xtask gates check` validates that `docs/architecture/feature-map.md` does not carry duplicate seed entries:
+
+- each `### \`<feature_id>\`` seed entry may appear only once
+- duplicate owner entries for the same `feature_id` fail the gate even if the duplicated docs are text-identical
+
+This keeps owner routing as one truth instead of allowing silent drift through duplicated seed blocks.
+
 ## Mainline Call-Table Binding Gate
 
 `xtask gates check` validates every migrated mainline-call row with `binding_status = "bound"`:

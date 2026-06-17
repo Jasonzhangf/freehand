@@ -145,6 +145,7 @@ Use this skill for any non-trivial work in this repo.
 - Any function used from multiple call sites must have one shared semantic description in the function map.
 - function-call tables must bind to code symbols or explicitly say implementation binding is still pending.
 - generated wiki must come from the machine-readable mainline call source; do not hand-edit generated wiki files.
+- feature-map seed entries must stay unique per `feature_id`; duplicate owner blocks are invalid and must fail gate.
 - `xtask gates check` validates migrated mainline-call sources as compiled manifests: JSON path, `feature_id`, function map, test design, generated wiki, and feature-map links must cross-link deterministically.
 - `xtask gates check` validates migrated `bound` call-table rows: listed source files must exist and listed symbols must resolve in those files; use `binding pending`/`pending` only for unlanded bindings.
 - `xtask gates check` validates CI/CD command alignment: `make ci` must include `mainlines check`, and pre-push, CI, and release workflows must route through the full gate.

@@ -14,6 +14,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - repo root may invoke `xtask mainlines generate`
 - repo root may invoke `xtask mainlines check`
 - gate runner verifies required files, workspace members, policy doc snippets, and generated wiki freshness
+- gate runner verifies feature-map seed entries stay unique per feature_id
 - gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
@@ -23,6 +24,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 ## Response Mainline
 
 - gate returns success when required repo truth, workspace structure, and generated wiki freshness are present
+- gate returns success when feature-map seed entries stay unique and owner routing has one seed entry per feature_id
 - gate returns success when migrated mainline manifests are deterministically linked to their owner docs
 - gate returns success when migrated mainline call-table bindings resolve to source files and source symbols
 - gate returns success when local and remote automation routes through the same full gate stack
@@ -34,6 +36,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 ## Error Mainline
 
 - missing file or missing required snippet surfaces as gate failure
+- duplicate feature-map seed entries for one feature_id surface as gate failure
 - mismatched mainline manifest source path, function map path, test design path, generated wiki path, or feature-map link surfaces as gate failure
 - missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure
 - missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
@@ -66,9 +69,10 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 | 14 | `verify_mainline_call_table_bindings` | `xtask/src/main.rs` | validate migrated mainline call-table file and symbol bindings | JSON mainline truth plus source files | pass/fail | run_gates_check | filesystem and symbol resolver | bound |
 | 15 | `verify_ci_cd_gate_commands` | `xtask/src/main.rs` | validate local hook, Makefile, CI, and release full-gate command alignment | automation config files | pass/fail | run_gates_check | filesystem and policy snippets | bound |
 | 16 | `verify_metadata_request_boundaries` | `xtask/src/main.rs` | validate static metadata/request isolation rules on source-owned request and metadata types | Rust source files for contracts and metadata owners | pass/fail | run_gates_check | source scanners | bound |
+| 17 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that docs/architecture/feature-map.md keeps one seed entry per feature_id | feature-map markdown | pass/fail | run_gates_check | feature-map scanner | bound |
 
 ## Sync Status Against Mainline Call
 
 - workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code
-- current gate baseline enforces required files, policy docs, generated wiki freshness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static metadata/request boundary checks
+- current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static metadata/request boundary checks
 - generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes

@@ -16,6 +16,7 @@
   - xtask rule-check logic
   - mainline JSON parse/render logic
   - generated-wiki freshness logic
+  - feature-map duplicate seed-entry detection
   - mainline manifest cross-link logic between JSON, feature map, function map, test design, and generated wiki path
   - mainline call-table file and symbol binding logic for migrated `bound` rows
   - CI/CD and local hook command-alignment logic
@@ -27,6 +28,7 @@
   - `cargo test -p xtask` call-table binding positive and negative tests
   - `cargo test -p xtask` CI/CD command-alignment positive and negative tests
   - `cargo test -p xtask` metadata/request leak-gate positive and negative tests
+  - `cargo test -p xtask` feature-map uniqueness positive and negative tests
 - project black-box impact:
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
   - machine-readable mainline truth remains the only source for generated wiki artifacts
@@ -37,6 +39,7 @@
 - sync status between design and implementation:
   - baseline aligned with current harness
   - mainline generation and freshness checks are implemented in `xtask`
+  - feature-map duplicate seed-entry checks are implemented in `xtask`
   - mainline manifest cross-link checks are implemented in `xtask`
   - mainline call-table binding checks are implemented in `xtask`
   - CI/CD command-alignment checks are implemented in `xtask`
