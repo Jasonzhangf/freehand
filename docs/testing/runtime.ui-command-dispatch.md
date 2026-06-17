@@ -60,6 +60,7 @@
   - active live cancel no longer waits behind provider IO because live submit releases the runtime mutex after active turn registration
   - latest-active cancel is covered for current-turn stop without a UI-known `turn_id`
   - active live cancel blocks later provider success projection after cancellation
+  - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
   - node-backed direct-message dispatch is covered
   - explicit unsupported resume dispatch is covered
   - migrated mainline-call source and generated wiki are kept in sync with this test design

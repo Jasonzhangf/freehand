@@ -26,6 +26,8 @@
   - SSE live-bridge mock path
   - broadcast capture path
   - incremental stream apply path proving broadcast can happen before stream completion
+  - cancellation before tool execution path
+  - cancellation before terminal persistence path
   - invalid-schema rejection then success path
   - `claim=continue` next-round path
   - retry-exhausted failed terminal path
@@ -69,5 +71,6 @@
   - runtime dispatch and daemon black-box coverage are landed against local mock providers
   - runtime live bridge now writes restore/request/tool/terminal lifecycle metadata through `metadata.core` and fails explicitly on metadata write errors
   - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
+  - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates

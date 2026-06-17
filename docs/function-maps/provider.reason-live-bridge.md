@@ -125,6 +125,7 @@
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
+- runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`

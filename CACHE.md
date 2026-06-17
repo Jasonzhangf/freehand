@@ -11,7 +11,7 @@
 - Latest local full gate:
   - `make ci` -> passed after runtime live bridge metadata producer wiring and doc/mainline/wiki sync
 - Current verified head:
-  - `make ci` -> passed after provider raw debug-ledger wiring and doc/mainline/wiki sync
+  - `make ci` -> passed after live cancel checkpoint hardening and doc/mainline/wiki sync
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -28,6 +28,7 @@
   - `CancelLatestActiveTurn` covers the submit-in-flight window before WebUI receives a concrete `turn_id`
   - runtime live submit releases the dispatcher mutex before provider IO and active cancel prevents later provider success projection
   - `UiTurnProjection.terminal_status` preserves cancelled/failed terminal status for public UI mapping
+  - runtime live bridge cancellation now has locked checkpoints before provider output, tool execution, and terminal persistence; cancel at the terminal-persistence boundary returns explicit `RuntimeLiveBridgeError::Cancelled` and must not materialize terminal truth
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
@@ -69,10 +70,9 @@
   - provider raw ledgers remain debug-only and never participate in restore or session truth
   - if provider raw retention is enabled and the raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - Latest verification:
-  - `cargo test -p freehand-provider-anthropic -p freehand-reason -p freehand-runtime`
-  - `cargo run -p xtask -- mainlines generate`
-  - `cargo run -p xtask -- mainlines check`
-  - `cargo run -p xtask -- gates check`
+  - `cargo test -p freehand-runtime live_bridge_cancel_token_stops_ -- --nocapture`
+  - `cargo test -p freehand-runtime`
+  - `cargo fmt --check`
   - `cargo fmt --all`
   - `make ci`
 - metadata docs/mainlines/wiki/runtime directory docs are synced so broader pending producers are now provider/debug only, not runtime live bridge

@@ -1134,6 +1134,7 @@ where
                         .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                     drain_debug_events(&debug_receiver, &mut on_debug);
+                    ensure_live_not_cancelled(&request)?;
                     write_live_bridge_metadata(
                         &metadata_center,
                         &agent_id,
@@ -1241,6 +1242,7 @@ where
                     );
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                     drain_debug_events(&debug_receiver, &mut on_debug);
+                    ensure_live_not_cancelled(&request)?;
                     write_live_bridge_metadata(
                         &metadata_center,
                         &agent_id,
@@ -3519,6 +3521,97 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         .expect_err("cancelled live bridge");
 
         assert_eq!(err, RuntimeLiveBridgeError::Cancelled);
+    }
+
+    #[test]
+    fn live_bridge_cancel_token_stops_after_provider_output_before_tool_execution() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let cancel_token = Arc::new(AtomicBool::new(false));
+        let mut request = live_request(false);
+        request.cancel_token = Some(Arc::clone(&cancel_token));
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
+        let (base_url, _rx, handle) =
+            spawn_mock_server(200, "application/json", tool_use_single_response());
+
+        let err = run_live_reason_turn_with_hooks(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+            |event| {
+                if matches!(event, ReasonBroadcastEvent::Tool(_)) {
+                    cancel_token.store(true, Ordering::SeqCst);
+                }
+            },
+            |_| {},
+        )
+        .expect_err("cancelled before tool execution");
+        handle.join().expect("join");
+
+        assert_eq!(err, RuntimeLiveBridgeError::Cancelled);
+
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&session_id)
+            .expect("restore live session");
+        assert!(
+            restored
+                .closed_turns
+                .iter()
+                .all(|turn| turn.terminal_event.is_none()),
+            "tool-call cancellation should not materialize terminal truth"
+        );
+        let latest = restored
+            .active_turn
+            .as_ref()
+            .expect("active turn should remain");
+        assert!(latest.turn.tool_results.is_empty());
+        assert!(latest.turn.terminal_event.is_none());
+    }
+
+    #[test]
+    fn live_bridge_cancel_token_stops_before_terminal_persistence() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let cancel_token = Arc::new(AtomicBool::new(false));
+        let mut request = live_request(false);
+        request.cancel_token = Some(Arc::clone(&cancel_token));
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
+        let (base_url, _rx, handle) =
+            spawn_mock_server(200, "application/json", complete_single_response("pong"));
+
+        let err = run_live_reason_turn_with_hooks(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+            |event| {
+                if matches!(event, ReasonBroadcastEvent::Terminal(_)) {
+                    cancel_token.store(true, Ordering::SeqCst);
+                }
+            },
+            |_| {},
+        )
+        .expect_err("cancelled before terminal persistence");
+        handle.join().expect("join");
+
+        assert_eq!(err, RuntimeLiveBridgeError::Cancelled);
+
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&session_id)
+            .expect("restore live session");
+        assert!(
+            restored.closed_turns.is_empty(),
+            "terminal cancellation should not materialize closed-turn truth"
+        );
+        let latest = restored
+            .active_turn
+            .as_ref()
+            .expect("active turn should remain");
+        assert!(
+            latest.turn.terminal_event.is_none(),
+            "terminal cancellation should not persist terminal truth into the active snapshot"
+        );
     }
 
     #[test]

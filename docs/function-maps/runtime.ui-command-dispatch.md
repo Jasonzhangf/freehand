@@ -85,6 +85,7 @@
 - live submit now releases the runtime mutex before provider IO so `CancelTurn` can enter concurrently
 - active live cancel now publishes cancelled UI projection immediately and later provider success cannot overwrite it
 - runtime dispatch now supports `CancelLatestActiveTurn` for current-turn stop without requiring the UI to know `turn_id`
+- runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and terminal persistence
 - direct slave message dispatch routes through `node.master-slave`
 - explicit checkpoint rewind dispatch now routes through `runtime.checkpoint-rewind`
 - resume dispatch remains an explicit unsupported runtime path

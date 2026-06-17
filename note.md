@@ -634,3 +634,29 @@
     - `cargo run -p xtask -- gates check`
     - `cargo fmt --all`
     - `make ci`
+- 2026-06-18: live cancel checkpoint hardening slice
+  - owner route: `provider.reason-live-bridge` + `runtime.ui-command-dispatch`
+  - gap found during audit: live bridge docs already claimed cancel checks at provider-output/tool-execution/terminal-write boundaries, but code and tests did not lock the terminal-persistence boundary
+  - verification-first path:
+    - added negative tests for cancel after provider output before tool execution
+    - added negative tests for cancel after terminal event before terminal persistence
+    - first red result split into:
+      - test hook bug: tool-execution test was listening to `ReasonBroadcastEvent::Semantic(...ToolCall)` instead of `ReasonBroadcastEvent::Tool(_)`
+      - real runtime gap: completed/failed terminal branches could still persist closed-turn truth after cancel
+  - landed fix:
+    - `run_live_reason_turn` now calls `ensure_live_not_cancelled(&request)?` after terminal broadcast/debug drain and before runtime terminal metadata write + `ReasonPersistence::record_turn_closed`
+    - negative truth locked: cancelling at that boundary returns explicit `RuntimeLiveBridgeError::Cancelled` and does not materialize terminal truth into active or closed turn snapshots
+  - docs synced:
+    - `docs/function-maps/provider.reason-live-bridge.md`
+    - `docs/function-maps/runtime.ui-command-dispatch.md`
+    - `docs/testing/provider.reason-live-bridge.md`
+    - `docs/testing/runtime.ui-command-dispatch.md`
+    - `docs/mainline-calls/provider.reason-live-bridge.json`
+    - `docs/mainline-calls/runtime.ui-command-dispatch.json`
+    - generated `docs/wiki/**`
+  - verification:
+    - `cargo fmt --all`
+    - `cargo fmt --check`
+    - `cargo test -p freehand-runtime live_bridge_cancel_token_stops_ -- --nocapture`
+    - `cargo test -p freehand-runtime`
+    - `make ci`
