@@ -11,14 +11,19 @@
   - pairing state transitions, permission checks, handshake validation, relisten behavior
   - config bootstrap validation for master/slave ownership fields
   - direct-message permission validation
+  - metadata bootstrap owner/write-node provenance validation
+  - metadata emission for pairing, delegated task, and slave turn publication without request/body leakage
+  - metadata write failure before rejected status or other node-truth materialization
   - pairing rejection for unauthorized source node and unauthorized source ip
   - delegated-task empty-status rejection
   - slave-turn publication permission rejection
 - module black-box plan:
   - status snapshot and progress query through node boundary
   - slave turn publication visible through subscription surface
+  - shared metadata-center smoke through node boundary
 - project black-box impact:
   - master can delegate work and subscribe to slave turn stream through runtime wiring
+  - config-selected live runtime bootstrap shares one metadata ledger path with node bootstrap and pairing writes
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - websocket handshake replays
@@ -30,5 +35,5 @@
   - transport heartbeat and reconnect timing policy not yet defined
 - sync status between design and implementation:
   - `LocalNodeRuntime` baseline implemented
-  - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, direct-message guardrails, and explicit rejection for unauthorized source node/ip, empty task status, and unauthorized slave-turn publication
+  - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, direct-message guardrails, metadata bootstrap/provenance, metadata leak prevention, metadata write failure no-truth-materialization, and explicit rejection for unauthorized source node/ip, empty task status, and unauthorized slave-turn publication
   - migrated mainline-call source and generated wiki are kept in sync with this test design

@@ -235,8 +235,10 @@ name = "freehand-node"
 version = "0.1.0"
 dependencies = [
  "freehand-contracts",
+ "freehand-metadata",
  "freehand-reason",
  "freehand-ui-protocol",
+ "serde_json",
  "thiserror",
 ]
 

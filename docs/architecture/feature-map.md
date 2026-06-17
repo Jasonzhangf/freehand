@@ -987,6 +987,7 @@ If a problem does not fit this table, update this routing index before making co
 - required_project_black_box_tests:
   - workspace gate validates metadata owner docs, mainline source, and generated wiki
   - reason-turn producer tests validate first metadata writer integration and durable-ledger persistence
+  - node runtime producer tests validate node-owned metadata admission and shared-ledger bootstrap wiring
 - test_design_doc: `docs/testing/metadata.core.md`
 - function_map_doc: `docs/function-maps/metadata.core.md`
 - mainline_call_doc: `docs/mainline-calls/metadata.core.json`
@@ -1016,12 +1017,13 @@ If a problem does not fit this table, update this routing index before making co
 ### `runtime.ui-command-dispatch`
 
 - owner: `crates/freehand-runtime`
-- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/architecture/**`, `docs/mainline-calls/**`, `docs/wiki/**`
+- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-metadata/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/architecture/**`, `docs/mainline-calls/**`, `docs/wiki/**`
 - forbidden_paths: `apps/freehand-server/**` except protocol-only transport injection, `crates/freehand-provider-*/**`
 - required_checks:
   - `cargo test -p freehand-runtime`
 - required_white_box_tests:
   - config-selected runtime bootstrap tests
+  - shared metadata-ledger bootstrap tests
   - submit-input dispatch routing tests
   - cancel-turn dispatch tests
   - rewind-checkpoint dispatch tests
@@ -1035,6 +1037,7 @@ If a problem does not fit this table, update this routing index before making co
   - checkpoint rewind receipt smoke
   - node-backed direct-message smoke
   - config-selected runtime bootstrap smoke
+  - config-selected live node-metadata-ledger bootstrap smoke
 - required_project_black_box_tests:
   - runtime dispatch owner stays outside app boundary smoke
 - test_design_doc: `docs/testing/runtime.ui-command-dispatch.md`
@@ -1107,7 +1110,7 @@ If a problem does not fit this table, update this routing index before making co
 ### `node.master-slave`
 
 - owner: `crates/freehand-node`
-- allowed_paths: `crates/freehand-node/**`, `crates/freehand-contracts/**`, `crates/freehand-ui-protocol/**`, `docs/architecture/**`, `docs/design/**`
+- allowed_paths: `crates/freehand-node/**`, `crates/freehand-contracts/**`, `crates/freehand-metadata/**`, `crates/freehand-ui-protocol/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
 - forbidden_paths: `crates/freehand-provider-*/**`, `apps/**` except wiring-only entrypoint glue
 - required_checks:
   - `cargo test -p freehand-node`
@@ -1118,15 +1121,19 @@ If a problem does not fit this table, update this routing index before making co
   - paired slave input-restriction tests
   - slave startup config permission tests
   - local websocket handshake tests
+  - metadata producer owner and write-node provenance tests
+  - metadata write failure no-truth-materialization tests
   - pairing-loss relisten tests
   - slave turn subscription tests
   - status query and health-check tests
 - required_module_black_box_tests:
   - node status snapshot smoke
   - slave progress query smoke
+  - node metadata ledger smoke
 - required_project_black_box_tests:
   - master-delegate/slave-progress smoke
   - master-subscribe-slave-turn smoke
+  - config-selected live runtime bootstrap shares node metadata ledger smoke
 - test_design_doc: `docs/testing/node.master-slave.md`
 - function_map_doc: `docs/function-maps/node.master-slave.md`
 - mainline_call_doc: `docs/mainline-calls/node.master-slave.json`
@@ -1139,6 +1146,7 @@ If a problem does not fit this table, update this routing index before making co
 - runtime_paths:
   - `~/.freehand/state/nodes`
   - `~/.freehand/state/config`
+  - `~/.freehand/ledgers/metadata`
   - `~/.freehand/ledgers/nodes`
   - `~/.freehand/replays/nodes`
 - update_triggers:
@@ -1148,6 +1156,7 @@ If a problem does not fit this table, update this routing index before making co
   - node mode lifecycle changes
   - slave startup config changes
   - websocket pairing changes
+  - metadata provenance or shared-ledger wiring changes
   - turn subscription changes
   - generated wiki freshness policy changes
 - lifecycle_checks:

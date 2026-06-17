@@ -990,3 +990,37 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: node.master-slave metadata producer wiring slice
+  - owner route: `node.master-slave`, plus runtime glue in `runtime.ui-command-dispatch` and shared truth sync in `metadata.core`
+  - audit target:
+    - `freehand-node` had no metadata producer wiring at all
+    - `freehand-runtime` already had shared metadata ledger bootstrap for live provider/reason paths, but node runtime bootstrap still bypassed it
+    - current highest-risk gap was node control/provenance state changing without owner/write-node metadata or shared-ledger audit evidence
+  - chosen closure:
+    - add `LocalNodeRuntime::with_metadata_center(...)` while keeping `LocalNodeRuntime::new(...)`
+    - write metadata before node truth mutation for bootstrap, pair accept/reject, lose-pair relisten, delegated task progress, and slave-turn publication
+    - keep metadata request-clean: no pair token, no task status text, no turn user text, no terminal text
+    - make metadata write failure explicit `NodeRuntimeError::MetadataWriteFailed(...)`
+    - wire `RuntimeCommandDispatcher::new(...)` live bootstrap to inject the same runtime metadata ledger path into node runtime
+    - sync function map / test design / migrated mainline JSON / generated wiki / memory files
+  - implementation:
+    - added `freehand-metadata` + `serde_json` deps to `freehand-node`
+    - added node-local metadata helper/spec and optional metadata center field on `LocalNodeRuntime`
+    - changed `lose_slave_pairing()` to return `Result<..., NodeRuntimeError>` so metadata failure can stay explicit
+    - added node tests:
+      - bootstrap metadata owner/write-node provenance
+      - accepted pairing metadata without token leakage
+      - delegated-task metadata without status-text leakage
+      - metadata-write failure before rejected-status materialization
+      - slave-turn metadata without turn/body leakage
+    - added runtime test `bootstrap_from_selected_live_agent_wires_node_metadata_into_shared_ledger`
+    - updated `map_node_dispatch_error(...)` so node metadata failures surface as explicit dispatch failures
+    - synced `docs/architecture/feature-map.md`, `docs/function-maps/node.master-slave.md`, `docs/testing/node.master-slave.md`, `docs/function-maps/runtime.ui-command-dispatch.md`, `docs/testing/runtime.ui-command-dispatch.md`, `docs/function-maps/metadata.core.md`, `docs/testing/metadata.core.md`, `docs/mainline-calls/{node.master-slave,runtime.ui-command-dispatch,metadata.core}.json`, and regenerated wiki docs
+  - verification:
+    - `cargo fmt --all`
+    - `cargo test -p freehand-node`
+    - `cargo test -p freehand-runtime`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

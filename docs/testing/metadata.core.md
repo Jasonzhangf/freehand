@@ -34,17 +34,19 @@
   - workspace gate validates metadata owner docs, mainline source, generated wiki, and workspace membership
   - `reason.turn` producer tests cover both in-memory admission and durable-ledger persistence
   - `provider.reason-live-bridge` producer tests cover runtime-owned lifecycle metadata admission into the same durable ledger without request-text leakage
+  - `node.master-slave` producer tests cover node-owned bootstrap/pair/progress/turn metadata admission into the shared ledger without request/body leakage
   - broader provider/debug producers are not claimed in this slice
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/ledgers/metadata`
   - `~/.freehand/replays/metadata`
 - known gaps:
-  - provider adapter crates and debug/node emitters are not yet wired to the metadata center
+  - provider adapter crates and debug emitters are not yet wired to the metadata center
 - sync status between design and implementation:
   - crate/test baseline is landed
   - metadata center validation, in-memory write/query behavior, and durable ledger behavior are implemented and covered together
   - `reason.turn` producer tests prove owner/node provenance, request-text isolation, and durable persistence on start-turn and provider-output metadata
   - runtime live bridge producer tests prove runtime-owned restore/request/terminal lifecycle metadata can share the same durable ledger without request-text leakage
+  - node runtime producer tests now prove owner/node provenance, no-request-leak metadata entries, and no-truth-materialization on metadata write failure
   - repo-wide static metadata/request boundary gate in `xtask` now rejects stray `Metadata*` owner types outside `crates/freehand-metadata` and metadata/request field leakage
   - runtime white-box coverage now explicitly locks missing metadata id, owner feature id/crate name/module path/symbol path, missing pipeline node, missing trace id, empty entry key, empty entries, and durable-ledger validation-failure branches
   - migrated mainline-call source and generated wiki are kept in sync with this test design

@@ -4,6 +4,7 @@
 - owner: `crates/freehand-runtime`
 - lifecycle path under test:
   - config-selected bootstrap becomes one runtime dispatcher
+  - config-selected live bootstrap may seed one shared node metadata ledger before the first command
   - accepted command ingress becomes a dispatch envelope
   - runtime dispatch routes to the declared owner module
   - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
@@ -20,6 +21,7 @@
 - white-box plan:
   - runtime bootstrap coverage
   - config-selected bootstrap coverage
+  - config-selected live shared node-metadata-ledger bootstrap coverage
   - persisted latest-turn restore coverage
   - next runtime turn ordinal restore coverage
   - submit/cancel reason dispatch coverage
@@ -42,6 +44,7 @@
   - runtime-derived cancelled terminal projection smoke
   - config-selected runtime bootstrap smoke
   - config-selected live restart/restore smoke
+  - config-selected live node-metadata-ledger bootstrap smoke
   - runtime checkpoint rewind receipt smoke
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
@@ -55,6 +58,7 @@
 - sync status between design and implementation:
   - runtime dispatch owner baseline is landed
   - config-selected bootstrap is landed and consumes explicit peer-topology config truth
+  - config-selected live bootstrap now seeds node-owned metadata records into the shared metadata ledger before first command ingress
   - provider-backed submit dispatch plus persisted restore/bootstrap is covered
   - live provider submit now streams incremental UI state updates through runtime-owned hooks
   - reason-backed cancel dispatch is covered

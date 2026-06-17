@@ -1542,20 +1542,31 @@ impl RuntimeCommandDispatcher {
         let mut turns = Vec::new();
         let mut next_turn_ordinal = 0_u64;
 
-        let mut node_runtime = LocalNodeRuntime::new(
-            MasterNodeConfig {
-                node_id: config.master_node_id.clone(),
-                agent_id: config.master_agent_id.clone(),
-                paired_slave_node_id: config.slave_node_id.clone(),
-            },
-            SlaveNodeConfig {
-                node_id: config.slave_node_id.clone(),
-                agent_id: config.slave_agent_id.clone(),
-                paired_master_node_id: config.master_node_id.clone(),
-                pair_token: config.pair_token.clone(),
-                allowed_pair_ip: config.allowed_pair_ip.clone(),
-            },
-        )
+        let node_master = MasterNodeConfig {
+            node_id: config.master_node_id.clone(),
+            agent_id: config.master_agent_id.clone(),
+            paired_slave_node_id: config.slave_node_id.clone(),
+        };
+        let node_slave = SlaveNodeConfig {
+            node_id: config.slave_node_id.clone(),
+            agent_id: config.slave_agent_id.clone(),
+            paired_master_node_id: config.master_node_id.clone(),
+            pair_token: config.pair_token.clone(),
+            allowed_pair_ip: config.allowed_pair_ip.clone(),
+        };
+        let mut node_runtime = if let Some(live) = &config.live {
+            let metadata_center = Arc::new(Mutex::new(
+                MetadataCenter::with_ledger_path(metadata_ledger_path(
+                    &live.runtime_home,
+                    &config.reason_agent_id,
+                    &config.session_id,
+                ))
+                .map_err(|err| RuntimeCommandDispatcherError::NodeRuntimeInit(err.to_string()))?,
+            ));
+            LocalNodeRuntime::with_metadata_center(node_master, node_slave, metadata_center)
+        } else {
+            LocalNodeRuntime::new(node_master, node_slave)
+        }
         .map_err(|err| RuntimeCommandDispatcherError::NodeRuntimeInit(err.to_string()))?;
 
         node_runtime
@@ -2017,7 +2028,9 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
 
 fn map_node_dispatch_error(err: NodeRuntimeError) -> UiCommandDispatchPortError {
     match err {
-        NodeRuntimeError::SlaveNotPaired | NodeRuntimeError::UnsupportedTransport => {
+        NodeRuntimeError::SlaveNotPaired
+        | NodeRuntimeError::UnsupportedTransport
+        | NodeRuntimeError::MetadataWriteFailed(_) => {
             UiCommandDispatchPortError::DispatchFailed(err.to_string())
         }
         NodeRuntimeError::UnauthorizedPairSourceNode
@@ -2728,7 +2741,7 @@ fn runtime_turn_position(turn_id: &TurnId) -> (u64, u64, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use freehand_contracts::{SemanticEventKind, TerminalStatus};
+    use freehand_contracts::{FeatureId, SemanticEventKind, TerminalStatus};
     use freehand_metadata::MetadataEnvelope;
     use freehand_reason::ProviderRawLedgerRow;
     use freehand_ui_protocol::{UiQueryResult, build_command_dispatch_envelope};
@@ -4849,6 +4862,44 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             }
             other => panic!("unexpected node status query: {other:?}"),
         }
+    }
+
+    #[test]
+    fn bootstrap_from_selected_live_agent_wires_node_metadata_into_shared_ledger() {
+        let runtime_home = temp_runtime_home();
+        let _runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime");
+
+        let metadata_path = metadata_ledger_path(
+            &runtime_home,
+            &AgentId::new("agent-live"),
+            &SessionId::new("runtime-session-agent-live"),
+        );
+        let raw = fs::read_to_string(&metadata_path).expect("read metadata ledger");
+        let records: Vec<MetadataEnvelope> = raw
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).expect("decode metadata"))
+            .collect();
+
+        assert!(records.iter().any(|record| {
+            record.owner.feature_id == FeatureId::new("node.master-slave")
+                && record.write_node.pipeline_node == "NodeReq01BootstrapListening"
+        }));
+        assert!(records.iter().any(|record| {
+            record.owner.feature_id == FeatureId::new("node.master-slave")
+                && record.write_node.pipeline_node == "NodeReq02PairingAccepted"
+        }));
+        assert!(!raw.contains("pair-token"));
+
+        let _ = fs::remove_dir_all(&runtime_home);
     }
 
     #[test]

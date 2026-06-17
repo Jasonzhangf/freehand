@@ -13,6 +13,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - accepted UI command ingress arrives as a `UiCommandDispatchEnvelope`
 - runtime bootstrap may first select one configured agent from `~/.freehand/config.toml`
 - config-selected bootstrap consumes local node id, paired node id, paired allowed IP, and paired token env from `config.core`
+- config-selected live bootstrap may also seed one shared metadata ledger path for node-owned bootstrap and pairing provenance
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
 - runtime dispatch owner reads the declared owner target from the envelope
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
@@ -27,6 +28,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - node-backed direct-message commands return dispatch receipts after owner validation
 - runtime-backed rewind commands restore checkpointed workspace state without mutating reason/session/UI truth directly
 - config-selected runtime bootstrap returns one dispatcher for the requested agent
+- config-selected live bootstrap may materialize node-owned bootstrap and pairing metadata into the shared metadata ledger before the first command runs
 - live bootstrap rehydrates `UiProtocolState` from persisted turn truth and resumes runtime turn-id allocation from persisted ordinals
 - runtime-owned UI state reflects derived projections only, not authoritative turn truth
 - active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion
@@ -39,7 +41,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - missing checkpoint manifests return explicit dispatch target-not-found failures
 - wrong slave target node returns explicit dispatch-port failures
 - missing config, invalid agent selection, paired-token mismatch, or slave-mode host selection return explicit bootstrap failures
-- invalid persisted recovery truth returns explicit runtime bootstrap failure
+- invalid persisted recovery truth or node-metadata bootstrap failure returns explicit runtime bootstrap failure
 - cancelled live turns return explicit cancelled dispatch failure to the original submitter and must not overwrite cancelled UI projection with later provider success
 - live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries
 - CancelLatestActiveTurn with no active or persisted turn returns explicit target-not-found
@@ -63,7 +65,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `RuntimeCommandDispatcher::new` | `crates/freehand-runtime/src/lib.rs` | compose first runtime owner wiring for reason/node command dispatch | runtime config | runtime dispatcher | runtime bootstrap/tests | runtime owner | bound |
+| 01 | `RuntimeCommandDispatcher::new` | `crates/freehand-runtime/src/lib.rs` | compose first runtime owner wiring for reason/node command dispatch and live node metadata bootstrap | runtime config | runtime dispatcher | runtime bootstrap/tests | runtime owner | bound |
 | 02 | `RuntimeCommandDispatcher::from_selected_agent` | `crates/freehand-runtime/src/lib.rs` | derive runtime bootstrap config from one selected agent config | selected agent config | runtime dispatcher | daemon/bootstrap tests | runtime bootstrap | bound |
 | 03 | `RuntimeCommandDispatcher::from_default_config` | `crates/freehand-runtime/src/lib.rs` | load default config and bootstrap one runtime dispatcher | agent name | runtime dispatcher | daemon host | config owner plus runtime bootstrap | bound |
 | 04 | `RuntimeCommandDispatcher::dispatch` | `crates/freehand-runtime/src/lib.rs` | execute protocol-owned dispatch envelope through the correct owner adapter | dispatch envelope | dispatch receipt or failure | app/daemon runtime boundary | reason/node owner adapter | bound |
@@ -84,6 +86,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - resume dispatch remains an explicit unsupported runtime path
 - config-selected runtime bootstrap is now bound in code
 - config-selected runtime bootstrap uses explicit peer-topology config instead of synthetic paired node ids
+- config-selected live bootstrap now seeds a shared metadata ledger path into `node.master-slave` before the first command runs
 - config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
 - generated wiki must be regenerated from `docs/mainline-calls/runtime.ui-command-dispatch.json` when this function-map truth changes
 - live submit now releases the runtime mutex before provider IO so CancelTurn can enter concurrently

@@ -9,11 +9,11 @@
   - `cargo run -p xtask -- gates check`
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
 - Latest local full gate:
-  - `make ci` -> passed after node.master-slave explicit rejection hardening
+  - `make ci` -> passed after node.metadata producer wiring and runtime shared-ledger bootstrap
 - Current verified head:
-  - `make ci` -> passed after node.master-slave explicit rejection hardening
+  - `make ci` -> passed after node.metadata producer wiring and runtime shared-ledger bootstrap
 - Current working slice:
-  - `node.master-slave` explicit rejection lock completed; next pending audit remains metadata producer wiring or debug path-policy gaps
+  - `node.master-slave` metadata producer wiring and `runtime.ui-command-dispatch` shared-ledger bootstrap completed; next pending audit remains broader provider/debug metadata producers or node transport policy
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -50,6 +50,9 @@
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
   - `metadata.core` now supports durable metadata ledger append/reload inside `freehand-metadata`
   - `reason.turn` producer tests now prove durable metadata persistence without request-text leakage when a ledger-backed metadata center is supplied
+  - `node.master-slave` now emits owner/write-node metadata for bootstrap, pairing, delegated progress, and slave-turn publication before node truth mutation
+  - `node.master-slave` metadata write failures are explicit `NodeRuntimeError::MetadataWriteFailed(...)` errors and must not materialize rejected status, progress, or slave-turn truth
+  - `runtime.ui-command-dispatch` live bootstrap now injects a shared metadata ledger path into `LocalNodeRuntime` and persists node bootstrap/pairing provenance under `~/.freehand/ledgers/metadata/<agent>/<session>.jsonl`
   - `foundation.workspace` now enforces a static metadata/request isolation gate in `xtask`: `ReasonReq*` request structs may not carry metadata/debug owner types or obvious metadata/debug fields, stray `Metadata*` owner types outside `crates/freehand-metadata` fail fast, and metadata owner structs may not introduce request-payload fields/types
 - Docs/mainline sync:
   - updated function maps, test designs, `docs/mainline-calls/**`, and regenerated `docs/wiki/**`
@@ -67,7 +70,7 @@
   - metadata/request separation is enforced by type boundary plus request-like key rejection in `validate_metadata_envelope`
   - `reason.turn` is now the first metadata producer for start-turn and provider-output application
   - durable metadata ledger append/reload is now implemented in `metadata.core`
-  - runtime live bridge producer wiring is now landed; broader provider/debug producer wiring is still pending
+  - runtime live bridge and node runtime producer wiring are now landed; broader provider/debug producer wiring is still pending
 - Latest landed stability slice:
   - `tool.registry` now owns deterministic implemented-tool schema fingerprint export through `BuiltinToolRegistry::implemented_schema_fingerprint`
   - `reason.turn` forwards optional `tool_schema_fingerprint` into planner diagnostics without mixing tool truth into request content
