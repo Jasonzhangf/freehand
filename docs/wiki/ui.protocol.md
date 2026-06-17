@@ -17,6 +17,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - query and subscribe stay separate
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
+- CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id
 
 ## Response Mainline
 
@@ -34,6 +35,9 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - client-specific projection gating stays inside the protocol owner, not in apps
 - UI must be able to consume reason-turn state and debug-state projections without owning either truth source
 - transport adapters may drain debug receivers and query protocol snapshots, but projection ownership stays in `freehand-ui-protocol`
+- turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
+- public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
+- cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn
 
 ## Error Mainline
 
@@ -44,6 +48,8 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn
 - source identity fields remain explicit across success and error paths
 - UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors
+- cancelled terminal projection must stay explicit and must not be collapsed into failed or completed UI status
+- CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module
 
 ## Shared Multi-Reference Functions
 
@@ -112,6 +118,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 15 | `UiProtocolState::drain_debug_receiver` | `crates/freehand-ui-protocol/src/lib.rs` | drain a debug.core receiver without making UI a truth writer | debug receiver | applied snapshot count | protocol transport/app adapters | protocol state | bound |
 | 16 | `debug_projection_from_event` | `crates/freehand-ui-protocol/src/lib.rs` | map one debug event to read-only UI debug projection when snapshot exists | freehand-debug event | UiProjection::Debug | protocol tests/transport adapters | projector | bound |
 | 17 | `UiProtocolState::set_checkpoint_snapshot / checkpoint_projection_from_runtime_summary` | `crates/freehand-ui-protocol/src/lib.rs` | store and query read-only checkpoint summaries supplied by runtime owner | runtime checkpoint summary DTO | checkpoint query result | runtime dispatcher / app query handlers | protocol state | bound |
+| 10b | `UiProtocolState::apply_terminal_event / turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text plus terminal status projection | runtime/app protocol consumers | protocol projector | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -125,3 +132,5 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - UI ingress versus truth-writer separation is now locked in the function map
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in UiProtocolState
 - public turn projection is protocol-owned
+- terminal status is now preserved in UiTurnProjection and public conversation status mapping
+- CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn

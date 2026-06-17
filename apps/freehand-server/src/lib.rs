@@ -629,6 +629,10 @@ mod tests {
             .expect("js body 2");
         assert!(js_body.contains("await refreshTurn();"));
         assert!(js_body.contains("refreshCheckpoints"));
+        assert!(js_body.contains("CancelTurn"));
+        assert!(js_body.contains("CancelLatestActiveTurn"));
+        assert!(js_body.contains("event.key !== \"Escape\""));
+        assert!(js_body.contains("cancelActiveTurn"));
 
         server.stop().await;
     }

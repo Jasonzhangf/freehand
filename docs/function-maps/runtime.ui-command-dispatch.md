@@ -18,13 +18,17 @@
 - config-selected bootstrap consumes local node id, paired node id, paired allowed IP, and paired token env from `config.core`
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
 - runtime dispatch owner reads the declared owner target from the envelope
+- live submit registers active turn cancellation state before provider execution and releases the runtime mutex before provider IO
+- `CancelLatestActiveTurn` resolves to the newest active live turn before falling back to latest persisted runtime turn
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 
 ## Response Mainline
 
-- reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections, including the original user prompt for public conversation projection
+- reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections, including the original user prompt and explicit cancelled terminal status for public conversation projection
 - live provider-backed submit incrementally writes reason/debug projection updates into `UiProtocolState` while the turn is still running
 - live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events so blank UI subscriptions can render a complete public conversation stream
+- active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion
+- latest-active cancellation supports Esc during the short window before WebUI has received a concrete `turn_id`
 - live provider-backed multi-round turns keep the original operator prompt in public UI projection instead of exposing internal continuation prompts
 - node-backed direct-message commands return dispatch receipts after owner validation
 - runtime-backed rewind commands restore checkpointed workspace state without mutating reason/session/UI truth directly
@@ -36,6 +40,9 @@
 
 - unsupported runtime command paths return explicit dispatch-port failures
 - missing turn targets for cancel/resume return explicit dispatch-port failures
+- cancelled live turns return explicit cancelled dispatch failure to the original submitter and must not overwrite cancelled UI projection with later provider success
+- live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries
+- `CancelLatestActiveTurn` with no active or persisted turn returns explicit target-not-found
 - missing checkpoint manifests return explicit dispatch target-not-found failures
 - wrong slave target node returns explicit dispatch-port failures
 - missing config, invalid agent selection, paired-token mismatch, or slave-mode host selection return explicit bootstrap failures
@@ -66,12 +73,18 @@
 | 04 | `RuntimeCommandDispatcher::dispatch` | `crates/freehand-runtime/src/lib.rs` | execute protocol-owned dispatch envelope through the correct owner adapter | dispatch envelope | dispatch receipt or failure | app/daemon runtime boundary | reason/node owner adapter | bound |
 | 05 | `RuntimeCommandDispatcher::ui_state` | `crates/freehand-runtime/src/lib.rs` | expose derived UI projection state for runtime-side consumers/tests | runtime dispatcher | shared derived UI state | runtime tests/future daemon | UI protocol state | bound |
 | 06 | `run_live_reason_turn_with_hooks` | `crates/freehand-runtime/src/lib.rs` | execute a live provider turn while streaming reason/debug callbacks to runtime-owned consumers | selected live config + live request + callbacks | live turn outcome plus incremental callbacks | runtime dispatch/tests | live bridge owner | bound |
+| 07 | `RuntimeCommandDispatcher::prepare_live_submit_user_input` | `crates/freehand-runtime/src/lib.rs` | register active live turn cancellation state before provider execution | runtime state + submitted user text | prepared live submit + active cancel token | `RuntimeCommandDispatcher::dispatch` | runtime owner | bound |
+| 08 | `RuntimeCommandDispatcher::dispatch_prepared_live_submit` | `crates/freehand-runtime/src/lib.rs` | run provider-backed live turn outside runtime mutex while honoring active cancel token | prepared live submit | live receipt or cancelled dispatch failure | `RuntimeCommandDispatcher::dispatch` | `run_live_reason_turn_with_hooks` | bound |
+| 09 | `RuntimeCommandDispatcher::dispatch_cancel_turn` | `crates/freehand-runtime/src/lib.rs` | cancel active or persisted turns through reason-owned terminal semantics and UI projection | cancel command turn id | cancel receipt + cancelled projection | `RuntimeCommandDispatcher::dispatch` | reason owner / active cancel registry | bound |
 
 ## Sync Status Against Code
 
 - runtime dispatch owner baseline is now bound in code
 - provider-backed submit input and cancel dispatch through `reason.turn` and update derived UI turn projections
 - live provider submit now streams reason/debug updates into `UiProtocolState` before final receipt is returned
+- live submit now releases the runtime mutex before provider IO so `CancelTurn` can enter concurrently
+- active live cancel now publishes cancelled UI projection immediately and later provider success cannot overwrite it
+- runtime dispatch now supports `CancelLatestActiveTurn` for current-turn stop without requiring the UI to know `turn_id`
 - direct slave message dispatch routes through `node.master-slave`
 - explicit checkpoint rewind dispatch now routes through `runtime.checkpoint-rewind`
 - resume dispatch remains an explicit unsupported runtime path

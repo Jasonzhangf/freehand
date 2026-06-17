@@ -8,6 +8,9 @@
   - runtime dispatch routes to the declared owner module
   - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
   - reason-backed submit/cancel update derived UI state
+  - active live cancel sets a cancel token and publishes cancelled projection without waiting for provider completion
+  - latest-active cancel resolves the current active live turn when UI has not received a concrete `turn_id`
+  - cancelled live provider success must not overwrite the cancelled UI projection or commit a success outcome
   - reason-backed submit projects the original user prompt into derived UI public conversation truth
   - live provider submit incrementally updates derived UI turn/debug state before terminal receipt
   - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately
@@ -20,6 +23,10 @@
   - persisted latest-turn restore coverage
   - next runtime turn ordinal restore coverage
   - submit/cancel reason dispatch coverage
+  - active live cancel immediate receipt coverage
+  - latest-active cancel coverage
+  - cancelled live submit negative coverage proving later provider success cannot replace cancelled projection
+  - live bridge cancellation checkpoint coverage before provider output, tool execution, and terminal write
   - checkpoint rewind dispatch coverage
   - live reason hook-to-ui-state coverage
   - live reason prompt-first projection coverage
@@ -31,6 +38,7 @@
   - owner-routing smoke
   - runtime-derived UI latest-turn smoke
   - runtime-derived UI latest-turn user prompt projection smoke
+  - runtime-derived cancelled terminal projection smoke
   - config-selected runtime bootstrap smoke
   - config-selected live restart/restore smoke
   - runtime checkpoint rewind receipt smoke
@@ -49,6 +57,9 @@
   - provider-backed submit dispatch plus persisted restore/bootstrap is covered
   - live provider submit now streams incremental UI state updates through runtime-owned hooks
   - reason-backed cancel dispatch is covered
+  - active live cancel no longer waits behind provider IO because live submit releases the runtime mutex after active turn registration
+  - latest-active cancel is covered for current-turn stop without a UI-known `turn_id`
+  - active live cancel blocks later provider success projection after cancellation
   - node-backed direct-message dispatch is covered
   - explicit unsupported resume dispatch is covered
   - migrated mainline-call source and generated wiki are kept in sync with this test design

@@ -1,12 +1,12 @@
 # CACHE
 
 - Current branch: `main`.
-- Current milestone: normal WebUI conversation path closed through protocol/runtime/daemon.
+- Current milestone: WebUI/runtime stop-cancel path closed through protocol/runtime/UI.
 - Last verified baseline:
   - `cargo fmt --all --check`
   - `cargo build --workspace`
   - `cargo clippy --workspace --all-targets -- -D warnings`
-  - `cargo test --workspace` -> 216 passed
+  - `cargo test --workspace` -> 221 passed
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - Real provider daemon smoke passed on 2026-06-17:
@@ -21,6 +21,10 @@
   - latest-turn subscribe waits on blank state; query remains snapshot-only
   - live runtime publishes prompt-first UI projection before provider output
   - live multi-round continuation prompts do not replace original public user prompt
+  - WebUI Cancel/Escape sends protocol-owned cancellation, not local-only clearing
+  - `CancelLatestActiveTurn` covers the submit-in-flight window before WebUI receives a concrete `turn_id`
+  - runtime live submit releases the dispatcher mutex before provider IO and active cancel prevents later provider success projection
+  - `UiTurnProjection.terminal_status` preserves cancelled/failed terminal status for public UI mapping
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
 - Docs/mainline sync:
   - updated function maps, test designs, `docs/mainline-calls/**`, and regenerated `docs/wiki/**`

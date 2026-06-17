@@ -6,7 +6,8 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use freehand_blocks::strip_completion_submission_block;
 use freehand_contracts::{
     AgentId, ErrorErr01RuntimeClassified, ReasonReq04ToolCall, ReasonResp01SemanticEvent,
-    ReasonResp02UsageEvent, ReasonResp03TerminalEvent, SemanticEventKind, SessionId, TurnId,
+    ReasonResp02UsageEvent, ReasonResp03TerminalEvent, SemanticEventKind, SessionId,
+    TerminalStatus, TurnId,
 };
 pub use freehand_debug::{
     DebugEvent, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot, DebugTraceEnvelope,
@@ -80,6 +81,7 @@ pub enum UiCommand {
     CancelTurn {
         turn_id: TurnId,
     },
+    CancelLatestActiveTurn {},
     ResumeTurn {
         turn_id: TurnId,
     },
@@ -95,6 +97,7 @@ pub struct UiTurnProjection {
     pub text: Vec<String>,
     pub tool_calls: Vec<String>,
     pub usage: Vec<String>,
+    pub terminal_status: Option<TerminalStatus>,
     pub terminal_text: Option<String>,
     pub errors: Vec<String>,
     pub slave_substream_card: bool,
@@ -435,6 +438,7 @@ impl UiProtocolState {
                 &event.turn_id,
                 slave_substream_card,
             );
+            projection.terminal_status = Some(event.status.clone());
             projection.terminal_text = Some(terminal_text_projection(event));
             projection.clone()
         };
@@ -573,6 +577,7 @@ impl UiProtocolState {
                 text: Vec::new(),
                 tool_calls: Vec::new(),
                 usage: Vec::new(),
+                terminal_status: None,
                 terminal_text: None,
                 errors: Vec::new(),
                 slave_substream_card,
@@ -757,11 +762,19 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
     if let Some(terminal_text) = &projection.terminal_text {
         let public_text = strip_completion_submission_block(terminal_text);
         if !public_text.trim().is_empty() {
+            let status = match projection.terminal_status {
+                Some(TerminalStatus::Cancelled) => "cancelled",
+                Some(TerminalStatus::Failed) => "failed",
+                Some(TerminalStatus::Blocked) => "blocked",
+                Some(TerminalStatus::Interrupted) => "interrupted",
+                Some(TerminalStatus::ToolPending) => "running",
+                Some(TerminalStatus::Success) | None => "completed",
+            };
             items.push(UiConversationItem {
                 kind: UiConversationItemKind::Terminal,
                 title: "Final".to_owned(),
                 body: public_text,
-                status: "completed".to_owned(),
+                status: status.to_owned(),
             });
         }
     }
@@ -833,6 +846,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::SendDirectMessageToSlave { .. } => "send_direct_message_to_slave",
         UiCommand::RewindCheckpoint { .. } => "rewind_checkpoint",
         UiCommand::CancelTurn { .. } => "cancel_turn",
+        UiCommand::CancelLatestActiveTurn { .. } => "cancel_latest_active_turn",
         UiCommand::ResumeTurn { .. } => "resume_turn",
     }
 }
@@ -844,6 +858,7 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::SendDirectMessageToSlave { .. }
             | UiCommand::RewindCheckpoint { .. }
             | UiCommand::CancelTurn { .. }
+            | UiCommand::CancelLatestActiveTurn { .. }
             | UiCommand::ResumeTurn { .. }
     )
 }
@@ -852,6 +867,7 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
     match command {
         UiCommand::SubmitUserInput { .. }
         | UiCommand::CancelTurn { .. }
+        | UiCommand::CancelLatestActiveTurn { .. }
         | UiCommand::ResumeTurn { .. } => ("reason.turn", "crates/freehand-reason"),
         UiCommand::RewindCheckpoint { .. } => {
             ("runtime.checkpoint-rewind", "crates/freehand-runtime")
@@ -898,6 +914,10 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
                 )
             })
             .collect(),
+        terminal_status: input
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
         terminal_text: input.terminal_event.as_ref().map(terminal_text_projection),
         errors: input
             .error_events
@@ -1112,6 +1132,22 @@ mod tests {
             summary: "only final text".to_owned(),
         };
         assert_eq!(terminal_text_projection(&event), "only final text");
+    }
+
+    #[test]
+    fn cancelled_terminal_status_projects_to_public_conversation() {
+        let mut projection = sample_turn_projection(false);
+        projection.terminal_status = Some(TerminalStatus::Cancelled);
+        projection.terminal_text = Some("cancelled by ui command".to_owned());
+
+        let items = public_conversation_items(&projection);
+        let terminal = items
+            .iter()
+            .find(|item| item.kind == UiConversationItemKind::Terminal)
+            .expect("terminal item");
+
+        assert_eq!(terminal.status, "cancelled");
+        assert_eq!(terminal.body, "cancelled by ui command");
     }
 
     #[test]

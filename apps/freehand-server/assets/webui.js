@@ -15,6 +15,7 @@ const state = {
   debug: null,
   checkpoints: [],
   pendingUserInput: null,
+  submitInFlight: false,
   debugEventSource: null,
 };
 
@@ -105,7 +106,14 @@ function renderMessages() {
             : item.kind === "Error"
               ? "failure"
               : "assistant";
-      const statusClass = item.kind === "Error" ? "failed" : item.kind === "Terminal" ? "success" : item.kind === "ToolSummary" ? "running" : "success";
+      const statusClass =
+        item.kind === "Error" || item.status === "failed" || item.status === "cancelled"
+          ? "failed"
+          : item.kind === "Terminal"
+            ? "success"
+            : item.kind === "ToolSummary"
+              ? "running"
+              : "success";
       fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, item.body, variant));
     });
   }
@@ -297,6 +305,42 @@ async function submitUserInput(text) {
   return payload;
 }
 
+function activeTurnId() {
+  return state.turn && state.turn.turn_id ? state.turn.turn_id : null;
+}
+
+async function cancelActiveTurn() {
+  const turnId = activeTurnId();
+  if (!turnId && !state.submitInFlight && !state.pendingUserInput) {
+    composerInput.value = "";
+    state.pendingUserInput = null;
+    commandStatus.textContent = "no active turn; input cleared";
+    renderMessages();
+    return;
+  }
+  const command = turnId
+    ? { CancelTurn: { turn_id: turnId } }
+    : { CancelLatestActiveTurn: {} };
+  commandStatus.textContent = `cancelling ${turnId || "latest active turn"}...`;
+  const response = await fetch(shellConfig().commandEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(command),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    commandStatus.textContent = `cancel failed: ${payload.message || payload.code || "command failed"}`;
+    return;
+  }
+  state.pendingUserInput = null;
+  composerInput.value = "";
+  commandStatus.textContent = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
+  await refreshTurn().catch((error) => {
+    commandStatus.textContent =
+      `${payload.dispatch_status} -> ${payload.target_feature_id} (turn refresh failed: ${error.message})`;
+  });
+}
+
 async function rewindCheckpoint(checkpointId) {
   commandStatus.textContent = `rewinding ${checkpointId}...`;
   const response = await fetch(shellConfig().commandEndpoint, {
@@ -322,10 +366,12 @@ composerForm.addEventListener("submit", async (event) => {
   }
   commandStatus.textContent = "dispatching...";
   state.pendingUserInput = text;
+  state.submitInFlight = true;
   renderMessages();
   try {
     const receipt = await submitUserInput(text);
     composerInput.value = "";
+    state.submitInFlight = false;
     commandStatus.textContent = `${receipt.dispatch_status} -> ${receipt.target_feature_id}`;
     try {
       await refreshTurn();
@@ -336,6 +382,7 @@ composerForm.addEventListener("submit", async (event) => {
         `${receipt.dispatch_status} -> ${receipt.target_feature_id} (turn refresh failed: ${error.message})`;
     }
   } catch (error) {
+    state.submitInFlight = false;
     state.pendingUserInput = null;
     renderMessages();
     commandStatus.textContent = `dispatch failed: ${error.message}`;
@@ -343,10 +390,19 @@ composerForm.addEventListener("submit", async (event) => {
 });
 
 cancelButton.addEventListener("click", () => {
-  composerInput.value = "";
-  state.pendingUserInput = null;
-  commandStatus.textContent = "input cleared";
-  renderMessages();
+  cancelActiveTurn().catch((error) => {
+    commandStatus.textContent = `cancel failed: ${error.message}`;
+  });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") {
+    return;
+  }
+  event.preventDefault();
+  cancelActiveTurn().catch((error) => {
+    commandStatus.textContent = `cancel failed: ${error.message}`;
+  });
 });
 
 refreshTurn().catch((error) => {

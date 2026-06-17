@@ -7,21 +7,25 @@
   - commands act as ingress only and do not make UI a truth writer
   - command ingress accepts only mutation-intent commands and rejects query-route misuse explicitly
   - accepted command ingress is routed to declared owner feature/module before transport dispatch
+  - latest-active cancellation is accepted as mutation intent and routes to `reason.turn`
   - query returns snapshot truth
   - debug query returns per-turn read-only debug snapshot truth
   - checkpoint query returns read-only runtime-owned checkpoint summary projections
   - subscribe returns an initial snapshot plus continuous incremental truth, or waits for the first matching turn when subscribing before any turn exists
   - debug subscribe returns per-turn read-only debug projections
   - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
+  - terminal events preserve both terminal text and terminal status in UI projection
   - debug receiver drain ingests observation-only debug events into protocol state
   - source identity and stream kind stay explicit
   - slave turn presentation divergence remains protocol-safe
   - client-specific projection gating keeps slave card visible only for WebUI
   - public conversation projection preserves the user prompt while hiding reasoning, usage, debug details, and raw completion schema blocks from the main user-visible stream
+  - cancelled terminal status remains visible to public conversation status mapping and is not projected as completed
 - white-box plan:
   - command/projection mapping, status query, terminal projection, slave subscription semantics
   - command ingress acceptance and rejection mapping
   - command dispatch routing mapping
+  - explicit cancel and latest-active cancel owner-routing mapping
   - checkpoint rewind ingress validation and owner-routing mapping
   - checkpoint projection storage and query mapping
   - client-specific projection gating
@@ -40,6 +44,7 @@
   - checkpoint summary query smoke
   - CLI hides slave card while WebUI may render it
   - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries plus user input
+  - cancelled/failed terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
 - project black-box impact:
   - CLI and WebUI consume one protocol truth while rendering different views
@@ -69,3 +74,4 @@
   - debug-state snapshot shape now comes from `freehand-debug`
   - client-specific projection gating remains protocol-owned
   - public turn projection is protocol-owned
+  - terminal status is now preserved in `UiTurnProjection` and public conversation status mapping

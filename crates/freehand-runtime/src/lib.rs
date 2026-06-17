@@ -4,6 +4,7 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -49,7 +50,7 @@ use freehand_ui_protocol::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct LiveReasonTurnRequest {
     pub runtime_home: PathBuf,
     pub session_id: SessionId,
@@ -57,7 +58,10 @@ pub struct LiveReasonTurnRequest {
     pub trace_id: TraceId,
     pub prompt: String,
     pub stream: bool,
+    pub cancel_token: Option<LiveReasonCancelToken>,
 }
+
+pub type LiveReasonCancelToken = Arc<AtomicBool>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveReasonTurnOutcome {
@@ -95,6 +99,8 @@ pub enum RuntimeLiveBridgeError {
     ToolCheckpointFailed(String),
     #[error("live tool execution failed: {0}")]
     ToolExecutionFailed(String),
+    #[error("live turn cancelled")]
+    Cancelled,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -719,6 +725,7 @@ where
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
 
     loop {
+        ensure_live_not_cancelled(&request)?;
         round = round.saturating_add(1);
         let turn_id = derived_turn_id(&request.turn_id, round);
         let trace_id = derived_trace_id(&request.trace_id, round);
@@ -756,6 +763,12 @@ where
             let mut stream_persistence_error = None::<RuntimeLiveBridgeError>;
             executor
                 .execute_stream_with(&provider_ctx(&turn), &semantic_request, |batch| {
+                    if live_is_cancelled(&request) {
+                        stream_persistence_error = Some(RuntimeLiveBridgeError::Cancelled);
+                        return Err(AnthropicExecutorError::Callback(
+                            "live bridge cancelled while reading stream".to_owned(),
+                        ));
+                    }
                     let mut apply_ctx = LiveApplyContext {
                         engine: &engine,
                         persistence: &persistence,
@@ -787,6 +800,7 @@ where
             let outputs = executor
                 .execute_once(&provider_ctx(&turn), &semantic_request)
                 .map_err(map_anthropic_executor_error)?;
+            ensure_live_not_cancelled(&request)?;
             let mut apply_ctx = LiveApplyContext {
                 engine: &engine,
                 persistence: &persistence,
@@ -804,17 +818,20 @@ where
                 schema_rejections.len() as u32,
             )?;
         }
+        ensure_live_not_cancelled(&request)?;
         drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
 
         let completed_tool_calls = pending_completed_tool_calls(&turn, &executed_tool_call_ids);
         if !completed_tool_calls.is_empty() {
             for tool_call in completed_tool_calls {
+                ensure_live_not_cancelled(&request)?;
                 let tool_result = execute_registry_tool_call(
                     &tool_registry,
                     &request.runtime_home,
                     &turn,
                     &tool_call,
                 )?;
+                ensure_live_not_cancelled(&request)?;
                 let output = ProviderSemanticOutput::ToolResultReentry(tool_result.clone());
                 engine.apply_provider_output(&mut turn, output.clone());
                 persistence
@@ -842,6 +859,7 @@ where
             continue;
         }
 
+        ensure_live_not_cancelled(&request)?;
         let provider_text = collect_turn_text(&turn);
         let visible_text = strip_completion_submission_block(&provider_text);
         match parse_completion_submission_block(&provider_text) {
@@ -849,6 +867,7 @@ where
                 .expect("completion submission already validated")
             {
                 CompletionDecision::Completed { .. } | CompletionDecision::Blocked { .. } => {
+                    ensure_live_not_cancelled(&request)?;
                     let _ = engine
                         .submit_completion(&mut turn, &submission)
                         .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
@@ -878,6 +897,7 @@ where
                 }
             },
             Err(rejection) => {
+                ensure_live_not_cancelled(&request)?;
                 let feedback = completion_schema_rejection_feedback(&rejection);
                 schema_rejections.push(rejection.clone());
                 persistence
@@ -999,8 +1019,29 @@ struct RuntimeCommandDispatcherState {
     reason_engine: ReasonTurnEngine,
     session_history: SessionHistory,
     turns: Vec<TurnRecord>,
+    active_turns: Vec<ActiveRuntimeTurn>,
     node_runtime: LocalNodeRuntime,
     next_turn_ordinal: u64,
+}
+
+#[derive(Clone)]
+struct ActiveRuntimeTurn {
+    turn_id: TurnId,
+    session_id: SessionId,
+    trace_id: TraceId,
+    user_text: String,
+    cancel_token: LiveReasonCancelToken,
+}
+
+struct PreparedLiveSubmit {
+    live: RuntimeLiveDispatcherConfig,
+    reason_agent_id: AgentId,
+    master_node_id: String,
+    session_id: SessionId,
+    turn_id: TurnId,
+    trace_id: TraceId,
+    prompt: String,
+    cancel_token: LiveReasonCancelToken,
 }
 
 pub struct RuntimeCommandDispatcher {
@@ -1192,6 +1233,7 @@ impl RuntimeCommandDispatcher {
                 reason_engine: ReasonTurnEngine::new(),
                 session_history,
                 turns,
+                active_turns: Vec::new(),
                 node_runtime,
                 next_turn_ordinal,
             }),
@@ -1215,67 +1257,6 @@ impl RuntimeCommandDispatcher {
         state.next_turn_ordinal += 1;
         let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
         let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
-        if let Some(live) = &state.config.live {
-            let ui_state = Arc::clone(&self.ui_state);
-            let reason_agent_id = state.config.reason_agent_id.clone();
-            let master_node_id = state.config.master_node_id.clone();
-            publish_live_pending_user_projection(
-                &ui_state,
-                &reason_agent_id,
-                &master_node_id,
-                &state.config.session_id,
-                &turn_id,
-                &text,
-            );
-            let outcome = run_live_reason_turn_with_hooks(
-                &live.selected_agent,
-                LiveReasonTurnRequest {
-                    runtime_home: live.runtime_home.clone(),
-                    session_id: state.config.session_id.clone(),
-                    turn_id,
-                    trace_id,
-                    prompt: text,
-                    stream: live.stream,
-                },
-                |event| {
-                    apply_runtime_reason_broadcast(
-                        &ui_state,
-                        &reason_agent_id,
-                        &master_node_id,
-                        event,
-                    );
-                },
-                |event| {
-                    apply_runtime_debug_event(&ui_state, event);
-                },
-            )
-            .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-            let projection = project_runtime_turn(
-                &state.config.reason_agent_id,
-                &state.config.master_node_id,
-                &outcome.turn,
-            );
-            state.turns.extend(outcome.turns);
-            self.ui_state
-                .lock()
-                .expect("lock ui state")
-                .apply_turn_projection(projection);
-            self.refresh_checkpoint_projection_from_config(&state.config)
-                .map_err(map_checkpoint_dispatch_error)?;
-
-            return Ok(UiCommandDispatchReceipt {
-                ingress: envelope.ingress,
-                target_feature_id: envelope.target_feature_id,
-                target_owner_module: envelope.target_owner_module,
-                dispatch_status: format!(
-                    "reason_live_turn_completed rounds={} schema_rejections={} tool_executions={} restored_closed_turns={}",
-                    outcome.rounds,
-                    outcome.schema_rejections.len(),
-                    outcome.tool_executions,
-                    outcome.restored_closed_turns
-                ),
-            });
-        }
 
         let turn = state
             .reason_engine
@@ -1313,12 +1294,161 @@ impl RuntimeCommandDispatcher {
         })
     }
 
+    fn prepare_live_submit_user_input(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        text: String,
+    ) -> Option<PreparedLiveSubmit> {
+        let live = state.config.live.clone()?;
+        state.next_turn_ordinal += 1;
+        let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
+        let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
+        let cancel_token = Arc::new(AtomicBool::new(false));
+        state.active_turns.push(ActiveRuntimeTurn {
+            turn_id: turn_id.clone(),
+            session_id: state.config.session_id.clone(),
+            trace_id: trace_id.clone(),
+            user_text: text.clone(),
+            cancel_token: Arc::clone(&cancel_token),
+        });
+        Some(PreparedLiveSubmit {
+            live,
+            reason_agent_id: state.config.reason_agent_id.clone(),
+            master_node_id: state.config.master_node_id.clone(),
+            session_id: state.config.session_id.clone(),
+            turn_id,
+            trace_id,
+            prompt: text,
+            cancel_token,
+        })
+    }
+
+    fn publish_prepared_live_submit(&self, prepared: &PreparedLiveSubmit) {
+        publish_live_pending_user_projection(
+            &self.ui_state,
+            &prepared.reason_agent_id,
+            &prepared.master_node_id,
+            &prepared.session_id,
+            &prepared.turn_id,
+            &prepared.prompt,
+        );
+    }
+
+    fn dispatch_prepared_live_submit(
+        &self,
+        envelope: UiCommandDispatchEnvelope,
+        prepared: PreparedLiveSubmit,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        self.publish_prepared_live_submit(&prepared);
+        let ui_state = Arc::clone(&self.ui_state);
+        let reason_agent_id = prepared.reason_agent_id.clone();
+        let master_node_id = prepared.master_node_id.clone();
+        let cancel_token = Arc::clone(&prepared.cancel_token);
+        let outcome = run_live_reason_turn_with_hooks(
+            &prepared.live.selected_agent,
+            LiveReasonTurnRequest {
+                runtime_home: prepared.live.runtime_home.clone(),
+                session_id: prepared.session_id.clone(),
+                turn_id: prepared.turn_id.clone(),
+                trace_id: prepared.trace_id.clone(),
+                prompt: prepared.prompt.clone(),
+                stream: prepared.live.stream,
+                cancel_token: Some(Arc::clone(&cancel_token)),
+            },
+            |event| {
+                if !cancel_token.load(Ordering::SeqCst) {
+                    apply_runtime_reason_broadcast(
+                        &ui_state,
+                        &reason_agent_id,
+                        &master_node_id,
+                        event,
+                    );
+                }
+            },
+            |event| {
+                if !cancel_token.load(Ordering::SeqCst) {
+                    apply_runtime_debug_event(&ui_state, event);
+                }
+            },
+        );
+        let outcome = self.finish_live_submit(&prepared, outcome)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!(
+                "reason_live_turn_completed rounds={} schema_rejections={} tool_executions={} restored_closed_turns={}",
+                outcome.rounds,
+                outcome.schema_rejections.len(),
+                outcome.tool_executions,
+                outcome.restored_closed_turns
+            ),
+        })
+    }
+
+    fn finish_live_submit(
+        &self,
+        prepared: &PreparedLiveSubmit,
+        outcome: Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError>,
+    ) -> Result<LiveReasonTurnOutcome, UiCommandDispatchPortError> {
+        let mut state = self.state.lock().expect("lock runtime dispatcher state");
+        let active = remove_active_turn(&mut state.active_turns, &prepared.turn_id);
+        let was_cancelled = active
+            .as_ref()
+            .is_some_and(|turn| turn.cancel_token.load(Ordering::SeqCst))
+            || prepared.cancel_token.load(Ordering::SeqCst);
+        if was_cancelled {
+            return Err(UiCommandDispatchPortError::DispatchFailed(
+                RuntimeLiveBridgeError::Cancelled.to_string(),
+            ));
+        }
+        let outcome =
+            outcome.map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        let projection = project_runtime_turn(
+            &state.config.reason_agent_id,
+            &state.config.master_node_id,
+            &outcome.turn,
+        );
+        state.turns.extend(outcome.turns.clone());
+        self.ui_state
+            .lock()
+            .expect("lock ui state")
+            .apply_turn_projection(projection);
+        self.refresh_checkpoint_projection_from_config(&state.config)
+            .map_err(map_checkpoint_dispatch_error)?;
+        Ok(outcome)
+    }
+
     fn dispatch_cancel_turn(
         &self,
         state: &mut RuntimeCommandDispatcherState,
         envelope: UiCommandDispatchEnvelope,
         turn_id: TurnId,
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        if let Some(active) = state
+            .active_turns
+            .iter()
+            .find(|active| active.turn_id == turn_id)
+            .cloned()
+        {
+            active.cancel_token.store(true, Ordering::SeqCst);
+            publish_live_cancelled_projection(
+                &self.ui_state,
+                &state.config.reason_agent_id,
+                &state.config.master_node_id,
+                &active.session_id,
+                &active.turn_id,
+                &active.trace_id,
+                &active.user_text,
+            );
+            return Ok(UiCommandDispatchReceipt {
+                ingress: envelope.ingress,
+                target_feature_id: envelope.target_feature_id,
+                target_owner_module: envelope.target_owner_module,
+                dispatch_status: "reason_live_turn_cancel_requested".to_owned(),
+            });
+        }
+
         let turn = state
             .turns
             .iter_mut()
@@ -1329,7 +1459,7 @@ impl RuntimeCommandDispatcher {
 
         state
             .reason_engine
-            .fail_turn(turn, "cancelled by ui command");
+            .cancel_turn(turn, "cancelled by ui command");
         let projection = project_runtime_turn(
             &state.config.reason_agent_id,
             &state.config.master_node_id,
@@ -1346,6 +1476,24 @@ impl RuntimeCommandDispatcher {
             target_owner_module: envelope.target_owner_module,
             dispatch_status: "reason_turn_cancelled".to_owned(),
         })
+    }
+
+    fn dispatch_cancel_latest_active_turn(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        if let Some(active) = state.active_turns.last().cloned() {
+            return self.dispatch_cancel_turn(state, envelope, active.turn_id);
+        }
+        let turn_id = state
+            .turns
+            .last()
+            .map(|turn| turn.request.turn_id.clone())
+            .ok_or_else(|| {
+                UiCommandDispatchPortError::TargetNotFound("latest-active-turn".to_owned())
+            })?;
+        self.dispatch_cancel_turn(state, envelope, turn_id)
     }
 
     fn dispatch_resume_turn(
@@ -1449,13 +1597,25 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
         &self,
         envelope: UiCommandDispatchEnvelope,
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        if let UiCommand::SubmitUserInput { text } = envelope.command.clone() {
+            let prepared = {
+                let mut state = self.state.lock().expect("lock runtime dispatcher state");
+                self.prepare_live_submit_user_input(&mut state, text.clone())
+            };
+            if let Some(prepared) = prepared {
+                return self.dispatch_prepared_live_submit(envelope, prepared);
+            }
+            let mut state = self.state.lock().expect("lock runtime dispatcher state");
+            return self.dispatch_submit_user_input(&mut state, envelope, text);
+        }
+
         let mut state = self.state.lock().expect("lock runtime dispatcher state");
         match envelope.command.clone() {
-            UiCommand::SubmitUserInput { text } => {
-                self.dispatch_submit_user_input(&mut state, envelope, text)
-            }
             UiCommand::CancelTurn { turn_id } => {
                 self.dispatch_cancel_turn(&mut state, envelope, turn_id)
+            }
+            UiCommand::CancelLatestActiveTurn {} => {
+                self.dispatch_cancel_latest_active_turn(&mut state, envelope)
             }
             UiCommand::ResumeTurn { turn_id } => self.dispatch_resume_turn(envelope, turn_id),
             UiCommand::SendDirectMessageToSlave { node_id, text } => {
@@ -1500,6 +1660,16 @@ fn map_checkpoint_dispatch_error(err: RuntimeCheckpointError) -> UiCommandDispat
     }
 }
 
+fn remove_active_turn(
+    active_turns: &mut Vec<ActiveRuntimeTurn>,
+    turn_id: &TurnId,
+) -> Option<ActiveRuntimeTurn> {
+    let index = active_turns
+        .iter()
+        .position(|active| &active.turn_id == turn_id)?;
+    Some(active_turns.remove(index))
+}
+
 fn provider_ctx(turn: &TurnRecord) -> freehand_provider_core::ProviderEventContext {
     freehand_provider_core::ProviderEventContext {
         agent_id: turn.request.agent_id.clone(),
@@ -1512,6 +1682,22 @@ fn provider_ctx(turn: &TurnRecord) -> freehand_provider_core::ProviderEventConte
 
 fn map_anthropic_executor_error(err: AnthropicExecutorError) -> RuntimeLiveBridgeError {
     RuntimeLiveBridgeError::AnthropicExecutorFailed(err.to_string())
+}
+
+fn live_is_cancelled(request: &LiveReasonTurnRequest) -> bool {
+    request
+        .cancel_token
+        .as_ref()
+        .is_some_and(|token| token.load(Ordering::SeqCst))
+}
+
+fn ensure_live_not_cancelled(
+    request: &LiveReasonTurnRequest,
+) -> Result<(), RuntimeLiveBridgeError> {
+    if live_is_cancelled(request) {
+        return Err(RuntimeLiveBridgeError::Cancelled);
+    }
+    Ok(())
 }
 
 fn provider_descriptor(selected: &SelectedAgentConfig) -> ProviderDescriptor {
@@ -1881,6 +2067,44 @@ fn publish_live_pending_user_projection(
         ));
 }
 
+fn publish_live_cancelled_projection(
+    ui_state: &Arc<Mutex<UiProtocolState>>,
+    reason_agent_id: &AgentId,
+    master_node_id: &str,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    trace_id: &TraceId,
+    user_text: &str,
+) {
+    ui_state
+        .lock()
+        .expect("lock ui state")
+        .apply_turn_projection(turn_projection_for_client(
+            turn_projection_from_events(TurnProjectionInput {
+                source_agent_id: reason_agent_id.clone(),
+                source_node_id: master_node_id.to_owned(),
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                user_text: Some(user_text.to_owned()),
+                semantic_events: Vec::new(),
+                tool_calls: Vec::new(),
+                usage_events: Vec::new(),
+                terminal_event: Some(freehand_contracts::ReasonResp03TerminalEvent {
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                    trace_id: trace_id.clone(),
+                    feature_id: FeatureId::new("runtime.ui-command-dispatch"),
+                    agent_id: reason_agent_id.clone(),
+                    status: freehand_contracts::TerminalStatus::Cancelled,
+                    summary: "cancelled by ui command".to_owned(),
+                }),
+                error_events: Vec::new(),
+                slave_substream_card: false,
+            }),
+            UiClientKind::WebUi,
+        ));
+}
+
 fn project_runtime_turn(
     reason_agent_id: &AgentId,
     master_node_id: &str,
@@ -2044,6 +2268,7 @@ mod tests {
             trace_id: TraceId::new("trace-live"),
             prompt: "reply exactly pong".to_owned(),
             stream,
+            cancel_token: None,
         }
     }
 
@@ -2526,6 +2751,24 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
+    fn live_bridge_cancel_token_stops_before_tool_execution() {
+        let cancel_token = Arc::new(AtomicBool::new(true));
+        let mut request = live_request(false);
+        request.cancel_token = Some(cancel_token);
+
+        let err = run_live_reason_turn(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            request,
+        )
+        .expect_err("cancelled live bridge");
+
+        assert_eq!(err, RuntimeLiveBridgeError::Cancelled);
+    }
+
+    #[test]
     fn live_bridge_retries_invalid_schema_then_completes() {
         let _cwd_lock = cwd_lock()
             .lock()
@@ -2895,6 +3138,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 trace_id: TraceId::new("runtime-trace-1"),
                 prompt: "first request".to_owned(),
                 stream: false,
+                cancel_token: None,
             },
         )
         .expect("first live turn");
@@ -3043,6 +3287,151 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 );
             }
             other => panic!("unexpected latest turn query: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cancel_latest_active_turn_dispatches_to_latest_reason_turn() {
+        let runtime = runtime();
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "cancel latest".to_owned(),
+                })
+                .expect("submit envelope"),
+            )
+            .expect("submit");
+
+        let receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::CancelLatestActiveTurn {})
+                    .expect("cancel latest envelope"),
+            )
+            .expect("cancel latest receipt");
+        assert_eq!(receipt.ingress.command_kind, "cancel_latest_active_turn");
+        assert_eq!(receipt.dispatch_status, "reason_turn_cancelled");
+
+        let latest = runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui state")
+            .query(&UiCommand::QueryLatestActiveTurn)
+            .expect("query");
+        match latest {
+            UiQueryResult::Turn(Some(turn)) => {
+                assert_eq!(turn.terminal_status, Some(TerminalStatus::Cancelled));
+            }
+            other => panic!("unexpected latest turn query: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn active_live_cancel_returns_before_provider_finishes_and_blocks_success_projection() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let first_chunk = concat!(
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"working\"}}\n\n"
+        )
+        .to_owned();
+        let remaining_chunks = complete_stream_response("late success");
+        let (base_url, _rx, released_rx, continue_tx, handle) =
+            spawn_incremental_stream_server(first_chunk, remaining_chunks);
+        let runtime = Arc::new(
+            RuntimeCommandDispatcher::from_selected_agent_with_live(
+                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+                temp_runtime_home(),
+                true,
+            )
+            .expect("runtime"),
+        );
+        let submit_runtime = Arc::clone(&runtime);
+        let submit_handle = thread::spawn(move || {
+            submit_runtime.dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "start long stream".to_owned(),
+                })
+                .expect("submit envelope"),
+            )
+        });
+
+        loop {
+            let latest = runtime
+                .ui_state()
+                .lock()
+                .expect("lock ui state")
+                .query(&UiCommand::QueryLatestActiveTurn)
+                .expect("query");
+            if matches!(latest, UiQueryResult::Turn(Some(_))) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let cancel_receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::CancelTurn {
+                    turn_id: TurnId::new("runtime-turn-1"),
+                })
+                .expect("cancel envelope"),
+            )
+            .expect("cancel receipt");
+        assert_eq!(
+            cancel_receipt.dispatch_status,
+            "reason_live_turn_cancel_requested"
+        );
+
+        let latest = runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui state")
+            .query(&UiCommand::QueryLatestActiveTurn)
+            .expect("query");
+        match latest {
+            UiQueryResult::Turn(Some(turn)) => {
+                assert_eq!(turn.terminal_status, Some(TerminalStatus::Cancelled));
+                let public = freehand_ui_protocol::public_turn_projection(turn);
+                assert_eq!(
+                    public
+                        .public_conversation
+                        .last()
+                        .map(|item| item.status.as_str()),
+                    Some("cancelled")
+                );
+            }
+            other => panic!("unexpected cancelled latest turn: {other:?}"),
+        }
+
+        continue_tx.send(()).expect("release provider");
+        let released = released_rx.recv().expect("release status");
+        assert!(released);
+        let submit_err = submit_handle
+            .join()
+            .expect("submit thread")
+            .expect_err("submit should observe cancellation");
+        assert_eq!(
+            submit_err,
+            UiCommandDispatchPortError::DispatchFailed("live turn cancelled".to_owned())
+        );
+        handle.join().expect("join provider");
+
+        let latest = runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui state")
+            .query(&UiCommand::QueryLatestActiveTurn)
+            .expect("query");
+        match latest {
+            UiQueryResult::Turn(Some(turn)) => {
+                assert_eq!(turn.terminal_status, Some(TerminalStatus::Cancelled));
+                assert!(
+                    turn.terminal_text
+                        .as_deref()
+                        .is_some_and(|text| text.contains("cancelled"))
+                );
+            }
+            other => panic!("unexpected final cancelled latest turn: {other:?}"),
         }
     }
 

@@ -17,7 +17,9 @@
     "transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection",
     "transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot",
     "transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing",
-    "the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only"
+    "the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only",
+    "front-end cancel button and Escape key send protocol-owned CancelTurn commands through command ingress",
+    "front-end Escape sends CancelLatestActiveTurn when submit is in flight but no concrete turn_id has reached the browser yet"
   ],
   "response_mainline": [
     "app boundary renders a protocol-driven WebUI page shell; live content is populated from existing query and SSE endpoints",
@@ -30,7 +32,10 @@
     "main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible",
     "theme module owns white and black theme switching and is separated from WebUI layout/runtime scripts",
     "CLI and WebUI divergence remains a rendering decision only, not a protocol decision",
-    "the app is a render-only transport boundary, not a reasoning or provider boundary"
+    "the app is a render-only transport boundary, not a reasoning or provider boundary",
+    "front-end cancel handling clears pending local input only after sending CancelTurn for the current active turn and refreshing protocol truth",
+    "terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success",
+    "front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window"
   ],
   "error_mainline": [
     "invalid smoke input or missing projection returns explicit app error",
@@ -38,7 +43,8 @@
     "unknown static assets return explicit 404",
     "checkpoint query uses protocol state only and must not parse runtime checkpoint files in the app boundary",
     "blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn",
-    "direct reason, provider, node, or config coupling is a policy violation, not a fallback path"
+    "direct reason, provider, node, or config coupling is a policy violation, not a fallback path",
+    "cancel without an active turn clears only local input and does not invent a runtime mutation"
   ],
   "shared_functions": [
     {
@@ -165,6 +171,17 @@
       "caller": "WebUI shell",
       "callee": "ui.protocol state",
       "binding_status": "bound"
+    },
+    {
+      "step": "11",
+      "symbol_path": "cancelActiveTurn",
+      "file_path": "apps/freehand-server/assets/webui.js",
+      "responsibility": "send CancelTurn for the active protocol turn from button or Escape key",
+      "input_semantic": "latest protocol turn id",
+      "output_semantic": "command dispatch receipt plus refreshed projection",
+      "caller": "WebUI shell",
+      "callee": "POST /ui/command",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -180,6 +197,8 @@
     "WebUI submit path still explicitly refreshes latest turn truth after a successful command receipt",
     "WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files",
     "app dependency boundary is intended to remain protocol-only and must not import reason, provider, node, or config semantics",
-    "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes"
+    "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes",
+    "WebUI Cancel button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input",
+    "WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn"
   ]
 }

@@ -12,17 +12,21 @@
     "config-selected bootstrap consumes local node id, paired node id, paired allowed IP, and paired token env from `config.core`",
     "live bootstrap may restore persisted session truth and prior turn projections before the next command runs",
     "runtime dispatch owner reads the declared owner target from the envelope",
-    "runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics"
+    "runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics",
+    "live submit registers an active turn cancel token before provider execution and releases the runtime mutex before running provider IO",
+    "CancelLatestActiveTurn resolves to the newest active live turn before falling back to latest persisted runtime turn"
   ],
   "response_mainline": [
-    "reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections, including the original user prompt for public conversation projection",
+    "reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections, including the original user prompt and explicit cancelled terminal status for public conversation projection",
     "live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events and incrementally writes reason/debug projection updates while the turn is still running",
     "live provider-backed multi-round turns keep the original operator prompt in public UI projection instead of exposing internal continuation prompts",
     "node-backed direct-message commands return dispatch receipts after owner validation",
     "runtime-backed rewind commands restore checkpointed workspace state without mutating reason/session/UI truth directly",
     "config-selected runtime bootstrap returns one dispatcher for the requested agent",
     "live bootstrap rehydrates `UiProtocolState` from persisted turn truth and resumes runtime turn-id allocation from persisted ordinals",
-    "runtime-owned UI state reflects derived projections only, not authoritative turn truth"
+    "runtime-owned UI state reflects derived projections only, not authoritative turn truth",
+    "active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion",
+    "latest-active cancellation supports Esc during the short window before WebUI has received a concrete turn_id"
   ],
   "error_mainline": [
     "unsupported runtime command paths return explicit dispatch-port failures",
@@ -30,7 +34,10 @@
     "missing checkpoint manifests return explicit dispatch target-not-found failures",
     "wrong slave target node returns explicit dispatch-port failures",
     "missing config, invalid agent selection, paired-token mismatch, or slave-mode host selection return explicit bootstrap failures",
-    "invalid persisted recovery truth returns explicit runtime bootstrap failure"
+    "invalid persisted recovery truth returns explicit runtime bootstrap failure",
+    "cancelled live turns return explicit cancelled dispatch failure to the original submitter and must not overwrite cancelled UI projection with later provider success",
+    "live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries",
+    "CancelLatestActiveTurn with no active or persisted turn returns explicit target-not-found"
   ],
   "shared_functions": [
     {
@@ -127,6 +134,39 @@
       "caller": "runtime dispatch/tests",
       "callee": "live bridge owner",
       "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "RuntimeCommandDispatcher::prepare_live_submit_user_input",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "register active live turn cancellation state before provider execution",
+      "input_semantic": "runtime state plus submitted user text",
+      "output_semantic": "prepared live submit plus active cancel token",
+      "caller": "RuntimeCommandDispatcher::dispatch",
+      "callee": "runtime owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "RuntimeCommandDispatcher::dispatch_prepared_live_submit",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "run provider-backed live turn outside runtime mutex while honoring active cancel token",
+      "input_semantic": "prepared live submit",
+      "output_semantic": "live receipt or cancelled dispatch failure",
+      "caller": "RuntimeCommandDispatcher::dispatch",
+      "callee": "run_live_reason_turn_with_hooks",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "RuntimeCommandDispatcher::dispatch_cancel_turn",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "cancel active or persisted turns through reason-owned terminal semantics and UI projection",
+      "input_semantic": "cancel command turn id",
+      "output_semantic": "cancel receipt plus cancelled projection",
+      "caller": "RuntimeCommandDispatcher::dispatch",
+      "callee": "reason owner / active cancel registry",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -139,6 +179,9 @@
     "config-selected runtime bootstrap is now bound in code",
     "config-selected runtime bootstrap uses explicit peer-topology config instead of synthetic paired node ids",
     "config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists",
-    "generated wiki must be regenerated from `docs/mainline-calls/runtime.ui-command-dispatch.json` when this function-map truth changes"
+    "generated wiki must be regenerated from `docs/mainline-calls/runtime.ui-command-dispatch.json` when this function-map truth changes",
+    "live submit now releases the runtime mutex before provider IO so CancelTurn can enter concurrently",
+    "active live cancel now publishes cancelled UI projection immediately and later provider success cannot overwrite it",
+    "runtime dispatch now supports CancelLatestActiveTurn for current-turn stop without requiring the UI to know turn_id"
   ]
 }

@@ -531,3 +531,10 @@
   - added runtime summary list from manifest + ledger truth; no UI/app filesystem parsing
   - added `QueryCheckpoints` and WebUI secondary checkpoint inspector; no checkpoint SSE in this slice
   - verification evidence: runtime/server/daemon targeted tests passed; workspace build/fmt/clippy/test/mainlines/gates passed
+- 2026-06-17: UI stop/cancel closeout
+  - root cause: WebUI Cancel only cleared local input, and runtime live submit held dispatcher mutex while provider IO ran, so `CancelTurn` could not enter until provider completion
+  - reason owner now has `ReasonTurnEngine::cancel_turn` and writes `TerminalStatus::Cancelled`
+  - UI protocol now preserves `terminal_status` separately from terminal text and maps cancelled terminal public status to `cancelled`
+  - runtime live submit now registers an active cancel token, releases runtime mutex before provider IO, checks cancellation across live-loop boundaries, and prevents later provider success from overwriting cancelled projection
+  - WebUI Cancel/Escape now sends `CancelTurn`; if submit is in flight before a concrete `turn_id` reaches the browser, it sends protocol-owned `CancelLatestActiveTurn`
+  - verification evidence: `cargo fmt --all --check`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` -> 221 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`

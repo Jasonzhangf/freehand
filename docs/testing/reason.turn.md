@@ -8,18 +8,20 @@
   - debug events emit to `debug.core` without mutating turn truth
   - tool result re-entry returns to the owning turn
   - completion schema controls terminal acceptance
+  - cancellation writes an explicit cancelled terminal event rather than failed/success terminal truth
   - completion schema is extracted from tagged JSON in model text
   - invalid completion schema feedback identifies exact invalid entries
   - invalid schema retry exhaustion writes failed terminal outcome
   - start-turn request payload preserves typed context segments through provider payload contract
   - start-turn rewrite mode/version are sourced from session history truth
 - white-box plan:
-  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability, debug emission
+  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, cancelled terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability, debug emission
 - module black-box plan:
   - reason turn boundary emits semantic stream and handles rejection/retry behavior
   - reason turn boundary emits debug observations through `debug.core`
   - completion parser rejects missing tag, malformed JSON, invalid claim, missing required field, and empty required field
   - reason turn boundary propagates explicit rewrite gate diagnostics
+  - reason turn boundary broadcasts cancelled terminal status for runtime/user cancellation
 - project black-box impact:
   - terminal projection reaches UI boundary correctly
 - fixtures / replay inputs / runtime evidence paths:
@@ -33,6 +35,7 @@
   - rewrite trigger policy exists in `freehand-blocks`, and `ReasonRewriteRuntime` now wires policy-approved rewrite gates into session history
   - provider usage can feed rewrite policy through shared prompt-token conversion
   - debug emission to `debug.core` is landed for start-turn, provider-output, completion, and fail-turn milestones
+  - explicit cancelled terminal write and broadcast are landed through `ReasonTurnEngine::cancel_turn`
   - current known gap is observation error surfacing when `DebugHub::emit` returns a sink-dispatch failure
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with reason turn owner code and function map updates

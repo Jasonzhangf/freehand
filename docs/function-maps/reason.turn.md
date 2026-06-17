@@ -28,6 +28,7 @@
 - turn truth broadcasts semantic events for reasoning, text, tool, usage, terminal, and error
 - turn lifecycle and provider-output milestones may emit debug events into `debug.core`
 - terminal result is projected from validated completion schema, not raw provider finish reason
+- cancel requests become explicit cancelled terminal events through the reason owner rather than failed terminal events
 - completion schema is extracted from `<freehand_completion>...</freehand_completion>` tagged JSON before validation
 - invalid completion schema feedback identifies concrete invalid schema entries
 - provider metadata signals may influence orchestration decisions only through explicit typed fields, never by hidden prompt mutation
@@ -37,6 +38,7 @@
 - invalid completion schema is rejected and reprompted with field-level feedback
 - invalid completion schema retries are capped at 3 before a failed terminal outcome is written
 - provider `finish_reason=stop` or `finish_reason=end_turn` does not end the turn by itself
+- UI/runtime cancellation is represented as `TerminalStatus::Cancelled`, not as a failed or successful terminal outcome
 - raw provider events go to debug ledger, not session truth
 - debug emission is observation-only and must not mutate turn/session truth
 - metadata/request boundary violations must be treated as architecture errors, not silently tolerated
@@ -73,12 +75,14 @@
 | 04 | `validate_completion_submission` | `crates/freehand-blocks/src/lib.rs` | validate completion schema | completion submission | completion decision or rejection | turn state writer | terminal validator | bound |
 | 05 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | accept or reject terminal outcome | candidate completion payload | terminal event or rejection | turn state writer | terminal validator | bound |
 | 06 | `ReasonTurnEngine::fail_turn` | `crates/freehand-reason/src/lib.rs` | write explicit failed terminal outcome after retry exhaustion | failure reason | failed terminal event | turn/live runtime | turn state writer | bound |
+| 06a | `ReasonTurnEngine::cancel_turn` | `crates/freehand-reason/src/lib.rs` | write explicit cancelled terminal outcome for user/runtime cancellation | cancellation reason | cancelled terminal event | runtime cancel dispatch | turn state writer | bound |
 | 07 | `ReasonTurnEngine::project_session` | `crates/freehand-reason/src/lib.rs` | project conversation view from turns | turn records | projected session view | UI/session consumers | projector | bound |
 | 08 | `ReasonTurnEngine::emit_debug` | `crates/freehand-reason/src/lib.rs` | emit observation-only debug event for turn lifecycle or provider-output milestones | turn truth + scene metadata + status/detail text | debug event fanout | reason orchestrator | `DebugHub::emit` | bound |
 
 ## Sync Status Against Code
 
 - turn startup, provider-output materialization, completion parsing/validation, failed terminal writing, and session projection are bound in code
+- explicit cancelled terminal writing via `ReasonTurnEngine::cancel_turn` is bound in code
 - planner baseline is implemented and called from turn startup
 - `reason.session-history` now owns rewrite version and explicit rewrite-gate orchestration for turn startup
 - `ReasonRewriteRuntime` now provides the baseline consumer path for calling `reason.rewrite-policy` and then triggering compaction/rollback/resume gates

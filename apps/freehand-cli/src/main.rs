@@ -119,6 +119,7 @@ fn run_reason_live(args: Vec<String>) -> Result<String, String> {
             trace_id: TraceId::new(format!("cli-live-trace-{stamp}")),
             prompt: args[3].clone(),
             stream,
+            cancel_token: None,
         },
     )
     .map_err(|err| err.to_string())?;

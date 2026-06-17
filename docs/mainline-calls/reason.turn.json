@@ -23,7 +23,8 @@
     "terminal result is projected from validated completion schema, not raw provider finish reason",
     "completion schema is extracted from `<freehand_completion>...</freehand_completion>` tagged JSON before validation",
     "invalid completion schema feedback identifies concrete invalid schema entries",
-    "provider metadata signals may influence orchestration decisions only through explicit typed fields, never by hidden prompt mutation"
+    "provider metadata signals may influence orchestration decisions only through explicit typed fields, never by hidden prompt mutation",
+    "cancel requests become explicit cancelled terminal events through the reason owner rather than failed terminal events"
   ],
   "error_mainline": [
     "invalid completion schema is rejected and reprompted with field-level feedback",
@@ -31,7 +32,8 @@
     "provider finish_reason=stop or finish_reason=end_turn does not end the turn by itself",
     "raw provider events go to debug ledger, not session truth",
     "debug emission is observation-only and must not mutate turn/session truth",
-    "metadata/request boundary violations must be treated as architecture errors, not silently tolerated"
+    "metadata/request boundary violations must be treated as architecture errors, not silently tolerated",
+    "UI/runtime cancellation is represented as TerminalStatus::Cancelled, not as a failed or successful terminal outcome"
   ],
   "shared_functions": [
     {
@@ -179,6 +181,17 @@
       "caller": "reason orchestrator",
       "callee": "DebugHub::emit",
       "binding_status": "bound"
+    },
+    {
+      "step": "06a",
+      "symbol_path": "ReasonTurnEngine::cancel_turn",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "write explicit cancelled terminal outcome for user/runtime cancellation",
+      "input_semantic": "cancellation reason",
+      "output_semantic": "cancelled terminal event",
+      "caller": "runtime cancel dispatch",
+      "callee": "turn state writer",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -191,6 +204,7 @@
     "current debug emission remains observation-only; `DebugHub::emit` failures are not promoted into turn truth or reason error events",
     "remaining gap is final CLI/server runtime loop integration with real provider usage events and persisted recovery payloads",
     "metadata/request hard isolation is now reflected in request content vs planner diagnostics split, but not yet enforced by a dedicated static gate or separate envelope types",
-    "generated wiki must be regenerated from `docs/mainline-calls/reason.turn.json` when this function-map truth changes"
+    "generated wiki must be regenerated from `docs/mainline-calls/reason.turn.json` when this function-map truth changes",
+    "reason owner now has explicit cancelled terminal writing via ReasonTurnEngine::cancel_turn"
   ]
 }

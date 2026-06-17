@@ -21,6 +21,8 @@
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
 - transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing
+- front-end cancel button and Escape key send protocol-owned `CancelTurn` commands through command ingress
+- front-end Escape sends `CancelLatestActiveTurn` when submit is in flight but no concrete `turn_id` has reached the browser yet
 - the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only
 
 ## Response Mainline
@@ -30,7 +32,10 @@
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
 - SSE subscribe routes now emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe must stay open on blank state until a turn exists
 - WebUI submit success path still actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing
+- WebUI cancel path sends `CancelTurn` for the current active turn, clears pending local input only after dispatch, and refreshes protocol truth
+- WebUI cancel path uses `CancelTurn` when `turn_id` is known and `CancelLatestActiveTurn` during the submit-in-flight pre-SSE window
 - front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes, including the user prompt in the public conversation stream
+- terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
 - theme module owns white/black theme switching and is separated from WebUI layout/runtime scripts
 - CLI and WebUI divergence remains a rendering decision only, not a protocol decision
@@ -41,6 +46,7 @@
 - invalid smoke input or missing projection returns explicit app error
 - transport/render wiring failures are surfaced explicitly
 - unknown static assets return explicit 404
+- cancel without an active turn clears only local input and does not invent a runtime mutation
 - direct reason/provider/node/config coupling is a policy violation, not a fallback path
 
 ## Shared Multi-Reference Functions
@@ -65,6 +71,7 @@
 | 07 | `initializeThemeToggle` | `apps/freehand-server/assets/theme.js` | switch white/black visual theme only | UI theme choice | body theme class + persisted localStorage setting | WebUI shell | theme module | bound |
 | 08 | `subscription_event_stream` / `projection_to_sse_event` | `apps/freehand-server/src/lib.rs` | convert protocol-owned subscription updates into continuous HTTP SSE delivery | `UiSubscriptionEvent` receiver + selector | streamed SSE events | subscribe routes | protocol state | bound |
 | 09 | `refreshTurn` / `renderMessages` / submit handler | `apps/freehand-server/assets/webui.js` | consume protocol query/SSE public turn payloads, re-query latest turn after command receipt, and render semantic cards without owning filtering semantics | `UiPublicTurnProjection` JSON + command dispatch receipt | DOM message blocks + command status | WebUI shell | existing protocol endpoints | bound |
+| 10 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` for the active protocol turn from button or Escape key | latest protocol turn id | command dispatch receipt + refreshed projection | WebUI shell | `/ui/command` | bound |
 
 ## Sync Status Against Code
 
@@ -78,5 +85,7 @@
 - protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
 - WebUI submit path still explicitly refreshes latest turn truth after a successful command receipt
+- WebUI Cancel button and Escape key now send `CancelTurn` through protocol command ingress instead of only clearing local input
+- WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics
 - generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes

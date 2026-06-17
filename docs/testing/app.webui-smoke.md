@@ -12,6 +12,8 @@
   - CLI and WebUI divergences stay protocol-safe
   - app boundary remains decoupled from reason/provider/node/config semantics
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
+  - WebUI Cancel button and Escape key send `CancelTurn` through command ingress when a turn is active
+  - WebUI Escape sends latest-active cancellation during submit-in-flight before a concrete `turn_id` is known
   - latest-turn subscribe should wait for the first turn instead of failing on blank state
 - white-box plan:
   - page shell render helper
@@ -23,6 +25,8 @@
   - WebUI theme asset smoke
   - WebUI JS asset smoke
   - WebUI submit-success path refresh smoke
+  - WebUI cancel button / Escape key command smoke
+  - WebUI submit-in-flight latest-active cancel smoke
   - WebUI command ingress dispatch receipt smoke
   - WebUI command ingress query-route-misuse rejection smoke
   - WebUI query projection smoke
@@ -31,6 +35,7 @@
   - WebUI blank-state latest-turn SSE wait smoke
   - WebUI debug SSE initial snapshot plus later update smoke
   - WebUI latest-turn query/SSE public projection excludes raw completion schema and internal reasoning from public conversation while preserving user input
+  - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
   - app dependency boundary smoke
@@ -51,6 +56,8 @@
   - HTTP query and continuous SSE subscribe transport smoke is landed
   - HTTP command ingress dispatch-receipt/failure smoke is landed
   - submit-success path now refreshes latest turn truth after command receipt
+  - cancel button and Escape key now send `CancelTurn` instead of only clearing local input
+  - submit-in-flight cancel path uses `CancelLatestActiveTurn` before a concrete `turn_id` arrives
   - query/SSE now return a public turn payload with `public_conversation` for main cards
   - protocol-only transport library reuse is landed
   - app remains protocol-only by dependency gate

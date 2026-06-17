@@ -13,7 +13,8 @@
     "accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary",
     "runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics",
     "query and subscribe stay separate",
-    "subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams"
+    "subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams",
+    "CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id"
   ],
   "response_mainline": [
     "query returns snapshots",
@@ -29,7 +30,10 @@
     "slave turn may surface as WebUI-only separate card while staying in one protocol truth",
     "client-specific projection gating stays inside the protocol owner, not in apps",
     "UI must be able to consume reason-turn state and debug-state projections without owning either truth source",
-    "transport adapters may drain debug receivers and query protocol snapshots, but projection ownership stays in `freehand-ui-protocol`"
+    "transport adapters may drain debug receivers and query protocol snapshots, but projection ownership stays in `freehand-ui-protocol`",
+    "turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states",
+    "public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed",
+    "cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn"
   ],
   "error_mainline": [
     "invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors",
@@ -38,7 +42,9 @@
     "checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback",
     "blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn",
     "source identity fields remain explicit across success and error paths",
-    "UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors"
+    "UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors",
+    "cancelled terminal projection must stay explicit and must not be collapsed into failed or completed UI status",
+    "CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module"
   ],
   "shared_functions": [
     {
@@ -330,6 +336,17 @@
       "caller": "runtime dispatcher / app query handlers",
       "callee": "protocol state",
       "binding_status": "bound"
+    },
+    {
+      "step": "10b",
+      "symbol_path": "UiProtocolState::apply_terminal_event / turn_projection_from_events",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "preserve terminal status alongside terminal text in UI turn projections",
+      "input_semantic": "terminal semantic event",
+      "output_semantic": "terminal text plus terminal status projection",
+      "caller": "runtime/app protocol consumers",
+      "callee": "protocol projector",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -342,6 +359,8 @@
     "debug-state projection consumes freehand-debug::DebugStateSnapshot instead of a UI-owned duplicate DTO",
     "UI ingress versus truth-writer separation is now locked in the function map",
     "minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in UiProtocolState",
-    "public turn projection is protocol-owned"
+    "public turn projection is protocol-owned",
+    "terminal status is now preserved in UiTurnProjection and public conversation status mapping",
+    "CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn"
   ]
 }

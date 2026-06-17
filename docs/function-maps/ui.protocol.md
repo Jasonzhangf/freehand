@@ -37,6 +37,7 @@
 - command ingress acceptance is explicit and route-scoped: only mutation-intent commands may enter the ingress transport path
 - accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
+- `CancelLatestActiveTurn` is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete `turn_id`
 - query and subscribe stay separate
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 
@@ -45,11 +46,14 @@
 - query returns snapshots
 - checkpoint query returns read-only checkpoint summary projections supplied by runtime owner code
 - command ingress returns explicit dispatch receipt without claiming truth mutation success
+- cancel commands route to `reason.turn` whether they target an explicit `turn_id` or the latest active turn
 - subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel
 - projections are read-only views over owner-written truth
 - terminal completion shows only final projected text
+- turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
 - public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, and debug details from the main user-visible stream
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, and debug details from the main user-visible stream
+- public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
 - `ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state
 - `ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`
@@ -62,9 +66,11 @@
 
 - invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors
 - query/subscribe commands sent to command-ingress route are explicit protocol misuse errors
+- `CancelLatestActiveTurn` without any active or persisted turn returns explicit target-not-found from the owner module
 - empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
 - source identity fields remain explicit across success and error paths
+- cancelled terminal projection stays explicit and is not collapsed into failed or completed UI status
 - UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors
 
 ## Shared Multi-Reference Functions
@@ -128,6 +134,7 @@
 | 09 | `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | project whole-turn state into UI snapshot | semantic/tool/usage/terminal/error/user inputs | UI turn projection | query/stream handler | projector | bound |
 | 10 | `terminal_text_projection` | `crates/freehand-ui-protocol/src/lib.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector | bound |
 | 10a | `public_conversation_items` / `public_turn_projection` | `crates/freehand-ui-protocol/src/lib.rs` | derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema | full turn projection | public turn projection | app transports/renderers | projector | bound |
+| 10b | `UiProtocolState::apply_terminal_event` / `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text + terminal status projection | runtime/app protocol consumers | protocol projector | bound |
 | 11 | `UiProtocolState::apply_semantic_event` / `apply_tool_call` / `apply_usage_event` / `apply_terminal_event` / `apply_error_event` | `crates/freehand-ui-protocol/src/lib.rs` | incrementally update one turn projection from shared contract events and publish subscription updates | shared reason/error contracts | updated queryable/subscribable turn projection | runtime/debug bridges | protocol state | bound |
 | 12 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate client-specific slave substream visibility | turn projection + client kind | client-specific turn projection | CLI/WebUI adapter | projector | bound |
 | 13 | `UiProtocolState::set_debug_state` | `crates/freehand-ui-protocol/src/lib.rs` | store per-turn read-only debug projection for UI consumption and publish subscription updates | `freehand-debug` snapshot | queryable/subscribable debug state | reason/node/debug bridge | protocol state | bound |

@@ -361,6 +361,31 @@ impl ReasonTurnEngine {
         event
     }
 
+    pub fn cancel_turn(
+        &self,
+        turn: &mut TurnRecord,
+        summary: impl Into<String>,
+    ) -> ReasonResp03TerminalEvent {
+        let event = ReasonResp03TerminalEvent {
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+            agent_id: turn.request.agent_id.clone(),
+            status: TerminalStatus::Cancelled,
+            summary: summary.into(),
+        };
+        turn.terminal_event = Some(event.clone());
+        self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
+        self.emit_debug(
+            turn,
+            "ReasonTurnEngine::cancel_turn",
+            "turn cancelled",
+            vec![event.summary.clone()],
+        );
+        event
+    }
+
     pub fn project_session(&self, turns: &[TurnRecord]) -> Vec<TurnProjection> {
         turns
             .iter()
@@ -608,6 +633,26 @@ mod tests {
             ReasonBroadcastEvent::Terminal(event) => {
                 assert_eq!(event.status, TerminalStatus::Failed);
                 assert!(event.summary.contains("schema retry limit exhausted"));
+            }
+            other => panic!("unexpected broadcast: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn writes_cancelled_terminal_when_requested() {
+        let engine = ReasonTurnEngine::new();
+        let receiver = engine.subscribe(4);
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let terminal = engine.cancel_turn(&mut turn, "cancelled by ui command");
+        assert_eq!(terminal.status, TerminalStatus::Cancelled);
+        let broadcast = receiver.recv().expect("broadcast");
+        match broadcast {
+            ReasonBroadcastEvent::Terminal(event) => {
+                assert_eq!(event.status, TerminalStatus::Cancelled);
+                assert!(event.summary.contains("cancelled by ui command"));
             }
             other => panic!("unexpected broadcast: {other:?}"),
         }
