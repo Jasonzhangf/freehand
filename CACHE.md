@@ -255,3 +255,6 @@
 - 2026-06-16: `provider.openai-adapter` migrated into the mainline/wiki chain
   - `docs/mainline-calls/provider.openai-adapter.json` is now the machine-readable OpenAI-compatible adapter mainline truth
   - `docs/wiki/provider.openai-adapter.md` is generated from it
+- 2026-06-17: `reason.persistence` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/reason.persistence.json` is now the machine-readable persistence mainline truth
+  - `docs/wiki/reason.persistence.md` is generated from it

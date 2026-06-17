@@ -19,3 +19,4 @@ Current migrated features:
 - `tool.registry`
 - `ui.protocol`
 - `reason.turn`
+- `reason.persistence`

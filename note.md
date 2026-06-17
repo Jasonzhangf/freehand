@@ -429,3 +429,7 @@
   - migrated `provider.openai-adapter` into `docs/mainline-calls/provider.openai-adapter.json`
   - generated `docs/wiki/provider.openai-adapter.md`
   - OpenAI-compatible wire owner now has machine-readable mainline truth alongside the function map
+- 2026-06-17: reason.persistence migrated mainline/wiki source in progress
+  - `docs/mainline-calls/reason.persistence.json` is the machine-readable source
+  - `docs/wiki/reason.persistence.md` must be generated, not hand-edited
+  - `xtask gates check` must require both files

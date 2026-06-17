@@ -1,0 +1,235 @@
+{
+  "feature_id": "reason.persistence",
+  "owner_crate": "crates/freehand-reason",
+  "owner_module": "crates/freehand-reason/src/persistence.rs",
+  "function_map_doc": "docs/function-maps/reason.persistence.md",
+  "test_design_doc": "docs/testing/reason.persistence.md",
+  "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+  "generated_wiki_doc": "docs/wiki/reason.persistence.md",
+  "request_mainline": [
+    "runtime opens `~/.freehand/state/turns/<agent_id>/<session_id>/` as the authoritative reason state directory",
+    "session-owned rewrite truth is restored from `SessionHistory` snapshots",
+    "turn execution consumes restored session truth through `ReasonTurnEngine::start_turn`",
+    "runtime persistence appends semantic reason-ledger rows before advancing durable snapshot cursors",
+    "terminal turn close materializes immutable turn truth files and only then updates derived UI and index sidecars",
+    "provider raw ledgers may be appended for debug, but they are not part of the authoritative request or recovery chain"
+  ],
+  "response_mainline": [
+    "`SessionHistory` JSON/file helpers render and restore authoritative session rewrite truth",
+    "reason persistence appends a reason-ledger row together with current session-history truth, then refreshes authoritative snapshots and derived sidecars",
+    "reason persistence returns deterministic restore state from snapshot plus reason-ledger tail replay, or from reason-ledger-only rebuild when snapshots are missing or invalid",
+    "terminal turn persistence yields immutable per-turn truth plus updated session cursor truth",
+    "derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete"
+  ],
+  "error_mainline": [
+    "invalid persisted snapshot JSON is rejected explicitly",
+    "invalid persisted snapshot coherence is rejected explicitly",
+    "reason-ledger sequence gaps or duplicate sequence numbers must block recovery",
+    "provider raw payload availability must not mask missing authoritative reason truth",
+    "UI sidecar presence must not be treated as session-truth recovery evidence"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "SessionHistory::persist_json",
+      "owner": "crates/freehand-reason/src/session_history.rs",
+      "purpose": "render authoritative session rewrite truth as a persistable JSON snapshot",
+      "allowed_callers": [
+        "runtime persistence owner",
+        "replay/debug tools",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "persisted JSON round-trip",
+        "snapshot render/load tests"
+      ],
+      "why_shared": "authoritative session snapshot rendering must stay centralized"
+    },
+    {
+      "symbol": "SessionHistory::from_persisted_json",
+      "owner": "crates/freehand-reason/src/session_history.rs",
+      "purpose": "restore authoritative session rewrite truth from JSON while validating coherence",
+      "allowed_callers": [
+        "runtime persistence owner",
+        "replay/debug tools",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "invalid persisted state rejection",
+        "persisted JSON round-trip"
+      ],
+      "why_shared": "restore validation must stay aligned with the authoritative snapshot renderer"
+    },
+    {
+      "symbol": "validate_rewrite_base_segments",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "validate stable rewrite base segments before session snapshots are accepted or restored",
+      "allowed_callers": [
+        "freehand-reason",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "rewrite-base validation",
+        "persisted coherence rejection"
+      ],
+      "why_shared": "rewrite-base semantic validation must not be duplicated in persistence coordinators"
+    },
+    {
+      "symbol": "inspect_context_cache_diagnostics",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "compute metadata-side cache diagnostics stored in rewrite records and recovery evidence",
+      "allowed_callers": [
+        "freehand-reason",
+        "owner-crate tests",
+        "replay/debug tools"
+      ],
+      "related_tests": [
+        "rewrite diagnostics snapshot tests",
+        "recovery audit tests"
+      ],
+      "why_shared": "cache-shape evidence must stay aligned between planner runtime and persisted rewrite records"
+    },
+    {
+      "symbol": "write_json_atomic",
+      "owner": "crates/freehand-reason/src/persistence.rs",
+      "purpose": "atomically replace authoritative snapshots and derived sidecars after durable ledger append",
+      "allowed_callers": [
+        "reason persistence owner",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "atomic snapshot replace",
+        "save/load smoke"
+      ],
+      "why_shared": "all persistence file writes must use one atomic replacement path instead of ad hoc writes"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "SessionHistory::load_from_path",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "restore authoritative session rewrite snapshot from disk",
+      "input_semantic": "session-history snapshot file",
+      "output_semantic": "validated session rewrite truth",
+      "caller": "runtime/bootstrap",
+      "callee": "session-history owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "SessionHistory::from_persisted_json",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "validate restored session rewrite JSON",
+      "input_semantic": "session-history JSON payload",
+      "output_semantic": "validated session rewrite truth",
+      "caller": "persistence loader/debug tools",
+      "callee": "session-history owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "ReasonTurnEngine::start_turn",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "consume restored session truth for turn startup",
+      "input_semantic": "restored session history plus turn input",
+      "output_semantic": "initialized turn record plus provider payload",
+      "caller": "runtime/live bridge",
+      "callee": "reason owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "ReasonTurnEngine::apply_provider_output",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "materialize semantic outputs into turn truth before persistence projection",
+      "input_semantic": "provider semantic output",
+      "output_semantic": "updated turn truth",
+      "caller": "runtime/live bridge",
+      "callee": "reason owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "SessionHistory::commit_turn_start",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "consume one-shot non-ordinary rewrite state after successful startup",
+      "input_semantic": "active turn id",
+      "output_semantic": "updated session rewrite truth",
+      "caller": "reason owner",
+      "callee": "session-history owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "ReasonPersistence::record_turn_started",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "append turn-start ledger row, refresh active-turn snapshot, and update cursor/sidecars",
+      "input_semantic": "session history plus started turn truth",
+      "output_semantic": "durable reason state for running turn",
+      "caller": "runtime/live bridge/testkit",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "ReasonPersistence::record_provider_output_applied",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "append provider-output ledger row and refresh active-turn snapshot",
+      "input_semantic": "session history plus updated turn truth plus provider semantic output",
+      "output_semantic": "durable active-turn truth",
+      "caller": "runtime/live bridge/testkit",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "ReasonPersistence::record_completion_rejected",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "append schema-rejection ledger row and refresh active-turn rejection counter",
+      "input_semantic": "session history plus updated turn truth plus rejection",
+      "output_semantic": "durable rejection evidence",
+      "caller": "runtime/live bridge/testkit",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "ReasonPersistence::record_turn_closed",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "append terminal ledger row, materialize immutable turn truth, clear active-turn snapshot, and update sidecars",
+      "input_semantic": "session history plus terminal turn truth",
+      "output_semantic": "durable closed-turn truth",
+      "caller": "runtime/live bridge/testkit",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "ReasonPersistence::record_rewrite_state_updated",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "append rewrite-state ledger row and refresh session snapshots",
+      "input_semantic": "updated session-history truth",
+      "output_semantic": "durable rewrite-state persistence",
+      "caller": "rewrite runtime / recovery path",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11",
+      "symbol_path": "ReasonPersistence::restore",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "rebuild authoritative state from snapshots plus reason-ledger tail, or from ledger alone",
+      "input_semantic": "snapshot directory plus reason ledger",
+      "output_semantic": "restored in-memory session and turn truth",
+      "caller": "runtime/bootstrap/testkit/CLI smoke",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "current code baseline now binds session-history JSON/file round-trip, reason-ledger append, active-turn refresh, terminal turn materialization, derived sidecar writes, and snapshot-plus-tail / ledger-only recovery",
+    "CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer",
+    "live Anthropic `reason-live` path now persists start/output/rejection/terminal events through `ReasonPersistence`",
+    "generated wiki must be regenerated from `docs/mainline-calls/reason.persistence.json` when this function-map truth changes"
+  ]
+}

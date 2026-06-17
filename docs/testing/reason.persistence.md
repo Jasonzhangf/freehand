@@ -43,3 +43,4 @@
   - session snapshot, active-turn snapshot, reason-ledger append, terminal turn materialization, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
   - shared harness and CLI smoke are implemented
   - live Anthropic `reason-live` path now persists start/output/rejection/terminal events through `ReasonPersistence`
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

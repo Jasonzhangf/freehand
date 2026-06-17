@@ -688,6 +688,8 @@ If a problem does not fit this table, update this routing index before making co
   - CLI persistence restore smoke
 - test_design_doc: `docs/testing/reason.persistence.md`
 - function_map_doc: `docs/function-maps/reason.persistence.md`
+- mainline_call_doc: `docs/mainline-calls/reason.persistence.json`
+- generated_wiki_doc: `docs/wiki/reason.persistence.md`
 - debug_artifacts:
   - persisted session snapshot fixture path
   - reason ledger fixture path
