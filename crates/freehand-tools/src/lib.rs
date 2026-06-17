@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::render_tool_arguments_json;
 use freehand_contracts::{ReasonReq04ToolCall, ToolArgument};
@@ -40,6 +42,8 @@ pub enum ToolRegistryError {
 }
 
 const READ_FILE_DEFAULT_LIMIT: usize = 2_000;
+const BASH_DEFAULT_TIMEOUT_SECONDS: usize = 900;
+const BASH_POLL_INTERVAL_MILLIS: u64 = 20;
 const GLOB_MAX_RESULTS: usize = 1_000;
 const GREP_MAX_MATCHES: usize = 200;
 
@@ -95,6 +99,7 @@ impl BuiltinToolRegistry {
             return Err(ToolRegistryError::UnimplementedTool(name.to_owned()));
         }
         match name {
+            "bash" => execute_bash(&call.tool_call.arguments),
             "read_file" => execute_read_file(&call.tool_call.arguments),
             "write_file" => execute_write_file(&call.tool_call.arguments),
             "edit_file" => execute_edit_file(&call.tool_call.arguments),
@@ -114,8 +119,8 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
         spec(
             "bash",
             false,
-            false,
-            "Run a shell command.",
+            true,
+            "Run a foreground shell command from the locked workspace root.",
             json!({
                 "type": "object",
                 "properties": {
@@ -392,6 +397,111 @@ fn spec(
         },
         read_only,
         implemented,
+    }
+}
+
+fn execute_bash(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let command = required_string(arguments, "bash", "command")?;
+    let timeout_seconds = optional_usize(arguments, "bash", "timeout_seconds")?
+        .unwrap_or(BASH_DEFAULT_TIMEOUT_SECONDS);
+    if timeout_seconds == 0 {
+        return Err(ToolRegistryError::InvalidArguments {
+            tool: "bash".to_owned(),
+            message: "`timeout_seconds` must be at least 1".to_owned(),
+        });
+    }
+    let root = locked_workspace_root("bash")?;
+    let output_path = temp_tool_output_path("bash")?;
+    let output_file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&output_path)
+        .map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: "bash".to_owned(),
+            message: format!(
+                "cannot create command output capture `{}`: {err}",
+                output_path.display()
+            ),
+        })?;
+    let stderr_file =
+        output_file
+            .try_clone()
+            .map_err(|err| ToolRegistryError::ExecutionFailed {
+                tool: "bash".to_owned(),
+                message: format!(
+                    "cannot clone command output capture `{}`: {err}",
+                    output_path.display()
+                ),
+            })?;
+
+    let mut child = Command::new("bash")
+        .arg("-lc")
+        .arg(command)
+        .current_dir(&root)
+        .stdout(Stdio::from(output_file))
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+        .map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: "bash".to_owned(),
+            message: format!("cannot spawn `bash`: {err}"),
+        })?;
+
+    let timeout = Duration::from_secs(u64::try_from(timeout_seconds).map_err(|_| {
+        ToolRegistryError::InvalidArguments {
+            tool: "bash".to_owned(),
+            message: "`timeout_seconds` is too large".to_owned(),
+        }
+    })?);
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = read_command_output(&output_path, "bash")?;
+                if status.success() {
+                    return Ok(ToolExecutionOutput {
+                        text: render_shell_output(output),
+                    });
+                }
+                return Err(ToolRegistryError::ExecutionFailed {
+                    tool: "bash".to_owned(),
+                    message: format!(
+                        "command exited with status {}{}",
+                        status,
+                        render_shell_output_suffix(&output)
+                    ),
+                });
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    child
+                        .kill()
+                        .map_err(|err| ToolRegistryError::ExecutionFailed {
+                            tool: "bash".to_owned(),
+                            message: format!("cannot kill timed-out command: {err}"),
+                        })?;
+                    let _ = child.wait();
+                    let output = read_command_output(&output_path, "bash")?;
+                    return Err(ToolRegistryError::ExecutionFailed {
+                        tool: "bash".to_owned(),
+                        message: format!(
+                            "command timed out after {} second(s){}",
+                            timeout_seconds,
+                            render_shell_output_suffix(&output)
+                        ),
+                    });
+                }
+                thread::sleep(Duration::from_millis(BASH_POLL_INTERVAL_MILLIS));
+            }
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ToolRegistryError::ExecutionFailed {
+                    tool: "bash".to_owned(),
+                    message: format!("cannot poll command status: {err}"),
+                });
+            }
+        }
     }
 }
 
@@ -1107,6 +1217,48 @@ fn read_text_file(path: &Path, tool: &str) -> Result<String, ToolRegistryError> 
     })
 }
 
+fn temp_tool_output_path(tool: &str) -> Result<PathBuf, ToolRegistryError> {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: format!("cannot derive temp file timestamp: {err}"),
+        })?
+        .as_nanos();
+    Ok(env::temp_dir().join(format!(
+        "freehand-{tool}-{}-{unique}.log",
+        std::process::id()
+    )))
+}
+
+fn read_command_output(path: &Path, tool: &str) -> Result<String, ToolRegistryError> {
+    let output = fs::read_to_string(path).map_err(|err| ToolRegistryError::ExecutionFailed {
+        tool: tool.to_owned(),
+        message: format!(
+            "cannot read command output `{}` as UTF-8 text: {err}",
+            path.display()
+        ),
+    })?;
+    let _ = fs::remove_file(path);
+    Ok(output)
+}
+
+fn render_shell_output(output: String) -> String {
+    if output.is_empty() {
+        "(no output)".to_owned()
+    } else {
+        output
+    }
+}
+
+fn render_shell_output_suffix(output: &str) -> String {
+    if output.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{output}")
+    }
+}
+
 fn write_text_atomic(path: &Path, content: &str, tool: &str) -> Result<(), ToolRegistryError> {
     let parent = path
         .parent()
@@ -1243,6 +1395,7 @@ mod tests {
             .into_iter()
             .map(|definition| definition.name)
             .collect::<Vec<_>>();
+        assert!(names.contains(&"bash".to_owned()));
         assert!(names.contains(&"read_file".to_owned()));
         assert!(names.contains(&"write_file".to_owned()));
         assert!(names.contains(&"edit_file".to_owned()));
@@ -1299,6 +1452,97 @@ mod tests {
             ))
             .expect("complete_step executes");
         assert!(output.text.contains("wire tool registry"));
+    }
+
+    #[test]
+    fn bash_runs_in_workspace_root_and_returns_output() {
+        with_temp_workspace(|root| {
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let canonical_root = fs::canonicalize(root).expect("canonical root");
+            let output = registry
+                .execute(&tool_call(
+                    "bash",
+                    vec![ToolArgument {
+                        name: "command".to_owned(),
+                        value: json!("pwd"),
+                    }],
+                ))
+                .expect("bash executes");
+            assert_eq!(output.text.trim(), canonical_root.to_string_lossy());
+        });
+    }
+
+    #[test]
+    fn bash_reports_non_zero_exit_with_captured_output() {
+        with_temp_workspace(|_| {
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let result = registry.execute(&tool_call(
+                "bash",
+                vec![ToolArgument {
+                    name: "command".to_owned(),
+                    value: json!("echo boom 1>&2; exit 7"),
+                }],
+            ));
+            assert!(matches!(
+                result,
+                Err(ToolRegistryError::ExecutionFailed { tool, message })
+                    if tool == "bash"
+                        && message.contains("command exited with status")
+                        && message.contains("boom")
+            ));
+        });
+    }
+
+    #[test]
+    fn bash_times_out_explicitly() {
+        with_temp_workspace(|_| {
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let result = registry.execute(&tool_call(
+                "bash",
+                vec![
+                    ToolArgument {
+                        name: "command".to_owned(),
+                        value: json!("sleep 2"),
+                    },
+                    ToolArgument {
+                        name: "timeout_seconds".to_owned(),
+                        value: json!(1),
+                    },
+                ],
+            ));
+            assert!(matches!(
+                result,
+                Err(ToolRegistryError::ExecutionFailed { tool, message })
+                    if tool == "bash" && message.contains("timed out after 1 second")
+            ));
+        });
+    }
+
+    #[test]
+    fn bash_rejects_zero_timeout() {
+        with_temp_workspace(|_| {
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let result = registry.execute(&tool_call(
+                "bash",
+                vec![
+                    ToolArgument {
+                        name: "command".to_owned(),
+                        value: json!("pwd"),
+                    },
+                    ToolArgument {
+                        name: "timeout_seconds".to_owned(),
+                        value: json!(0),
+                    },
+                ],
+            ));
+            assert_eq!(
+                result,
+                Err(ToolRegistryError::InvalidArguments {
+                    tool: "bash".to_owned(),
+                    message: "`timeout_seconds` must be at least 1".to_owned(),
+                })
+            );
+        });
     }
 
     #[test]
@@ -1737,7 +1981,9 @@ mod tests {
     where
         F: FnOnce(&Path),
     {
-        let lock = cwd_lock().lock().expect("cwd lock");
+        let lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let original = env::current_dir().expect("current dir");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

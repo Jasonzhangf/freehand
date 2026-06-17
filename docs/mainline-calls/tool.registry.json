@@ -10,6 +10,7 @@
     "runtime asks the tool owner for a per-run registry",
     "registry exports provider-neutral tool definitions without importing provider adapter DTOs",
     "registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner",
+    "foreground `bash` starts in one locked workspace root: the canonical process current working directory",
     "path-based read-only tools resolve against one locked workspace root: the canonical process current working directory",
     "path-based tools resolve against one locked workspace root: the canonical process current working directory",
     "runtime may choose a subset of implemented definitions for live execution",
@@ -17,6 +18,7 @@
   ],
   "response_mainline": [
     "completed provider tool calls enter `BuiltinToolRegistry::execute`",
+    "first real foreground command execution set is: `bash`",
     "first real read-only execution set is: `read_file`, `glob`, `grep`, `ls`",
     "first real file-mutation execution set is: `write_file`, `edit_file`, `multi_edit`",
     "implemented tools return user/model-visible tool result text",
@@ -26,6 +28,7 @@
     "unknown tool names return `ToolRegistryError::UnknownTool`",
     "registered but not implemented tools return `ToolRegistryError::UnimplementedTool`",
     "invalid tool arguments return `ToolRegistryError::InvalidArguments`",
+    "foreground `bash` timeout and non-zero exit return `ToolRegistryError::ExecutionFailed`",
     "runtime and filesystem failures return `ToolRegistryError::ExecutionFailed`"
   ],
   "shared_functions": [
@@ -164,6 +167,17 @@
     },
     {
       "step": "05",
+      "symbol_path": "execute_bash",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "run one foreground shell command from the locked workspace root with timeout and explicit failure reporting",
+      "input_semantic": "command plus optional timeout_seconds",
+      "output_semantic": "combined stdout/stderr text",
+      "caller": "registry execute",
+      "callee": "command tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
       "symbol_path": "execute_read_file",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "responsibility": "read UTF-8 text from one locked in-root file with line-windowing",
@@ -174,7 +188,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "06",
+      "step": "07",
       "symbol_path": "execute_write_file",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "responsibility": "create or overwrite one UTF-8 text file inside the locked root",
@@ -185,7 +199,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "07",
+      "step": "08",
       "symbol_path": "execute_edit_file",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "responsibility": "replace one exact text occurrence in one locked in-root file",
@@ -196,7 +210,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "08",
+      "step": "09",
       "symbol_path": "execute_multi_edit",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "responsibility": "apply ordered exact text edits and write once at the end",
@@ -207,7 +221,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "09",
+      "step": "10",
       "symbol_path": "execute_glob",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "responsibility": "match in-root files by glob pattern with recursive filename fallback",
@@ -218,7 +232,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "10",
+      "step": "11",
       "symbol_path": "execute_grep",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "responsibility": "search in-root UTF-8 text files by regex",
@@ -229,7 +243,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "11",
+      "step": "12",
       "symbol_path": "execute_ls",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "responsibility": "list directory entries or recursive tree under locked root",
@@ -242,9 +256,10 @@
   ],
   "sync_status": [
     "Reasonix-aligned built-in names and schemas are bound in `freehand-tools`",
-    "current implemented tool set is: `read_file`, `write_file`, `edit_file`, `multi_edit`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`",
+    "current implemented tool set is: `bash`, `read_file`, `write_file`, `edit_file`, `multi_edit`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`",
     "first-version path tools are locked to the canonical process current working directory and reject path escape outside that root",
+    "first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing",
     "first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path",
-    "bash/web/notebook/symbol-aware mutation tools remain registered but explicitly unimplemented until their lifecycle/gates are designed"
+    "`bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools remain registered but explicitly unimplemented until their lifecycle/gates are designed"
   ]
 }

@@ -301,3 +301,16 @@
   - `freehand-tools` now truly implements `write_file`, `edit_file`, and `multi_edit`
   - first-version writable tools are workspace-locked, existing-parent-only, and owner-atomic
   - `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo run -p xtask -- mainlines check`, and `cargo run -p xtask -- gates check` pass
+- 2026-06-17: `tool.registry` foreground bash batch landed
+  - `freehand-tools` now truly implements foreground `bash`
+  - bash starts in the locked workspace root, defaults to a 900-second timeout, captures combined stdout/stderr, and fails explicitly on timeout or non-zero exit
+  - `bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation remain explicitly unimplemented
+  - verification passed:
+    - `cargo fmt --all --check`
+    - `cargo test -p freehand-tools`
+    - `cargo test --workspace`
+    - `cargo clippy --workspace --all-targets -- -D warnings`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - real provider smoke: `FREEHAND_PAIR_TOKEN_SHARED=dummy cargo run -p freehand-cli -- reason-live --agent master --prompt 'You must call the bash tool once with command \`pwd\`, then report the output and finish with a valid freehand completion schema.'`

@@ -490,3 +490,9 @@
   - writable path resolution needed a separate helper because target files may not exist yet
   - `edit_file` is locked to exact single-match semantics; `multi_edit` carries ordered edit and `replace_all` behavior
   - gate initially failed because a locked policy snippet expected the old read-only wording; function map and JSON were updated to preserve the old locked phrase while adding writable semantics
+- 2026-06-17: tool.registry foreground bash implementation
+  - locked scope to synchronous foreground `bash` only; `bg_jobs` / `kill_shell` / `wait_job` remain explicitly unimplemented
+  - `bash` now starts in the locked workspace root, defaults to 900-second timeout, captures combined stdout/stderr, and fails explicitly on timeout or non-zero exit
+  - first owner-test pass caught two real issues in the test harness: macOS canonical `pwd` path differs by `/private` prefix, and cwd-lock poisoning hid later failures after the first panic
+  - fixed by comparing against canonicalized temp roots and allowing poisoned cwd-lock recovery in the test harness
+  - real live verification also needed `FREEHAND_PAIR_TOKEN_SHARED` set because selected-agent bootstrap validates the configured pair-token env even for CLI `reason-live`

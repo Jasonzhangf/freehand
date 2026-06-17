@@ -502,6 +502,7 @@ If a problem does not fit this table, update this routing index before making co
 - required_white_box_tests:
   - registry schema export tests
   - read-only / implemented metadata tests
+  - foreground bash success / cwd / timeout / exit-failure tests
   - implemented tool execution tests
   - unknown/unimplemented tool rejection tests
 - required_module_black_box_tests:
@@ -522,11 +523,13 @@ If a problem does not fit this table, update this routing index before making co
 - update_triggers:
   - tool registry surface changes
   - tool schema changes
+  - foreground bash execution policy changes
   - implemented tool execution behavior changes
   - runtime live bridge tool ownership changes
 - lifecycle_checks:
   - tool schema ownership remains outside runtime orchestration
   - registered but unimplemented tools fail explicitly
+  - foreground bash cwd lock and timeout policy remain explicit
   - first-version path tools remain locked to one workspace-root policy
   - implemented tool execution path is closed-loop into provider tool-result re-entry
 

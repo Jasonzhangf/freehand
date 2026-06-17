@@ -11,6 +11,7 @@
 - white-box plan:
   - registry name/schema export tests
   - `read_only` metadata tests
+  - `bash` success-path, workspace-cwd, timeout, and non-zero-exit tests
   - `read_file` line-window and path-lock tests
   - `write_file` create/overwrite/path-lock tests
   - `edit_file` exact-single-match and rejection tests
@@ -25,6 +26,7 @@
   - runtime live bridge can advertise implemented tool definitions without hardcoded demo tools
   - runtime live bridge can execute a real implemented read-only registry tool and re-enter the result
 - project black-box impact:
+  - provider live turn tool loop may now execute foreground `bash` through the registry owner instead of forcing file-only tools
   - provider live turn tool loop no longer depends on `echo_json` or forced `todo_write`
   - daemon and runtime smokes now prove `read_file` can run through the registry-owned live path
   - writable file-mutation tools now still enter the live path only through the registry owner instead of runtime orchestration
@@ -35,7 +37,7 @@
   - provider mock tool-use fixtures
   - `~/.freehand/ledgers/reason`
 - known gaps:
-  - bash/web/notebook tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
+  - `bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
 - sync status between design and implementation:
-  - registry-backed read-only file/search and first text-mutation tools are landed
+  - registry-backed foreground `bash`, read-only file/search, and first text-mutation tools are landed
   - runtime and daemon smokes now consume real registry tools instead of a forced demo first tool

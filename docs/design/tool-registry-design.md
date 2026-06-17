@@ -26,6 +26,7 @@ This doc locks the first built-in tool surface for Freehand.
 
 Current first implemented set:
 
+- `bash`
 - `read_file`
 - `write_file`
 - `edit_file`
@@ -40,8 +41,10 @@ Current first implemented set:
 
 - `freehand-tools` owns tool registry truth and execution ownership
 - first-version path tools are directory-locked to the canonical process current working directory
+- first-version `bash` runs with its current working directory locked to that same workspace root
 - first-version file-mutation tools are also workspace-locked and may only target existing parent directories inside that root
 - first-version file-mutation tools must write atomically through the tool owner; no app/runtime/orchestrator may write file content on their behalf
+- first-version `bash` does not claim filesystem or network sandboxing; it only owns shell invocation, cwd locking, timeout enforcement, stdout/stderr capture, and explicit failure reporting
 - `freehand-runtime` may:
   - construct a per-run registry
   - expose only `implemented_definitions()` to live provider requests
@@ -71,6 +74,13 @@ If any of the above is false, the tool may remain registered only as explicitly 
 
 - registry names and schemas should stay aligned with the Reasonix tool surface where semantics match
 - first implemented tools should prefer deterministic, low-side-effect tools
+- first real command tool is foreground-only `bash`:
+  - input is `command` plus optional `timeout_seconds`
+  - default timeout is `900` seconds, aligned with the Reasonix foreground safety cap baseline
+  - command starts in the locked workspace root as its current working directory
+  - stdout and stderr are captured into one combined result
+  - non-zero exit and timeout both fail explicitly and preserve captured output in the error message
+  - background jobs remain out of scope until `bg_jobs` / `kill_shell` / `wait_job` lifecycle is designed
 - first real file/search batch is read-only and workspace-locked:
   - `read_file`
   - `glob`
@@ -92,6 +102,8 @@ If any of the above is false, the tool may remain registered only as explicitly 
 - unknown name -> explicit `UnknownTool`
 - known but not implemented -> explicit `UnimplementedTool`
 - malformed arguments -> explicit `InvalidArguments`
+- `bash` timeout -> explicit `ExecutionFailed`
+- `bash` non-zero exit -> explicit `ExecutionFailed`
 - no fallback, no synthetic success, no silent skip
 
 ## Test Direction
@@ -101,6 +113,7 @@ If any of the above is false, the tool may remain registered only as explicitly 
   - implemented/unimplemented state
   - argument validation
   - explicit error classes
+  - foreground `bash` success / cwd / timeout / exit-failure tests
 - module black-box:
   - runtime can advertise implemented tool definitions without hardcoded demo tools
   - runtime can execute a completed tool call through the registry and re-enter the result
