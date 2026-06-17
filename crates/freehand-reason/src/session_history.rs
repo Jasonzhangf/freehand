@@ -279,6 +279,22 @@ mod tests {
         }
     }
 
+    fn invalid_rewrite_segment(id: &str) -> ContextSegment {
+        ContextSegment {
+            segment_id: ContextSegmentId::new(id),
+            kind: ContextSegmentKind::UserTurnInput,
+            stability: ContextStability::TurnVolatile,
+            cache_policy: ContextCachePolicy::NoCache,
+            role: ContextRole::User,
+            content: "user text must not enter rewrite base".to_owned(),
+            token_budget: 16,
+            provenance: ContextProvenance {
+                source: "invalid-rewrite".to_owned(),
+                reference: None,
+            },
+        }
+    }
+
     #[test]
     fn compaction_bumps_rewrite_version_and_records_diagnostics() {
         let mut history =
@@ -438,5 +454,83 @@ mod tests {
             SessionHistoryError::InvalidPersistedCoherence(message)
             if message.contains("rewrite ledger evidence")
         ));
+    }
+
+    #[test]
+    fn rejects_empty_rewrite_reason_explicitly() {
+        let mut history =
+            SessionHistory::new(SessionId::new("session-1"), Vec::new()).expect("new");
+
+        let err = history
+            .stage_compaction(
+                vec![stable_segment(
+                    "summary-1",
+                    ContextSegmentKind::SessionSummary,
+                    "compact summary",
+                )],
+                "   ",
+            )
+            .expect_err("empty rewrite reason must fail");
+
+        assert_eq!(err, SessionHistoryError::EmptyRewriteReason);
+    }
+
+    #[test]
+    fn rejects_forbidden_rewrite_base_segments_explicitly() {
+        let mut history =
+            SessionHistory::new(SessionId::new("session-1"), Vec::new()).expect("new");
+
+        let err = history
+            .stage_compaction(
+                vec![invalid_rewrite_segment("segment-user-turn")],
+                "compact stale context",
+            )
+            .expect_err("forbidden rewrite base segment must fail");
+
+        assert!(
+            matches!(err, SessionHistoryError::RewriteRejected(message) if message.contains("user_turn_input"))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_persisted_json_explicitly() {
+        let err =
+            SessionHistory::from_persisted_json("{").expect_err("invalid persisted json must fail");
+
+        assert!(matches!(err, SessionHistoryError::InvalidPersistedState(_)));
+    }
+
+    #[test]
+    fn persist_to_path_reports_file_io_failure_explicitly() {
+        let history = SessionHistory::new(SessionId::new("session-1"), Vec::new()).expect("new");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let parent = std::env::temp_dir().join(format!("freehand-session-parent-{unique}"));
+        fs::write(&parent, "not-a-directory").expect("write parent file");
+        let path = parent.join("session.json");
+
+        let err = history
+            .persist_to_path(&path)
+            .expect_err("persist to non-directory parent must fail");
+
+        assert!(matches!(err, SessionHistoryError::FileIoFailed(_)));
+        fs::remove_file(&parent).expect("cleanup");
+    }
+
+    #[test]
+    fn load_from_path_reports_file_io_failure_explicitly() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("freehand-session-missing-load-{unique}.json"));
+
+        let err =
+            SessionHistory::load_from_path(&path).expect_err("loading missing file must fail");
+
+        assert!(matches!(err, SessionHistoryError::FileIoFailed(_)));
     }
 }

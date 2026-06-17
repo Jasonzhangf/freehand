@@ -15,6 +15,11 @@
   - resume-rebuild version-bump tests
   - rewrite gate consumption tests
   - ordinary-turn no-version-bump tests
+  - empty rewrite reason rejection tests
+  - forbidden rewrite base segment rejection tests
+  - invalid persisted json rejection tests
+  - file IO failure rejection tests
+  - session mismatch rejection tests
   - persisted json round-trip tests
   - persisted file round-trip tests
 - module black-box plan:
@@ -36,4 +41,5 @@
   - session-history rewrite baseline landed
   - ordinary-turn stability and rewrite-gate bump behavior are covered in crate tests
   - persisted JSON/file round-trip baseline is covered in crate tests
+  - direct white-box failures for empty rewrite reason, forbidden rewrite base segments, invalid persisted json, file IO failure on persist/load, and session mismatch are now explicitly covered
   - migrated mainline-call source and generated wiki are kept in sync with this test design

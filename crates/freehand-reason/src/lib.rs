@@ -1041,6 +1041,27 @@ mod tests {
     }
 
     #[test]
+    fn start_turn_rejects_session_history_mismatch_explicitly() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+
+        let err = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-other"),
+                    ..start_input()
+                },
+            )
+            .expect_err("session mismatch must fail");
+
+        assert_eq!(
+            err,
+            ReasonTurnError::SessionMismatch("session-other".to_owned())
+        );
+    }
+
+    #[test]
     fn explicit_rewrite_gate_bumps_version_and_is_consumed_by_next_turn() {
         let engine = ReasonTurnEngine::new();
         let mut history = session_history();

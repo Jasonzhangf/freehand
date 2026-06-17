@@ -78,6 +78,7 @@
 - rewrite mode and rewrite version are now sourced from `SessionHistory` instead of turn-local constants
 - compaction, rollback, and resume rebuild each have explicit owner methods
 - persisted json/file round-trip is implemented for session truth baseline
+- direct white-box locks now cover empty rewrite reason, forbidden rewrite base segments, invalid persisted json, file IO failure on persist/load, and `ReasonTurnEngine::start_turn` session mismatch
 - `ReasonRewriteRuntime` now consumes `reason.rewrite-policy` decisions before calling each rewrite gate
 - remaining gap: final CLI/server runtime loop must supply real usage metrics and persisted recovery payloads
 - migrated mainline-call source now lives at `docs/mainline-calls/reason.session-history.json` and generated wiki lives at `docs/wiki/reason.session-history.md`

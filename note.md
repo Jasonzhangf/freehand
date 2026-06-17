@@ -917,3 +917,30 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: reason.session-history explicit error-path slice
+  - owner route: `reason.session-history`
+  - audit target: function map already claimed explicit rejection for empty rewrite reason, forbidden rewrite base segments, invalid persisted json, file-io failure, and session mismatch at `ReasonTurnEngine::start_turn`, but crate tests only covered the happy path plus one persisted coherence branch
+  - chosen closure:
+    - add one direct white-box test for empty rewrite reason
+    - add one direct white-box test for forbidden rewrite base segment rejection
+    - add one direct white-box test for invalid persisted json parse failure
+    - add direct white-box tests for persist and load file-io failure
+    - add one direct white-box test for `ReasonTurnEngine::start_turn` session mismatch
+    - sync function map / test design / migrated mainline JSON / generated wiki
+  - implementation:
+    - added `rejects_empty_rewrite_reason_explicitly`
+    - added `rejects_forbidden_rewrite_base_segments_explicitly`
+    - added `rejects_invalid_persisted_json_explicitly`
+    - added `persist_to_path_reports_file_io_failure_explicitly`
+    - added `load_from_path_reports_file_io_failure_explicitly`
+    - added `start_turn_rejects_session_history_mismatch_explicitly`
+    - synced `docs/function-maps/reason.session-history.md`
+    - synced `docs/testing/reason.session-history.md`
+    - synced `docs/mainline-calls/reason.session-history.json`
+    - regenerated `docs/wiki/reason.session-history.md`
+  - verification:
+    - `cargo test -p freehand-reason`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`
