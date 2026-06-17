@@ -553,3 +553,10 @@
   - drift found: full gate docs required `cargo run -p xtask -- mainlines check`, but `make ci`, pre-push via `make ci`, release via `make ci`, and GitHub CI did not all explicitly include that freshness check
   - fix direction: make `make ci` the canonical full local gate, add a `mainlines` target before `gates`, make GitHub CI run `make ci`, and add `xtask gates check` coverage so the automation cannot silently drift back to partial gates
   - targeted verification so far: `cargo test -p xtask` -> 8 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
+- 2026-06-17: metadata.core baseline
+  - user requirement: internal control metadata and request data must be separated, and metadata writes must show writer owner plus write node
+  - owner route created: `metadata.core` in `crates/freehand-metadata`
+  - landed minimal center: `MetadataEnvelope`, `MetadataWriteOwner`, `MetadataWriteNode`, `MetadataSubject`, `MetadataCenter`, and `validate_metadata_envelope`
+  - first guard rejects missing owner/node/trace/entries and request-data-like metadata keys such as `request.*`, `payload.*`, `prompt.*`, `input.*`, `content`, and `text`
+  - known gap: runtime/reason/provider/debug producers are not yet wired, and persistent metadata ledger is not implemented yet
+  - targeted verification so far: `cargo fmt --all --check`, `cargo test -p freehand-metadata` -> 6 passed, `cargo test -p xtask` -> 8 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`

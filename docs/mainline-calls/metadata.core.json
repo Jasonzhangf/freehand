@@ -1,0 +1,140 @@
+{
+  "feature_id": "metadata.core",
+  "owner_crate": "crates/freehand-metadata",
+  "owner_module": "crates/freehand-metadata/src/lib.rs",
+  "function_map_doc": "docs/function-maps/metadata.core.md",
+  "test_design_doc": "docs/testing/metadata.core.md",
+  "mainline_call_doc": "docs/mainline-calls/metadata.core.json",
+  "generated_wiki_doc": "docs/wiki/metadata.core.md",
+  "request_mainline": [
+    "owner module constructs metadata with one explicit `MetadataWriteOwner`",
+    "owner module constructs metadata with one explicit `MetadataWriteNode`",
+    "owner module attaches a `MetadataSubject` carrying trace/session/turn identity without carrying request text",
+    "metadata entry keys are validated before admission",
+    "metadata center stores only validated internal control/provenance metadata"
+  ],
+  "response_mainline": [
+    "metadata center returns accepted metadata records as internal provenance/control truth",
+    "metadata center can query records by `trace_id` for debugging and audit correlation",
+    "serialized metadata remains replay-safe without becoming request-chain data"
+  ],
+  "error_mainline": [
+    "missing metadata id, writer owner, writer node, trace id, or entries is rejected explicitly",
+    "request-data-like keys such as `request.*`, `payload.*`, `prompt.*`, `input.*`, `content`, or `text` are rejected explicitly",
+    "invalid metadata is not stored and is not rewritten into debug/session/request truth",
+    "no fallback path exists for recovering request content from metadata"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "validate_metadata_envelope",
+      "owner": "crates/freehand-metadata/src/lib.rs",
+      "purpose": "enforce metadata owner, write-node, subject, and request-data key separation before metadata can be stored or forwarded",
+      "allowed_callers": [
+        "module metadata writers",
+        "metadata center",
+        "tests"
+      ],
+      "related_tests": [
+        "metadata validation tests",
+        "metadata/request isolation smoke"
+      ],
+      "why_shared": "avoids each module inventing its own metadata provenance and request-isolation checks"
+    },
+    {
+      "symbol": "MetadataCenter::write",
+      "owner": "crates/freehand-metadata/src/lib.rs",
+      "purpose": "central validated metadata admission point",
+      "allowed_callers": [
+        "runtime/reason/provider/node/debug integration layers after they construct metadata envelopes"
+      ],
+      "related_tests": [
+        "metadata center write/query smoke"
+      ],
+      "why_shared": "keeps metadata admission and validation in one owner instead of distributed module-local maps"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "MetadataWriteOwner",
+      "file_path": "crates/freehand-metadata/src/lib.rs",
+      "responsibility": "identify the feature/symbol that wrote metadata",
+      "input_semantic": "owner feature/crate/module/symbol",
+      "output_semantic": "writer owner contract",
+      "caller": "metadata writers",
+      "callee": "metadata contract",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "MetadataWriteNode",
+      "file_path": "crates/freehand-metadata/src/lib.rs",
+      "responsibility": "identify the pipeline node where metadata was written",
+      "input_semantic": "pipeline node and optional runtime node id",
+      "output_semantic": "write-node contract",
+      "caller": "metadata writers",
+      "callee": "metadata contract",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "MetadataSubject",
+      "file_path": "crates/freehand-metadata/src/lib.rs",
+      "responsibility": "identify trace/session/turn subject without request text",
+      "input_semantic": "trace/session/turn ids",
+      "output_semantic": "metadata subject contract",
+      "caller": "metadata writers",
+      "callee": "metadata contract",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "MetadataEnvelope::new",
+      "file_path": "crates/freehand-metadata/src/lib.rs",
+      "responsibility": "construct validated metadata envelope",
+      "input_semantic": "id/kind/owner/node/subject/entries",
+      "output_semantic": "accepted metadata envelope or explicit error",
+      "caller": "metadata writers",
+      "callee": "validate_metadata_envelope",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "validate_metadata_envelope",
+      "file_path": "crates/freehand-metadata/src/lib.rs",
+      "responsibility": "enforce owner, write-node, subject, entry, and request-key rules",
+      "input_semantic": "metadata envelope",
+      "output_semantic": "pass/fail",
+      "caller": "MetadataEnvelope::new and MetadataCenter::write",
+      "callee": "validation helpers",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "MetadataCenter::write",
+      "file_path": "crates/freehand-metadata/src/lib.rs",
+      "responsibility": "admit validated metadata into the center",
+      "input_semantic": "metadata envelope",
+      "output_semantic": "stored metadata or explicit error",
+      "caller": "metadata writers",
+      "callee": "validator plus in-memory store",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "MetadataCenter::by_trace",
+      "file_path": "crates/freehand-metadata/src/lib.rs",
+      "responsibility": "query metadata records by trace id for audit/debug correlation",
+      "input_semantic": "trace id",
+      "output_semantic": "metadata record references",
+      "caller": "debug/audit tools",
+      "callee": "in-memory store",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "metadata envelope, writer owner, write node, subject, validation, and in-memory center are bound in code",
+    "first integration slice does not yet wire runtime/reason/provider producers into the metadata center",
+    "generated wiki must be regenerated from `docs/mainline-calls/metadata.core.json` when this function-map truth changes"
+  ]
+}

@@ -116,7 +116,7 @@ Hard rule:
 - exact event enum and field names
 - exact tool-call semantic model
 - exact provider capability negotiation model
-- exact metadata/request envelope type names and builder ownership
+- runtime/reason/provider producer wiring into `metadata.core`
 
 ## Design guardrails
 

@@ -30,6 +30,8 @@ Unknown details stay `TBD`.
   - turn orchestration, session-history / rewrite-gate truth, and reasoning event emission
 - `freehand-node`
   - master/slave runtime and node protocol
+- `freehand-metadata`
+  - internal control/provenance metadata center with writer owner and write-node validation
 - `freehand-ui-protocol`
   - UI-facing commands, projections, event surface
 - `freehand-gates`
@@ -48,6 +50,7 @@ Unknown details stay `TBD`.
 - reasoning and provider adapters are independent modules; they may only meet through contracts and provider-core semantic outputs
 - metadata and request data pipelines must be hard-isolated by type and builder ownership
 - debug/provider/model/cache metadata must not become hidden prompt/request content
+- metadata writes must pass through `metadata.core` with explicit writer owner and write-node provenance
 - subagent search/enrichment enters parent context only through a typed final-conclusion projection, never by replaying the child transcript into the parent prompt
 
 ### Persistence layering

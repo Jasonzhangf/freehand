@@ -112,6 +112,7 @@ The first version locks these shared IDs:
 - request contracts use typed context segments instead of ad hoc `source/content` pairs
 - provider payload semantic contract carries `input_segments`, not one mixed rendered string field
 - metadata/debug envelope remains outside `contracts.core`
+- internal control/provenance metadata is owned by `metadata.core`, not by `contracts.core`
 
 ## Open Questions / TBD
 

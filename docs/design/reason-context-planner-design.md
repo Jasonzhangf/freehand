@@ -250,6 +250,7 @@ Request content types may carry only:
 
 Metadata types may carry only:
 
+- writer owner and write-node provenance owned by `metadata.core`
 - trace ids
 - source ids
 - provider/model/protocol selectors

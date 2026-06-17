@@ -52,6 +52,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | context planning, cache shape, segment admission | `reason.context-planner` | `crates/freehand-blocks` | `docs/function-maps/reason.context-planner.md` | `docs/testing/reason.context-planner.md` |
 | compaction/rewrite/recovery trigger policy | `reason.rewrite-policy` | `crates/freehand-blocks` | `docs/function-maps/reason.rewrite-policy.md` | `docs/testing/reason.rewrite-policy.md` |
 | independent debug/trace contracts, snapshots, hub/sinks | `debug.core` | `crates/freehand-debug` | `docs/function-maps/debug.core.md` | `docs/testing/debug.core.md` |
+| internal control metadata center, writer ownership, write-node provenance, metadata/request isolation | `metadata.core` | `crates/freehand-metadata` | `docs/function-maps/metadata.core.md` | `docs/testing/metadata.core.md` |
 | master/slave pairing, node status, delegation, slave turn publication | `node.master-slave` | `crates/freehand-node` | `docs/function-maps/node.master-slave.md` | `docs/testing/node.master-slave.md` |
 | UI commands, query/subscribe, UI projections | `ui.protocol` | `crates/freehand-ui-protocol` | `docs/function-maps/ui.protocol.md` | `docs/testing/ui.protocol.md` |
 | runtime wiring for UI command dispatch into owner modules | `runtime.ui-command-dispatch` | `crates/freehand-runtime` | `docs/function-maps/runtime.ui-command-dispatch.md` | `docs/testing/runtime.ui-command-dispatch.md` |
@@ -940,6 +941,49 @@ If a problem does not fit this table, update this routing index before making co
   - debug does not become request/session/reason truth
   - semantic and scene positions remain paired
   - UI consumes debug projections without owning debug truth
+
+### `metadata.core`
+
+- owner: `crates/freehand-metadata`
+- allowed_paths: `crates/freehand-metadata/**`, `crates/freehand-contracts/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
+- forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `crates/freehand-ui-protocol/**`, `apps/**`
+- required_checks:
+  - `cargo test -p freehand-metadata`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - metadata envelope validation tests
+  - writer owner required-field tests
+  - write-node required-field tests
+  - request-data key rejection tests
+  - metadata JSON round-trip tests
+- required_module_black_box_tests:
+  - metadata center write/query smoke
+  - metadata/request isolation smoke
+- required_project_black_box_tests:
+  - workspace gate validates metadata owner docs, mainline source, and generated wiki
+- test_design_doc: `docs/testing/metadata.core.md`
+- function_map_doc: `docs/function-maps/metadata.core.md`
+- mainline_call_doc: `docs/mainline-calls/metadata.core.json`
+- generated_wiki_doc: `docs/wiki/metadata.core.md`
+- debug_artifacts:
+  - metadata ledger fixture path
+- runtime_paths:
+  - `~/.freehand/ledgers/metadata`
+  - `~/.freehand/replays/metadata`
+- update_triggers:
+  - metadata envelope fields change
+  - writer owner contract changes
+  - write-node provenance contract changes
+  - metadata/request isolation policy changes
+  - metadata center storage/query behavior changes
+  - generated wiki freshness policy changes
+- lifecycle_checks:
+  - every metadata write remains attributable to one owner feature and owner symbol
+  - every metadata write remains attributable to one pipeline write node
+  - metadata remains internal control/provenance data, not request-chain content
+  - request content cannot be recovered from metadata fields
+  - debug remains observation-only and does not become the metadata owner
 
 ### `runtime.ui-command-dispatch`
 

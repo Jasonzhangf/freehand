@@ -14,6 +14,7 @@ Use this directory family for durable design truth.
 - `docs/design/provider-and-reasoning-design.md`
 - `docs/design/debug-and-observability-design.md`
 - `docs/design/debug-core-design.md`
+- `docs/design/metadata-core-design.md`
 - `docs/design/ui-and-runtime-topology.md`
 - `docs/design/config-core-design.md`
 - `docs/design/contracts-core-design.md`
@@ -83,6 +84,8 @@ Use this directory family for durable design truth.
   - semantic location, scene location, ledgers, replays, runtime evidence
 - `debug-core-design.md`
   - debug module ownership, trace envelope, debug snapshot, and read-only observation boundaries
+- `metadata-core-design.md`
+  - internal metadata center, writer owner, write-node provenance, and metadata/request isolation boundary
 - `ui-and-runtime-topology.md`
   - multi-UI access, runtime home, master/slave shape, UI protocol boundaries
 - `config-core-design.md`

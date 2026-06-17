@@ -9,6 +9,7 @@
 - `freehand-reason`: turn orchestration, session-history / rewrite-gate truth, and event emission
 - `freehand-node`: master/slave runtime
 - `freehand-debug`: debug/trace envelope, debug snapshot, replay-facing observation contracts
+- `freehand-metadata`: internal control/provenance metadata center with writer owner and write-node validation
 - `freehand-ui-protocol`: UI-facing contract surface
 - `freehand-runtime`: runtime wiring owner that composes reason/node owners without turning apps into business owners
   - may also own config-selected runtime bootstrap helpers so host apps stay thin
@@ -65,6 +66,9 @@
 - UI-submitted commands may ask the system to act, but owner modules still own all turn/debug/session truth mutation.
 - transport reuse is allowed only when the shared transport implementation stays protocol-only.
 - Debug snapshots and trace envelopes belong in `freehand-debug`, not in `freehand-contracts`, `freehand-reason`, or UI apps.
+- Internal control/provenance metadata belongs in `freehand-metadata`; metadata entries must include writer owner and write-node provenance.
+- Metadata must not carry request text, prompt content, message arrays, provider request payloads, or context segment content.
+- Debug may observe or link metadata, but debug is not the metadata write owner.
 - Test ownership follows the same single-truth rule as runtime semantics.
 - `freehand-reason` must not depend on provider adapter crates.
 - Provider adapter crates must not depend on `freehand-reason`.

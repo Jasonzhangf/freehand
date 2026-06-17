@@ -9,6 +9,7 @@ members = [
   "crates/freehand-reason",
   "crates/freehand-node",
   "crates/freehand-debug",
+  "crates/freehand-metadata",
   "crates/freehand-ui-protocol",
   "crates/freehand-tools",
   "crates/freehand-runtime",

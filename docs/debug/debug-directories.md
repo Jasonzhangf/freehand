@@ -13,9 +13,11 @@
 - `~/.freehand/logs`
 - `~/.freehand/ledgers`
 - `~/.freehand/ledgers/checkpoints`
+- `~/.freehand/ledgers/metadata`
 - `~/.freehand/ledgers/reason`
 - `~/.freehand/ledgers/providers`
 - `~/.freehand/replays`
+- `~/.freehand/replays/metadata`
 - `~/.freehand/cache/session-index`
 - `~/.freehand/tmp`
 

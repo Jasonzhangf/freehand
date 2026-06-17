@@ -71,6 +71,7 @@ Minimum binding fields for each function-call-table row:
 - caller / callee relationship
 - notes on adjacent-node boundary
 - metadata/request isolation notes for cross-module calls
+- metadata owner/write-node notes when the feature writes internal control metadata
 
 If implementation is not landed yet, the row must say binding is pending. Do not pretend symbols exist.
 

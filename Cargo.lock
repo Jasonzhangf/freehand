@@ -221,6 +221,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "freehand-metadata"
+version = "0.1.0"
+dependencies = [
+ "freehand-contracts",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "freehand-node"
 version = "0.1.0"
 dependencies = [

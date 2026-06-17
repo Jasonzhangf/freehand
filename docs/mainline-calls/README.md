@@ -32,4 +32,5 @@ Current migrated features:
 - `reason.rewrite-policy`
 - `reason.context-planner`
 - `debug.core`
+- `metadata.core`
 - `runtime.ui-command-dispatch`

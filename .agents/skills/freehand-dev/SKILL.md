@@ -72,9 +72,11 @@ Use this skill for any non-trivial work in this repo.
   - `~/.freehand/logs`
   - `~/.freehand/ledgers`
   - `~/.freehand/ledgers/checkpoints`
+  - `~/.freehand/ledgers/metadata`
   - `~/.freehand/ledgers/reason`
   - `~/.freehand/ledgers/providers`
   - `~/.freehand/replays`
+  - `~/.freehand/replays/metadata`
   - `~/.freehand/cache`
   - `~/.freehand/cache/session-index`
   - `~/.freehand/tmp`
@@ -94,6 +96,9 @@ Use this skill for any non-trivial work in this repo.
 - Global semantic types live in `crates/freehand-contracts`.
 - `crates/freehand-contracts` owns cross-module shared semantic types, shared IDs, cross-module error contracts, and module-level error base contracts.
 - `crates/freehand-contracts` does not own config schema, UI projection, or debug/trace envelope.
+- Internal control/provenance metadata lives in `crates/freehand-metadata`.
+- Every metadata write must carry writer owner and write-node provenance through `metadata.core`.
+- Metadata entries must not carry request text, prompt content, message arrays, provider request payloads, or context segment content.
 - Shared pure semantic logic lives in `crates/freehand-blocks`.
 - Before adding any function, inspect existing blocks and owner crates first.
 - Do not add temporary helpers to `crates/freehand-reason` or `crates/freehand-node`.
@@ -168,6 +173,7 @@ Use this skill for any non-trivial work in this repo.
 - `freehand-reason` and provider adapter crates must remain independent; neither side may depend on the other's implementation crate.
 - Metadata/debug/provider/cache fields and request-chain content fields must stay hard-isolated by type and builder ownership.
 - Metadata must not be smuggled into request text, and request content must not be recovered from metadata/debug fields.
+- Debug may observe metadata later, but debug is not the metadata write owner.
 - Restart recovery must use authoritative snapshots plus reason-ledger replay; UI sidecars and provider raw ledgers are never recovery truth.
 - In UI protocol work, query and subscribe must stay separate, and source identity fields must remain explicit.
 - Shared contract types should default to serializable, replayable, and persistable unless a higher-priority truth source says otherwise.

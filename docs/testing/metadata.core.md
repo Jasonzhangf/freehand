@@ -1,0 +1,35 @@
+# Test Design: `metadata.core`
+
+- feature_id: `metadata.core`
+- owner: `crates/freehand-metadata`
+- lifecycle path under test:
+  - module writer constructs metadata owner provenance
+  - module writer constructs metadata write-node provenance
+  - module writer attaches trace/session/turn subject without request text
+  - metadata envelope validates owner, node, subject, and entries
+  - metadata center admits only validated metadata
+  - metadata center query can locate records by `trace_id`
+  - request-data-like keys are rejected before storage
+- white-box plan:
+  - metadata envelope records writer owner and write node
+  - missing writer owner is rejected
+  - missing write node is rejected
+  - request-data keys are rejected
+  - metadata JSON round-trip preserves provenance fields
+- module black-box plan:
+  - metadata center write/query smoke
+  - metadata/request isolation smoke
+- project black-box impact:
+  - workspace gate validates metadata owner docs, mainline source, generated wiki, and workspace membership
+  - no runtime producer integration is claimed in this slice
+- fixtures / replay inputs / runtime evidence paths:
+  - `~/.freehand/ledgers/metadata`
+  - `~/.freehand/replays/metadata`
+- known gaps:
+  - runtime/reason/provider/debug producers are not yet wired to the metadata center
+  - no persistent metadata ledger writer is implemented yet
+  - no architecture scan yet detects metadata-like ad hoc structs outside the owner crate
+- sync status between design and implementation:
+  - crate/test baseline is landed
+  - metadata center validation and in-memory write/query behavior are implemented and covered
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

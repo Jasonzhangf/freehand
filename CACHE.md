@@ -4,6 +4,7 @@
 - Current milestone: stability-quality gate hardening.
 - Last verified baseline:
   - `cargo test -p xtask` -> 8 passed
+  - `cargo test -p freehand-metadata` -> 6 passed
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
@@ -33,5 +34,10 @@
   - `xtask gates check` now validates migrated mainline `bound` call-table rows against existing source files and resolvable symbols
   - `make ci` is the canonical full local gate and now includes `cargo run -p xtask -- mainlines check` before `cargo run -p xtask -- gates check`
   - `xtask gates check` now validates CI/CD command alignment so pre-push, GitHub CI, and release paths cannot silently skip the full gate
+- Metadata core update:
+  - `metadata.core` now owns internal control/provenance metadata in `crates/freehand-metadata`
+  - metadata writes must carry `MetadataWriteOwner` and `MetadataWriteNode`
+  - metadata/request separation is enforced by type boundary plus request-like key rejection in `validate_metadata_envelope`
+  - runtime/reason/provider/debug producer wiring and persistent metadata ledger are still pending
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.
