@@ -36,3 +36,4 @@
   - session-history rewrite baseline landed
   - ordinary-turn stability and rewrite-gate bump behavior are covered in crate tests
   - persisted JSON/file round-trip baseline is covered in crate tests
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

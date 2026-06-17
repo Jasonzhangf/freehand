@@ -625,7 +625,7 @@ If a problem does not fit this table, update this routing index before making co
 ### `reason.session-history`
 
 - owner: `crates/freehand-reason`
-- allowed_paths: `crates/freehand-reason/**`, `crates/freehand-contracts/**`, `crates/freehand-blocks/**`, `docs/architecture/**`, `docs/design/**`
+- allowed_paths: `crates/freehand-reason/**`, `crates/freehand-contracts/**`, `crates/freehand-blocks/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
 - forbidden_paths: `crates/freehand-provider-*/**`, `crates/freehand-ui-protocol/**` except projection-only consumers
 - required_checks:
   - `cargo test -p freehand-reason`
@@ -643,6 +643,8 @@ If a problem does not fit this table, update this routing index before making co
   - reason-to-provider rewrite-version propagation smoke
 - test_design_doc: `docs/testing/reason.session-history.md`
 - function_map_doc: `docs/function-maps/reason.session-history.md`
+- mainline_call_doc: `docs/mainline-calls/reason.session-history.json`
+- generated_wiki_doc: `docs/wiki/reason.session-history.md`
 - debug_artifacts:
   - session-history persisted fixture path
   - rewrite-ledger fixture path

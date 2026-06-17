@@ -1,0 +1,159 @@
+{
+  "feature_id": "reason.session-history",
+  "owner_crate": "crates/freehand-reason",
+  "owner_module": "crates/freehand-reason/src/session_history.rs",
+  "function_map_doc": "docs/function-maps/reason.session-history.md",
+  "test_design_doc": "docs/testing/reason.session-history.md",
+  "mainline_call_doc": "docs/mainline-calls/reason.session-history.json",
+  "generated_wiki_doc": "docs/wiki/reason.session-history.md",
+  "request_mainline": [
+    "runtime/session truth is created or restored as `SessionHistory`",
+    "stable/session-stable base context lives in `SessionHistory.base_context_segments`",
+    "`reason.rewrite-policy` decides whether runtime should stay append-only, compact, rollback, rebuild, or block",
+    "`ReasonRewriteRuntime` is the baseline consumer that applies policy decisions before calling any `SessionHistory::stage_*` method",
+    "explicit rewrite gate methods are the only owner path that may bump `rewrite_version` and switch non-ordinary `rewrite_mode`",
+    "`ReasonTurnEngine::start_turn` reads `SessionHistory` for base context, `rewrite_mode`, and `rewrite_version`",
+    "after successful turn startup, `SessionHistory::commit_turn_start` returns the session to ordinary-turn mode while preserving the bumped version"
+  ],
+  "response_mainline": [
+    "rewrite gate methods return updated session truth plus a rewrite-ledger record",
+    "persistence methods return JSON or filesystem snapshots for later reload",
+    "turn startup consumes session history state and projects rewrite metadata into planner diagnostics, not request text"
+  ],
+  "error_mainline": [
+    "empty rewrite reason is rejected",
+    "volatile or forbidden rewrite base segments are rejected",
+    "invalid persisted json is rejected",
+    "file IO failure is explicit",
+    "mismatched session id between turn input and session history is rejected by `ReasonTurnEngine::start_turn`"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "validate_rewrite_base_segments",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "validate and order stable/session-stable rewrite base segments before session truth mutates",
+      "allowed_callers": [
+        "freehand-reason",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "rewrite base rejection",
+        "persisted session truth validation"
+      ],
+      "why_shared": "stable-prefix semantic validation must not be duplicated in orchestrator code"
+    },
+    {
+      "symbol": "inspect_context_cache_diagnostics",
+      "owner": "crates/freehand-blocks/src/lib.rs",
+      "purpose": "compute metadata-side cache diagnostics for rewrite ledger evidence",
+      "allowed_callers": [
+        "freehand-reason",
+        "owner-crate tests",
+        "replay/debug tools"
+      ],
+      "related_tests": [
+        "rewrite diagnostics snapshot tests"
+      ],
+      "why_shared": "cache-shape semantics must stay aligned between planner turns and rewrite ledger"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "SessionHistory::new",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "create session truth with validated base context and ordinary rewrite state",
+      "input_semantic": "session id plus stable/session-stable base segments",
+      "output_semantic": "initialized session history",
+      "caller": "runtime/bootstrap",
+      "callee": "session-history owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "SessionHistory::stage_compaction",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "stage compaction rewrite and bump rewrite version",
+      "input_semantic": "compacted base context plus reason",
+      "output_semantic": "updated session truth plus rewrite ledger record",
+      "caller": "runtime/orchestrator",
+      "callee": "rewrite gate",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "SessionHistory::stage_rollback",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "stage rollback rewrite and bump rewrite version",
+      "input_semantic": "rollback base context plus reason plus reference turn id",
+      "output_semantic": "updated session truth plus rewrite ledger record",
+      "caller": "runtime/orchestrator",
+      "callee": "rewrite gate",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "SessionHistory::stage_resume_rebuild",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "stage resume rebuild rewrite and bump rewrite version",
+      "input_semantic": "rebuilt base context plus reason plus resume source",
+      "output_semantic": "updated session truth plus rewrite ledger record",
+      "caller": "runtime/orchestrator",
+      "callee": "rewrite gate",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "ReasonTurnEngine::start_turn",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "responsibility": "consume session rewrite state for turn startup",
+      "input_semantic": "session history plus turn input",
+      "output_semantic": "planned turn request plus provider payload",
+      "caller": "CLI/server/node",
+      "callee": "turn orchestrator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "SessionHistory::commit_turn_start",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "clear one-shot non-ordinary rewrite mode after successful startup and stamp applied turn id",
+      "input_semantic": "turn id",
+      "output_semantic": "updated session truth",
+      "caller": "turn orchestrator",
+      "callee": "session-history owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "SessionHistory::persist_json",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "render persistable session truth snapshot",
+      "input_semantic": "session history",
+      "output_semantic": "JSON snapshot",
+      "caller": "runtime/debug/replay",
+      "callee": "persistence helper",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "SessionHistory::from_persisted_json",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "restore session truth from persisted JSON",
+      "input_semantic": "JSON snapshot",
+      "output_semantic": "session history",
+      "caller": "runtime/debug/replay",
+      "callee": "persistence helper",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "session-history baseline is landed in `freehand-reason`",
+    "rewrite mode and rewrite version are now sourced from `SessionHistory` instead of turn-local constants",
+    "compaction, rollback, and resume rebuild each have explicit owner methods",
+    "persisted json/file round-trip is implemented for session truth baseline",
+    "`ReasonRewriteRuntime` now consumes `reason.rewrite-policy` decisions before calling each rewrite gate",
+    "remaining gap: final CLI/server runtime loop must supply real usage metrics and persisted recovery payloads",
+    "generated wiki must be regenerated from `docs/mainline-calls/reason.session-history.json` when this function-map truth changes"
+  ]
+}

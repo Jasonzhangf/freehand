@@ -258,3 +258,6 @@
 - 2026-06-17: `reason.persistence` migrated into the mainline/wiki chain
   - `docs/mainline-calls/reason.persistence.json` is now the machine-readable persistence mainline truth
   - `docs/wiki/reason.persistence.md` is generated from it
+- 2026-06-17: `reason.session-history` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/reason.session-history.json` is now the machine-readable session-history mainline truth
+  - `docs/wiki/reason.session-history.md` is generated from it

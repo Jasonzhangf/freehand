@@ -20,3 +20,4 @@ Current migrated features:
 - `ui.protocol`
 - `reason.turn`
 - `reason.persistence`
+- `reason.session-history`
