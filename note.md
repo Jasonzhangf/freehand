@@ -733,3 +733,19 @@
     - `cargo run -p xtask -- mainlines generate`
     - `cargo run -p xtask -- mainlines check`
     - `make ci`
+- 2026-06-18: daemon corrupt checkpoint-bootstrap slice
+  - owner route: `app.runtime-daemon`
+  - audit target: daemon app boundary already covered checkpoint rewind runtime failures over HTTP, but startup-time checkpoint projection bootstrap corruption was only claimed in docs and not black-box locked at the host boundary
+  - chosen closure:
+    - corrupt `~/.freehand/ledgers/checkpoints/master/runtime-session-master.jsonl` before daemon bootstrap
+    - assert `build_runtime_dispatcher_from_default_config("master")` fails explicitly before transport serve
+    - sync daemon owner docs, test design, mainline JSON, and generated wiki to name this startup failure path
+  - implementation:
+    - added `daemon_bootstrap_rejects_corrupt_checkpoint_projection_truth`
+    - synced `docs/function-maps/app.runtime-daemon.md`, `docs/testing/app.runtime-daemon.md`, `docs/mainline-calls/app.runtime-daemon.json`, `docs/wiki/app.runtime-daemon.md`
+  - verification target:
+    - `cargo test -p freehand-daemon daemon_bootstrap_rejects_corrupt_checkpoint_projection_truth -- --nocapture`
+    - `cargo test -p freehand-daemon`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

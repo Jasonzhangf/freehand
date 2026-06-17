@@ -32,6 +32,7 @@
   - `runtime.checkpoint-rewind` now has explicit regression coverage for missing manifest rewind, missing blob rewind, corrupt checkpoint-ledger query failure, and corrupt checkpoint-ledger bootstrap failure
   - `runtime.ui-command-dispatch` now has explicit regression coverage that missing checkpoint rewind manifests map to `TargetNotFound`
   - `app.runtime-daemon` now has explicit HTTP black-box coverage that missing checkpoint rewind manifests surface `command_dispatch_target_not_found` instead of being projected as success
+  - `app.runtime-daemon` now also has explicit startup black-box coverage that corrupt checkpoint projection bootstrap truth fails before transport serve
   - `app.webui-smoke` now has explicit HTTP black-box coverage that protocol command ingress surfaces both dispatch-port failures and dispatch-task join failures as explicit 500 failure payloads
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
@@ -75,6 +76,7 @@
   - if provider raw retention is enabled and the raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - Latest verification:
   - `cargo test -p freehand-daemon daemon_rewind_checkpoint_ -- --nocapture`
+  - `cargo test -p freehand-daemon daemon_bootstrap_rejects_corrupt_checkpoint_projection_truth -- --nocapture`
   - `cargo test -p freehand-daemon daemon_submit_input_surfaces_provider_failure_from_runtime_owner -- --nocapture`
   - `cargo test -p freehand-daemon`
   - `cargo test -p freehand-server transport_command_ingress_ -- --nocapture`

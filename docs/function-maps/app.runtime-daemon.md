@@ -32,6 +32,7 @@
 
 - invalid daemon CLI input returns explicit startup error
 - runtime dispatcher bootstrap failure returns explicit daemon startup error
+- corrupt checkpoint projection bootstrap truth returns explicit daemon startup error before transport serve
 - runtime dispatch failures return protocol-mapped HTTP failures through the shared transport layer
 - missing checkpoint rewind manifests surface protocol-mapped target-not-found failure over the same HTTP command ingress
 - slave-mode agent selection returns explicit daemon startup error
@@ -72,6 +73,6 @@
 
 - daemon bootstrap is bound in code
 - daemon now injects `RuntimeCommandDispatcher` into shared protocol-only HTTP/SSE transport
-- provider-backed submit/query/continuous-SSE restore, provider-failure surfacing, restart resume of turn-id allocation, direct-message HTTP smoke, checkpoint rewind HTTP smoke, and missing-checkpoint rewind HTTP failure smoke are covered through the daemon app boundary
+- provider-backed submit/query/continuous-SSE restore, provider-failure surfacing, restart resume of turn-id allocation, direct-message HTTP smoke, checkpoint rewind HTTP smoke, missing-checkpoint rewind HTTP failure smoke, and corrupt-checkpoint-bootstrap startup smoke are covered through the daemon app boundary
 - config-selected bootstrap is now bound in code and uses configured peer topology
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

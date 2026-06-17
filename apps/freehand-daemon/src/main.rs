@@ -819,6 +819,41 @@ mod tests {
         assert!(err.contains("runtime host requires a master agent"));
     }
 
+    #[test]
+    #[serial]
+    fn daemon_bootstrap_rejects_corrupt_checkpoint_projection_truth() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let home =
+            write_test_home(&master_config_text("https://example.invalid")).expect("test home");
+        let checkpoint_ledger = home
+            .join(".freehand")
+            .join("ledgers")
+            .join("checkpoints")
+            .join("master");
+        fs::create_dir_all(&checkpoint_ledger).expect("create checkpoint ledger dir");
+        fs::write(
+            checkpoint_ledger.join("runtime-session-master.jsonl"),
+            "{not-json}\n",
+        )
+        .expect("write corrupt checkpoint ledger");
+
+        let old_home = env::var_os("HOME");
+        let old_pair_token = env::var_os("FREEHAND_PAIR_TOKEN_SHARED");
+        unsafe { env::set_var("HOME", &home) };
+        unsafe { env::set_var("FREEHAND_PAIR_TOKEN_SHARED", "pair-token-shared") };
+
+        let err = match build_runtime_dispatcher_from_default_config("master") {
+            Ok(_) => panic!("corrupt checkpoint projection truth must fail"),
+            Err(err) => err,
+        };
+
+        restore_env(old_home, "FREEHAND_PAIR_TOKEN_SHARED", old_pair_token);
+
+        assert!(err.contains("failed to build runtime dispatcher"));
+        assert!(err.contains("checkpoint projection bootstrap failed"));
+        assert!(err.contains("checkpoint ledger line 1 failed to parse"));
+    }
+
     fn master_config_text(base_url: &str) -> String {
         format!(
             r#"

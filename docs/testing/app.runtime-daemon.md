@@ -28,6 +28,7 @@
   - daemon checkpoint rewind HTTP smoke
   - daemon missing-checkpoint rewind HTTP failure smoke
   - daemon slave-mode startup rejection smoke
+  - daemon corrupt-checkpoint-bootstrap startup rejection smoke
 - project black-box impact:
   - closes the first real runtime host gap without polluting the protocol-only app boundary
   - machine-readable mainline truth remains the only source for generated wiki artifacts
@@ -41,5 +42,6 @@
   - daemon bootstrap helper is landed
   - runtime-backed submit/query/restart-restore/continuous-SSE/provider-failure/direct-message/checkpoint-rewind HTTP smoke is landed
   - daemon HTTP rewind now also has explicit missing-manifest failure coverage through the same command ingress
+  - daemon startup now also has explicit corrupt checkpoint-projection bootstrap failure coverage
   - config-selected bootstrap smoke is landed and uses configured peer topology
   - migrated mainline-call source and generated wiki are kept in sync with this test design
