@@ -21,6 +21,7 @@ Generated from `docs/mainline-calls/runtime.checkpoint-rewind.json`. Do not edit
 
 - checkpoint creation returns manifest and ledger truth bound to agent/session/turn/tool-call identity
 - writable tool execution is associated with one checkpoint lifecycle record and ledger rows for created/applied/failed
+- read-only checkpoint query returns runtime-owned summaries from manifest plus ledger truth
 - explicit rewind restores the pre-image set into the locked workspace root
 - runtime emits checkpoint status for debug and future projection consumers without changing reason truth ownership
 
@@ -29,6 +30,7 @@ Generated from `docs/mainline-calls/runtime.checkpoint-rewind.json`. Do not edit
 - preview-unavailable writable tools return explicit rejection
 - snapshot failure blocks writable execution explicitly
 - restore failure, missing manifest, missing blob, or ledger corruption block explicitly
+- checkpoint query failure is explicit and never falls back to UI projection truth
 - checkpoint truth must not be reconstructed from UI projections or provider raw ledgers
 
 ## Shared Multi-Reference Functions
@@ -45,6 +47,12 @@ Generated from `docs/mainline-calls/runtime.checkpoint-rewind.json`. Do not edit
   - allowed callers: checkpoint create path, runtime restore path
   - related tests: checkpoint ledger lifecycle tests
   - why shared: runtime checkpoint audit must not be duplicated across entrypoints
+- `RuntimeCheckpointStore::list_summaries`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: read runtime-owned checkpoint manifests plus ledger rows into safe summary DTOs
+  - allowed callers: runtime dispatcher, runtime tests
+  - related tests: checkpoint summary query tests
+  - why shared: checkpoint query semantics must stay tied to runtime truth instead of being reconstructed in UI or app transports
 
 ## Function Call Table
 
@@ -55,10 +63,12 @@ Generated from `docs/mainline-calls/runtime.checkpoint-rewind.json`. Do not edit
 | 03 | `RuntimeCheckpointStore::create_from_preview` | `crates/freehand-runtime/src/lib.rs` | snapshot previewed pre-image set and write checkpoint manifest | preview truth plus turn identity | checkpoint manifest plus created ledger row | tool loop | checkpoint owner | bound |
 | 04 | `execute_registry_tool_call` | `crates/freehand-runtime/src/lib.rs` | call `tool.registry` execute only after checkpoint succeeds for writable tools | checkpoint id plus writable tool call | tool result plus applied ledger row | tool loop | tool registry owner | bound |
 | 05 | `rewind_checkpoint` | `crates/freehand-runtime/src/lib.rs` | restore one checkpoint pre-image set into the locked workspace root | checkpoint id | restored workspace plus restore ledger row | future CLI/UI/runtime command | checkpoint owner | bound |
+| 06 | `list_checkpoints / RuntimeCheckpointStore::list_summaries` | `crates/freehand-runtime/src/lib.rs` | read manifest plus ledger truth into safe checkpoint summaries | runtime home plus agent/session ids | checkpoint summary list | runtime dispatcher and tests | checkpoint owner | bound |
 
 ## Sync Status Against Mainline Call
 
 - design truth is locked
 - current runtime code has live tool execution with checkpoint + rewind owner path now code-bound
+- checkpoint summary query/projection is runtime-owned and code-bound
 - current reason persistence remains authoritative for session/turn truth and is intentionally separate from checkpoint restore truth
 - generated wiki must be regenerated from `docs/mainline-calls/runtime.checkpoint-rewind.json` when this function-map truth changes

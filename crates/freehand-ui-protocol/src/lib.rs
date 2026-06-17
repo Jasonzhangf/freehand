@@ -27,6 +27,7 @@ pub enum UiStreamKind {
     Progress,
     NodeStatus,
     Debug,
+    Checkpoint,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +69,7 @@ pub enum UiCommand {
     QueryDebugState {
         turn_id: TurnId,
     },
+    QueryCheckpoints,
     SendDirectMessageToSlave {
         node_id: String,
         text: String,
@@ -135,11 +137,31 @@ pub struct TaskProgressSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiCheckpointSummary {
+    pub checkpoint_id: String,
+    pub agent_id: AgentId,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub tool_call_id: String,
+    pub changed_paths: Vec<String>,
+    pub latest_status: String,
+    pub latest_detail: Option<String>,
+    pub updated_unix_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiCheckpointSnapshot {
+    pub source: UiSource,
+    pub checkpoints: Vec<UiCheckpointSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiProjection {
     Turn(UiTurnProjection),
     NodeStatus(NodeStatusSnapshot),
     Progress(TaskProgressSnapshot),
     Debug(DebugStateSnapshot),
+    Checkpoints(UiCheckpointSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +190,7 @@ pub enum UiQueryResult {
     NodeStatus(Option<NodeStatusSnapshot>),
     Progress(Option<TaskProgressSnapshot>),
     Debug(Option<DebugStateSnapshot>),
+    Checkpoints(UiCheckpointSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,6 +286,7 @@ pub struct UiProtocolState {
     node_status: BTreeMap<String, NodeStatusSnapshot>,
     progress: BTreeMap<TurnId, TaskProgressSnapshot>,
     debug: BTreeMap<TurnId, DebugStateSnapshot>,
+    checkpoints: Option<UiCheckpointSnapshot>,
     subscription_tx: broadcast::Sender<UiSubscriptionEvent>,
 }
 
@@ -299,6 +323,7 @@ impl UiProtocolState {
             node_status: BTreeMap::new(),
             progress: BTreeMap::new(),
             debug: BTreeMap::new(),
+            checkpoints: None,
             subscription_tx,
         }
     }
@@ -464,6 +489,11 @@ impl UiProtocolState {
         self.publish_projection(UiProjection::Debug(snapshot));
     }
 
+    pub fn set_checkpoint_snapshot(&mut self, snapshot: UiCheckpointSnapshot) {
+        self.checkpoints = Some(snapshot.clone());
+        self.publish_projection(UiProjection::Checkpoints(snapshot));
+    }
+
     pub fn apply_debug_event(&mut self, event: &DebugEvent) -> bool {
         let Some(snapshot) = event.snapshot.clone() else {
             return false;
@@ -507,6 +537,11 @@ impl UiProtocolState {
             UiCommand::QueryDebugState { turn_id } => {
                 Ok(UiQueryResult::Debug(self.debug.get(turn_id).cloned()))
             }
+            UiCommand::QueryCheckpoints => Ok(UiQueryResult::Checkpoints(
+                self.checkpoints
+                    .clone()
+                    .unwrap_or_else(empty_checkpoint_snapshot),
+            )),
             _ => Err(UiProtocolError::StreamKindMismatch),
         }
     }
@@ -675,6 +710,7 @@ pub fn subscription_matches(
         (UiStreamKind::Debug, UiProjection::Debug(debug)) => {
             selector.target_turn_id.as_ref() == Some(&debug.semantic.turn_id)
         }
+        (UiStreamKind::Checkpoint, UiProjection::Checkpoints(_)) => true,
         _ => false,
     }
 }
@@ -734,8 +770,36 @@ pub fn public_turn_projection(projection: UiTurnProjection) -> UiPublicTurnProje
     }
 }
 
+pub fn checkpoint_projection_from_runtime_summary(
+    source_agent_id: AgentId,
+    source_node_id: String,
+    summaries: Vec<UiCheckpointSummary>,
+) -> UiCheckpointSnapshot {
+    UiCheckpointSnapshot {
+        source: UiSource {
+            source_agent_id,
+            source_node_id,
+            source_turn_id: None,
+            stream_kind: UiStreamKind::Checkpoint,
+        },
+        checkpoints: summaries,
+    }
+}
+
 pub fn debug_projection_from_event(event: &DebugEvent) -> Option<UiProjection> {
     event.snapshot.clone().map(UiProjection::Debug)
+}
+
+fn empty_checkpoint_snapshot() -> UiCheckpointSnapshot {
+    UiCheckpointSnapshot {
+        source: UiSource {
+            source_agent_id: AgentId::new("unknown"),
+            source_node_id: "unknown".to_owned(),
+            source_turn_id: None,
+            stream_kind: UiStreamKind::Checkpoint,
+        },
+        checkpoints: Vec::new(),
+    }
 }
 
 fn command_kind(command: &UiCommand) -> &'static str {
@@ -751,6 +815,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",
+        UiCommand::QueryCheckpoints => "query_checkpoints",
         UiCommand::SendDirectMessageToSlave { .. } => "send_direct_message_to_slave",
         UiCommand::RewindCheckpoint { .. } => "rewind_checkpoint",
         UiCommand::CancelTurn { .. } => "cancel_turn",
@@ -1118,6 +1183,41 @@ mod tests {
             &UiProjection::Debug(debug),
             state.latest_active_turn_id.as_ref()
         ));
+    }
+
+    #[test]
+    fn checkpoint_summary_query_smoke() {
+        let mut state = UiProtocolState::default();
+        let snapshot = checkpoint_projection_from_runtime_summary(
+            AgentId::new("agent-1"),
+            "node-1".to_owned(),
+            vec![UiCheckpointSummary {
+                checkpoint_id: "checkpoint-1".to_owned(),
+                agent_id: AgentId::new("agent-1"),
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                tool_call_id: "tool-1".to_owned(),
+                changed_paths: vec!["scratch/file.txt".to_owned()],
+                latest_status: "restored".to_owned(),
+                latest_detail: None,
+                updated_unix_seconds: 42,
+            }],
+        );
+        state.set_checkpoint_snapshot(snapshot.clone());
+
+        let result = state
+            .query(&UiCommand::QueryCheckpoints)
+            .expect("checkpoint query");
+        match result {
+            UiQueryResult::Checkpoints(returned) => assert_eq!(returned, snapshot),
+            other => panic!("unexpected checkpoint query result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn command_ingress_rejects_checkpoint_query_route_misuse() {
+        let err = accept_command_ingress(&UiCommand::QueryCheckpoints).expect_err("must reject");
+        assert_eq!(err, UiProtocolError::IngressCommandKindMismatch);
     }
 
     #[test]

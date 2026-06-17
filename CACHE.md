@@ -236,6 +236,12 @@
   - `runtime.ui-command-dispatch` now routes rewind to `runtime.checkpoint-rewind`
   - `freehand-daemon` HTTP black-box now proves writable submit -> checkpoint ledger -> rewind command -> workspace restore
   - workspace verification passed again: `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
+- 2026-06-17: checkpoint query/projection closeout landed
+  - runtime now exposes checkpoint summaries from manifest + ledger truth through `list_checkpoints`
+  - UI protocol now has read-only `UiCheckpointSnapshot` and `QueryCheckpoints`
+  - shared WebUI transport serves `/ui/query/checkpoints`; WebUI renders a secondary checkpoint panel and sends explicit rewind commands
+  - daemon E2E now proves writable submit -> checkpoint query shows `applied` -> rewind -> checkpoint query shows `restored`
+  - verification passed: `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
 - 2026-06-16: `tool.registry` harness rule locked
   - `freehand-tools` is the only owner for built-in tool specs and execution truth
   - every tool must have explicit spec + implemented state before runtime/provider exposure

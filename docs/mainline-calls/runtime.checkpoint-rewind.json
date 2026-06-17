@@ -17,6 +17,7 @@
   "response_mainline": [
     "checkpoint creation returns manifest and ledger truth bound to agent/session/turn/tool-call identity",
     "writable tool execution is associated with one checkpoint lifecycle record and ledger rows for created/applied/failed",
+    "read-only checkpoint query returns runtime-owned summaries from manifest plus ledger truth",
     "explicit rewind restores the pre-image set into the locked workspace root",
     "runtime emits checkpoint status for debug and future projection consumers without changing reason truth ownership"
   ],
@@ -24,6 +25,7 @@
     "preview-unavailable writable tools return explicit rejection",
     "snapshot failure blocks writable execution explicitly",
     "restore failure, missing manifest, missing blob, or ledger corruption block explicitly",
+    "checkpoint query failure is explicit and never falls back to UI projection truth",
     "checkpoint truth must not be reconstructed from UI projections or provider raw ledgers"
   ],
   "shared_functions": [
@@ -53,6 +55,19 @@
         "checkpoint ledger lifecycle tests"
       ],
       "why_shared": "runtime checkpoint audit must not be duplicated across entrypoints"
+    },
+    {
+      "symbol": "RuntimeCheckpointStore::list_summaries",
+      "owner": "crates/freehand-runtime/src/lib.rs",
+      "purpose": "read runtime-owned checkpoint manifests plus ledger rows into safe summary DTOs",
+      "allowed_callers": [
+        "runtime dispatcher",
+        "runtime tests"
+      ],
+      "related_tests": [
+        "checkpoint summary query tests"
+      ],
+      "why_shared": "checkpoint query semantics must stay tied to runtime truth instead of being reconstructed in UI or app transports"
     }
   ],
   "call_table": [
@@ -110,11 +125,23 @@
       "caller": "future CLI/UI/runtime command",
       "callee": "checkpoint owner",
       "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "list_checkpoints / RuntimeCheckpointStore::list_summaries",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "read manifest plus ledger truth into safe checkpoint summaries",
+      "input_semantic": "runtime home plus agent/session ids",
+      "output_semantic": "checkpoint summary list",
+      "caller": "runtime dispatcher and tests",
+      "callee": "checkpoint owner",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
     "design truth is locked",
     "current runtime code has live tool execution with checkpoint + rewind owner path now code-bound",
+    "checkpoint summary query/projection is runtime-owned and code-bound",
     "current reason persistence remains authoritative for session/turn truth and is intentionally separate from checkpoint restore truth",
     "generated wiki must be regenerated from `docs/mainline-calls/runtime.checkpoint-rewind.json` when this function-map truth changes"
   ]

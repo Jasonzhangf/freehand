@@ -69,7 +69,9 @@ fn build_runtime_dispatcher_from_default_config(
 mod tests {
     use super::*;
     use freehand_contracts::TurnId;
-    use freehand_ui_protocol::{UiCommand, UiCommandDispatchReceipt, UiPublicTurnProjection};
+    use freehand_ui_protocol::{
+        UiCheckpointSnapshot, UiCommand, UiCommandDispatchReceipt, UiPublicTurnProjection,
+    };
     use reqwest::Client;
     use serde_json::Value;
     use serial_test::serial;
@@ -371,6 +373,19 @@ mod tests {
             "daemon rewind\n"
         );
         let checkpoint_id = checkpoint_id_from_home(&server.home);
+        let checkpoint_query = client
+            .get(format!("{}/ui/query/checkpoints", server.base_url))
+            .send()
+            .await
+            .expect("checkpoint query response");
+        assert_eq!(checkpoint_query.status(), reqwest::StatusCode::OK);
+        let checkpoint_query: UiCheckpointSnapshot = checkpoint_query
+            .json()
+            .await
+            .expect("checkpoint query json");
+        assert_eq!(checkpoint_query.checkpoints.len(), 1);
+        assert_eq!(checkpoint_query.checkpoints[0].checkpoint_id, checkpoint_id);
+        assert_eq!(checkpoint_query.checkpoints[0].latest_status, "applied");
 
         let rewind = client
             .post(format!("{}/ui/command", server.base_url))
@@ -387,6 +402,17 @@ mod tests {
             format!("runtime_checkpoint_rewound checkpoint_id={checkpoint_id}")
         );
         assert!(!file_path.exists());
+        let checkpoint_query = client
+            .get(format!("{}/ui/query/checkpoints", server.base_url))
+            .send()
+            .await
+            .expect("post-rewind checkpoint query response");
+        assert_eq!(checkpoint_query.status(), reqwest::StatusCode::OK);
+        let checkpoint_query: UiCheckpointSnapshot = checkpoint_query
+            .json()
+            .await
+            .expect("post-rewind checkpoint json");
+        assert_eq!(checkpoint_query.checkpoints[0].latest_status, "restored");
 
         server.stop().await;
         drop(workspace);

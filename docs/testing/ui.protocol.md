@@ -9,6 +9,7 @@
   - accepted command ingress is routed to declared owner feature/module before transport dispatch
   - query returns snapshot truth
   - debug query returns per-turn read-only debug snapshot truth
+  - checkpoint query returns read-only runtime-owned checkpoint summary projections
   - subscribe returns an initial snapshot plus continuous incremental truth
   - debug subscribe returns per-turn read-only debug projections
   - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
@@ -22,6 +23,7 @@
   - command ingress acceptance and rejection mapping
   - command dispatch routing mapping
   - checkpoint rewind ingress validation and owner-routing mapping
+  - checkpoint projection storage and query mapping
   - client-specific projection gating
   - debug-state query and subscription routing
   - protocol-owned subscription channel fanout
@@ -35,6 +37,7 @@
   - debug-state subscription by `turn_id`
   - protocol subscription receiver gets turn/debug updates after state mutation
   - debug-core receiver to queryable protocol-state smoke
+  - checkpoint summary query smoke
   - CLI hides slave card while WebUI may render it
   - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries
 - project black-box impact:
@@ -42,6 +45,7 @@
   - protocol truth can back a minimal service boundary without duplicating projection logic in apps
   - any UI remains decoupled from reason/debug truth ownership while still acting as the user input port
   - protocol state can back HTTP query and SSE subscribe adapters without app-owned projection duplication
+  - protocol state can expose runtime checkpoint summaries without becoming checkpoint recovery truth
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with protocol owner code and function map updates
 - fixtures / replay inputs / runtime evidence paths:
@@ -56,6 +60,7 @@
   - command ingress ack/rejection baseline landed
   - command dispatch envelope routing baseline landed
   - checkpoint rewind command ingress and runtime owner routing are landed
+  - checkpoint summary projection/query is code-bound as read-only UI protocol state
   - protocol-owned continuous subscription channel landed
   - incremental turn projection update methods from shared contracts landed
   - minimal per-turn debug-state query/subscribe baseline landed

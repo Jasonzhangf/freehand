@@ -13,6 +13,7 @@ const state = {
   turn: null,
   publicConversation: [],
   debug: null,
+  checkpoints: [],
   pendingUserInput: null,
   debugEventSource: null,
 };
@@ -23,6 +24,7 @@ function shellConfig() {
     turnSubscribe: shell.dataset.turnSubscribe,
     debugQueryBase: shell.dataset.debugQueryBase,
     debugSubscribeBase: shell.dataset.debugSubscribeBase,
+    checkpointQuery: shell.dataset.checkpointQuery,
     commandEndpoint: shell.dataset.commandEndpoint,
   };
 }
@@ -126,6 +128,29 @@ function renderDebug() {
   setText("debug-lines", state.debug.detail_lines.join(" · "));
 }
 
+function renderCheckpoints() {
+  setText("checkpoint-status", `${state.checkpoints.length} checkpoint(s)`);
+  const list = document.getElementById("checkpoint-list");
+  if (!list) {
+    return;
+  }
+  list.replaceChildren();
+  if (state.checkpoints.length === 0) {
+    list.textContent = "-";
+    return;
+  }
+  state.checkpoints.slice(0, 4).forEach((checkpoint) => {
+    const item = document.createElement("button");
+    item.className = "checkpoint-item";
+    item.type = "button";
+    item.dataset.checkpointId = checkpoint.checkpoint_id;
+    item.textContent = `${checkpoint.latest_status} · ${checkpoint.changed_paths.join(", ")}`;
+    item.title = checkpoint.checkpoint_id;
+    item.addEventListener("click", () => rewindCheckpoint(checkpoint.checkpoint_id));
+    list.appendChild(item);
+  });
+}
+
 function renderTurnMeta() {
   if (!state.turn) {
     setText("session-title", "waiting for protocol state");
@@ -166,6 +191,7 @@ function renderAll() {
   renderTurnMeta();
   renderMessages();
   renderDebug();
+  renderCheckpoints();
 }
 
 async function fetchJson(url) {
@@ -186,6 +212,7 @@ async function refreshTurn() {
   }
   renderAll();
   await refreshDebug();
+  await refreshCheckpoints();
   ensureDebugSubscription();
 }
 
@@ -198,6 +225,12 @@ async function refreshDebug() {
   const config = shellConfig();
   state.debug = await fetchJson(`${config.debugQueryBase}${state.turn.turn_id}`);
   renderDebug();
+}
+
+async function refreshCheckpoints() {
+  const payload = await fetchJson(shellConfig().checkpointQuery);
+  state.checkpoints = payload.checkpoints || [];
+  renderCheckpoints();
 }
 
 function ensureTurnSubscription() {
@@ -243,6 +276,22 @@ async function submitUserInput(text) {
   return payload;
 }
 
+async function rewindCheckpoint(checkpointId) {
+  commandStatus.textContent = `rewinding ${checkpointId}...`;
+  const response = await fetch(shellConfig().commandEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ RewindCheckpoint: { checkpoint_id: checkpointId } }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    commandStatus.textContent = `rewind failed: ${payload.message || payload.code || "command failed"}`;
+    return;
+  }
+  commandStatus.textContent = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
+  await refreshCheckpoints();
+}
+
 composerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = composerInput.value.trim();
@@ -259,6 +308,7 @@ composerForm.addEventListener("submit", async (event) => {
     commandStatus.textContent = `${receipt.dispatch_status} -> ${receipt.target_feature_id}`;
     try {
       await refreshTurn();
+      await refreshCheckpoints();
       commandStatus.textContent = `${receipt.dispatch_status} -> ${receipt.target_feature_id}`;
     } catch (error) {
       commandStatus.textContent =
@@ -281,5 +331,9 @@ cancelButton.addEventListener("click", () => {
 refreshTurn().catch((error) => {
   commandStatus.textContent = `bootstrap failed: ${error.message}`;
   renderAll();
+});
+refreshCheckpoints().catch(() => {
+  state.checkpoints = [];
+  renderCheckpoints();
 });
 ensureTurnSubscription();

@@ -14,6 +14,7 @@
     "app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets",
     "app boundary keeps theme assets separate from WebUI layout assets",
     "transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot",
+    "transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection",
     "transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot",
     "transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing",
     "the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only"
@@ -25,6 +26,7 @@
     "SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection",
     "WebUI submit success path actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing",
     "front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes",
+    "front-end script projects checkpoint summaries into a secondary inspector card and sends explicit rewind commands through command ingress",
     "main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream",
     "theme module owns white and black theme switching and is separated from WebUI layout/runtime scripts",
     "CLI and WebUI divergence remains a rendering decision only, not a protocol decision",
@@ -34,6 +36,7 @@
     "invalid smoke input or missing projection returns explicit app error",
     "transport or render wiring failures are surfaced explicitly",
     "unknown static assets return explicit 404",
+    "checkpoint query uses protocol state only and must not parse runtime checkpoint files in the app boundary",
     "direct reason, provider, node, or config coupling is a policy violation, not a fallback path"
   ],
   "shared_functions": [
@@ -150,6 +153,17 @@
       "caller": "WebUI shell",
       "callee": "existing protocol endpoints",
       "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "handle_query_checkpoints / refreshCheckpoints",
+      "file_path": "apps/freehand-server/src/lib.rs / apps/freehand-server/assets/webui.js",
+      "responsibility": "serve and render read-only checkpoint summaries from protocol state",
+      "input_semantic": "protocol checkpoint snapshot",
+      "output_semantic": "HTTP JSON checkpoint snapshot plus secondary inspector cards",
+      "caller": "WebUI shell",
+      "callee": "ui.protocol state",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -163,6 +177,7 @@
     "protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke",
     "subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot",
     "WebUI submit path still explicitly refreshes latest turn truth after a successful command receipt",
+    "WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files",
     "app dependency boundary is intended to remain protocol-only and must not import reason, provider, node, or config semantics",
     "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes"
   ]

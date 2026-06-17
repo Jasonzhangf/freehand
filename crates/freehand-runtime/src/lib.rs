@@ -41,9 +41,10 @@ use freehand_reason::{
 };
 use freehand_tools::BuiltinToolRegistry;
 use freehand_ui_protocol::{
-    TurnProjectionInput, UiClientKind, UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort,
-    UiCommandDispatchPortError, UiCommandDispatchReceipt, UiProtocolState, UiTurnProjection,
-    turn_projection_for_client, turn_projection_from_events,
+    TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
+    UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt, UiProtocolState,
+    UiTurnProjection, checkpoint_projection_from_runtime_summary, turn_projection_for_client,
+    turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -149,6 +150,30 @@ enum RuntimeCheckpointLedgerEvent {
     Applied,
     Failed,
     Restored,
+}
+
+impl RuntimeCheckpointLedgerEvent {
+    fn as_status(self) -> &'static str {
+        match self {
+            RuntimeCheckpointLedgerEvent::Created => "created",
+            RuntimeCheckpointLedgerEvent::Applied => "applied",
+            RuntimeCheckpointLedgerEvent::Failed => "failed",
+            RuntimeCheckpointLedgerEvent::Restored => "restored",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeCheckpointSummary {
+    pub checkpoint_id: String,
+    pub agent_id: AgentId,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub tool_call_id: String,
+    pub changed_paths: Vec<String>,
+    pub latest_status: String,
+    pub latest_detail: Option<String>,
+    pub updated_unix_seconds: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -391,6 +416,81 @@ impl RuntimeCheckpointStore {
             .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))
     }
 
+    fn list_summaries(&self) -> Result<Vec<RuntimeCheckpointSummary>, RuntimeCheckpointError> {
+        let mut manifests: Vec<RuntimeCheckpointManifest> = Vec::new();
+        if !self.manifests_dir.exists() {
+            return Ok(Vec::new());
+        }
+        for entry in fs::read_dir(&self.manifests_dir)
+            .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?
+        {
+            let entry =
+                entry.map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?;
+            if !entry
+                .file_type()
+                .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?
+                .is_dir()
+            {
+                continue;
+            }
+            let checkpoint_id = entry.file_name().to_string_lossy().into_owned();
+            manifests.push(self.load_manifest(&checkpoint_id)?);
+        }
+
+        let ledger_rows = self.read_ledger_rows()?;
+        let mut summaries = manifests
+            .into_iter()
+            .map(|manifest| {
+                let latest = ledger_rows
+                    .iter()
+                    .filter(|row| row.checkpoint_id == manifest.checkpoint_id)
+                    .max_by_key(|row| row.unix_seconds);
+                RuntimeCheckpointSummary {
+                    checkpoint_id: manifest.checkpoint_id,
+                    agent_id: AgentId::new(manifest.agent_id),
+                    session_id: SessionId::new(manifest.session_id),
+                    turn_id: TurnId::new(manifest.turn_id),
+                    tool_call_id: manifest.tool_call_id,
+                    changed_paths: manifest
+                        .entries
+                        .iter()
+                        .map(|entry| entry.locked_path.clone())
+                        .collect(),
+                    latest_status: latest
+                        .map(|row| row.event.as_status().to_owned())
+                        .unwrap_or_else(|| "manifest_only".to_owned()),
+                    latest_detail: latest.and_then(|row| row.detail.clone()),
+                    updated_unix_seconds: latest.map(|row| row.unix_seconds).unwrap_or(0),
+                }
+            })
+            .collect::<Vec<_>>();
+        summaries.sort_by_key(|summary| summary.updated_unix_seconds);
+        summaries.reverse();
+        Ok(summaries)
+    }
+
+    fn read_ledger_rows(&self) -> Result<Vec<RuntimeCheckpointLedgerRow>, RuntimeCheckpointError> {
+        if !self.ledger_path.exists() {
+            return Ok(Vec::new());
+        }
+        let raw = fs::read_to_string(&self.ledger_path)
+            .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?;
+        let mut rows = Vec::new();
+        for (index, line) in raw.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let row = serde_json::from_str(line).map_err(|err| {
+                RuntimeCheckpointError::PersistenceFailed(format!(
+                    "checkpoint ledger line {} failed to parse: {err}",
+                    index + 1
+                ))
+            })?;
+            rows.push(row);
+        }
+        Ok(rows)
+    }
+
     fn write_manifest(
         &self,
         manifest: &RuntimeCheckpointManifest,
@@ -467,6 +567,28 @@ pub fn rewind_checkpoint(
     let store = RuntimeCheckpointStore::new(runtime_home.as_ref(), agent_id, session_id)?;
     let _ = store.rewind(checkpoint_id)?;
     Ok(())
+}
+
+pub fn list_checkpoints(
+    runtime_home: impl AsRef<Path>,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+) -> Result<Vec<RuntimeCheckpointSummary>, RuntimeCheckpointError> {
+    RuntimeCheckpointStore::new(runtime_home.as_ref(), agent_id, session_id)?.list_summaries()
+}
+
+fn checkpoint_summary_to_ui(summary: RuntimeCheckpointSummary) -> UiCheckpointSummary {
+    UiCheckpointSummary {
+        checkpoint_id: summary.checkpoint_id,
+        agent_id: summary.agent_id,
+        session_id: summary.session_id,
+        turn_id: summary.turn_id,
+        tool_call_id: summary.tool_call_id,
+        changed_paths: summary.changed_paths,
+        latest_status: summary.latest_status,
+        latest_detail: summary.latest_detail,
+        updated_unix_seconds: summary.updated_unix_seconds,
+    }
 }
 
 fn checkpoint_id_for(turn_id: &str, tool_call_id: &str) -> String {
@@ -868,6 +990,8 @@ pub enum RuntimeCommandDispatcherError {
     NodeRuntimePairing(String),
     #[error("reason persistence bootstrap restore failed: {0}")]
     ReasonPersistenceBootstrap(String),
+    #[error("checkpoint projection bootstrap failed: {0}")]
+    CheckpointProjectionBootstrap(String),
 }
 
 struct RuntimeCommandDispatcherState {
@@ -1061,7 +1185,7 @@ impl RuntimeCommandDispatcher {
             }
         }
 
-        Ok(Self {
+        let dispatcher = Self {
             ui_state,
             state: Mutex::new(RuntimeCommandDispatcherState {
                 config,
@@ -1071,7 +1195,11 @@ impl RuntimeCommandDispatcher {
                 node_runtime,
                 next_turn_ordinal,
             }),
-        })
+        };
+        dispatcher.refresh_checkpoint_projection().map_err(|err| {
+            RuntimeCommandDispatcherError::CheckpointProjectionBootstrap(err.to_string())
+        })?;
+        Ok(dispatcher)
     }
 
     pub fn ui_state(&self) -> Arc<Mutex<UiProtocolState>> {
@@ -1124,6 +1252,8 @@ impl RuntimeCommandDispatcher {
                 .lock()
                 .expect("lock ui state")
                 .apply_turn_projection(projection);
+            self.refresh_checkpoint_projection_from_config(&state.config)
+                .map_err(map_checkpoint_dispatch_error)?;
 
             return Ok(UiCommandDispatchReceipt {
                 ingress: envelope.ingress,
@@ -1263,12 +1393,46 @@ impl RuntimeCommandDispatcher {
             &checkpoint_id,
         )
         .map_err(map_checkpoint_dispatch_error)?;
+        self.refresh_checkpoint_projection_from_config(&state.config)
+            .map_err(map_checkpoint_dispatch_error)?;
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
             target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("runtime_checkpoint_rewound checkpoint_id={checkpoint_id}"),
         })
+    }
+
+    fn refresh_checkpoint_projection(&self) -> Result<(), RuntimeCheckpointError> {
+        let state = self.state.lock().expect("lock runtime dispatcher state");
+        self.refresh_checkpoint_projection_from_config(&state.config)
+    }
+
+    fn refresh_checkpoint_projection_from_config(
+        &self,
+        config: &RuntimeCommandDispatcherConfig,
+    ) -> Result<(), RuntimeCheckpointError> {
+        let Some(live) = &config.live else {
+            return Ok(());
+        };
+        let summaries = list_checkpoints(
+            &live.runtime_home,
+            &config.reason_agent_id,
+            &config.session_id,
+        )?;
+        let snapshot = checkpoint_projection_from_runtime_summary(
+            config.reason_agent_id.clone(),
+            config.master_node_id.clone(),
+            summaries
+                .into_iter()
+                .map(checkpoint_summary_to_ui)
+                .collect(),
+        );
+        self.ui_state
+            .lock()
+            .expect("lock ui state")
+            .set_checkpoint_snapshot(snapshot);
+        Ok(())
     }
 }
 
@@ -2891,6 +3055,20 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 &SessionId::new("runtime-session-agent-live"),
             );
             let checkpoint_id = rows.first().expect("created row").checkpoint_id.clone();
+            let checkpoint_query = runtime
+                .ui_state()
+                .lock()
+                .expect("lock ui state")
+                .query(&UiCommand::QueryCheckpoints)
+                .expect("checkpoint query");
+            match checkpoint_query {
+                UiQueryResult::Checkpoints(snapshot) => {
+                    assert_eq!(snapshot.checkpoints.len(), 1);
+                    assert_eq!(snapshot.checkpoints[0].checkpoint_id, checkpoint_id);
+                    assert_eq!(snapshot.checkpoints[0].latest_status, "applied");
+                }
+                other => panic!("unexpected checkpoint query: {other:?}"),
+            }
 
             let rewind = runtime
                 .dispatch(
@@ -2905,6 +3083,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 format!("runtime_checkpoint_rewound checkpoint_id={checkpoint_id}")
             );
             assert!(!file_path.exists());
+            let checkpoint_query = runtime
+                .ui_state()
+                .lock()
+                .expect("lock ui state")
+                .query(&UiCommand::QueryCheckpoints)
+                .expect("checkpoint query");
+            match checkpoint_query {
+                UiQueryResult::Checkpoints(snapshot) => {
+                    assert_eq!(snapshot.checkpoints[0].latest_status, "restored");
+                }
+                other => panic!("unexpected checkpoint query after rewind: {other:?}"),
+            }
         });
     }
 

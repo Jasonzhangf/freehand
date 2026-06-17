@@ -522,3 +522,8 @@
   - `BuiltinToolRegistry::preview` is now bound for `write_file`, `edit_file`, and `multi_edit`
   - execute paths now reuse the same `plan_*` semantic transform helpers as preview
   - `delete_range` preview and runtime checkpoint consumption remain pending
+- 2026-06-17: checkpoint query/projection implementation
+  - owner route confirmed: checkpoint query belongs to `runtime.checkpoint-rewind`, protocol projection belongs to `ui.protocol`, app server must stay protocol-only
+  - added runtime summary list from manifest + ledger truth; no UI/app filesystem parsing
+  - added `QueryCheckpoints` and WebUI secondary checkpoint inspector; no checkpoint SSE in this slice
+  - verification evidence: runtime/server/daemon targeted tests passed; workspace build/fmt/clippy/test/mainlines/gates passed

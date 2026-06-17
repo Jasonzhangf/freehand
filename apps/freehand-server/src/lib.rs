@@ -18,11 +18,12 @@ use freehand_contracts::{
 };
 use freehand_ui_protocol::{
     DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot, SubscriptionSelector,
-    TurnProjectionInput, UiClientKind, UiCommand, UiCommandDispatchFailure, UiCommandDispatchPort,
-    UiCommandDispatchReceipt, UiProjection, UiProtocolState, UiPublicTurnProjection, UiQueryResult,
-    UiSubscriptionEvent, UiTurnProjection, build_command_dispatch_envelope, dispatch_port_failure,
-    protocol_rejection, public_turn_projection, subscription_matches, subscription_selector,
-    turn_projection_for_client, turn_projection_from_events,
+    TurnProjectionInput, UiCheckpointSnapshot, UiClientKind, UiCommand, UiCommandDispatchFailure,
+    UiCommandDispatchPort, UiCommandDispatchReceipt, UiProjection, UiProtocolState,
+    UiPublicTurnProjection, UiQueryResult, UiSubscriptionEvent, UiTurnProjection,
+    build_command_dispatch_envelope, checkpoint_projection_from_runtime_summary,
+    dispatch_port_failure, protocol_rejection, public_turn_projection, subscription_matches,
+    subscription_selector, turn_projection_for_client, turn_projection_from_events,
 };
 use futures_util::stream;
 use tokio::net::TcpListener;
@@ -71,6 +72,7 @@ pub fn build_webui_router(
             "/ui/query/latest-active-turn",
             get(handle_query_latest_active_turn),
         )
+        .route("/ui/query/checkpoints", get(handle_query_checkpoints))
         .route("/ui/query/debug/{turn_id}", get(handle_query_debug_state))
         .route(
             "/ui/subscribe/turn/latest",
@@ -112,6 +114,7 @@ pub fn seed_webui_protocol_state() -> UiProtocolState {
     let projection = sample_slave_turn_projection();
     state.apply_turn_projection(projection);
     state.set_debug_state(sample_debug_snapshot());
+    state.set_checkpoint_snapshot(sample_checkpoint_snapshot());
     state
 }
 
@@ -189,6 +192,22 @@ async fn handle_query_debug_state(
     {
         UiQueryResult::Debug(Some(snapshot)) => snapshot,
         UiQueryResult::Debug(None) => return Err(StatusCode::NOT_FOUND),
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+    Ok(Json(snapshot))
+}
+
+async fn handle_query_checkpoints(
+    State(state): State<WebUiState>,
+) -> Result<Json<UiCheckpointSnapshot>, StatusCode> {
+    let snapshot = match state
+        .protocol_state
+        .lock()
+        .expect("lock protocol state")
+        .query(&UiCommand::QueryCheckpoints)
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+    {
+        UiQueryResult::Checkpoints(snapshot) => snapshot,
         _ => return Err(StatusCode::BAD_REQUEST),
     };
     Ok(Json(snapshot))
@@ -299,6 +318,9 @@ fn projection_to_sse_event(projection: UiProjection, client: UiClientKind) -> Ev
         UiProjection::Debug(snapshot) => Event::default()
             .event("debug")
             .data(serde_json::to_string(&snapshot).expect("debug json")),
+        UiProjection::Checkpoints(snapshot) => Event::default()
+            .event("checkpoints")
+            .data(serde_json::to_string(&snapshot).expect("checkpoint json")),
         UiProjection::NodeStatus(snapshot) => Event::default()
             .event("node_status")
             .data(serde_json::to_string(&snapshot).expect("node status json")),
@@ -387,6 +409,24 @@ fn sample_debug_snapshot() -> DebugStateSnapshot {
             "feature=app.webui-smoke".to_owned(),
             "consumer=webui".to_owned(),
         ],
+    )
+}
+
+fn sample_checkpoint_snapshot() -> UiCheckpointSnapshot {
+    checkpoint_projection_from_runtime_summary(
+        AgentId::new("slave-agent"),
+        "slave-node".to_owned(),
+        vec![freehand_ui_protocol::UiCheckpointSummary {
+            checkpoint_id: "checkpoint-webui-smoke".to_owned(),
+            agent_id: AgentId::new("slave-agent"),
+            session_id: SessionId::new("session-webui-smoke"),
+            turn_id: TurnId::new("turn-webui-smoke"),
+            tool_call_id: "tool-webui-smoke".to_owned(),
+            changed_paths: vec!["scratch/webui.txt".to_owned()],
+            latest_status: "applied".to_owned(),
+            latest_detail: None,
+            updated_unix_seconds: 42,
+        }],
     )
 }
 
@@ -506,6 +546,20 @@ mod tests {
             vec!["feature=app.webui-smoke", "consumer=webui"]
         );
 
+        let checkpoints = client
+            .get(format!("{}/ui/query/checkpoints", server.base_url))
+            .send()
+            .await
+            .expect("checkpoint response");
+        assert_eq!(checkpoints.status(), StatusCode::OK);
+        let checkpoints: UiCheckpointSnapshot = checkpoints.json().await.expect("checkpoint json");
+        assert_eq!(checkpoints.checkpoints.len(), 1);
+        assert_eq!(
+            checkpoints.checkpoints[0].checkpoint_id,
+            "checkpoint-webui-smoke"
+        );
+        assert_eq!(checkpoints.checkpoints[0].latest_status, "applied");
+
         server.stop().await;
     }
 
@@ -523,6 +577,7 @@ mod tests {
         let root_body = root.text().await.expect("root body");
         assert!(root_body.contains("data-webui-shell=\"true\""));
         assert!(root_body.contains("/assets/theme.css"));
+        assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
 
         let theme = client
             .get(format!("{}/assets/theme.css", server.base_url))
@@ -563,6 +618,7 @@ mod tests {
             .await
             .expect("js body 2");
         assert!(js_body.contains("await refreshTurn();"));
+        assert!(js_body.contains("refreshCheckpoints"));
 
         server.stop().await;
     }

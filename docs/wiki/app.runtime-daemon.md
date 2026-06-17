@@ -17,6 +17,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - daemon injects the runtime dispatcher and its shared UI state into the protocol-only HTTP and SSE transport
 - mutation commands travel through protocol-owned ingress validation and dispatch envelope building before runtime dispatch
 - explicit checkpoint rewind can travel through the same HTTP command ingress without adding app-owned business logic
+- checkpoint summary query travels through the shared protocol-only HTTP query route from runtime-populated UI state
 
 ## Response Mainline
 
@@ -25,12 +26,14 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - daemon restart can serve restored terminal projection before any new submit arrives
 - daemon SSE subscriptions stay open across later runtime turn updates and observe the same protocol-owned projections as query consumers
 - daemon can rewind a previously checkpointed writable-tool mutation through runtime owner dispatch while leaving turn/session/UI truth untouched
+- daemon can serve checkpoint summary query results after writable mutation and after explicit rewind without reading checkpoint files in app code
 - daemon remains a host process and does not own reason or node semantics itself
 
 ## Error Mainline
 
 - invalid daemon CLI input returns explicit startup error
 - runtime dispatcher bootstrap failure returns explicit daemon startup error
+- runtime checkpoint projection bootstrap failure returns explicit daemon startup error
 - runtime dispatch failures return protocol-mapped HTTP failures through the shared transport layer
 - slave-mode agent selection returns explicit daemon startup error
 - async command ingress does not execute injected synchronous provider or runtime work inline; it returns explicit transport failure if the dispatch task itself fails
@@ -55,6 +58,12 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
   - allowed callers: runtime host app, bootstrap tests
   - related tests: config-selected bootstrap smoke
   - why shared: keeps startup config selection out of app host glue while preserving one-process-one-agent flow
+- `RuntimeCommandDispatcher::refresh_checkpoint_projection_from_config`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: populate protocol state with runtime-owned checkpoint summaries for daemon HTTP query consumers
+  - allowed callers: runtime dispatcher bootstrap, runtime submit dispatch, runtime rewind dispatch
+  - related tests: daemon checkpoint rewind HTTP smoke
+  - why shared: keeps checkpoint projection refresh in runtime owner instead of app host code
 
 ## Function Call Table
 
@@ -65,11 +74,13 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 | 03 | `parse_bind_arg` | `apps/freehand-daemon/src/main.rs` | parse CLI bind address and default host and port semantics | bind flag value | socket address | daemon CLI runner | bind parser | bound |
 | 04 | `build_runtime_dispatcher_from_default_config` | `apps/freehand-daemon/src/main.rs` | select one agent from default config and create the daemon-owned runtime host dependency set | daemon agent name | runtime dispatcher | daemon startup or tests | `freehand-runtime` | bound |
 | 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve protocol-only routes while using injected runtime dispatch and shared state | listener plus shared state plus dispatch port | live HTTP and SSE boundary | daemon host | shared transport owner | bound |
+| 06 | `handle_query_checkpoints` | `apps/freehand-server/src/lib.rs` | serve checkpoint summaries from injected protocol state | HTTP checkpoint query | UI checkpoint snapshot JSON | daemon-hosted WebUI transport | protocol state | bound |
 
 ## Sync Status Against Mainline Call
 
 - daemon bootstrap is bound in code
 - daemon now injects `RuntimeCommandDispatcher` into shared protocol-only HTTP and SSE transport
 - provider-backed submit, query, continuous-SSE restore, provider-failure surfacing, restart resume of turn-id allocation, direct-message HTTP smoke, and checkpoint rewind HTTP smoke are covered through the daemon app boundary
+- checkpoint query projection is covered through daemon HTTP after writable mutation and after rewind
 - config-selected bootstrap is now bound in code and uses configured peer topology
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

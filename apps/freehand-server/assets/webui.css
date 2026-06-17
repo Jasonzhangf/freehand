@@ -177,6 +177,33 @@ body.theme-dark .inspector-block {
   padding: 12px;
 }
 
+.checkpoint-block {
+  border-color: rgba(138, 106, 48, 0.28);
+}
+
+.checkpoint-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.checkpoint-item {
+  width: 100%;
+  border: 1px solid rgba(138, 106, 48, 0.3);
+  border-radius: 12px;
+  background: rgba(246, 239, 223, 0.72);
+  color: var(--tool);
+  padding: 9px 10px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+body.theme-dark .checkpoint-item {
+  background: rgba(138, 106, 48, 0.14);
+}
+
 .session-item.active {
   border-color: rgba(31, 108, 88, 0.28);
   background: var(--master-soft);

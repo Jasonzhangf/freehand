@@ -7,7 +7,9 @@
   - runtime requests preview truth from `tool.preview`
   - runtime snapshots previewed pre-image paths before tool execute
   - runtime records checkpoint lifecycle rows
+  - runtime exposes read-only checkpoint summaries from runtime-owned manifest and ledger truth
   - explicit rewind restores workspace state through runtime owner path
+  - runtime refreshes UI checkpoint projections after create / rewind without making UI a recovery truth source
   - checkpoint truth remains separate from reason persistence truth
 - white-box plan:
   - checkpoint manifest round-trip tests
@@ -16,12 +18,15 @@
   - restore create / modify / delete state tests
   - no-preview writable-tool rejection tests
   - missing manifest / blob / ledger corruption rejection tests
+  - checkpoint list/query summary tests from manifest plus ledger truth
 - module black-box plan:
   - runtime writable tool loop creates checkpoint before execute
   - runtime explicit rewind restores prior workspace state
   - runtime restart can inspect checkpoint ledger and manifests without treating them as reason truth
+  - runtime dispatcher materializes checkpoint summaries into protocol state for query consumers
 - project black-box impact:
   - CLI or daemon live writable-tool path can mutate files and later rewind through runtime owner path
+  - daemon HTTP query can show checkpoint summaries without app-owned filesystem parsing
 - fixtures / replay inputs / runtime evidence paths:
   - checkpoint manifest fixture path
   - checkpoint ledger fixture path
@@ -30,9 +35,10 @@
   - `~/.freehand/state/turns`
   - `~/.freehand/ledgers/reason`
 - known gaps:
-  - command ingress for explicit rewind is not wired yet
+  - checkpoint subscribe/SSE is intentionally out of scope for this slice; WebUI uses query refresh after command receipt
 - sync status between design and implementation:
   - design is locked
   - runtime checkpoint store, live writable pre-execute checkpointing, and explicit rewind owner API are now code-bound
   - runtime tests now cover create-file rewind, modify-file rewind, and previewless writable-tool rejection
+  - checkpoint summary query/projection is runtime-owned and code-bound
   - migrated mainline-call source and generated wiki must stay in sync with this test design
