@@ -477,3 +477,7 @@
   - `docs/mainline-calls/app.cli-live-turn.json` is the machine-readable source
   - `docs/wiki/app.cli-live-turn.md` must be generated, not hand-edited
   - `xtask gates check` must require function map, test design, JSON source, and generated wiki
+- 2026-06-17: app.webui-smoke migrated mainline/wiki source in progress
+  - `docs/mainline-calls/app.webui-smoke.json` is the machine-readable source
+  - `docs/wiki/app.webui-smoke.md` must be generated, not hand-edited
+  - `xtask gates check` must require function map, test design, JSON source, and generated wiki

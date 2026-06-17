@@ -237,6 +237,8 @@ If a problem does not fit this table, update this routing index before making co
 - forbidden_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**`
 - required_checks:
   - `cargo test -p freehand-server`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
   - render helper coverage
   - protocol-only router coverage
@@ -254,6 +256,8 @@ If a problem does not fit this table, update this routing index before making co
   - protocol-only app boundary smoke for HTTP query/SSE/command ingress
 - test_design_doc: `docs/testing/app.webui-smoke.md`
 - function_map_doc: `docs/function-maps/app.webui-smoke.md`
+- mainline_call_doc: `docs/mainline-calls/app.webui-smoke.json`
+- generated_wiki_doc: `docs/wiki/app.webui-smoke.md`
 - debug_artifacts:
   - WebUI smoke stdout fixture
 - runtime_paths:
@@ -951,11 +955,13 @@ If a problem does not fit this table, update this routing index before making co
   - WebUI command shape changes
   - WebUI projection shape changes
   - UI protocol projection rules change
+  - generated wiki freshness policy changes
 - lifecycle_checks:
   - WebUI remains app/render boundary only
   - WebUI consumes `freehand-ui-protocol` truth
   - query and subscribe remain protocol-owned
   - slave-card divergence remains protocol-safe
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `node.master-slave`
 

@@ -1,0 +1,169 @@
+{
+  "feature_id": "app.webui-smoke",
+  "owner_crate": "apps/freehand-server",
+  "owner_module": "apps/freehand-server/src/lib.rs",
+  "function_map_doc": "docs/function-maps/app.webui-smoke.md",
+  "test_design_doc": "docs/testing/app.webui-smoke.md",
+  "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+  "generated_wiki_doc": "docs/wiki/app.webui-smoke.md",
+  "request_mainline": [
+    "app boundary receives a minimal WebUI smoke invocation",
+    "app boundary consumes `freehand-ui-protocol` projection truth only",
+    "app boundary stays decoupled from reason, provider, node, and config semantics",
+    "app boundary may render query snapshot, debug snapshot, and separate slave-card projection without owning protocol semantics",
+    "app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets",
+    "app boundary keeps theme assets separate from WebUI layout assets",
+    "transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot",
+    "transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot",
+    "transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing",
+    "the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only"
+  ],
+  "response_mainline": [
+    "app boundary renders a protocol-driven WebUI page shell; live content is populated from existing query and SSE endpoints",
+    "app boundary serves protocol-owned query and subscription payloads without becoming a reason or debug truth writer",
+    "app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success",
+    "SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection",
+    "WebUI submit success path actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing",
+    "front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes",
+    "main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream",
+    "theme module owns white and black theme switching and is separated from WebUI layout/runtime scripts",
+    "CLI and WebUI divergence remains a rendering decision only, not a protocol decision",
+    "the app is a render-only transport boundary, not a reasoning or provider boundary"
+  ],
+  "error_mainline": [
+    "invalid smoke input or missing projection returns explicit app error",
+    "transport or render wiring failures are surfaced explicitly",
+    "unknown static assets return explicit 404",
+    "direct reason, provider, node, or config coupling is a policy violation, not a fallback path"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "turn_projection_for_client",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "keep client-specific slave-card visibility inside the protocol owner",
+      "allowed_callers": [
+        "CLI or WebUI adapters",
+        "tests"
+      ],
+      "related_tests": [
+        "slave turn subscription smoke"
+      ],
+      "why_shared": "app boundary must not duplicate client-specific projection logic"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "render_webui_smoke",
+      "file_path": "apps/freehand-server/src/page.rs",
+      "responsibility": "render protocol-driven WebUI shell and endpoint bindings",
+      "input_semantic": "static page request",
+      "output_semantic": "HTML shell",
+      "caller": "app entrypoint or root route",
+      "callee": "page module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "assets::asset_response",
+      "file_path": "apps/freehand-server/src/assets.rs",
+      "responsibility": "serve split CSS and JS assets with explicit content type",
+      "input_semantic": "asset path",
+      "output_semantic": "CSS or JS response or 404",
+      "caller": "app asset route",
+      "callee": "embedded assets",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "build_webui_router",
+      "file_path": "apps/freehand-server/src/lib.rs",
+      "responsibility": "define shared protocol-only HTTP, SSE, and static asset surface",
+      "input_semantic": "protocol state plus dispatch port",
+      "output_semantic": "router with root, assets, query, subscribe, and command routes",
+      "caller": "app entrypoint, tests, or runtime host",
+      "callee": "app router",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "handle_command_ingress",
+      "file_path": "apps/freehand-server/src/lib.rs",
+      "responsibility": "expose protocol-owned command-ingress transport endpoint backed by an injected dispatch port",
+      "input_semantic": "HTTP JSON command",
+      "output_semantic": "HTTP dispatch receipt or failure payload",
+      "caller": "WebUI transport",
+      "callee": "protocol owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "serve_webui_listener",
+      "file_path": "apps/freehand-server/src/lib.rs",
+      "responsibility": "serve shared protocol-only router on a listener",
+      "input_semantic": "TCP listener plus protocol state plus dispatch port plus shutdown future",
+      "output_semantic": "live HTTP and SSE transport boundary",
+      "caller": "app entrypoint, tests, or runtime host",
+      "callee": "app server",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "turn_projection_for_client",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "gate slave-card visibility by client kind",
+      "input_semantic": "turn projection plus client kind",
+      "output_semantic": "client-specific projection",
+      "caller": "app boundary",
+      "callee": "protocol owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "initializeThemeToggle",
+      "file_path": "apps/freehand-server/assets/theme.js",
+      "responsibility": "switch white and black visual theme only",
+      "input_semantic": "UI theme choice",
+      "output_semantic": "body theme class plus persisted localStorage setting",
+      "caller": "WebUI shell",
+      "callee": "theme module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "subscription_event_stream / projection_to_sse_event",
+      "file_path": "apps/freehand-server/src/lib.rs",
+      "responsibility": "convert protocol-owned subscription updates into continuous HTTP SSE delivery",
+      "input_semantic": "`UiSubscriptionEvent` receiver plus selector",
+      "output_semantic": "streamed SSE events",
+      "caller": "subscribe routes",
+      "callee": "protocol state",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "refreshTurn / renderMessages / submit handler",
+      "file_path": "apps/freehand-server/assets/webui.js",
+      "responsibility": "consume protocol query and SSE public turn payloads, re-query latest turn after command receipt, and render semantic cards without owning filtering semantics",
+      "input_semantic": "`UiPublicTurnProjection` JSON plus command dispatch receipt",
+      "output_semantic": "DOM message blocks plus command status",
+      "caller": "WebUI shell",
+      "callee": "existing protocol endpoints",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "app boundary now renders a usable WebUI shell instead of a minimal text-only smoke",
+    "theme code is split into `assets/theme.css` and `assets/theme.js`",
+    "WebUI layout and protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`",
+    "app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface",
+    "app boundary now serves protocol-only POST command ingress dispatch-receipt or failure smoke route from that shared transport surface",
+    "app boundary now serves static embedded assets through an explicit 404ing route",
+    "runtime host reuse now happens through injected state and dispatch port, not by duplicating transport behavior",
+    "protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke",
+    "subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot",
+    "WebUI submit path still explicitly refreshes latest turn truth after a successful command receipt",
+    "app dependency boundary is intended to remain protocol-only and must not import reason, provider, node, or config semantics",
+    "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes"
+  ]
+}

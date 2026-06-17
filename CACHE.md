@@ -291,3 +291,6 @@
 - 2026-06-17: `app.cli-live-turn` migrated into the mainline/wiki chain
   - `docs/mainline-calls/app.cli-live-turn.json` is now the machine-readable CLI live-turn mainline truth
   - `docs/wiki/app.cli-live-turn.md` is generated from it
+- 2026-06-17: `app.webui-smoke` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/app.webui-smoke.json` is now the machine-readable WebUI transport mainline truth
+  - `docs/wiki/app.webui-smoke.md` is generated from it

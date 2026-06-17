@@ -4,6 +4,7 @@ Generated wiki artifacts from machine-readable mainline call source files. Do no
 
 - [app.cli-live-turn](./app.cli-live-turn.md) mainline call source `docs/mainline-calls/app.cli-live-turn.json`
 - [app.cli-runtime-smoke](./app.cli-runtime-smoke.md) mainline call source `docs/mainline-calls/app.cli-runtime-smoke.json`
+- [app.webui-smoke](./app.webui-smoke.md) mainline call source `docs/mainline-calls/app.webui-smoke.json`
 - [config.core](./config.core.md) mainline call source `docs/mainline-calls/config.core.json`
 - [contracts.core](./contracts.core.md) mainline call source `docs/mainline-calls/contracts.core.json`
 - [debug.core](./debug.core.md) mainline call source `docs/mainline-calls/debug.core.json`

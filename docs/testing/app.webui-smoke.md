@@ -35,6 +35,7 @@
 - project black-box impact:
   - app boundary proves WebUI can consume `freehand-ui-protocol` without owning reason/provider semantics
   - app boundary proves it does not need direct reason/provider/node/config imports
+  - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/state/ui`
   - `~/.freehand/replays/ui`
@@ -51,3 +52,4 @@
   - query/SSE now return a public turn payload with `public_conversation` for main cards
   - protocol-only transport library reuse is landed
   - app remains protocol-only by dependency gate
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

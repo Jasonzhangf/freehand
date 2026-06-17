@@ -79,3 +79,4 @@
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
 - WebUI submit path still explicitly refreshes latest turn truth after a successful command receipt
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics
+- generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes
