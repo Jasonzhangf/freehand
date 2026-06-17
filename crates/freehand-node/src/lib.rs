@@ -368,6 +368,7 @@ mod tests {
             source_node_id: "slave-node".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            user_text: Some("delegate to slave".to_owned()),
             semantic_events: vec![
                 ReasonResp01SemanticEvent {
                     session_id: SessionId::new("session-1"),

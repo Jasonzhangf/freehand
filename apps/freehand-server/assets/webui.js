@@ -97,7 +97,14 @@ function renderMessages() {
     );
   } else {
     state.publicConversation.forEach((item) => {
-      const variant = item.kind === "ToolSummary" ? "tool" : item.kind === "Error" ? "failure" : "assistant";
+      const variant =
+        item.kind === "UserText"
+          ? "user"
+          : item.kind === "ToolSummary"
+            ? "tool"
+            : item.kind === "Error"
+              ? "failure"
+              : "assistant";
       const statusClass = item.kind === "Error" ? "failed" : item.kind === "Terminal" ? "success" : item.kind === "ToolSummary" ? "running" : "success";
       fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, item.body, variant));
     });
@@ -197,14 +204,28 @@ function renderAll() {
 async function fetchJson(url) {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`${url} -> ${response.status}`);
+    const error = new Error(`${url} -> ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
 
 async function refreshTurn() {
   const config = shellConfig();
-  const payload = await fetchJson(config.turnQuery);
+  let payload;
+  try {
+    payload = await fetchJson(config.turnQuery);
+  } catch (error) {
+    if (error.status === 404) {
+      state.turn = null;
+      state.publicConversation = [];
+      renderAll();
+      await refreshCheckpoints();
+      return;
+    }
+    throw error;
+  }
   state.turn = payload.turn;
   state.publicConversation = payload.public_conversation || [];
   if (state.pendingUserInput) {

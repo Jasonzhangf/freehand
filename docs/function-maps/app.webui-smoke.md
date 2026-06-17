@@ -28,10 +28,10 @@
 - app boundary renders a protocol-driven WebUI page shell; live content is populated from existing query/SSE endpoints
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason/debug truth writer
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
-- SSE subscribe routes now emit one initial snapshot followed by continuous incremental projection updates over the same connection
+- SSE subscribe routes now emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe must stay open on blank state until a turn exists
 - WebUI submit success path still actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing
-- front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes
-- main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream
+- front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes, including the user prompt in the public conversation stream
+- main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
 - theme module owns white/black theme switching and is separated from WebUI layout/runtime scripts
 - CLI and WebUI divergence remains a rendering decision only, not a protocol decision
 - the app is a render-only transport boundary, not a reasoning or provider boundary

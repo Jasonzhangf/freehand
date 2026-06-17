@@ -19,10 +19,10 @@
     "query returns snapshots",
     "checkpoint query returns read-only checkpoint summary projections supplied by runtime owner code",
     "command ingress returns explicit dispatch receipt without claiming truth mutation success",
-    "subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel",
+    "subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel, or waits for the first turn when the latest-turn stream is subscribed before any turn exists",
     "projections are read-only views over owner-written truth",
     "terminal completion shows only final projected text",
-    "public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, and debug details from the main user-visible stream",
+    "public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, and debug details from the main user-visible stream",
     "debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines",
     "`ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state",
     "`ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`",
@@ -36,6 +36,7 @@
     "query/subscribe commands sent to command-ingress route are explicit protocol misuse errors",
     "empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch",
     "checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback",
+    "blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn",
     "source identity fields remain explicit across success and error paths",
     "UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors"
   ],
@@ -57,7 +58,7 @@
     {
       "symbol": "public_conversation_items",
       "owner": "crates/freehand-ui-protocol/src/lib.rs",
-      "purpose": "derive user-visible conversation items from a full turn projection without exposing internal reasoning/debug/raw schema data",
+      "purpose": "derive user-visible conversation items from a full turn projection without exposing internal reasoning/debug/raw schema data while retaining the user prompt",
       "allowed_callers": [
         "CLI/WebUI renderers",
         "transport adapters"
@@ -225,7 +226,7 @@
       "symbol_path": "turn_projection_from_events",
       "file_path": "crates/freehand-ui-protocol/src/lib.rs",
       "responsibility": "project whole-turn state into UI snapshot",
-      "input_semantic": "semantic/tool/usage/terminal/error inputs",
+      "input_semantic": "semantic/tool/usage/terminal/error/user inputs",
       "output_semantic": "UI turn projection",
       "caller": "query/stream handler",
       "callee": "projector",
@@ -246,7 +247,7 @@
       "step": "10a",
       "symbol_path": "public_conversation_items / public_turn_projection",
       "file_path": "crates/freehand-ui-protocol/src/lib.rs",
-      "responsibility": "derive public user-visible conversation stream and strip raw completion schema",
+      "responsibility": "derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema",
       "input_semantic": "full turn projection",
       "output_semantic": "public turn projection",
       "caller": "app transports/renderers",

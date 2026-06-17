@@ -27,6 +27,7 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - first real read-only execution set is: `read_file`, `glob`, `grep`, `ls`
 - first real file-mutation execution set is: `write_file`, `edit_file`, `multi_edit`
 - implemented tools return user/model-visible tool result text
+- foreground `bash` is executable but is not a checkpointable file-mutation preview target
 - unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth
 
 ## Error Mainline

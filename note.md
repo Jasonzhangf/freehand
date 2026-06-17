@@ -218,6 +218,10 @@
   - CLI tests use local mock server with selected config, not live credentials
 - 2026-06-15: provider/live-stream incremental closeout in progress
   - owner targets: freehand-provider-anthropic, freehand-testkit
+- 2026-06-17: normal WebUI conversation closeout slice
+  - rooted from owner map: `ui.protocol`, `app.webui-smoke`, `runtime.ui-command-dispatch`, `app.runtime-daemon`
+  - identified two blockers: blank latest-turn SSE returned 404 before first turn, and public conversation projection lost user input after real turn projection arrived
+  - chosen fix: query remains snapshot-only 404 on blank state; subscribe stays open and waits for first matching turn; `UiTurnProjection` carries optional `user_text` from reason request truth into public conversation projection
   - goal: replace collected-SSE runtime path with true incremental callback/apply path
 - 2026-06-15: completion schema loop requirement confirmed
   - must guide schema in prompt/context

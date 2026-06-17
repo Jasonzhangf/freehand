@@ -90,6 +90,7 @@ pub struct UiTurnProjection {
     pub source: UiSource,
     pub session_id: SessionId,
     pub turn_id: TurnId,
+    pub user_text: Option<String>,
     pub reasoning: Vec<String>,
     pub text: Vec<String>,
     pub tool_calls: Vec<String>,
@@ -101,6 +102,7 @@ pub struct UiTurnProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiConversationItemKind {
+    UserText,
     AssistantText,
     ToolSummary,
     Terminal,
@@ -176,6 +178,7 @@ pub struct TurnProjectionInput {
     pub source_node_id: String,
     pub session_id: SessionId,
     pub turn_id: TurnId,
+    pub user_text: Option<String>,
     pub semantic_events: Vec<ReasonResp01SemanticEvent>,
     pub tool_calls: Vec<ReasonReq04ToolCall>,
     pub usage_events: Vec<ReasonResp02UsageEvent>,
@@ -565,6 +568,7 @@ impl UiProtocolState {
                 },
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
+                user_text: None,
                 reasoning: Vec::new(),
                 text: Vec::new(),
                 tool_calls: Vec::new(),
@@ -721,6 +725,16 @@ pub fn terminal_text_projection(event: &ReasonResp03TerminalEvent) -> String {
 
 pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConversationItem> {
     let mut items = Vec::new();
+    if let Some(user_text) = &projection.user_text
+        && !user_text.trim().is_empty()
+    {
+        items.push(UiConversationItem {
+            kind: UiConversationItemKind::UserText,
+            title: "User".to_owned(),
+            body: user_text.clone(),
+            status: "submitted".to_owned(),
+        });
+    }
     for text in &projection.text {
         let public_text = strip_completion_submission_block(text);
         if !public_text.trim().is_empty() {
@@ -866,6 +880,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
         },
         session_id: input.session_id,
         turn_id: input.turn_id,
+        user_text: input.user_text,
         reasoning,
         text,
         tool_calls: input
@@ -930,6 +945,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            user_text: Some("run the task".to_owned()),
             semantic_events: vec![
                 ReasonResp01SemanticEvent {
                     session_id: SessionId::new("session-1"),
@@ -1118,7 +1134,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
+        assert_eq!(items[0].kind, UiConversationItemKind::UserText);
+        assert_eq!(items[0].body, "run the task");
         assert!(rendered.contains("Visible answer"));
+        assert!(rendered.contains("run the task"));
         assert!(!rendered.contains("freehand_completion"));
         assert!(!rendered.contains("private chain"));
         assert!(!rendered.contains("input=10"));

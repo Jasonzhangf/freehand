@@ -226,13 +226,13 @@ async fn handle_subscribe_latest_turn(
             .query(&UiCommand::QueryLatestActiveTurn)
             .map_err(|_| StatusCode::BAD_REQUEST)?
         {
-            UiQueryResult::Turn(Some(turn)) => {
-                turn_projection_for_client(turn, UiClientKind::WebUi)
-            }
-            UiQueryResult::Turn(None) => return Err(StatusCode::NOT_FOUND),
+            UiQueryResult::Turn(Some(turn)) => Some(UiProjection::Turn(
+                turn_projection_for_client(turn, UiClientKind::WebUi),
+            )),
+            UiQueryResult::Turn(None) => None,
             _ => return Err(StatusCode::BAD_REQUEST),
         };
-        (UiProjection::Turn(turn), state.subscribe())
+        (turn, state.subscribe())
     };
     Ok(Sse::new(subscription_event_stream(
         initial_projection,
@@ -268,19 +268,19 @@ async fn handle_subscribe_debug_state(
         (UiProjection::Debug(snapshot), state.subscribe())
     };
     Ok(Sse::new(subscription_event_stream(
-        initial_projection,
+        Some(initial_projection),
         receiver,
         selector,
     )))
 }
 
 fn subscription_event_stream(
-    initial_projection: UiProjection,
+    initial_projection: Option<UiProjection>,
     receiver: broadcast::Receiver<UiSubscriptionEvent>,
     selector: SubscriptionSelector,
 ) -> impl futures_util::Stream<Item = Result<Event, Infallible>> {
     stream::unfold(
-        (Some(initial_projection), receiver, selector),
+        (initial_projection, receiver, selector),
         |(pending, mut receiver, selector)| async move {
             if let Some(projection) = pending {
                 let event = projection_to_sse_event(projection, selector.client);
@@ -350,6 +350,7 @@ fn sample_slave_turn_projection() -> UiTurnProjection {
         source_node_id: "slave-node".to_owned(),
         session_id: SessionId::new("session-webui-smoke"),
         turn_id: TurnId::new("turn-webui-smoke"),
+        user_text: Some("inspect slave status".to_owned()),
         semantic_events: vec![
             ReasonResp01SemanticEvent {
                 session_id: SessionId::new("session-webui-smoke"),
@@ -448,9 +449,17 @@ mod tests {
 
     impl TestServer {
         async fn spawn() -> Self {
+            Self::spawn_with_state(seed_webui_protocol_state()).await
+        }
+
+        async fn spawn_empty() -> Self {
+            Self::spawn_with_state(UiProtocolState::default()).await
+        }
+
+        async fn spawn_with_state(initial_state: UiProtocolState) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let addr = listener.local_addr().expect("local addr");
-            let protocol_state = Arc::new(Mutex::new(seed_webui_protocol_state()));
+            let protocol_state = Arc::new(Mutex::new(initial_state));
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let protocol_state_for_task = Arc::clone(&protocol_state);
             let task = tokio::spawn(async move {
@@ -527,8 +536,9 @@ mod tests {
             Some("terminal final text")
         );
         assert!(turn.turn.slave_substream_card);
-        assert_eq!(turn.public_conversation[0].body, "slave answer");
-        assert_eq!(turn.public_conversation[1].body, "terminal final text");
+        assert_eq!(turn.public_conversation[0].body, "inspect slave status");
+        assert_eq!(turn.public_conversation[1].body, "slave answer");
+        assert_eq!(turn.public_conversation[2].body, "terminal final text");
 
         let debug = client
             .get(format!(
@@ -650,6 +660,7 @@ mod tests {
                 source_node_id: "slave-node".to_owned(),
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-webui-smoke-2"),
+                user_text: Some("second prompt".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {
                     session_id: SessionId::new("session-webui-smoke"),
                     turn_id: TurnId::new("turn-webui-smoke-2"),
@@ -714,6 +725,62 @@ mod tests {
 
         drop(turn_sse);
         drop(debug_sse);
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn latest_turn_subscribe_waits_on_blank_state_until_first_turn() {
+        let server = TestServer::spawn_empty().await;
+        let client = Client::builder().build().expect("client");
+
+        let query = client
+            .get(format!("{}/ui/query/latest-active-turn", server.base_url))
+            .send()
+            .await
+            .expect("blank query");
+        assert_eq!(query.status(), StatusCode::NOT_FOUND);
+
+        let mut turn_sse = client
+            .get(format!("{}/ui/subscribe/turn/latest", server.base_url))
+            .send()
+            .await
+            .expect("turn sse");
+        assert_eq!(turn_sse.status(), StatusCode::OK);
+
+        server
+            .protocol_state
+            .lock()
+            .expect("lock protocol")
+            .apply_turn_projection(turn_projection_from_events(TurnProjectionInput {
+                source_agent_id: AgentId::new("slave-agent"),
+                source_node_id: "slave-node".to_owned(),
+                session_id: SessionId::new("session-webui-smoke"),
+                turn_id: TurnId::new("turn-webui-first"),
+                user_text: Some("first prompt".to_owned()),
+                semantic_events: vec![ReasonResp01SemanticEvent {
+                    session_id: SessionId::new("session-webui-smoke"),
+                    turn_id: TurnId::new("turn-webui-first"),
+                    trace_id: TraceId::new("trace-webui-first"),
+                    feature_id: FeatureId::new("app.webui-smoke"),
+                    agent_id: AgentId::new("slave-agent"),
+                    kind: SemanticEventKind::Text,
+                    content: "first answer".to_owned(),
+                }],
+                tool_calls: Vec::new(),
+                usage_events: Vec::new(),
+                terminal_event: None,
+                error_events: Vec::new(),
+                slave_substream_card: false,
+            }));
+
+        let mut turn_buffer = String::new();
+        let turn_body = read_next_sse_event(&mut turn_sse, &mut turn_buffer).await;
+        assert!(turn_body.contains("event: turn"));
+        assert!(turn_body.contains("\"turn_id\":\"turn-webui-first\""));
+        assert!(turn_body.contains("first prompt"));
+        assert!(turn_body.contains("first answer"));
+
+        drop(turn_sse);
         server.stop().await;
     }
 

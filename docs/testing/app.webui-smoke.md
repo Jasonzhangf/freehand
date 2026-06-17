@@ -12,6 +12,7 @@
   - CLI and WebUI divergences stay protocol-safe
   - app boundary remains decoupled from reason/provider/node/config semantics
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
+  - latest-turn subscribe should wait for the first turn instead of failing on blank state
 - white-box plan:
   - page shell render helper
   - embedded asset serving helper
@@ -27,8 +28,9 @@
   - WebUI query projection smoke
   - WebUI debug query projection smoke
   - WebUI latest-turn SSE initial snapshot plus later update smoke
+  - WebUI blank-state latest-turn SSE wait smoke
   - WebUI debug SSE initial snapshot plus later update smoke
-  - WebUI latest-turn query/SSE public projection excludes raw completion schema and internal reasoning from public conversation
+  - WebUI latest-turn query/SSE public projection excludes raw completion schema and internal reasoning from public conversation while preserving user input
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
   - app dependency boundary smoke

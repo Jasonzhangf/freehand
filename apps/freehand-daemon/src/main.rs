@@ -291,6 +291,8 @@ mod tests {
         let queried: UiPublicTurnProjection = queried.json().await.expect("query json");
         assert_eq!(queried.turn.turn_id, TurnId::new("runtime-turn-1-r2"));
         assert_eq!(queried.turn.source.source_node_id, "master-node");
+        assert_eq!(queried.turn.user_text.as_deref(), Some("daemon turn"));
+        assert_eq!(queried.public_conversation[0].body, "daemon turn");
         assert!(
             queried
                 .turn
@@ -299,6 +301,55 @@ mod tests {
                 .is_some_and(|text| text.contains("Summary: tool done"))
         );
 
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn daemon_blank_latest_sse_streams_user_prompt_before_provider_output() {
+        let (provider_url, request_rx, provider_handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_single_response(),
+                complete_single_response("tool done"),
+            ],
+        );
+        let server = TestServer::spawn(master_config_text(&provider_url)).await;
+        let client = Client::builder().build().expect("client");
+
+        let mut turn_sse = client
+            .get(format!("{}/ui/subscribe/turn/latest", server.base_url))
+            .send()
+            .await
+            .expect("turn sse");
+        assert_eq!(turn_sse.status(), reqwest::StatusCode::OK);
+
+        let accepted = client
+            .post(format!("{}/ui/command", server.base_url))
+            .json(&UiCommand::SubmitUserInput {
+                text: "daemon streamed user prompt".to_owned(),
+            })
+            .send()
+            .await
+            .expect("command response");
+        assert_eq!(accepted.status(), reqwest::StatusCode::ACCEPTED);
+        let _ = request_rx.recv().expect("first request");
+        let _ = request_rx.recv().expect("second request");
+        provider_handle.join().expect("join provider");
+
+        let mut buffer = String::new();
+        let user_event =
+            read_sse_event_matching(&mut turn_sse, &mut buffer, "daemon streamed user prompt")
+                .await;
+        assert!(user_event.contains("event: turn"));
+        assert!(user_event.contains("\"kind\":\"UserText\""));
+        assert!(
+            user_event.contains("\"turn_id\":\"runtime-turn-1\"")
+                || user_event.contains("\"turn_id\":\"runtime-turn-1-r2\""),
+            "unexpected SSE event: {user_event}"
+        );
+
+        drop(turn_sse);
         server.stop().await;
     }
 

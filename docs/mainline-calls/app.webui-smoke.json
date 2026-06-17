@@ -23,11 +23,11 @@
     "app boundary renders a protocol-driven WebUI page shell; live content is populated from existing query and SSE endpoints",
     "app boundary serves protocol-owned query and subscription payloads without becoming a reason or debug truth writer",
     "app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success",
-    "SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection",
+    "SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe keeps waiting when no turn exists yet",
     "WebUI submit success path actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing",
-    "front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes",
+    "front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes, and preserves the user prompt in the public conversation stream",
     "front-end script projects checkpoint summaries into a secondary inspector card and sends explicit rewind commands through command ingress",
-    "main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream",
+    "main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible",
     "theme module owns white and black theme switching and is separated from WebUI layout/runtime scripts",
     "CLI and WebUI divergence remains a rendering decision only, not a protocol decision",
     "the app is a render-only transport boundary, not a reasoning or provider boundary"
@@ -37,6 +37,7 @@
     "transport or render wiring failures are surfaced explicitly",
     "unknown static assets return explicit 404",
     "checkpoint query uses protocol state only and must not parse runtime checkpoint files in the app boundary",
+    "blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn",
     "direct reason, provider, node, or config coupling is a policy violation, not a fallback path"
   ],
   "shared_functions": [

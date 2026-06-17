@@ -10,14 +10,14 @@
   - query returns snapshot truth
   - debug query returns per-turn read-only debug snapshot truth
   - checkpoint query returns read-only runtime-owned checkpoint summary projections
-  - subscribe returns an initial snapshot plus continuous incremental truth
+  - subscribe returns an initial snapshot plus continuous incremental truth, or waits for the first matching turn when subscribing before any turn exists
   - debug subscribe returns per-turn read-only debug projections
   - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
   - debug receiver drain ingests observation-only debug events into protocol state
   - source identity and stream kind stay explicit
   - slave turn presentation divergence remains protocol-safe
   - client-specific projection gating keeps slave card visible only for WebUI
-  - public conversation projection hides reasoning, usage, debug details, and raw completion schema blocks from the main user-visible stream
+  - public conversation projection preserves the user prompt while hiding reasoning, usage, debug details, and raw completion schema blocks from the main user-visible stream
 - white-box plan:
   - command/projection mapping, status query, terminal projection, slave subscription semantics
   - command ingress acceptance and rejection mapping
@@ -39,7 +39,8 @@
   - debug-core receiver to queryable protocol-state smoke
   - checkpoint summary query smoke
   - CLI hides slave card while WebUI may render it
-  - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries
+  - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries plus user input
+  - blank latest-turn subscribe waits until a turn exists instead of failing early
 - project black-box impact:
   - CLI and WebUI consume one protocol truth while rendering different views
   - protocol truth can back a minimal service boundary without duplicating projection logic in apps

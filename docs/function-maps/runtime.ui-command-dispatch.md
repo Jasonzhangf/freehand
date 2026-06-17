@@ -22,8 +22,10 @@
 
 ## Response Mainline
 
-- reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections
+- reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections, including the original user prompt for public conversation projection
 - live provider-backed submit incrementally writes reason/debug projection updates into `UiProtocolState` while the turn is still running
+- live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events so blank UI subscriptions can render a complete public conversation stream
+- live provider-backed multi-round turns keep the original operator prompt in public UI projection instead of exposing internal continuation prompts
 - node-backed direct-message commands return dispatch receipts after owner validation
 - runtime-backed rewind commands restore checkpointed workspace state without mutating reason/session/UI truth directly
 - config-selected runtime bootstrap returns one dispatcher for the requested agent

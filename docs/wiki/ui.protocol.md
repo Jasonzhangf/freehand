@@ -23,10 +23,10 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - query returns snapshots
 - checkpoint query returns read-only checkpoint summary projections supplied by runtime owner code
 - command ingress returns explicit dispatch receipt without claiming truth mutation success
-- subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel
+- subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel, or waits for the first turn when the latest-turn stream is subscribed before any turn exists
 - projections are read-only views over owner-written truth
 - terminal completion shows only final projected text
-- public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, and debug details from the main user-visible stream
+- public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, and debug details from the main user-visible stream
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
 - `ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state
 - `ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`
@@ -41,6 +41,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - query/subscribe commands sent to command-ingress route are explicit protocol misuse errors
 - empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
+- blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn
 - source identity fields remain explicit across success and error paths
 - UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors
 
@@ -54,7 +55,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
   - why shared: ensures CLI and WebUI project the same terminal text truth
 - `public_conversation_items`
   - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: derive user-visible conversation items from a full turn projection without exposing internal reasoning/debug/raw schema data
+  - purpose: derive user-visible conversation items from a full turn projection without exposing internal reasoning/debug/raw schema data while retaining the user prompt
   - allowed callers: CLI/WebUI renderers, transport adapters
   - related tests: public conversation projection smoke
   - why shared: all UI clients need one public projection rule instead of per-client filtering
@@ -101,9 +102,9 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 06 | `UiProtocolState::subscribe` | `crates/freehand-ui-protocol/src/lib.rs` | expose the protocol-owned continuous subscription channel for app transports | none | UiSubscriptionEvent receiver | app/transport adapters | protocol state | bound |
 | 07 | `subscription_selector` | `crates/freehand-ui-protocol/src/lib.rs` | build read-only subscribe selector | subscribe command | subscription selector | protocol boundary | stream handler | bound |
 | 08 | `subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route incremental projection to matching subscription | subscription selector plus projection | delivery decision | stream handler | selector matcher | bound |
-| 09 | `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | project whole-turn state into UI snapshot | semantic/tool/usage/terminal/error inputs | UI turn projection | query/stream handler | projector | bound |
+| 09 | `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | project whole-turn state into UI snapshot | semantic/tool/usage/terminal/error/user inputs | UI turn projection | query/stream handler | projector | bound |
 | 10 | `terminal_text_projection` | `crates/freehand-ui-protocol/src/lib.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector | bound |
-| 10a | `public_conversation_items / public_turn_projection` | `crates/freehand-ui-protocol/src/lib.rs` | derive public user-visible conversation stream and strip raw completion schema | full turn projection | public turn projection | app transports/renderers | projector | bound |
+| 10a | `public_conversation_items / public_turn_projection` | `crates/freehand-ui-protocol/src/lib.rs` | derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema | full turn projection | public turn projection | app transports/renderers | projector | bound |
 | 11 | `UiProtocolState::apply_semantic_event / apply_tool_call / apply_usage_event / apply_terminal_event / apply_error_event` | `crates/freehand-ui-protocol/src/lib.rs` | incrementally update one turn projection from shared contract events and publish subscription updates | shared reason/error contracts | updated queryable/subscribable turn projection | runtime/debug bridges | protocol state | bound |
 | 12 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate client-specific slave substream visibility | turn projection plus client kind | client-specific turn projection | CLI/WebUI adapter | projector | bound |
 | 13 | `UiProtocolState::set_debug_state` | `crates/freehand-ui-protocol/src/lib.rs` | store per-turn read-only debug projection for UI consumption and publish subscription updates | freehand-debug snapshot | queryable/subscribable debug state | reason/node/debug bridge | protocol state | bound |

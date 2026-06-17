@@ -1219,6 +1219,14 @@ impl RuntimeCommandDispatcher {
             let ui_state = Arc::clone(&self.ui_state);
             let reason_agent_id = state.config.reason_agent_id.clone();
             let master_node_id = state.config.master_node_id.clone();
+            publish_live_pending_user_projection(
+                &ui_state,
+                &reason_agent_id,
+                &master_node_id,
+                &state.config.session_id,
+                &turn_id,
+                &text,
+            );
             let outcome = run_live_reason_turn_with_hooks(
                 &live.selected_agent,
                 LiveReasonTurnRequest {
@@ -1669,7 +1677,7 @@ fn execute_registry_tool_call(
         ));
     }
     let tool_name = tool_call.tool_call.tool_name.as_str();
-    if registry.read_only(tool_name) == Some(false) {
+    if is_checkpointable_file_mutation_tool(tool_name) {
         let store = RuntimeCheckpointStore::new(
             runtime_home,
             &turn.request.agent_id,
@@ -1724,6 +1732,10 @@ fn execute_registry_tool_call(
             output: output.text,
         },
     })
+}
+
+fn is_checkpointable_file_mutation_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "write_file" | "edit_file" | "multi_edit")
 }
 
 struct LiveApplyContext<'a, FB>
@@ -1840,6 +1852,35 @@ fn apply_runtime_debug_event(ui_state: &Arc<Mutex<UiProtocolState>>, event: &Deb
         .apply_debug_event(event);
 }
 
+fn publish_live_pending_user_projection(
+    ui_state: &Arc<Mutex<UiProtocolState>>,
+    reason_agent_id: &AgentId,
+    master_node_id: &str,
+    session_id: &SessionId,
+    base_turn_id: &TurnId,
+    user_text: &str,
+) {
+    ui_state
+        .lock()
+        .expect("lock ui state")
+        .apply_turn_projection(turn_projection_for_client(
+            turn_projection_from_events(TurnProjectionInput {
+                source_agent_id: reason_agent_id.clone(),
+                source_node_id: master_node_id.to_owned(),
+                session_id: session_id.clone(),
+                turn_id: derived_turn_id(base_turn_id, 1),
+                user_text: Some(user_text.to_owned()),
+                semantic_events: Vec::new(),
+                tool_calls: Vec::new(),
+                usage_events: Vec::new(),
+                terminal_event: None,
+                error_events: Vec::new(),
+                slave_substream_card: false,
+            }),
+            UiClientKind::WebUi,
+        ));
+}
+
 fn project_runtime_turn(
     reason_agent_id: &AgentId,
     master_node_id: &str,
@@ -1851,6 +1892,7 @@ fn project_runtime_turn(
             source_node_id: master_node_id.to_owned(),
             session_id: turn.request.session_id.clone(),
             turn_id: turn.request.turn_id.clone(),
+            user_text: Some(ui_user_text_for_turn(turn)),
             semantic_events: turn.semantic_events.clone(),
             tool_calls: turn.tool_calls.clone(),
             usage_events: turn.usage_events.clone(),
@@ -1860,6 +1902,23 @@ fn project_runtime_turn(
         }),
         UiClientKind::WebUi,
     )
+}
+
+fn ui_user_text_for_turn(turn: &TurnRecord) -> String {
+    turn.request
+        .context_segments
+        .iter()
+        .find(|segment| {
+            segment.provenance.source == "freehand_runtime"
+                && segment.provenance.reference.as_deref() == Some("original_task")
+        })
+        .and_then(|segment| {
+            segment
+                .content
+                .strip_prefix("Original operator task:\n")
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| turn.request.user_text.clone())
 }
 
 fn runtime_turn_position(turn_id: &TurnId) -> (u64, u64, String) {
@@ -2776,29 +2835,40 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
-    fn live_bridge_rejects_writable_tool_without_preview_support() {
+    fn live_bridge_executes_bash_without_checkpoint_preview() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let (base_url, _rx, handle) = spawn_sequence_server(
+        let (base_url, rx, handle) = spawn_sequence_server(
             "application/json",
-            vec![tool_use_bash_response("printf 'pong'")],
+            vec![
+                tool_use_bash_response("printf 'pong'"),
+                complete_single_response("bash done"),
+            ],
         );
+        let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
 
-        let err = run_live_reason_turn(
+        let outcome = run_live_reason_turn(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            live_request(false),
+            request,
         )
-        .expect_err("must fail");
+        .expect("live bridge");
+        let _ = rx.recv().expect("first provider request");
+        let second_request = rx.recv().expect("second provider request");
         handle.join().expect("join");
 
-        match err {
-            RuntimeLiveBridgeError::ToolCheckpointFailed(message) => {
-                assert!(message.contains("bash"));
-                assert!(message.contains("preview"));
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        assert!(second_request.contains("\"type\":\"tool_result\""));
+        assert!(second_request.contains("pong"));
+        assert_eq!(outcome.tool_executions, 1);
+        assert_eq!(outcome.rounds, 2);
+        let checkpoint_path = runtime_home
+            .join("ledgers")
+            .join("checkpoints")
+            .join("agent-live")
+            .join(format!("{}.jsonl", session_id.as_str()));
+        assert!(!checkpoint_path.exists());
     }
 
     #[test]
@@ -2929,6 +2999,9 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             UiQueryResult::Turn(Some(turn)) => {
                 assert_eq!(turn.source.source_node_id, "master-node");
                 assert_eq!(turn.turn_id, TurnId::new("runtime-turn-1"));
+                assert_eq!(turn.user_text.as_deref(), Some("hello runtime"));
+                let public = freehand_ui_protocol::public_turn_projection(turn);
+                assert_eq!(public.public_conversation[0].body, "hello runtime");
             }
             other => panic!("unexpected latest turn query: {other:?}"),
         }

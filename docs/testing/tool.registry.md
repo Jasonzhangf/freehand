@@ -10,8 +10,9 @@
   - unknown tools fail explicitly
 - white-box plan:
   - registry name/schema export tests
-  - `read_only` metadata tests
-  - `bash` success-path, workspace-cwd, timeout, and non-zero-exit tests
+- `read_only` metadata tests
+- `bash` success-path, workspace-cwd, timeout, and non-zero-exit tests
+- live runtime checkpoint routing must not treat non-file-mutation tools such as `bash` as preview/checkpointable file mutations
   - `read_file` line-window and path-lock tests
   - `write_file` create/overwrite/path-lock tests
   - `edit_file` exact-single-match and rejection tests

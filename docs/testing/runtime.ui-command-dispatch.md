@@ -8,7 +8,10 @@
   - runtime dispatch routes to the declared owner module
   - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
   - reason-backed submit/cancel update derived UI state
+  - reason-backed submit projects the original user prompt into derived UI public conversation truth
   - live provider submit incrementally updates derived UI turn/debug state before terminal receipt
+  - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately
+  - live provider multi-round continuation prompts must not replace the public user prompt projection
   - node-backed direct message returns owner-backed receipt
   - unsupported resume path fails explicitly
 - white-box plan:
@@ -19,12 +22,15 @@
   - submit/cancel reason dispatch coverage
   - checkpoint rewind dispatch coverage
   - live reason hook-to-ui-state coverage
+  - live reason prompt-first projection coverage
+  - live reason final projection keeps original user prompt after tool-result continuation
   - node direct-message dispatch coverage
   - unsupported/missing-target dispatch failure coverage
 - module black-box plan:
   - command dispatch receipt smoke
   - owner-routing smoke
   - runtime-derived UI latest-turn smoke
+  - runtime-derived UI latest-turn user prompt projection smoke
   - config-selected runtime bootstrap smoke
   - config-selected live restart/restore smoke
   - runtime checkpoint rewind receipt smoke
