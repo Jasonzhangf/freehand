@@ -68,6 +68,6 @@ Generated from `docs/mainline-calls/debug.core.json`. Do not edit by hand.
 
 - debug core crate, reusable snapshot/envelope contracts, hub fanout, subscriber registration, and file/stdout sink classes are bound in code
 - dedicated observation-failure stream is bound in code through `DebugObservationFailure` and `DebugHub::subscribe_failures`
-- current landed emitters are `freehand-reason` lifecycle milestones; provider/node producers remain future integration work
+- current landed emitters are `freehand-reason` lifecycle milestones plus runtime-owned `provider.reason-live-bridge` restore/request/tool/terminal boundaries; node producers and direct provider-adapter emitters remain future integration work
 - sink failures are explicit at `DebugHub::emit`, surface through the dedicated observation-failure stream, and current reason-side integration keeps them observation-only without promoting them into reason truth
 - generated wiki must be regenerated from `docs/mainline-calls/debug.core.json` when this function-map truth changes

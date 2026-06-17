@@ -85,6 +85,21 @@ pub struct AnthropicExecutor {
     adapter: AnthropicAdapter,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnthropicRawCapture {
+    ResponseBody {
+        body: String,
+    },
+    HttpErrorBody {
+        status: u16,
+        body: String,
+    },
+    StreamEventBody {
+        event_index: usize,
+        event_body: String,
+    },
+}
+
 impl AnthropicExecutor {
     pub fn new(config: AnthropicExecutorConfig) -> Result<Self, AnthropicExecutorError> {
         if config.base_url.trim().is_empty()
@@ -105,8 +120,32 @@ impl AnthropicExecutor {
         ctx: &ProviderEventContext,
         request: &ProviderSemanticRequest,
     ) -> Result<Vec<ProviderSemanticOutput>, AnthropicExecutorError> {
+        self.execute_once_with_raw(ctx, request, |_| Ok(()))
+    }
+
+    pub fn execute_once_with_raw<F>(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        mut on_raw: F,
+    ) -> Result<Vec<ProviderSemanticOutput>, AnthropicExecutorError>
+    where
+        F: FnMut(&AnthropicRawCapture) -> Result<(), AnthropicExecutorError>,
+    {
         let rendered = self.adapter.render_request(request, false)?;
-        let body = self.send_rendered_request(&rendered)?.text()?;
+        let response = match self.send_rendered_request(&rendered) {
+            Ok(response) => response,
+            Err(AnthropicExecutorError::HttpStatus { status, body }) => {
+                on_raw(&AnthropicRawCapture::HttpErrorBody {
+                    status,
+                    body: body.clone(),
+                })?;
+                return Err(AnthropicExecutorError::HttpStatus { status, body });
+            }
+            Err(other) => return Err(other),
+        };
+        let body = response.text()?;
+        on_raw(&AnthropicRawCapture::ResponseBody { body: body.clone() })?;
         Ok(self
             .adapter
             .parse_response(ctx, request.descriptor.protocol, &body)?)
@@ -129,12 +168,37 @@ impl AnthropicExecutor {
     where
         F: FnMut(&[ProviderSemanticOutput]) -> Result<(), AnthropicExecutorError>,
     {
+        self.execute_stream_with_raw(ctx, request, |_| Ok(()), |batch| on_outputs(batch))
+    }
+
+    pub fn execute_stream_with_raw<FR, FO>(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        mut on_raw: FR,
+        mut on_outputs: FO,
+    ) -> Result<Vec<ProviderSemanticOutput>, AnthropicExecutorError>
+    where
+        FR: FnMut(&AnthropicRawCapture) -> Result<(), AnthropicExecutorError>,
+        FO: FnMut(&[ProviderSemanticOutput]) -> Result<(), AnthropicExecutorError>,
+    {
         let rendered = self.adapter.render_request(request, true)?;
-        let response = self.send_rendered_request(&rendered)?;
+        let response = match self.send_rendered_request(&rendered) {
+            Ok(response) => response,
+            Err(AnthropicExecutorError::HttpStatus { status, body }) => {
+                on_raw(&AnthropicRawCapture::HttpErrorBody {
+                    status,
+                    body: body.clone(),
+                })?;
+                return Err(AnthropicExecutorError::HttpStatus { status, body });
+            }
+            Err(other) => return Err(other),
+        };
         let mut reader = BufReader::new(response);
         let mut outputs = Vec::new();
         let mut collector = SseEventCollector::default();
         let mut line = String::new();
+        let mut event_index = 0usize;
         loop {
             line.clear();
             if reader.read_line(&mut line)? == 0 {
@@ -143,6 +207,11 @@ impl AnthropicExecutor {
             let Some(event_body) = collector.push_line(&line) else {
                 continue;
             };
+            event_index = event_index.saturating_add(1);
+            on_raw(&AnthropicRawCapture::StreamEventBody {
+                event_index,
+                event_body: event_body.clone(),
+            })?;
             let batch =
                 self.adapter
                     .parse_stream_event(ctx, request.descriptor.protocol, &event_body)?;
@@ -150,6 +219,11 @@ impl AnthropicExecutor {
             outputs.extend(batch);
         }
         if let Some(event_body) = collector.finish() {
+            event_index = event_index.saturating_add(1);
+            on_raw(&AnthropicRawCapture::StreamEventBody {
+                event_index,
+                event_body: event_body.clone(),
+            })?;
             let batch =
                 self.adapter
                     .parse_stream_event(ctx, request.descriptor.protocol, &event_body)?;
@@ -1171,6 +1245,112 @@ mod tests {
                     if usage.usage.finish_reason.as_deref() == Some("end_turn")
             )
         }));
+    }
+
+    #[test]
+    fn executor_raw_callback_sees_single_response_body_before_parse_failure() {
+        let (base_url, _rx, handle) = spawn_mock_server(200, "application/json", "{\"type\":");
+        let mut executor = executor(base_url);
+        let mut raw = Vec::<AnthropicRawCapture>::new();
+
+        let err = executor
+            .execute_once_with_raw(&ctx(), &request(), |capture| {
+                raw.push(capture.clone());
+                Ok(())
+            })
+            .expect_err("parse failure");
+        handle.join().expect("server thread");
+
+        assert!(matches!(
+            err,
+            AnthropicExecutorError::Adapter(AnthropicAdapterError::InvalidJson(_))
+        ));
+        assert_eq!(
+            raw,
+            vec![AnthropicRawCapture::ResponseBody {
+                body: "{\"type\":".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn executor_raw_callback_sees_http_error_body() {
+        let (base_url, _rx, handle) =
+            spawn_mock_server(401, "application/json", "{\"error\":\"expired\"}");
+        let mut executor = executor(base_url);
+        let mut raw = Vec::<AnthropicRawCapture>::new();
+
+        let err = executor
+            .execute_once_with_raw(&ctx(), &request(), |capture| {
+                raw.push(capture.clone());
+                Ok(())
+            })
+            .expect_err("http failure");
+        handle.join().expect("server thread");
+
+        assert!(matches!(
+            err,
+            AnthropicExecutorError::HttpStatus { status: 401, body }
+                if body.contains("expired")
+        ));
+        assert_eq!(
+            raw,
+            vec![AnthropicRawCapture::HttpErrorBody {
+                status: 401,
+                body: "{\"error\":\"expired\"}".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn executor_raw_callback_sees_stream_event_bodies() {
+        let raw_sse = concat!(
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"pong\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let (base_url, _rx, handle) = spawn_mock_server(200, "text/event-stream", raw_sse);
+        let mut executor = executor(base_url);
+        let mut raw = Vec::<AnthropicRawCapture>::new();
+
+        let outputs = executor
+            .execute_stream_with_raw(
+                &ctx(),
+                &request(),
+                |capture| {
+                    raw.push(capture.clone());
+                    Ok(())
+                },
+                |_| Ok(()),
+            )
+            .expect("execute stream");
+        handle.join().expect("server thread");
+
+        assert!(!outputs.is_empty());
+        assert_eq!(
+            raw,
+            vec![
+                AnthropicRawCapture::StreamEventBody {
+                    event_index: 1,
+                    event_body:
+                        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}"
+                            .to_owned()
+                },
+                AnthropicRawCapture::StreamEventBody {
+                    event_index: 2,
+                    event_body:
+                        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"pong\"}}"
+                            .to_owned()
+                },
+                AnthropicRawCapture::StreamEventBody {
+                    event_index: 3,
+                    event_body: "{\"type\":\"message_stop\"}".to_owned()
+                }
+            ]
+        );
     }
 
     #[test]

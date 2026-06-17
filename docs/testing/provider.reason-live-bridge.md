@@ -7,6 +7,7 @@
   - runtime-owned live bridge restores existing session truth or explicitly creates a new session when recovery truth is missing
   - one or more reason rounds start and build provider payloads
   - provider semantic request is built from round truth
+  - provider raw response/error/event bodies are captured through raw-capable executor callbacks and written into debug-only provider ledgers
   - first tool-capable request advertises implemented schemas from the Reasonix-aligned tool registry
   - anthropic executor runs single-shot or SSE request
   - provider-neutral outputs are written back into the active round and broadcast
@@ -19,6 +20,7 @@
   - unsupported provider rejection
   - metadata center bootstrap from `~/.freehand/ledgers/metadata`
   - runtime-owned restore/request/tool/terminal lifecycle metadata writes
+  - runtime-owned restore/request/tool/terminal lifecycle debug snapshot emission
   - runtime-owned metadata write failure is explicit and aborts the live bridge
   - single-shot live-bridge mock path
   - SSE live-bridge mock path
@@ -29,6 +31,8 @@
   - retry-exhausted failed terminal path
   - restore-before-turn path
   - live turn start/provider-output/schema-rejection/terminal persistence writes
+  - provider raw debug-ledger write path for single-shot response bodies and SSE event bodies
+  - provider raw debug-ledger failure path is explicit and aborts the live bridge
   - registry-backed tool schema export path
   - registry-backed tool schema fingerprint reaches planner diagnostics
   - implemented registry read-only tool execution path
@@ -38,11 +42,13 @@
   - runtime dispatch submit-user-input path invokes the live bridge and updates UI projection
 - module black-box plan:
   - one selected anthropic provider drives text/reasoning/usage into turn truth through the bridge and closes via accepted completion schema
+  - one selected anthropic provider writes provider raw response body or stream event bodies into `~/.freehand/ledgers/providers/anthropic`
   - one selected anthropic provider emits an implemented registered tool call, receives tool result, then closes via accepted completion schema
   - one selected anthropic provider emits a writable file tool call, gets checkpointed before execute, and can be rewound by runtime owner truth
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
   - invalid completion schema retries exactly 3 times and closes failed terminal without early success
   - provider HTTP failure returns explicit dispatch failure and does not project a successful terminal
+  - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
   - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation
 - project black-box impact:
   - CLI can reuse the runtime-owned bridge for a live-turn smoke path without importing provider DTOs into app code
@@ -57,9 +63,11 @@
   - `~/.freehand/ledgers/reason`
 - sync status between design and implementation:
   - anthropic-only live bridge owner is now `freehand-runtime`
-  - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, persistence restore, and runtime metadata producer wiring
+  - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, persistence restore, runtime metadata producer wiring, and provider raw debug-ledger wiring
+  - runtime white-box coverage now also proves runtime-owned debug snapshots for restore/request/tool/terminal lifecycle boundaries without prompt or tool-result leakage
   - runtime live bridge now injects tool owner schema fingerprint into reason planner diagnostics before provider request build
   - runtime dispatch and daemon black-box coverage are landed against local mock providers
   - runtime live bridge now writes restore/request/tool/terminal lifecycle metadata through `metadata.core` and fails explicitly on metadata write errors
+  - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates

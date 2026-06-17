@@ -16,6 +16,7 @@
   ],
   "response_mainline": [
     "Anthropic single-shot body or SSE event becomes provider-neutral semantic output",
+    "raw-capable executor paths expose response bodies, HTTP error bodies, and SSE event bodies before semantic parsing so runtime can retain debug-only ledgers even when parsing fails",
     "partial tool-use input stays adapter-local until enough JSON exists to emit structured arguments",
     "live `minimonth` single-shot and SSE fixtures replay through the same parser entrypoints as synthetic tests",
     "executor single-shot path parses response body through `AnthropicAdapter::parse_response`",
@@ -24,6 +25,7 @@
   "error_mainline": [
     "unsupported protocol, invalid JSON body, invalid tool-use input, and stream-shape violations are explicit adapter errors",
     "HTTP transport failures and non-success HTTP statuses are explicit executor errors",
+    "raw-callback failures from `execute_*_with_raw` are explicit executor errors and do not become semantic success",
     "Anthropic stop reasons are semantic metadata, not Freehand completion truth"
   ],
   "shared_functions": [
@@ -93,15 +95,26 @@
       "step": "04",
       "symbol_path": "AnthropicExecutor::execute_once",
       "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
-      "responsibility": "execute one Anthropic messages HTTP request",
+      "responsibility": "execute one Anthropic messages HTTP request through the raw-capable single-shot path",
       "input_semantic": "semantic request plus auth/base URL",
       "output_semantic": "provider semantic outputs",
+      "caller": "runtime/provider caller",
+      "callee": "execute_once_with_raw + adapter parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "AnthropicExecutor::execute_once_with_raw",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "execute one Anthropic messages HTTP request and expose raw response/error body before semantic parsing",
+      "input_semantic": "semantic request plus auth/base URL plus raw callback",
+      "output_semantic": "provider semantic outputs plus callback-visible raw body/error body",
       "caller": "runtime/provider caller",
       "callee": "HTTP executor plus adapter parser",
       "binding_status": "bound"
     },
     {
-      "step": "05",
+      "step": "06",
       "symbol_path": "AnthropicExecutor::execute_stream",
       "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
       "responsibility": "execute one Anthropic SSE request and return accumulated semantic outputs",
@@ -112,12 +125,23 @@
       "binding_status": "bound"
     },
     {
-      "step": "06",
+      "step": "07",
       "symbol_path": "AnthropicExecutor::execute_stream_with",
       "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
       "responsibility": "execute one Anthropic SSE request and call back for each parsed semantic batch before stream completion",
       "input_semantic": "semantic request plus auth/base URL plus callback",
       "output_semantic": "incremental provider semantic output batches plus final accumulated outputs",
+      "caller": "runtime/provider caller",
+      "callee": "execute_stream_with_raw + adapter stream parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "AnthropicExecutor::execute_stream_with_raw",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "execute one Anthropic SSE request and expose each raw SSE event body before semantic parsing",
+      "input_semantic": "semantic request plus auth/base URL plus raw callback plus output callback",
+      "output_semantic": "incremental raw event bodies plus incremental provider semantic output batches",
       "caller": "runtime/provider caller",
       "callee": "HTTP executor plus adapter stream parser",
       "binding_status": "bound"
@@ -129,6 +153,7 @@
     "fixture replay bindings now cover `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`",
     "HTTP executor bindings now cover single-shot and incremental-SSE execution against local mock servers",
     "incremental stream regression proves callback delivery can happen before the provider response completes",
+    "raw-capable executor bindings now preserve single-shot response bodies, HTTP error bodies, and SSE event bodies before semantic parsing",
     "request renderer now binds Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result` message rendering from provider-neutral metadata",
     "generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes"
   ]

@@ -1,5 +1,7 @@
 //! Runtime wiring owner for UI command dispatch.
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -24,7 +26,10 @@ use freehand_contracts::{
     ReasonReq05ToolResultReentry, SessionId, ToolPreviewChangeKind, ToolPreviewContract,
     ToolResultContract, TraceId, TurnId,
 };
-use freehand_debug::{DebugEvent, DebugHub};
+use freehand_debug::{
+    DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
+    DebugTraceEnvelope,
+};
 use freehand_metadata::{
     MetadataCenter, MetadataEntry, MetadataEnvelope, MetadataError, MetadataId, MetadataKind,
     MetadataSubject, MetadataWriteNode, MetadataWriteOwner,
@@ -35,14 +40,15 @@ use freehand_node::{
 };
 use freehand_provider_anthropic::{
     AnthropicAdapterConfig, AnthropicExecutor, AnthropicExecutorConfig, AnthropicExecutorError,
+    AnthropicRawCapture,
 };
 use freehand_provider_core::{
     ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderProtocol,
     ProviderSemanticOutput, ProviderToolExchange, build_semantic_request,
 };
 use freehand_reason::{
-    ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError, ReasonTurnEngine,
-    SessionHistory, TurnRecord, TurnStartInput,
+    ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonBroadcastEvent, ReasonPersistence,
+    ReasonPersistenceError, ReasonTurnEngine, SessionHistory, TurnRecord, TurnStartInput,
 };
 use freehand_tools::BuiltinToolRegistry;
 use freehand_ui_protocol::{
@@ -708,6 +714,8 @@ where
         };
     let debug_hub = Arc::new(DebugHub::new(true));
     let debug_receiver = debug_hub.subscribe(64);
+    let first_round_turn_id = derived_turn_id(&request.turn_id, 1);
+    let first_round_trace_id = derived_trace_id(&request.trace_id, 1);
     let metadata_center = Arc::new(Mutex::new(
         MetadataCenter::with_ledger_path(metadata_ledger_path(
             &request.runtime_home,
@@ -754,6 +762,30 @@ where
             ],
         },
     )?;
+    emit_live_bridge_debug(
+        &debug_hub,
+        &agent_id,
+        &request.session_id,
+        RuntimeDebugEmitSpec {
+            turn_id: &first_round_turn_id,
+            trace_id: &first_round_trace_id,
+            pipeline_node: "RuntimeLive01RestoreResolved",
+            function: "run_live_anthropic_reason_turn",
+            status_text: "runtime restore resolved",
+            detail_lines: vec![
+                format!(
+                    "restore_status={}",
+                    match restore_status {
+                        LiveReasonRestoreStatus::CreatedNew => "created_new",
+                        LiveReasonRestoreStatus::RestoredExisting => "restored_existing",
+                    }
+                ),
+                format!("restored_closed_turns={restored_closed_turns}"),
+                format!("stream={}", request.stream),
+                "provider=anthropic/messages".to_owned(),
+            ],
+        },
+    );
     let engine = ReasonTurnEngine::with_debug_hub_and_metadata_center(
         Arc::clone(&debug_hub),
         Arc::clone(&metadata_center),
@@ -812,7 +844,7 @@ where
         let mut semantic_request = build_semantic_request(
             provider_descriptor(selected),
             turn.provider_payload.clone(),
-            false,
+            debug_hub.is_enabled(),
         )
         .map_err(|err| RuntimeLiveBridgeError::ProviderRequestBuildFailed(err.to_string()))?;
         semantic_request.tools = tool_registry.implemented_definitions();
@@ -861,13 +893,63 @@ where
                 ],
             },
         )?;
+        emit_live_bridge_debug(
+            &debug_hub,
+            &agent_id,
+            &request.session_id,
+            RuntimeDebugEmitSpec {
+                turn_id: &turn.request.turn_id,
+                trace_id: &turn.request.trace_id,
+                pipeline_node: "RuntimeLive02ProviderRequestBuilt",
+                function: "run_live_anthropic_reason_turn",
+                status_text: "provider request built",
+                detail_lines: vec![
+                    format!("round={round}"),
+                    format!("stream={}", request.stream),
+                    "provider=anthropic/messages".to_owned(),
+                    format!("model={}", selected.provider.default_model),
+                    format!("tool_definition_count={}", semantic_request.tools.len()),
+                    format!(
+                        "tool_exchange_count={}",
+                        semantic_request.tool_exchanges.len()
+                    ),
+                ],
+            },
+        );
 
         if request.stream {
-            let mut stream_persistence_error = None::<RuntimeLiveBridgeError>;
-            executor
-                .execute_stream_with(&provider_ctx(&turn), &semantic_request, |batch| {
+            let stream_persistence_error = RefCell::new(None::<RuntimeLiveBridgeError>);
+            let raw_session_id = turn.request.session_id.clone();
+            let raw_turn_id = turn.request.turn_id.clone();
+            let raw_trace_id = turn.request.trace_id.clone();
+            let stream_result = executor.execute_stream_with_raw(
+                &provider_ctx(&turn),
+                &semantic_request,
+                |raw| {
+                    if semantic_request.raw_retention
+                        == freehand_provider_core::RawRetentionPolicy::DoNotRetain
+                    {
+                        return Ok(());
+                    }
+                    if let Err(err) = record_live_provider_raw(
+                        &persistence,
+                        &raw_session_id,
+                        &raw_turn_id,
+                        &raw_trace_id,
+                        semantic_request.descriptor.family,
+                        raw,
+                    ) {
+                        *stream_persistence_error.borrow_mut() = Some(err);
+                        return Err(AnthropicExecutorError::Callback(
+                            "live bridge failed while persisting raw provider stream".to_owned(),
+                        ));
+                    }
+                    Ok(())
+                },
+                |batch| {
                     if live_is_cancelled(&request) {
-                        stream_persistence_error = Some(RuntimeLiveBridgeError::Cancelled);
+                        *stream_persistence_error.borrow_mut() =
+                            Some(RuntimeLiveBridgeError::Cancelled);
                         return Err(AnthropicExecutorError::Callback(
                             "live bridge cancelled while reading stream".to_owned(),
                         ));
@@ -888,21 +970,46 @@ where
                         batch,
                         schema_rejections.len() as u32,
                     ) {
-                        stream_persistence_error = Some(err);
+                        *stream_persistence_error.borrow_mut() = Some(err);
                         return Err(AnthropicExecutorError::Callback(
                             "live bridge failed while persisting stream output".to_owned(),
                         ));
                     }
                     Ok(())
-                })
-                .map_err(map_anthropic_executor_error)?;
-            if let Some(err) = stream_persistence_error {
+                },
+            );
+            if let Some(err) = stream_persistence_error.into_inner() {
                 return Err(err);
             }
+            stream_result.map_err(map_anthropic_executor_error)?;
         } else {
-            let outputs = executor
-                .execute_once(&provider_ctx(&turn), &semantic_request)
-                .map_err(map_anthropic_executor_error)?;
+            let single_raw_error = RefCell::new(None::<RuntimeLiveBridgeError>);
+            let execute_result =
+                executor.execute_once_with_raw(&provider_ctx(&turn), &semantic_request, |raw| {
+                    if semantic_request.raw_retention
+                        == freehand_provider_core::RawRetentionPolicy::DoNotRetain
+                    {
+                        return Ok(());
+                    }
+                    if let Err(err) = record_live_provider_raw(
+                        &persistence,
+                        &turn.request.session_id,
+                        &turn.request.turn_id,
+                        &turn.request.trace_id,
+                        semantic_request.descriptor.family,
+                        raw,
+                    ) {
+                        *single_raw_error.borrow_mut() = Some(err);
+                        return Err(AnthropicExecutorError::Callback(
+                            "live bridge failed while persisting raw provider response".to_owned(),
+                        ));
+                    }
+                    Ok(())
+                });
+            if let Some(err) = single_raw_error.into_inner() {
+                return Err(err);
+            }
+            let outputs = execute_result.map_err(map_anthropic_executor_error)?;
             ensure_live_not_cancelled(&request)?;
             let mut apply_ctx = LiveApplyContext {
                 engine: &engine,
@@ -964,6 +1071,23 @@ where
                         ],
                     },
                 )?;
+                emit_live_bridge_debug(
+                    &debug_hub,
+                    &agent_id,
+                    &request.session_id,
+                    RuntimeDebugEmitSpec {
+                        turn_id: &turn.request.turn_id,
+                        trace_id: &turn.request.trace_id,
+                        pipeline_node: "RuntimeLive03ToolExecuted",
+                        function: "run_live_anthropic_reason_turn",
+                        status_text: "registry tool executed",
+                        detail_lines: vec![
+                            format!("round={round}"),
+                            format!("tool_name={}", tool_call.tool_call.tool_name.as_str()),
+                            format!("tool_call_id={}", tool_call.tool_call.tool_call_id.as_str()),
+                        ],
+                    },
+                );
                 ensure_live_not_cancelled(&request)?;
                 let output = ProviderSemanticOutput::ToolResultReentry(tool_result.clone());
                 engine
@@ -1047,6 +1171,29 @@ where
                             ],
                         },
                     )?;
+                    emit_live_bridge_debug(
+                        &debug_hub,
+                        &agent_id,
+                        &request.session_id,
+                        RuntimeDebugEmitSpec {
+                            turn_id: &turn.request.turn_id,
+                            trace_id: &turn.request.trace_id,
+                            pipeline_node: "RuntimeLive04TurnClosed",
+                            function: "run_live_anthropic_reason_turn",
+                            status_text: "turn closed",
+                            detail_lines: terminal_debug_details(
+                                round,
+                                schema_rejections.len(),
+                                tool_executions,
+                                turn.terminal_event
+                                    .as_ref()
+                                    .expect("terminal event after completion")
+                                    .status
+                                    .clone(),
+                            ),
+                        },
+                    );
+                    drain_debug_events(&debug_receiver, &mut on_debug);
                     persistence
                         .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
                         .map_err(|err| {
@@ -1131,6 +1278,29 @@ where
                             ],
                         },
                     )?;
+                    emit_live_bridge_debug(
+                        &debug_hub,
+                        &agent_id,
+                        &request.session_id,
+                        RuntimeDebugEmitSpec {
+                            turn_id: &turn.request.turn_id,
+                            trace_id: &turn.request.trace_id,
+                            pipeline_node: "RuntimeLive04TurnClosed",
+                            function: "run_live_anthropic_reason_turn",
+                            status_text: "turn closed",
+                            detail_lines: terminal_debug_details(
+                                round,
+                                schema_rejections.len(),
+                                tool_executions,
+                                turn.terminal_event
+                                    .as_ref()
+                                    .expect("terminal event after failure")
+                                    .status
+                                    .clone(),
+                            ),
+                        },
+                    );
+                    drain_debug_events(&debug_receiver, &mut on_debug);
                     persistence
                         .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
                         .map_err(|err| {
@@ -1902,6 +2072,15 @@ struct RuntimeMetadataWriteSpec<'a> {
     entries: Vec<MetadataEntry>,
 }
 
+struct RuntimeDebugEmitSpec<'a> {
+    turn_id: &'a TurnId,
+    trace_id: &'a TraceId,
+    pipeline_node: &'a str,
+    function: &'a str,
+    status_text: &'a str,
+    detail_lines: Vec<String>,
+}
+
 fn metadata_ledger_path(
     runtime_home: &Path,
     agent_id: &AgentId,
@@ -1954,6 +2133,114 @@ fn write_live_bridge_metadata(
         })?
         .write(envelope)
         .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))
+}
+
+fn emit_live_bridge_debug(
+    debug_hub: &DebugHub,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    spec: RuntimeDebugEmitSpec<'_>,
+) {
+    let snapshot = DebugStateSnapshot::new(
+        DebugSemanticPosition {
+            feature_id: FeatureId::new("provider.reason-live-bridge"),
+            session_id: session_id.clone(),
+            turn_id: spec.turn_id.clone(),
+            trace_id: spec.trace_id.clone(),
+            agent_id: Some(agent_id.clone()),
+            pipeline_node: Some(spec.pipeline_node.to_owned()),
+        },
+        DebugScenePosition {
+            crate_name: "freehand-runtime".to_owned(),
+            file: "src/lib.rs".to_owned(),
+            function: spec.function.to_owned(),
+            line: None,
+            artifact_path: None,
+            raw_exchange_id: None,
+        },
+        spec.status_text,
+        spec.detail_lines,
+    );
+    let event = DebugEvent {
+        envelope: DebugTraceEnvelope {
+            semantic: snapshot.semantic.clone(),
+            scene: snapshot.scene.clone(),
+            input_hash: None,
+            output_hash: None,
+            artifact_path: snapshot.scene.artifact_path.clone(),
+            timestamp: now_unix_seconds().to_string(),
+        },
+        snapshot: Some(snapshot),
+    };
+    let _ = debug_hub.emit(event);
+}
+
+fn record_live_provider_raw(
+    persistence: &ReasonPersistence,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    trace_id: &TraceId,
+    provider_family: ProviderFamily,
+    raw: &AnthropicRawCapture,
+) -> Result<(), RuntimeLiveBridgeError> {
+    let (raw_kind, function, raw_exchange_id, body, headers) = match raw {
+        AnthropicRawCapture::ResponseBody { body } => (
+            "response_body",
+            "AnthropicExecutor::execute_once_with_raw",
+            Some("response-body".to_owned()),
+            body.clone(),
+            BTreeMap::new(),
+        ),
+        AnthropicRawCapture::HttpErrorBody { status, body } => (
+            "http_error_body",
+            "AnthropicExecutor::send_rendered_request",
+            Some(format!("http-status:{status}")),
+            body.clone(),
+            BTreeMap::from([("http-status".to_owned(), status.to_string())]),
+        ),
+        AnthropicRawCapture::StreamEventBody {
+            event_index,
+            event_body,
+        } => (
+            "stream_event_body",
+            "AnthropicExecutor::execute_stream_with_raw",
+            Some(format!("stream-event:{event_index}")),
+            event_body.clone(),
+            BTreeMap::from([("stream-event-index".to_owned(), event_index.to_string())]),
+        ),
+    };
+    persistence
+        .record_provider_raw_event(ProviderRawLedgerWrite {
+            provider_family,
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            trace_id: trace_id.clone(),
+            raw_kind: raw_kind.to_owned(),
+            scene: ProviderRawScenePosition {
+                crate_name: "freehand-provider-anthropic".to_owned(),
+                file: "src/lib.rs".to_owned(),
+                function: function.to_owned(),
+                line: None,
+                raw_exchange_id,
+            },
+            body,
+            headers,
+        })
+        .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))
+}
+
+fn terminal_debug_details(
+    round: usize,
+    schema_rejections: usize,
+    tool_executions: usize,
+    status: freehand_contracts::TerminalStatus,
+) -> Vec<String> {
+    vec![
+        format!("rounds={round}"),
+        format!("schema_rejections={schema_rejections}"),
+        format!("tool_executions={tool_executions}"),
+        format!("terminal_status={status:?}"),
+    ]
 }
 
 fn map_anthropic_executor_error(err: AnthropicExecutorError) -> RuntimeLiveBridgeError {
@@ -2441,6 +2728,7 @@ mod tests {
     use super::*;
     use freehand_contracts::{SemanticEventKind, TerminalStatus};
     use freehand_metadata::MetadataEnvelope;
+    use freehand_reason::ProviderRawLedgerRow;
     use freehand_ui_protocol::{UiQueryResult, build_command_dispatch_envelope};
     use serde_json::json;
     use std::fs;
@@ -2637,6 +2925,43 @@ mod tests {
         let raw = fs::read_to_string(path).expect("read metadata ledger");
         raw.lines()
             .map(|line| serde_json::from_str(line).expect("decode metadata ledger row"))
+            .collect()
+    }
+
+    fn provider_raw_ledger_rows(
+        runtime_home: &Path,
+        provider_family: &str,
+        agent_id: &str,
+        session_id: &SessionId,
+        turn_id: &str,
+    ) -> Vec<ProviderRawLedgerRow> {
+        let path = runtime_home
+            .join("ledgers")
+            .join("providers")
+            .join(provider_family)
+            .join(agent_id)
+            .join(session_id.as_str())
+            .join(format!("{turn_id}.jsonl"));
+        let raw = fs::read_to_string(path).expect("read provider raw ledger");
+        raw.lines()
+            .map(|line| serde_json::from_str(line).expect("decode provider raw ledger row"))
+            .collect()
+    }
+
+    fn runtime_debug_events<'a>(
+        events: &'a [DebugEvent],
+        pipeline_node: &str,
+    ) -> Vec<&'a DebugEvent> {
+        events
+            .iter()
+            .filter(|event| {
+                event
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.scene.crate_name == "freehand-runtime")
+                    && event.envelope.semantic.feature_id.as_str() == "provider.reason-live-bridge"
+                    && event.envelope.semantic.pipeline_node.as_deref() == Some(pipeline_node)
+            })
             .collect()
     }
 
@@ -2913,10 +3238,13 @@ mod tests {
         let request = live_request(false);
         let runtime_home = request.runtime_home.clone();
         let session_id = request.session_id.clone();
+        let mut debug_events = Vec::<DebugEvent>::new();
 
-        let outcome = run_live_reason_turn(
+        let outcome = run_live_reason_turn_with_hooks(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
             request,
+            |_| {},
+            |event| debug_events.push(event.clone()),
         )
         .expect("live bridge");
         let raw_request = rx.recv().expect("request");
@@ -2972,6 +3300,52 @@ mod tests {
             let encoded = serde_json::to_string(record).expect("encode metadata");
             !encoded.contains("reply exactly pong")
         }));
+        let provider_raw = provider_raw_ledger_rows(
+            &runtime_home,
+            "anthropic",
+            "agent-live",
+            &session_id,
+            "turn-live",
+        );
+        assert_eq!(provider_raw.len(), 1);
+        assert_eq!(provider_raw[0].raw_kind, "response_body");
+        assert!(
+            provider_raw[0]
+                .body
+                .contains("\"stop_reason\":\"end_turn\"")
+        );
+        assert_eq!(
+            runtime_debug_events(&debug_events, "RuntimeLive01RestoreResolved").len(),
+            1
+        );
+        assert_eq!(
+            runtime_debug_events(&debug_events, "RuntimeLive02ProviderRequestBuilt").len(),
+            1
+        );
+        assert_eq!(
+            runtime_debug_events(&debug_events, "RuntimeLive04TurnClosed").len(),
+            1
+        );
+        let expected_tool_count = BuiltinToolRegistry::reasonix_aligned()
+            .implemented_definitions()
+            .len();
+        assert!(
+            runtime_debug_events(&debug_events, "RuntimeLive02ProviderRequestBuilt")
+                .into_iter()
+                .flat_map(|event| {
+                    event
+                        .snapshot
+                        .as_ref()
+                        .expect("runtime snapshot")
+                        .detail_lines
+                        .iter()
+                })
+                .any(|line| line == &format!("tool_definition_count={expected_tool_count}"))
+        );
+        assert!(debug_events.iter().all(|event| {
+            let encoded = serde_json::to_string(event).expect("encode debug event");
+            !encoded.contains("reply exactly pong")
+        }));
     }
 
     #[test]
@@ -3010,10 +3384,13 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (base_url, rx, handle) =
             spawn_mock_server(200, "text/event-stream", complete_stream_response("pong"));
+        let request = live_request(true);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
 
         let outcome = run_live_reason_turn(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            live_request(true),
+            request,
         )
         .expect("live bridge");
         let raw_request = rx.recv().expect("request");
@@ -3030,6 +3407,24 @@ mod tests {
                 .as_ref()
                 .map(|e| e.status.clone()),
             Some(TerminalStatus::Success)
+        );
+        let provider_raw = provider_raw_ledger_rows(
+            &runtime_home,
+            "anthropic",
+            "agent-live",
+            &session_id,
+            "turn-live",
+        );
+        assert!(!provider_raw.is_empty());
+        assert!(
+            provider_raw
+                .iter()
+                .all(|row| row.raw_kind == "stream_event_body")
+        );
+        assert!(
+            provider_raw
+                .iter()
+                .any(|row| row.body.contains("\"type\":\"message_stop\""))
         );
         assert!(outcome.broadcasts.iter().any(
             |event| matches!(event, ReasonBroadcastEvent::Semantic(event) if event.kind == SemanticEventKind::Reasoning)
@@ -3212,10 +3607,13 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         let request = live_request(false);
         let runtime_home = request.runtime_home.clone();
         let session_id = request.session_id.clone();
+        let mut debug_events = Vec::<DebugEvent>::new();
 
-        let outcome = run_live_reason_turn(
+        let outcome = run_live_reason_turn_with_hooks(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
             request,
+            |_| {},
+            |event| debug_events.push(event.clone()),
         )
         .expect("live bridge");
         let first_request = rx.recv().expect("first request");
@@ -3268,6 +3666,21 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     .iter()
                     .any(|entry| entry.key == "tool.name" && entry.value == json!("read_file"))
         }));
+        let tool_debug = runtime_debug_events(&debug_events, "RuntimeLive03ToolExecuted");
+        assert_eq!(tool_debug.len(), 1);
+        let tool_snapshot = tool_debug[0].snapshot.as_ref().expect("tool snapshot");
+        assert!(
+            tool_snapshot
+                .detail_lines
+                .iter()
+                .any(|line| line == "tool_name=read_file")
+        );
+        assert!(
+            tool_snapshot
+                .detail_lines
+                .iter()
+                .any(|line| line == "tool_call_id=toolu_read_1")
+        );
     }
 
     #[test]
@@ -3293,6 +3706,37 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         .expect_err("must fail when metadata ledger is unwritable");
 
         assert!(matches!(err, RuntimeLiveBridgeError::MetadataFailed(_)));
+    }
+
+    #[test]
+    fn live_bridge_fails_explicitly_when_provider_raw_ledger_is_not_writable() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, _rx, handle) =
+            spawn_mock_server(200, "application/json", complete_single_response("pong"));
+        let request = live_request(false);
+        let raw_path = request
+            .runtime_home
+            .join("ledgers")
+            .join("providers")
+            .join("anthropic")
+            .join("agent-live")
+            .join(request.session_id.as_str())
+            .join("turn-live.jsonl");
+        fs::create_dir_all(&raw_path).expect("poison provider raw ledger path as directory");
+
+        let err = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect_err("must fail when provider raw ledger is unwritable");
+        handle.join().expect("join");
+
+        assert!(matches!(
+            err,
+            RuntimeLiveBridgeError::ReasonPersistenceFailed(_)
+        ));
     }
 
     #[test]

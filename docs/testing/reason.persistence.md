@@ -17,12 +17,14 @@
   - snapshot-plus-tail replay tests
   - ledger-only rebuild tests
   - atomic snapshot replace tests
+  - provider-raw debug-ledger write tests
   - provider-raw-ledger exclusion tests
 - module black-box plan:
   - persistence save/reload smoke at the `freehand-reason` boundary
   - active-turn update then terminal materialization smoke
   - snapshot-missing recovery smoke
   - derived-sidecar rebuild smoke
+  - provider-raw debug-ledger append smoke
 - project black-box impact:
   - CLI persistence restore smoke
   - shared runtime harness persistence smoke
@@ -36,11 +38,9 @@
   - `~/.freehand/ledgers/reason`
   - `~/.freehand/ledgers/providers`
   - `~/.freehand/cache/session-index`
-- known gaps:
-  - provider raw debug-ledger writer is not yet wired in the adapter runtime loop
 - sync status between design and implementation:
   - design is locked
-  - session snapshot, active-turn snapshot, reason-ledger append, terminal turn materialization, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
+  - session snapshot, active-turn snapshot, reason-ledger append, provider-raw debug-ledger append, terminal turn materialization, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
   - shared harness and CLI smoke are implemented
-  - live Anthropic `reason-live` path now persists start/output/rejection/terminal events through `ReasonPersistence`
+  - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

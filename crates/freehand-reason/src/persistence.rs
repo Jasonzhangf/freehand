@@ -1,16 +1,18 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::CompletionSchemaRejection;
-use freehand_contracts::{AgentId, SessionId, TurnId};
-use freehand_provider_core::ProviderSemanticOutput;
+use freehand_contracts::{AgentId, SessionId, TraceId, TurnId};
+use freehand_provider_core::{ProviderFamily, ProviderSemanticOutput};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{ReasonTurnEngine, SessionHistory, TurnProjection, TurnRecord};
 
 const PERSISTENCE_SCHEMA_VERSION: u32 = 1;
+const PROVIDER_RAW_LEDGER_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReasonPersistenceCursor {
@@ -84,6 +86,41 @@ pub struct PersistedSessionIndexEntry {
     pub latest_turn_id: Option<TurnId>,
     pub active_turn_id: Option<TurnId>,
     pub latest_terminal_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderRawLedgerWrite {
+    pub provider_family: ProviderFamily,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub trace_id: TraceId,
+    pub raw_kind: String,
+    pub scene: ProviderRawScenePosition,
+    pub body: String,
+    pub headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderRawScenePosition {
+    pub crate_name: String,
+    pub file: String,
+    pub function: String,
+    pub line: Option<u32>,
+    pub raw_exchange_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderRawLedgerRow {
+    pub schema_version: u32,
+    pub provider_family: ProviderFamily,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub trace_id: TraceId,
+    pub raw_kind: String,
+    pub scene: ProviderRawScenePosition,
+    pub body: String,
+    pub headers: BTreeMap<String, String>,
+    pub captured_unix_seconds: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +268,28 @@ impl ReasonPersistence {
             active_turn,
             None,
         )
+    }
+
+    pub fn record_provider_raw_event(
+        &self,
+        write: ProviderRawLedgerWrite,
+    ) -> Result<(), ReasonPersistenceError> {
+        let row = ProviderRawLedgerRow {
+            schema_version: PROVIDER_RAW_LEDGER_SCHEMA_VERSION,
+            provider_family: write.provider_family,
+            session_id: write.session_id,
+            turn_id: write.turn_id,
+            trace_id: write.trace_id,
+            raw_kind: write.raw_kind,
+            scene: write.scene,
+            body: write.body,
+            headers: write.headers,
+            captured_unix_seconds: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?
+                .as_secs(),
+        };
+        self.append_provider_raw_row(&row)
     }
 
     pub fn restore(
@@ -499,6 +558,25 @@ impl ReasonPersistence {
         read_json_file(&self.session_index_path())
     }
 
+    fn append_provider_raw_row(
+        &self,
+        row: &ProviderRawLedgerRow,
+    ) -> Result<(), ReasonPersistenceError> {
+        let path =
+            self.provider_raw_ledger_path(row.provider_family, &row.session_id, &row.turn_id);
+        ensure_parent_dir(&path)?;
+        let payload = serde_json::to_string(row)
+            .map_err(|err| ReasonPersistenceError::JsonRenderFailed(err.to_string()))?;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
+        use std::io::Write;
+        writeln!(file, "{payload}")
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))
+    }
+
     fn session_dir(&self, session_id: &SessionId) -> PathBuf {
         self.runtime_home
             .join("state")
@@ -534,6 +612,25 @@ impl ReasonPersistence {
             .join("reason")
             .join(self.agent_id.as_str())
             .join(format!("{}.jsonl", session_id.as_str()))
+    }
+
+    fn provider_raw_ledger_path(
+        &self,
+        provider_family: ProviderFamily,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> PathBuf {
+        let family = match provider_family {
+            ProviderFamily::OpenAiCompatible => "openai-compatible",
+            ProviderFamily::Anthropic => "anthropic",
+        };
+        self.runtime_home
+            .join("ledgers")
+            .join("providers")
+            .join(family)
+            .join(self.agent_id.as_str())
+            .join(session_id.as_str())
+            .join(format!("{}.jsonl", turn_id.as_str()))
     }
 
     fn ui_sidecar_path(&self, session_id: &SessionId) -> PathBuf {
@@ -970,6 +1067,60 @@ mod tests {
         let restored = coordinator.restore(history.session_id()).expect("restore");
         assert_eq!(restored.closed_turns.len(), 0);
         assert!(restored.active_turn.is_some());
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn record_provider_raw_event_writes_separate_debug_ledger() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+
+        coordinator
+            .record_provider_raw_event(ProviderRawLedgerWrite {
+                provider_family: ProviderFamily::Anthropic,
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                raw_kind: "response_body".to_owned(),
+                scene: ProviderRawScenePosition {
+                    crate_name: "freehand-provider-anthropic".to_owned(),
+                    file: "src/lib.rs".to_owned(),
+                    function: "AnthropicExecutor::execute_once_with_raw".to_owned(),
+                    line: None,
+                    raw_exchange_id: Some("response-body".to_owned()),
+                },
+                body: "{\"type\":\"message\"}".to_owned(),
+                headers: BTreeMap::from([(
+                    "content-type".to_owned(),
+                    "application/json".to_owned(),
+                )]),
+            })
+            .expect("write provider raw");
+
+        let path = runtime_home
+            .join("ledgers")
+            .join("providers")
+            .join("anthropic")
+            .join("agent-1")
+            .join("session-1")
+            .join("turn-1.jsonl");
+        let raw = fs::read_to_string(path).expect("read provider raw ledger");
+        let rows = raw
+            .lines()
+            .map(|line| serde_json::from_str::<ProviderRawLedgerRow>(line).expect("decode row"))
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].raw_kind, "response_body");
+        assert_eq!(
+            rows[0].scene.function,
+            "AnthropicExecutor::execute_once_with_raw"
+        );
+        assert_eq!(rows[0].body, "{\"type\":\"message\"}");
+        assert_eq!(
+            rows[0].headers.get("content-type").map(String::as_str),
+            Some("application/json")
+        );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");
     }

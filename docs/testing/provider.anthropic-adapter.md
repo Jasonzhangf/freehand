@@ -12,12 +12,14 @@
   - request renderer, response parser, SSE parser, partial tool accumulator
   - Anthropic `tools` / `tool_choice` / `tool_result` request rendering
   - executor URL joining, header emission, non-success status handling, SSE event-boundary parsing, and incremental callback delivery
+  - raw-capable executor callback coverage for response bodies, HTTP error bodies, and SSE event bodies before semantic parse
 - module black-box plan:
   - adapter emits provider-neutral text/tool/usage/terminal/error outputs for Anthropic messages
   - adapter replays live `minimonth` Anthropic-compatible single-shot response fixture
   - adapter replays live `minimonth` Anthropic-compatible SSE stream fixture
   - executor emits provider-neutral outputs from local single-shot and SSE mock servers
   - executor proves first semantic batch can be observed before the stream is released to completion
+  - executor raw callbacks surface parse-failing bodies and HTTP error bodies for runtime debug-ledger retention
 - project black-box impact:
   - reason layer can consume Anthropic semantic outputs without protocol leakage
 - fixtures / replay inputs / runtime evidence paths:
@@ -32,6 +34,7 @@
   - single-shot and stream parsing cover text, tool use, usage, terminal, and error paths
   - live `minimonth` fixtures now cover thinking/text/usage/cache/terminal replay for single-shot and SSE
   - HTTP executor now supports incremental SSE callback delivery via `AnthropicExecutor::execute_stream_with`
+  - raw-capable executor variants now support debug retention of single-shot response bodies, HTTP error bodies, and SSE event bodies before semantic parse
   - HTTP executor tests use local mock servers and do not require live provider credentials
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with Anthropic adapter owner code and function map updates

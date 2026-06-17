@@ -603,3 +603,34 @@
   - landed narrow source-level rule only: `verify_metadata_request_boundaries` checks `ReasonReq*` structs for metadata/debug owner types and obvious metadata/debug field names, rejects stray `pub struct/enum Metadata*` outside `crates/freehand-metadata`, and rejects request-payload field names/types inside metadata owner structs
   - white-box closeout includes positive + negative tests for request metadata type leaks, request debug field leaks, stray metadata owner types, metadata prompt fields, and metadata request-payload types
   - doc follow-up: removed the stale `reason.turn` note that said the repo-wide metadata leak gate was still pending
+- 2026-06-18: debug.core producer expansion slice
+  - owner route: `debug.core` + `provider.reason-live-bridge`
+  - gap before change: runtime live bridge already owned metadata lifecycle writes, but restore/request/tool/terminal boundaries still had no runtime-owned debug snapshots; only `reason.turn` milestones reached `DebugHub`
+  - landed shape: `freehand-runtime` now owns `emit_live_bridge_debug` and emits observation-only snapshots at `RuntimeLive01RestoreResolved`, `RuntimeLive02ProviderRequestBuilt`, `RuntimeLive03ToolExecuted`, and `RuntimeLive04TurnClosed`
+  - leakage rule locked in tests: runtime debug snapshots must not contain the operator prompt, provider payload text, or tool-result content
+  - bug found during verification: terminal close debug snapshot was emitted but not drained before return, so hook consumers missed it; fixed by draining debug receiver immediately after terminal snapshot emission on both success and failed-terminal paths
+  - targeted verification: `cargo test -p freehand-runtime live_bridge_ -- --nocapture`, `cargo test -p freehand-runtime -p freehand-debug`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `make ci`
+- 2026-06-18: provider raw debug-ledger slice
+  - owner route: `provider.anthropic-adapter` -> `provider.reason-live-bridge` -> `reason.persistence`
+  - requirement closure:
+    - raw provider bodies/events stay debug-only
+    - raw provider bodies/events never enter session truth or restore truth
+    - runtime/request data stay isolated from metadata/debug lanes
+  - landed owner chain:
+    - `freehand-provider-anthropic` exposes raw captures before parse through `AnthropicRawCapture`, `execute_once_with_raw`, and `execute_stream_with_raw`
+    - `freehand-runtime` maps raw captures into scene-provenanced writes through `record_live_provider_raw`
+    - `freehand-reason` persists them under `~/.freehand/ledgers/providers/**` through `ReasonPersistence::record_provider_raw_event`
+  - failure policy locked:
+    - if provider raw retention is enabled and the provider raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
+    - no fallback, no silent skip, no promotion into session truth
+  - docs/test/mainline sync:
+    - updated `provider.anthropic-adapter`, `provider.reason-live-bridge`, and `reason.persistence` function maps
+    - updated matching test designs and mainline JSON manifests
+    - regenerated matching wiki artifacts
+  - verification:
+    - `cargo test -p freehand-provider-anthropic -p freehand-reason -p freehand-runtime`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `cargo fmt --all`
+    - `make ci`

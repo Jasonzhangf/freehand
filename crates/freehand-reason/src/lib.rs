@@ -33,9 +33,9 @@ use serde_json::json;
 use thiserror::Error;
 
 pub use persistence::{
-    ActiveTurnSnapshot, PersistedSessionIndexEntry, PersistedSessionView, ReasonLedgerPayload,
-    ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor, ReasonPersistenceError,
-    RestoredReasonSession,
+    ActiveTurnSnapshot, PersistedSessionIndexEntry, PersistedSessionView, ProviderRawLedgerRow,
+    ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonLedgerPayload, ReasonLedgerRow,
+    ReasonPersistence, ReasonPersistenceCursor, ReasonPersistenceError, RestoredReasonSession,
 };
 pub use rewrite_runtime::{
     CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,

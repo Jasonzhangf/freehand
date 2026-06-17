@@ -10,6 +10,8 @@
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
 - Latest local full gate:
   - `make ci` -> passed after runtime live bridge metadata producer wiring and doc/mainline/wiki sync
+- Current verified head:
+  - `make ci` -> passed after provider raw debug-ledger wiring and doc/mainline/wiki sync
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -58,6 +60,21 @@
   - runtime live bridge now bootstraps a shared metadata ledger under `~/.freehand/ledgers/metadata/<agent>/<session>.jsonl`
   - `provider.reason-live-bridge` writes runtime-owned restore/request/tool/terminal lifecycle metadata into that ledger while `reason.turn` continues writing turn-owned metadata through the same center
   - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors; no fallback or silent continuation path exists
-  - metadata docs/mainlines/wiki/runtime directory docs are synced so broader pending producers are now provider/debug only, not runtime live bridge
+  - runtime live bridge now emits runtime-owned restore/request/tool/terminal debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
+  - runtime debug snapshots reuse the same `DebugHub` path as `reason.turn`, and terminal close snapshots are drained before the live bridge returns
+- Latest landed provider raw slice:
+  - `provider.anthropic-adapter` now exposes raw response bodies, HTTP error bodies, and SSE event bodies before semantic parsing through `AnthropicRawCapture`, `execute_once_with_raw`, and `execute_stream_with_raw`
+  - `reason.persistence` now owns provider raw debug-ledger append at `~/.freehand/ledgers/providers/<family>/<agent>/<session>/<turn>.jsonl`
+  - `provider.reason-live-bridge` now routes Anthropic raw captures into that debug ledger through `record_live_provider_raw`
+  - provider raw ledgers remain debug-only and never participate in restore or session truth
+  - if provider raw retention is enabled and the raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
+- Latest verification:
+  - `cargo test -p freehand-provider-anthropic -p freehand-reason -p freehand-runtime`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `cargo fmt --all`
+  - `make ci`
+- metadata docs/mainlines/wiki/runtime directory docs are synced so broader pending producers are now provider/debug only, not runtime live bridge
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.

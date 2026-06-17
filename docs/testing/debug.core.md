@@ -23,16 +23,18 @@
   - observation-failure subscriber smoke
 - project black-box impact:
   - UI debug-state projection consumes `freehand-debug` snapshot truth instead of duplicating a DTO
+  - runtime-owned `provider.reason-live-bridge` lifecycle boundaries now emit through the same debug snapshot truth as `reason.turn`
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/ledgers`
   - `~/.freehand/replays`
   - `~/.freehand/logs`
 - known gaps:
   - no standardized runtime-owned debug ledger path contract yet
-  - provider/node emitters are still not wired into `debug.core`
+  - node emitters and direct provider-adapter emitters are still not wired into `debug.core`
 - sync status between design and implementation:
   - crate/test baseline is landed
   - runtime hub fanout, subscriber delivery, and sink dispatch are implemented and covered
-  - dedicated observation-failure stream is implemented and covered
-  - `reason.turn` emission smoke now covers one real producer without mutating turn truth, including sink-failure surfacing
-  - migrated mainline-call source and generated wiki are kept in sync with this test design
+- dedicated observation-failure stream is implemented and covered
+- `reason.turn` emission smoke now covers one real producer without mutating turn truth, including sink-failure surfacing
+- `provider.reason-live-bridge` runtime tests now cover a second real producer for restore/request/tool/terminal lifecycle debug snapshots without prompt or tool-result leakage
+- migrated mainline-call source and generated wiki are kept in sync with this test design
