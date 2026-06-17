@@ -13,10 +13,14 @@
 - white-box plan:
   - metadata envelope records writer owner and write node
   - missing metadata id is rejected
-  - missing writer owner is rejected
+  - missing owner feature id is rejected
+  - missing owner crate name is rejected
+  - missing owner module path is rejected
+  - missing owner symbol path is rejected
   - missing write node is rejected
   - missing trace id is rejected
   - empty metadata entries are rejected
+  - empty metadata entry key is rejected
   - request-data keys are rejected
   - metadata JSON round-trip preserves provenance fields
   - metadata center durable ledger append/reload coverage
@@ -42,5 +46,5 @@
   - `reason.turn` producer tests prove owner/node provenance, request-text isolation, and durable persistence on start-turn and provider-output metadata
   - runtime live bridge producer tests prove runtime-owned restore/request/terminal lifecycle metadata can share the same durable ledger without request-text leakage
   - repo-wide static metadata/request boundary gate in `xtask` now rejects stray `Metadata*` owner types outside `crates/freehand-metadata` and metadata/request field leakage
-  - runtime white-box coverage now explicitly locks missing metadata id, missing trace id, empty entries, and durable-ledger validation-failure branches
+  - runtime white-box coverage now explicitly locks missing metadata id, owner feature id/crate name/module path/symbol path, missing pipeline node, missing trace id, empty entry key, empty entries, and durable-ledger validation-failure branches
   - migrated mainline-call source and generated wiki are kept in sync with this test design

@@ -892,3 +892,28 @@
     - `cargo test -p freehand-metadata metadata_rejects_empty_entries -- --nocapture`
     - `cargo test -p freehand-metadata`
     - `make ci`
+- 2026-06-18: metadata.core owner-field and entry-key hardening slice
+  - owner route: `metadata.core`
+  - audit target: metadata docs already promised writer-owner required-field tests and entry-key validation, but landed white-box coverage only locked one owner field and omitted empty entry keys
+  - chosen closure:
+    - add direct white-box failures for empty owner `feature_id`
+    - add direct white-box failures for empty owner `crate_name`
+    - add direct white-box failures for empty owner `module_path`
+    - keep existing owner `symbol_path` failure and missing pipeline-node failure as explicit siblings
+    - add direct white-box failure for empty metadata entry key
+    - sync function map / test design / migrated mainline JSON / generated wiki to make the closure queryable
+  - implementation:
+    - added `metadata_rejects_missing_owner_feature_id`
+    - added `metadata_rejects_missing_owner_crate_name`
+    - added `metadata_rejects_missing_owner_module_path`
+    - added `metadata_rejects_empty_entry_key`
+    - synced `docs/function-maps/metadata.core.md`
+    - synced `docs/testing/metadata.core.md`
+    - synced `docs/mainline-calls/metadata.core.json`
+    - regenerated `docs/wiki/metadata.core.md`
+  - verification:
+    - `cargo test -p freehand-metadata`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

@@ -9,11 +9,11 @@
   - `cargo run -p xtask -- gates check`
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
 - Latest local full gate:
-  - `make ci` -> passed after runtime live bridge metadata producer wiring and doc/mainline/wiki sync
+  - `make ci` -> passed after metadata.core owner-field and entry-key validation hardening
 - Current verified head:
-  - `make ci` -> passed after daemon checkpoint failure-transport hardening and doc/mainline/wiki sync
+  - `make ci` -> passed after metadata.core owner-field and entry-key validation hardening
 - Current working slice:
-  - `metadata.core` validation-branch lock
+  - `metadata.core` broader producer wiring audit remains pending
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -41,7 +41,7 @@
   - `provider.reason-live-bridge` now has explicit white-box regression coverage that unknown tool names and registered-but-unimplemented tool names fail as `RuntimeLiveBridgeError::ToolExecutionFailed(...)` and do not materialize tool-result or terminal-success truth
   - `reason.persistence` now has explicit white-box regression coverage that ledger sequence gaps block recovery and that provider-raw-only or UI-sidecar-only artifacts still return `MissingRecoveryTruth`
   - `reason.persistence` now also has explicit white-box regression coverage that invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate ledger sequence numbers fail recovery explicitly
-  - `metadata.core` now has explicit white-box regression coverage that missing `metadata_id`, missing `trace_id`, empty `entries`, and validation-failed durable-ledger lines are rejected explicitly
+  - `metadata.core` now has explicit white-box regression coverage that missing `metadata_id`, owner feature id/crate name/module path/symbol path, missing `trace_id`, empty entry keys, empty `entries`, and validation-failed durable-ledger lines are rejected explicitly
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
@@ -85,35 +85,16 @@
 - Latest verification:
   - `cargo test -p freehand-metadata metadata_center_rejects_validation_failed_durable_ledger_line -- --nocapture`
   - `cargo test -p freehand-metadata metadata_rejects_missing_metadata_id -- --nocapture`
+  - `cargo test -p freehand-metadata metadata_rejects_missing_owner_feature_id -- --nocapture`
+  - `cargo test -p freehand-metadata metadata_rejects_missing_owner_crate_name -- --nocapture`
+  - `cargo test -p freehand-metadata metadata_rejects_missing_owner_module_path -- --nocapture`
   - `cargo test -p freehand-metadata metadata_rejects_missing_trace_id -- --nocapture`
+  - `cargo test -p freehand-metadata metadata_rejects_empty_entry_key -- --nocapture`
   - `cargo test -p freehand-metadata metadata_rejects_empty_entries -- --nocapture`
   - `cargo test -p freehand-metadata`
-  - `cargo test -p freehand-reason restore_rejects_invalid_persisted_snapshot_json_explicitly -- --nocapture`
-  - `cargo test -p freehand-reason restore_rejects_invalid_snapshot_coherence_explicitly -- --nocapture`
-  - `cargo test -p freehand-reason restore_rejects_duplicate_reason_ledger_sequence_explicitly -- --nocapture`
-  - `cargo test -p freehand-reason restore_rejects_reason_ledger_sequence_gap_explicitly -- --nocapture`
-  - `cargo test -p freehand-reason provider_raw_only_debug_files_do_not_mask_missing_recovery_truth -- --nocapture`
-  - `cargo test -p freehand-reason ui_sidecar_only_does_not_mask_missing_recovery_truth -- --nocapture`
-  - `cargo test -p freehand-reason`
-  - `cargo test -p freehand-testkit`
-  - `cargo test -p freehand-cli`
-  - `cargo test -p freehand-runtime live_bridge_fails_explicitly_on_unknown_tool_name -- --nocapture`
-  - `cargo test -p freehand-runtime live_bridge_fails_explicitly_on_registered_unimplemented_tool_name -- --nocapture`
-  - `cargo test -p freehand-daemon daemon_rewind_checkpoint_ -- --nocapture`
-  - `cargo test -p freehand-daemon daemon_bootstrap_rejects_corrupt_checkpoint_projection_truth -- --nocapture`
-  - `cargo test -p freehand-daemon daemon_submit_input_surfaces_provider_failure_from_runtime_owner -- --nocapture`
-  - `cargo test -p freehand-daemon`
-  - `cargo test -p freehand-server transport_command_ingress_ -- --nocapture`
-  - `cargo test -p freehand-server`
-  - `cargo test -p freehand-runtime cancel_turn_missing_target_returns_target_not_found -- --nocapture`
-  - `cargo test -p freehand-runtime cancel_latest_active_turn_without_any_turn_returns_target_not_found -- --nocapture`
-  - `cargo test -p freehand-runtime direct_message_wrong_slave_target_returns_target_not_found -- --nocapture`
-  - `cargo test -p freehand-runtime`
-  - `cargo test -p xtask feature_map_unique_entries_accept_single_seed_entry -- --nocapture`
-  - `cargo test -p xtask feature_map_unique_entries_reject_duplicate_seed_entry -- --nocapture`
-  - `cargo test -p xtask`
   - `cargo run -p xtask -- mainlines generate`
   - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
   - `make ci`
 - Latest landed docs/gate sync:
   - `docs/architecture/feature-map.md` no longer carries duplicate `app.webui-smoke` owner entries

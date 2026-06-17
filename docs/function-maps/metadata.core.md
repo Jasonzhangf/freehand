@@ -37,7 +37,7 @@
 
 ## Error Mainline
 
-- missing metadata id, writer owner, writer node, trace id, or entries is rejected explicitly
+- missing metadata id, any required writer-owner field, writer node, trace id, empty entry key, or entries is rejected explicitly
 - request-data-like keys such as `request.*`, `payload.*`, `prompt.*`, `input.*`, `content`, or `text` are rejected explicitly
 - invalid metadata is not stored and is not rewritten into debug/session/request truth
 - invalid durable-ledger parse, validation, render, or io states are rejected explicitly
@@ -90,6 +90,6 @@
 - first producer integration is wired from `reason.turn` through `ReasonTurnEngine::start_turn` and `ReasonTurnEngine::apply_provider_output`
 - `reason.turn` producer tests now prove durable-ledger persistence without request-text leakage when a ledger-backed center is supplied
 - runtime live bridge producer integration is now wired through `freehand-runtime` and shares the same durable metadata ledger path with `reason.turn`
-- direct white-box locks for missing metadata id, missing trace id, empty entries, and durable-ledger validation-failure paths are now landed in `metadata.core`
+- direct white-box locks for missing metadata id, owner feature id/crate name/module path/symbol path, missing pipeline node, missing trace id, empty entry key, empty entries, and durable-ledger validation-failure paths are now landed in `metadata.core`
 - broader provider/debug producers remain pending
 - generated wiki must be regenerated from `docs/mainline-calls/metadata.core.json` when this function-map truth changes

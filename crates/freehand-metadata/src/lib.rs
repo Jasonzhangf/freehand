@@ -443,6 +443,39 @@ mod tests {
     }
 
     #[test]
+    fn metadata_rejects_missing_owner_feature_id() {
+        let mut envelope = sample_envelope();
+        envelope.owner.feature_id = FeatureId::new(" ");
+
+        let err =
+            validate_metadata_envelope(&envelope).expect_err("missing owner feature id must fail");
+
+        assert_eq!(err, MetadataError::EmptyOwnerFeatureId);
+    }
+
+    #[test]
+    fn metadata_rejects_missing_owner_crate_name() {
+        let mut envelope = sample_envelope();
+        envelope.owner.crate_name = " ".to_owned();
+
+        let err =
+            validate_metadata_envelope(&envelope).expect_err("missing owner crate name must fail");
+
+        assert_eq!(err, MetadataError::EmptyOwnerCrateName);
+    }
+
+    #[test]
+    fn metadata_rejects_missing_owner_module_path() {
+        let mut envelope = sample_envelope();
+        envelope.owner.module_path = " ".to_owned();
+
+        let err =
+            validate_metadata_envelope(&envelope).expect_err("missing owner module path must fail");
+
+        assert_eq!(err, MetadataError::EmptyOwnerModulePath);
+    }
+
+    #[test]
     fn metadata_rejects_missing_trace_id() {
         let mut envelope = sample_envelope();
         envelope.subject.trace_id = TraceId::new(" ");
@@ -486,6 +519,19 @@ mod tests {
             err,
             MetadataError::ReservedRequestDataKey("request.prompt".to_owned())
         );
+    }
+
+    #[test]
+    fn metadata_rejects_empty_entry_key() {
+        let mut envelope = sample_envelope();
+        envelope.entries = vec![MetadataEntry {
+            key: " ".to_owned(),
+            value: json!(true),
+        }];
+
+        let err = validate_metadata_envelope(&envelope).expect_err("empty entry key must fail");
+
+        assert_eq!(err, MetadataError::EmptyEntryKey);
     }
 
     #[test]
