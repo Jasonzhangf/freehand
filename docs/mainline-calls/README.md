@@ -12,6 +12,7 @@ This directory is the machine-readable mainline call source of truth for migrate
 
 Current migrated features:
 
+- `app.cli-runtime-smoke`
 - `contracts.core`
 - `config.core`
 - `foundation.workspace`

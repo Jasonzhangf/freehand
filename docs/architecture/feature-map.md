@@ -159,6 +159,8 @@ If a problem does not fit this table, update this routing index before making co
 - forbidden_paths: `crates/freehand-provider-*/**` except consumed semantic outputs only
 - required_checks:
   - `cargo test -p freehand-cli`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
   - none beyond dispatch helper coverage
 - required_module_black_box_tests:
@@ -169,6 +171,8 @@ If a problem does not fit this table, update this routing index before making co
   - app boundary config -> harness-backed reason E2E smoke
 - test_design_doc: `docs/testing/app.cli-runtime-smoke.md`
 - function_map_doc: `docs/function-maps/app.cli-runtime-smoke.md`
+- mainline_call_doc: `docs/mainline-calls/app.cli-runtime-smoke.json`
+- generated_wiki_doc: `docs/wiki/app.cli-runtime-smoke.md`
 - debug_artifacts:
   - CLI smoke stdout fixtures
 - runtime_paths:
@@ -179,10 +183,12 @@ If a problem does not fit this table, update this routing index before making co
   - CLI command shape changes
   - smoke scenario changes
   - harness boundary changes
+  - generated wiki freshness policy changes
 - lifecycle_checks:
   - CLI remains a true app boundary, not direct crate test glue
   - config selection still has one-process-one-agent truth
   - reason smoke path still routes through shared harness and rewrite policy owner paths
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `app.cli-live-turn`
 

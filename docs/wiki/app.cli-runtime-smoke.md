@@ -1,11 +1,12 @@
-# Function Map: `app.cli-runtime-smoke`
+# Wiki: `app.cli-runtime-smoke`
 
-- feature_id: `app.cli-runtime-smoke`
+Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by hand.
+
 - owner crate: `apps/freehand-cli`
 - owner module: `apps/freehand-cli/src/main.rs`
-- owner entry symbols:
-  - `run`
-  - `run_reason_e2e_smoke`
+- function map: `docs/function-maps/app.cli-runtime-smoke.md`
+- generated wiki: `docs/wiki/app.cli-runtime-smoke.md`
+- test design: `docs/testing/app.cli-runtime-smoke.md`
 
 ## Request Mainline
 
@@ -24,20 +25,20 @@
 
 - invalid command shape returns explicit usage
 - missing config or missing agent selection returns explicit config errors
-- smoke runtime failures return explicit reason/runtime errors
+- smoke runtime failures return explicit reason or runtime errors
 - rewrite recovery block is reported as explicit blocked outcome, not disguised as success
 
 ## Shared Multi-Reference Functions
 
 - `ReasonRuntimeHarness::run_provider_turn`
-  - owner: `crates/freehand-testkit`
-  - purpose: black-box route provider semantic outputs through turn truth into usage-driven rewrite policy
+  - owner: `crates/freehand-testkit/src/lib.rs`
+  - purpose: route provider semantic outputs through turn truth into usage-driven rewrite policy
   - allowed callers: CLI smoke command, project tests
   - related tests: CLI reason E2E smoke tests
   - why shared: app and project tests must reuse one runtime harness path
 - `ReasonRuntimeHarness::apply_resume_rebuild`
-  - owner: `crates/freehand-testkit`
-  - purpose: black-box route restore status into resume-rebuild/block decision
+  - owner: `crates/freehand-testkit/src/lib.rs`
+  - purpose: route restore status into resume-rebuild or block decision
   - allowed callers: CLI smoke command, project tests
   - related tests: CLI recovery-block smoke tests
   - why shared: recovery smoke must reuse one runtime harness path
@@ -48,20 +49,14 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `run` | `apps/freehand-cli/src/main.rs` | parse CLI command and dispatch config startup or reason E2E smoke | CLI args | selected command path | shell/operator | CLI dispatcher | bound |
 | 02 | `load_default_config` | `crates/freehand-config/src/lib.rs` | load runtime config from `~/.freehand/config.toml` | runtime home config path | selected config truth | CLI dispatcher | config owner | bound |
-| 03 | `run_reason_e2e_smoke` | `apps/freehand-cli/src/main.rs` | build scripted E2E runtime harness request from selected agent | selected agent + scenario | terminal-facing smoke summary | CLI dispatcher | app smoke runner | bound |
-| 04 | `ReasonRuntimeHarness::run_provider_turn` | `crates/freehand-testkit/src/lib.rs` | route provider usage into turn truth and rewrite policy | scripted provider outputs + compaction scenario | turn truth + optional compaction outcome | app smoke runner | testkit harness | bound |
-| 05 | `ReasonRuntimeHarness::apply_resume_rebuild` | `crates/freehand-testkit/src/lib.rs` | route restore state into recovery policy | restore status + optional rebuild payload | recovery outcome | app smoke runner | testkit harness | bound |
+| 03 | `run_reason_e2e_smoke` | `apps/freehand-cli/src/main.rs` | build scripted E2E runtime harness request from selected agent | selected agent plus scenario | terminal-facing smoke summary | CLI dispatcher | app smoke runner | bound |
+| 04 | `ReasonRuntimeHarness::run_provider_turn` | `crates/freehand-testkit/src/lib.rs` | route provider usage into turn truth and rewrite policy | scripted provider outputs plus compaction scenario | turn truth plus optional compaction outcome | app smoke runner | testkit harness | bound |
+| 05 | `ReasonRuntimeHarness::apply_resume_rebuild` | `crates/freehand-testkit/src/lib.rs` | route restore state into recovery policy | restore status plus optional rebuild payload | recovery outcome | app smoke runner | testkit harness | bound |
 
-## Metadata / Request Isolation Notes
-
-- CLI scenario selection, config selection, and harness options stay outside request text
-- provider usage, recovery facts, and rewrite decisions remain metadata/runtime-side until they are projected as smoke output
-- CLI smoke output reports terminal summary only; it does not expose hidden prompt mutations
-
-## Sync Status Against Code
+## Sync Status Against Mainline Call
 
 - CLI config startup path is implemented
 - CLI reason E2E smoke path is implemented
-- harness-backed app E2E smoke now exists before production CLI/server runtime loop
+- harness-backed app E2E smoke now exists before production CLI or server runtime loop
 - remaining gap: production non-smoke command loop is still pending
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes

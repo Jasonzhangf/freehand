@@ -18,6 +18,7 @@
 - project black-box impact:
   - one app entrypoint can now drive config + provider selection plus reason runtime E2E smoke
   - provider usage and recovery policy remain wired through the shared harness path
+  - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - temp `HOME` with `~/.freehand/config.toml`
   - scripted provider semantic outputs in CLI tests
@@ -27,3 +28,4 @@
   - production non-smoke CLI/server runtime loop is still pending
 - sync status between design and implementation:
   - CLI smoke baseline is implemented in integration tests
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

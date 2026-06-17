@@ -1,0 +1,118 @@
+{
+  "feature_id": "app.cli-runtime-smoke",
+  "owner_crate": "apps/freehand-cli",
+  "owner_module": "apps/freehand-cli/src/main.rs",
+  "function_map_doc": "docs/function-maps/app.cli-runtime-smoke.md",
+  "test_design_doc": "docs/testing/app.cli-runtime-smoke.md",
+  "mainline_call_doc": "docs/mainline-calls/app.cli-runtime-smoke.json",
+  "generated_wiki_doc": "docs/wiki/app.cli-runtime-smoke.md",
+  "request_mainline": [
+    "operator invokes `freehand-cli`",
+    "CLI parses the command shape and selects one agent plus its bound provider from `~/.freehand/config.toml`",
+    "for reason E2E smoke, CLI builds one scripted runtime harness request",
+    "provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting"
+  ],
+  "response_mainline": [
+    "config startup path prints selected-agent summary plus selected-provider metadata without exposing provider secret values",
+    "reason E2E smoke prints scenario name, selected agent, rewrite outcome, rewrite version, and latest usage summary",
+    "CLI output remains a terminal-facing projection, not debug ledger raw payload"
+  ],
+  "error_mainline": [
+    "invalid command shape returns explicit usage",
+    "missing config or missing agent selection returns explicit config errors",
+    "smoke runtime failures return explicit reason or runtime errors",
+    "rewrite recovery block is reported as explicit blocked outcome, not disguised as success"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "ReasonRuntimeHarness::run_provider_turn",
+      "owner": "crates/freehand-testkit/src/lib.rs",
+      "purpose": "route provider semantic outputs through turn truth into usage-driven rewrite policy",
+      "allowed_callers": [
+        "CLI smoke command",
+        "project tests"
+      ],
+      "related_tests": [
+        "CLI reason E2E smoke tests"
+      ],
+      "why_shared": "app and project tests must reuse one runtime harness path"
+    },
+    {
+      "symbol": "ReasonRuntimeHarness::apply_resume_rebuild",
+      "owner": "crates/freehand-testkit/src/lib.rs",
+      "purpose": "route restore status into resume-rebuild or block decision",
+      "allowed_callers": [
+        "CLI smoke command",
+        "project tests"
+      ],
+      "related_tests": [
+        "CLI recovery-block smoke tests"
+      ],
+      "why_shared": "recovery smoke must reuse one runtime harness path"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "run",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "parse CLI command and dispatch config startup or reason E2E smoke",
+      "input_semantic": "CLI args",
+      "output_semantic": "selected command path",
+      "caller": "shell/operator",
+      "callee": "CLI dispatcher",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "load_default_config",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "load runtime config from `~/.freehand/config.toml`",
+      "input_semantic": "runtime home config path",
+      "output_semantic": "selected config truth",
+      "caller": "CLI dispatcher",
+      "callee": "config owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "run_reason_e2e_smoke",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "build scripted E2E runtime harness request from selected agent",
+      "input_semantic": "selected agent plus scenario",
+      "output_semantic": "terminal-facing smoke summary",
+      "caller": "CLI dispatcher",
+      "callee": "app smoke runner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "ReasonRuntimeHarness::run_provider_turn",
+      "file_path": "crates/freehand-testkit/src/lib.rs",
+      "responsibility": "route provider usage into turn truth and rewrite policy",
+      "input_semantic": "scripted provider outputs plus compaction scenario",
+      "output_semantic": "turn truth plus optional compaction outcome",
+      "caller": "app smoke runner",
+      "callee": "testkit harness",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "ReasonRuntimeHarness::apply_resume_rebuild",
+      "file_path": "crates/freehand-testkit/src/lib.rs",
+      "responsibility": "route restore state into recovery policy",
+      "input_semantic": "restore status plus optional rebuild payload",
+      "output_semantic": "recovery outcome",
+      "caller": "app smoke runner",
+      "callee": "testkit harness",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "CLI config startup path is implemented",
+    "CLI reason E2E smoke path is implemented",
+    "harness-backed app E2E smoke now exists before production CLI or server runtime loop",
+    "remaining gap: production non-smoke command loop is still pending",
+    "generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes"
+  ]
+}

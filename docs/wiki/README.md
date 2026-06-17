@@ -2,6 +2,7 @@
 
 Generated wiki artifacts from machine-readable mainline call source files. Do not edit by hand.
 
+- [app.cli-runtime-smoke](./app.cli-runtime-smoke.md) mainline call source `docs/mainline-calls/app.cli-runtime-smoke.json`
 - [config.core](./config.core.md) mainline call source `docs/mainline-calls/config.core.json`
 - [contracts.core](./contracts.core.md) mainline call source `docs/mainline-calls/contracts.core.json`
 - [debug.core](./debug.core.md) mainline call source `docs/mainline-calls/debug.core.json`

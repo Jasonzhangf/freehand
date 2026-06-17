@@ -285,3 +285,6 @@
 - 2026-06-17: `node.master-slave` migrated into the mainline/wiki chain
   - `docs/mainline-calls/node.master-slave.json` is now the machine-readable node-topology mainline truth
   - `docs/wiki/node.master-slave.md` is generated from it
+- 2026-06-17: `app.cli-runtime-smoke` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/app.cli-runtime-smoke.json` is now the machine-readable CLI smoke mainline truth
+  - `docs/wiki/app.cli-runtime-smoke.md` is generated from it
