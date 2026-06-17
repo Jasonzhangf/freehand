@@ -174,6 +174,7 @@ Use this skill for any non-trivial work in this repo.
 - Metadata/debug/provider/cache fields and request-chain content fields must stay hard-isolated by type and builder ownership.
 - Metadata must not be smuggled into request text, and request content must not be recovered from metadata/debug fields.
 - Debug may observe metadata later, but debug is not the metadata write owner.
+- When wiring a module as a metadata producer, add tests proving writer owner, write-node provenance, request-content absence, and explicit failure behavior before the producer mutates its owned truth.
 - Restart recovery must use authoritative snapshots plus reason-ledger replay; UI sidecars and provider raw ledgers are never recovery truth.
 - In UI protocol work, query and subscribe must stay separate, and source identity fields must remain explicit.
 - Shared contract types should default to serializable, replayable, and persistable unless a higher-priority truth source says otherwise.

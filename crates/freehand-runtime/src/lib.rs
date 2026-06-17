@@ -91,6 +91,8 @@ pub enum RuntimeLiveBridgeError {
     RewriteRuntimeFailed(String),
     #[error("provider semantic request build failed: {0}")]
     ProviderRequestBuildFailed(String),
+    #[error("provider output apply failed: {0}")]
+    ProviderOutputApplyFailed(String),
     #[error("anthropic live executor failed: {0}")]
     AnthropicExecutorFailed(String),
     #[error("reason persistence failed: {0}")]
@@ -833,7 +835,11 @@ where
                 )?;
                 ensure_live_not_cancelled(&request)?;
                 let output = ProviderSemanticOutput::ToolResultReentry(tool_result.clone());
-                engine.apply_provider_output(&mut turn, output.clone());
+                engine
+                    .apply_provider_output(&mut turn, output.clone())
+                    .map_err(|err| {
+                        RuntimeLiveBridgeError::ProviderOutputApplyFailed(err.to_string())
+                    })?;
                 persistence
                     .record_provider_output_applied(
                         &history,
@@ -1948,7 +1954,9 @@ where
     FB: FnMut(&ReasonBroadcastEvent),
 {
     for output in outputs {
-        ctx.engine.apply_provider_output(turn, output.clone());
+        ctx.engine
+            .apply_provider_output(turn, output.clone())
+            .map_err(|err| RuntimeLiveBridgeError::ProviderOutputApplyFailed(err.to_string()))?;
         ctx.persistence
             .record_provider_output_applied(ctx.history, turn, output, schema_rejections)
             .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;

@@ -8,6 +8,8 @@
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
+- Latest local full gate:
+  - `make ci` -> passed after `reason.turn` metadata producer integration
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -38,6 +40,7 @@
   - `metadata.core` now owns internal control/provenance metadata in `crates/freehand-metadata`
   - metadata writes must carry `MetadataWriteOwner` and `MetadataWriteNode`
   - metadata/request separation is enforced by type boundary plus request-like key rejection in `validate_metadata_envelope`
-  - runtime/reason/provider/debug producer wiring and persistent metadata ledger are still pending
+  - `reason.turn` is now the first metadata producer for start-turn and provider-output application
+  - runtime/provider/debug producer wiring and persistent metadata ledger are still pending
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.

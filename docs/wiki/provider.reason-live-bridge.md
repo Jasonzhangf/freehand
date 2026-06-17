@@ -42,6 +42,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names fail explicitly instead of being ignored
 - registered but unimplemented tool names fail explicitly instead of being treated as successful fallback
+- provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`
 - persistence restore/write failures fail the live bridge explicitly
 - provider terminal metadata does not become final completion truth without accepted Freehand completion schema
 
@@ -71,7 +72,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 | 05 | `build_semantic_request` | `crates/freehand-provider-core/src/lib.rs` | build provider-neutral request | provider descriptor plus provider payload | provider semantic request | live bridge | provider semantic owner | bound |
 | 06 | `AnthropicExecutor::execute_once` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one non-stream Anthropic request | provider semantic request plus auth/base URL | provider semantic outputs | live bridge | anthropic executor | bound |
 | 07 | `AnthropicExecutor::execute_stream_with` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one stream Anthropic request and call back per semantic batch before completion | provider semantic request plus auth/base URL plus callback | incremental semantic output batches plus accumulated outputs | live bridge | anthropic executor | bound |
-| 08 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | write provider-neutral outputs into turn truth | provider semantic output | updated turn record plus broadcast | live bridge | reason owner | bound |
+| 08 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | write provider-neutral outputs into turn truth | provider semantic output | updated turn record plus broadcast or explicit provider-output apply error | live bridge | reason owner | bound |
 | 09 | `ReasonPersistence::record_provider_output_applied` | `crates/freehand-reason/src/persistence.rs` | persist live semantic output application | session history plus active turn plus provider-neutral output | reason ledger row plus active-turn snapshot | live bridge | persistence owner | bound |
 | 10 | `BuiltinToolRegistry::reasonix_aligned / execute_registry_tool_call` | `crates/freehand-runtime/src/lib.rs` | export Reasonix-aligned tool schemas and route writable tool calls through runtime checkpoint gating before execute | complete tool call | tool execution output or explicit tool error | live bridge | tool registry owner | bound |
 | 11 | `parse_completion_submission_block` | `crates/freehand-blocks/src/lib.rs` | parse tagged completion schema from model text | model text | typed submission or schema rejection list | live bridge | blocks owner | bound |
@@ -84,5 +85,6 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 
 - current live path supports Anthropic `messages` only
 - runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, and checkpoint gating without duplicating adapter semantics
+- provider-output apply failure classification is code-bound; current failure trigger coverage lives in `reason.turn` metadata-producer tests until runtime metadata-center wiring lands
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`
 - generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes

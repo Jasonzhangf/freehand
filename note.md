@@ -233,6 +233,16 @@
   - full-symbol text check was too strict for Rust `Type::method` rows because source files contain `fn method`; normalized last-segment method matching leaves one real drift
   - real drift: `app.webui-smoke` step 09 used natural-language `submit handler`, and its human function map missed the checkpoint-query step present in mainline JSON
   - chosen fix: normalize the WebUI call map symbol to `submitUserInput`, sync app.webui-smoke function map, and add an xtask gate that bound call-table files exist and symbols resolve to source text
+- 2026-06-17: metadata producer integration slice
+  - rooted from owner map: `metadata.core` owns envelope/center, `reason.turn` owns the first producer write sites
+  - user requirement: internal metadata/control information must stay separated from request data, and every metadata write must identify writer owner and write node
+  - current dirty state already added an optional metadata center to `ReasonTurnEngine`, but compile fails on stale error field names and call sites still ignore the new `Result`
+  - chosen fix: keep metadata admission in `freehand-metadata`, make reason producer write failures explicit, update callers, and add positive/negative producer tests proving provenance and request-text isolation
+  - implementation status: `reason.turn` now writes metadata on start-turn and provider-output application through `MetadataCenter::write`
+  - negative behavior locked: poisoned metadata center returns `ReasonTurnError::MetadataWriteFailed`; start-turn does not commit session-history, provider-output does not mutate turn truth
+  - doc sync: updated feature map, reason/metadata function maps, test designs, mainline JSON, generated wiki, local skill, CACHE, MEMORY
+  - targeted verification: `cargo fmt --all --check`; `cargo test -p freehand-reason`; `cargo test -p freehand-metadata -p freehand-runtime -p freehand-testkit`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`
+  - final verification: `make ci` passed after all docs/wiki/memory updates
 - 2026-06-15: completion schema loop requirement confirmed
   - must guide schema in prompt/context
   - must validate schema structurally and semantically
@@ -558,5 +568,5 @@
   - owner route created: `metadata.core` in `crates/freehand-metadata`
   - landed minimal center: `MetadataEnvelope`, `MetadataWriteOwner`, `MetadataWriteNode`, `MetadataSubject`, `MetadataCenter`, and `validate_metadata_envelope`
   - first guard rejects missing owner/node/trace/entries and request-data-like metadata keys such as `request.*`, `payload.*`, `prompt.*`, `input.*`, `content`, and `text`
-  - known gap: runtime/reason/provider/debug producers are not yet wired, and persistent metadata ledger is not implemented yet
+  - known gap after follow-up: runtime/provider/debug producers are not yet wired, and persistent metadata ledger is not implemented yet
   - targeted verification so far: `cargo fmt --all --check`, `cargo test -p freehand-metadata` -> 6 passed, `cargo test -p xtask` -> 8 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`

@@ -75,5 +75,6 @@
 ## Sync Status Against Code
 
 - metadata envelope, writer owner, write node, subject, validation, and in-memory center are bound in code
-- first integration slice does not yet wire runtime/reason/provider producers into the metadata center
+- first producer integration is wired from `reason.turn` through `ReasonTurnEngine::start_turn` and `ReasonTurnEngine::apply_provider_output`
+- runtime/provider/debug producers and persistent metadata ledger remain pending
 - generated wiki must be regenerated from `docs/mainline-calls/metadata.core.json` when this function-map truth changes

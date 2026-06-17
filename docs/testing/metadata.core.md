@@ -21,15 +21,16 @@
   - metadata/request isolation smoke
 - project black-box impact:
   - workspace gate validates metadata owner docs, mainline source, generated wiki, and workspace membership
-  - no runtime producer integration is claimed in this slice
+  - first producer integration is covered by `reason.turn` tests; broader runtime/provider/debug producers are not claimed in this slice
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/ledgers/metadata`
   - `~/.freehand/replays/metadata`
 - known gaps:
-  - runtime/reason/provider/debug producers are not yet wired to the metadata center
+  - runtime/provider/debug producers are not yet wired to the metadata center
   - no persistent metadata ledger writer is implemented yet
   - no architecture scan yet detects metadata-like ad hoc structs outside the owner crate
 - sync status between design and implementation:
   - crate/test baseline is landed
   - metadata center validation and in-memory write/query behavior are implemented and covered
+  - `reason.turn` producer tests prove owner/node provenance and request-text isolation on start-turn and provider-output metadata
   - migrated mainline-call source and generated wiki are kept in sync with this test design

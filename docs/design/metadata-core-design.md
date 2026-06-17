@@ -2,7 +2,7 @@
 
 ## Status
 
-Baseline owner and contract are implemented.
+Baseline owner and contract are implemented. `reason.turn` is the first producer wired into the in-memory metadata center.
 
 ## Purpose
 
@@ -101,7 +101,7 @@ Future durable metadata ledgers should live under:
 - `~/.freehand/ledgers/metadata`
 - `~/.freehand/replays/metadata`
 
-This baseline implements only validated in-memory admission. Persistent ledger ownership is intentionally not claimed yet.
+This baseline implements validated in-memory admission and first producer writes from `reason.turn`. Persistent ledger ownership is intentionally not claimed yet.
 
 ## Update Trigger
 

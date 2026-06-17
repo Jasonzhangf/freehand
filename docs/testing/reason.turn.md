@@ -4,6 +4,8 @@
 - owner: `crates/freehand-reason`
 - lifecycle path under test:
   - per-turn truth is written
+  - start-turn metadata is written with explicit owner and write-node provenance
+  - provider-output metadata is written before turn mutation and is request-text isolated
   - semantic events broadcast
   - debug events emit to `debug.core` without mutating turn truth
   - tool result re-entry returns to the owning turn
@@ -15,13 +17,15 @@
   - start-turn request payload preserves typed context segments through provider payload contract
   - start-turn rewrite mode/version are sourced from session history truth
 - white-box plan:
-  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, cancelled terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability, debug emission
+  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, cancelled terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability, debug emission, metadata provenance writes, metadata write failure stop path
 - module black-box plan:
   - reason turn boundary emits semantic stream and handles rejection/retry behavior
   - reason turn boundary emits debug observations through `debug.core`
+  - reason turn boundary writes metadata only through `metadata.core` with owner/node provenance
   - completion parser rejects missing tag, malformed JSON, invalid claim, missing required field, and empty required field
   - reason turn boundary propagates explicit rewrite gate diagnostics
   - reason turn boundary broadcasts cancelled terminal status for runtime/user cancellation
+  - reason turn boundary rejects metadata write failures explicitly before turn mutation
 - project black-box impact:
   - terminal projection reaches UI boundary correctly
 - fixtures / replay inputs / runtime evidence paths:
@@ -30,6 +34,7 @@
   - `~/.freehand/replays/reason`
 - known gaps:
   - production CLI/server persistence of schema retry ledger remains outside this module baseline
+  - metadata producer coverage currently starts with `reason.turn`; broader runtime/provider/debug producers remain out of scope
 - sync status between design and implementation:
   - turn truth, typed request payload baseline, completion parsing/validation, tool-result re-entry, non-blocking broadcast baseline, and session-history rewrite-state sourcing landed
   - rewrite trigger policy exists in `freehand-blocks`, and `ReasonRewriteRuntime` now wires policy-approved rewrite gates into session history
@@ -37,5 +42,6 @@
   - debug emission to `debug.core` is landed for start-turn, provider-output, completion, and fail-turn milestones
   - explicit cancelled terminal write and broadcast are landed through `ReasonTurnEngine::cancel_turn`
   - current known gap is observation error surfacing when `DebugHub::emit` returns a sink-dispatch failure
+  - `reason.turn` is the first metadata producer and has positive/negative metadata write coverage
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with reason turn owner code and function map updates

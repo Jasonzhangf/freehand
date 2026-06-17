@@ -494,6 +494,7 @@ If a problem does not fit this table, update this routing index before making co
   - config-to-provider bridge rules change
   - anthropic executor boundary changes
   - reason turn live ingestion path changes
+  - provider-output apply error mapping changes
   - CLI live-turn command shape changes
 - lifecycle_checks:
   - reason remains provider-implementation independent
@@ -685,9 +686,12 @@ If a problem does not fit this table, update this routing index before making co
   - invalid completion schema rejection tests
   - failed terminal write tests
   - slow subscriber non-blocking tests
+  - metadata producer provenance tests
+  - metadata write failure stop-path tests
 - required_module_black_box_tests:
   - turn semantic stream smoke
   - completion rejection/retry smoke
+  - reason metadata/request isolation smoke
 - required_project_black_box_tests:
   - reason-to-ui terminal projection smoke
 - test_design_doc: `docs/testing/reason.turn.md`
@@ -707,6 +711,7 @@ If a problem does not fit this table, update this routing index before making co
   - subscriber delivery policy changes
   - raw-event retention policy changes
   - session-history ownership changes
+  - metadata producer write path changes
 - lifecycle_checks:
   - turn truth write path remains single-owner
   - terminal decision path is closed-loop
@@ -716,6 +721,7 @@ If a problem does not fit this table, update this routing index before making co
   - turn startup rewrite state remains sourced from `reason.session-history`
   - provider adapter crates remain independent from `freehand-reason`
   - metadata and request-chain data remain type-isolated
+  - metadata write failures remain explicit and stop affected turn mutation
   - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `reason.session-history`
@@ -962,6 +968,7 @@ If a problem does not fit this table, update this routing index before making co
   - metadata/request isolation smoke
 - required_project_black_box_tests:
   - workspace gate validates metadata owner docs, mainline source, and generated wiki
+  - reason-turn producer tests validate first metadata writer integration
 - test_design_doc: `docs/testing/metadata.core.md`
 - function_map_doc: `docs/function-maps/metadata.core.md`
 - mainline_call_doc: `docs/mainline-calls/metadata.core.json`
@@ -977,6 +984,7 @@ If a problem does not fit this table, update this routing index before making co
   - write-node provenance contract changes
   - metadata/request isolation policy changes
   - metadata center storage/query behavior changes
+  - metadata producer integration changes
   - generated wiki freshness policy changes
 - lifecycle_checks:
   - every metadata write remains attributable to one owner feature and owner symbol

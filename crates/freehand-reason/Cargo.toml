@@ -8,6 +8,7 @@ license.workspace = true
 freehand-contracts = { path = "../freehand-contracts" }
 freehand-blocks = { path = "../freehand-blocks" }
 freehand-debug = { path = "../freehand-debug" }
+freehand-metadata = { path = "../freehand-metadata" }
 freehand-provider-core = { path = "../freehand-provider-core" }
 freehand-ui-protocol = { path = "../freehand-ui-protocol" }
 serde = { version = "1", features = ["derive"] }

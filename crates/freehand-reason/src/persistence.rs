@@ -887,7 +887,9 @@ mod tests {
             kind: SemanticEventKind::Text,
             content: "hello".to_owned(),
         });
-        ReasonTurnEngine::new().apply_provider_output(&mut turn, output.clone());
+        ReasonTurnEngine::new()
+            .apply_provider_output(&mut turn, output.clone())
+            .expect("apply provider output");
 
         let stale_cursor: ReasonPersistenceCursor =
             read_json_file(&coordinator.cursor_path(history.session_id())).expect("cursor");

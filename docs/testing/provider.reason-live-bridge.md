@@ -39,6 +39,7 @@
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
   - invalid completion schema retries exactly 3 times and closes failed terminal without early success
   - provider HTTP failure returns explicit dispatch failure and does not project a successful terminal
+  - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation
 - project black-box impact:
   - CLI can reuse the runtime-owned bridge for a live-turn smoke path without importing provider DTOs into app code
   - CLI can prove real provider -> reason -> tool -> reason -> persistence from the app boundary
@@ -53,5 +54,6 @@
   - anthropic-only live bridge owner is now `freehand-runtime`
   - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, and persistence restore
   - runtime dispatch and daemon black-box coverage are landed against local mock providers
+  - provider-output apply failure classification is code-bound as `ProviderOutputApplyFailed`; current failure trigger coverage lives in `reason.turn` metadata-producer tests until runtime metadata-center wiring lands
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates

@@ -23,8 +23,13 @@ use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
     DebugTraceEnvelope,
 };
+use freehand_metadata::{
+    MetadataCenter, MetadataEntry, MetadataEnvelope, MetadataId, MetadataKind, MetadataSubject,
+    MetadataWriteNode, MetadataWriteOwner,
+};
 use freehand_provider_core::ProviderSemanticOutput;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use thiserror::Error;
 
 pub use persistence::{
@@ -85,6 +90,7 @@ pub struct TurnRecord {
 pub struct ReasonTurnEngine {
     subscribers: Mutex<Vec<SyncSender<ReasonBroadcastEvent>>>,
     debug_hub: Option<Arc<DebugHub>>,
+    metadata_center: Option<Arc<Mutex<MetadataCenter>>>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -99,6 +105,8 @@ pub enum ReasonTurnError {
     CompletionRejected(String),
     #[error("completion requires next step: {0}")]
     CompletionRequiresNextStep(String),
+    #[error("metadata write failed: {0}")]
+    MetadataWriteFailed(String),
 }
 
 impl Default for ReasonTurnEngine {
@@ -112,6 +120,7 @@ impl ReasonTurnEngine {
         Self {
             subscribers: Mutex::new(Vec::new()),
             debug_hub: None,
+            metadata_center: None,
         }
     }
 
@@ -119,6 +128,26 @@ impl ReasonTurnEngine {
         Self {
             subscribers: Mutex::new(Vec::new()),
             debug_hub: Some(debug_hub),
+            metadata_center: None,
+        }
+    }
+
+    pub fn with_metadata_center(metadata_center: Arc<Mutex<MetadataCenter>>) -> Self {
+        Self {
+            subscribers: Mutex::new(Vec::new()),
+            debug_hub: None,
+            metadata_center: Some(metadata_center),
+        }
+    }
+
+    pub fn with_debug_hub_and_metadata_center(
+        debug_hub: Arc<DebugHub>,
+        metadata_center: Arc<Mutex<MetadataCenter>>,
+    ) -> Self {
+        Self {
+            subscribers: Mutex::new(Vec::new()),
+            debug_hub: Some(debug_hub),
+            metadata_center: Some(metadata_center),
         }
     }
 
@@ -159,7 +188,6 @@ impl ReasonTurnEngine {
             tool_schema_fingerprint: None,
         })
         .map_err(|err| ReasonTurnError::ContextPlanningFailed(err.to_string()))?;
-        history.commit_turn_start(&input.turn_id);
         let request = ReasonReq02ContextComposedInput {
             session_id: input.session_id.clone(),
             turn_id: input.turn_id.clone(),
@@ -190,6 +218,35 @@ impl ReasonTurnEngine {
             terminal_event: None,
             error_events: Vec::new(),
         };
+        self.write_metadata(
+            &turn,
+            MetadataKind::RuntimeState,
+            "ReasonReq02ContextComposedInput",
+            "start_turn",
+            "ReasonTurnEngine::start_turn",
+            vec![
+                MetadataEntry {
+                    key: "reason.model".to_owned(),
+                    value: json!(turn.provider_payload.model),
+                },
+                MetadataEntry {
+                    key: "context.rewrite_mode".to_owned(),
+                    value: json!(format!(
+                        "{:?}",
+                        turn.planned_context.diagnostics.rewrite_mode
+                    )),
+                },
+                MetadataEntry {
+                    key: "context.rewrite_version".to_owned(),
+                    value: json!(turn.planned_context.diagnostics.rewrite_version),
+                },
+                MetadataEntry {
+                    key: "context.segment_count".to_owned(),
+                    value: json!(turn.planned_context.ordered_segments.len()),
+                },
+            ],
+        )?;
+        history.commit_turn_start(&turn.request.turn_id);
         self.emit_debug(
             &turn,
             "ReasonTurnEngine::start_turn",
@@ -209,7 +266,12 @@ impl ReasonTurnEngine {
         Ok(turn)
     }
 
-    pub fn apply_provider_output(&self, turn: &mut TurnRecord, output: ProviderSemanticOutput) {
+    pub fn apply_provider_output(
+        &self,
+        turn: &mut TurnRecord,
+        output: ProviderSemanticOutput,
+    ) -> Result<(), ReasonTurnError> {
+        self.write_provider_output_metadata(turn, &output)?;
         match output {
             ProviderSemanticOutput::SemanticEvent(event) => {
                 turn.semantic_events.push(event.clone());
@@ -279,6 +341,7 @@ impl ReasonTurnEngine {
                 );
             }
         }
+        Ok(())
     }
 
     pub fn submit_completion(
@@ -452,6 +515,150 @@ impl ReasonTurnEngine {
         };
         let _ = hub.emit(event);
     }
+
+    fn write_provider_output_metadata(
+        &self,
+        turn: &TurnRecord,
+        output: &ProviderSemanticOutput,
+    ) -> Result<(), ReasonTurnError> {
+        let (kind, pipeline_node, output_kind, extra_entries) = match output {
+            ProviderSemanticOutput::SemanticEvent(event) => (
+                MetadataKind::RuntimeState,
+                "ReasonResp01SemanticEvent",
+                "semantic_event",
+                vec![MetadataEntry {
+                    key: "provider_output.semantic_kind".to_owned(),
+                    value: json!(format!("{:?}", event.kind)),
+                }],
+            ),
+            ProviderSemanticOutput::ToolCall(event) => (
+                MetadataKind::Routing,
+                "ReasonReq04ToolCall",
+                "tool_call",
+                vec![MetadataEntry {
+                    key: "tool.name".to_owned(),
+                    value: json!(event.tool_call.tool_name),
+                }],
+            ),
+            ProviderSemanticOutput::ToolResultReentry(event) => (
+                MetadataKind::Routing,
+                "ReasonReq05ToolResultReentry",
+                "tool_result_reentry",
+                vec![MetadataEntry {
+                    key: "tool.call_id".to_owned(),
+                    value: json!(event.tool_result.tool_call_id.as_str()),
+                }],
+            ),
+            ProviderSemanticOutput::Usage(event) => (
+                MetadataKind::Cache,
+                "ReasonResp02UsageEvent",
+                "usage",
+                vec![
+                    MetadataEntry {
+                        key: "usage.input_tokens".to_owned(),
+                        value: json!(event.usage.input_tokens),
+                    },
+                    MetadataEntry {
+                        key: "usage.output_tokens".to_owned(),
+                        value: json!(event.usage.output_tokens),
+                    },
+                    MetadataEntry {
+                        key: "usage.cache_hit_rate".to_owned(),
+                        value: json!(event.usage.cache_hit_rate()),
+                    },
+                ],
+            ),
+            ProviderSemanticOutput::Terminal(event) => (
+                MetadataKind::Provider,
+                "ReasonProviderTerminalObserved",
+                "provider_terminal_observed",
+                vec![
+                    MetadataEntry {
+                        key: "provider_terminal.status".to_owned(),
+                        value: json!(format!("{:?}", event.status)),
+                    },
+                    MetadataEntry {
+                        key: "provider_terminal.final_truth".to_owned(),
+                        value: json!(false),
+                    },
+                ],
+            ),
+            ProviderSemanticOutput::Error(event) => (
+                MetadataKind::RuntimeState,
+                "ErrorErr01RuntimeClassified",
+                "provider_error",
+                vec![
+                    MetadataEntry {
+                        key: "error.class".to_owned(),
+                        value: json!(format!("{:?}", event.error.class)),
+                    },
+                    MetadataEntry {
+                        key: "error.recovery".to_owned(),
+                        value: json!(format!("{:?}", event.error.recovery)),
+                    },
+                ],
+            ),
+        };
+        let mut entries = vec![MetadataEntry {
+            key: "provider_output.kind".to_owned(),
+            value: json!(output_kind),
+        }];
+        entries.extend(extra_entries);
+        self.write_metadata(
+            turn,
+            kind,
+            pipeline_node,
+            output_kind,
+            "ReasonTurnEngine::apply_provider_output",
+            entries,
+        )
+    }
+
+    fn write_metadata(
+        &self,
+        turn: &TurnRecord,
+        kind: MetadataKind,
+        pipeline_node: &str,
+        metadata_suffix: &str,
+        symbol_path: &str,
+        entries: Vec<MetadataEntry>,
+    ) -> Result<(), ReasonTurnError> {
+        let Some(center) = &self.metadata_center else {
+            return Ok(());
+        };
+        let envelope = MetadataEnvelope::new(
+            MetadataId::new(format!(
+                "{}:{}:{}",
+                turn.request.trace_id.as_str(),
+                pipeline_node,
+                metadata_suffix
+            )),
+            kind,
+            MetadataWriteOwner {
+                feature_id: FeatureId::new("reason.turn"),
+                crate_name: "freehand-reason".to_owned(),
+                module_path: "freehand_reason".to_owned(),
+                symbol_path: symbol_path.to_owned(),
+            },
+            MetadataWriteNode {
+                pipeline_node: pipeline_node.to_owned(),
+                runtime_node_id: None,
+            },
+            MetadataSubject {
+                agent_id: Some(turn.request.agent_id.clone()),
+                session_id: Some(turn.request.session_id.clone()),
+                turn_id: Some(turn.request.turn_id.clone()),
+                trace_id: turn.request.trace_id.clone(),
+            },
+            entries,
+        )
+        .map_err(|err| ReasonTurnError::MetadataWriteFailed(err.to_string()))?;
+        center
+            .lock()
+            .map_err(|err| ReasonTurnError::MetadataWriteFailed(err.to_string()))?
+            .write(envelope)
+            .map_err(|err| ReasonTurnError::MetadataWriteFailed(err.to_string()))
+    }
 }
 
 fn unix_timestamp_string() -> String {
@@ -555,10 +762,12 @@ mod tests {
                 output: "done".to_owned(),
             },
         };
-        engine.apply_provider_output(
-            &mut turn,
-            ProviderSemanticOutput::ToolResultReentry(result.clone()),
-        );
+        engine
+            .apply_provider_output(
+                &mut turn,
+                ProviderSemanticOutput::ToolResultReentry(result.clone()),
+            )
+            .expect("apply provider output");
         assert_eq!(turn.tool_results, vec![result]);
     }
 
@@ -673,20 +882,24 @@ mod tests {
             trace_id: turn.request.trace_id.clone(),
             feature_id: turn.request.feature_id.clone(),
         };
-        engine.apply_provider_output(
-            &mut turn,
-            freehand_provider_core::map_adapter_event(
-                &ctx,
-                ProviderAdapterEvent::ReasoningDelta("step-1".to_owned()),
-            ),
-        );
-        engine.apply_provider_output(
-            &mut turn,
-            freehand_provider_core::map_adapter_event(
-                &ctx,
-                ProviderAdapterEvent::TextDelta("step-2".to_owned()),
-            ),
-        );
+        engine
+            .apply_provider_output(
+                &mut turn,
+                freehand_provider_core::map_adapter_event(
+                    &ctx,
+                    ProviderAdapterEvent::ReasoningDelta("step-1".to_owned()),
+                ),
+            )
+            .expect("apply first provider output");
+        engine
+            .apply_provider_output(
+                &mut turn,
+                freehand_provider_core::map_adapter_event(
+                    &ctx,
+                    ProviderAdapterEvent::TextDelta("step-2".to_owned()),
+                ),
+            )
+            .expect("apply second provider output");
         assert_eq!(turn.semantic_events.len(), 2);
     }
 
@@ -705,36 +918,40 @@ mod tests {
             trace_id: turn.request.trace_id.clone(),
             feature_id: turn.request.feature_id.clone(),
         };
-        engine.apply_provider_output(
-            &mut turn,
-            freehand_provider_core::map_adapter_event(
-                &ctx,
-                ProviderAdapterEvent::ToolCall(ToolCallContract {
-                    tool_call_id: ToolCallId::new("tool-1"),
-                    tool_name: "search".to_owned(),
-                    arguments: vec![ToolArgument {
-                        name: "query".to_owned(),
-                        value: json!("rust"),
-                    }],
-                    arguments_complete: true,
-                }),
-            ),
-        );
-        engine.apply_provider_output(
-            &mut turn,
-            freehand_provider_core::map_adapter_event(
-                &ctx,
-                ProviderAdapterEvent::Usage(TokenUsage {
-                    input_tokens: 10,
-                    output_tokens: 5,
-                    total_tokens: Some(15),
-                    reasoning_tokens: Some(4),
-                    cache_creation_tokens: 0,
-                    cache_read_tokens: 0,
-                    finish_reason: Some("stop".to_owned()),
-                }),
-            ),
-        );
+        engine
+            .apply_provider_output(
+                &mut turn,
+                freehand_provider_core::map_adapter_event(
+                    &ctx,
+                    ProviderAdapterEvent::ToolCall(ToolCallContract {
+                        tool_call_id: ToolCallId::new("tool-1"),
+                        tool_name: "search".to_owned(),
+                        arguments: vec![ToolArgument {
+                            name: "query".to_owned(),
+                            value: json!("rust"),
+                        }],
+                        arguments_complete: true,
+                    }),
+                ),
+            )
+            .expect("apply tool call output");
+        engine
+            .apply_provider_output(
+                &mut turn,
+                freehand_provider_core::map_adapter_event(
+                    &ctx,
+                    ProviderAdapterEvent::Usage(TokenUsage {
+                        input_tokens: 10,
+                        output_tokens: 5,
+                        total_tokens: Some(15),
+                        reasoning_tokens: Some(4),
+                        cache_creation_tokens: 0,
+                        cache_read_tokens: 0,
+                        finish_reason: Some("stop".to_owned()),
+                    }),
+                ),
+            )
+            .expect("apply usage output");
 
         let first = receiver.recv().expect("first");
         let second = receiver.recv().expect("second");
@@ -864,5 +1081,172 @@ mod tests {
         );
         assert!(turn.semantic_events.is_empty());
         assert!(turn.terminal_event.is_none());
+    }
+
+    #[test]
+    fn writes_start_turn_metadata_with_owner_node_and_without_request_text() {
+        let center = Arc::new(Mutex::new(MetadataCenter::new()));
+        let engine = ReasonTurnEngine::with_metadata_center(Arc::clone(&center));
+        let mut history = session_history();
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    user_text: "secret operator prompt".to_owned(),
+                    ..start_input()
+                },
+            )
+            .expect("turn");
+
+        let center = center.lock().expect("metadata center");
+        assert_eq!(center.records().len(), 1);
+        let record = &center.records()[0];
+        assert_eq!(record.owner.feature_id, FeatureId::new("reason.turn"));
+        assert_eq!(
+            record.owner.symbol_path,
+            "ReasonTurnEngine::start_turn".to_owned()
+        );
+        assert_eq!(
+            record.write_node.pipeline_node,
+            "ReasonReq02ContextComposedInput".to_owned()
+        );
+        assert_eq!(record.subject.turn_id, Some(TurnId::new("turn-1")));
+        let encoded = serde_json::to_string(record).expect("metadata json");
+        assert!(!encoded.contains("secret operator prompt"));
+        assert_eq!(turn.request.user_text, "secret operator prompt");
+    }
+
+    #[test]
+    fn writes_provider_output_metadata_for_usage_without_request_payload() {
+        let center = Arc::new(Mutex::new(MetadataCenter::new()));
+        let engine = ReasonTurnEngine::with_metadata_center(Arc::clone(&center));
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let usage = ProviderSemanticOutput::Usage(freehand_contracts::ReasonResp02UsageEvent {
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+            agent_id: turn.request.agent_id.clone(),
+            usage: TokenUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+                total_tokens: Some(15),
+                reasoning_tokens: Some(3),
+                cache_creation_tokens: 2,
+                cache_read_tokens: 8,
+                finish_reason: Some("stop".to_owned()),
+            },
+        });
+
+        engine
+            .apply_provider_output(&mut turn, usage)
+            .expect("apply usage");
+
+        let center = center.lock().expect("metadata center");
+        let usage_record = center
+            .records()
+            .iter()
+            .find(|record| record.write_node.pipeline_node == "ReasonResp02UsageEvent")
+            .expect("usage metadata");
+        assert_eq!(usage_record.kind, MetadataKind::Cache);
+        assert_eq!(
+            usage_record.owner.symbol_path,
+            "ReasonTurnEngine::apply_provider_output".to_owned()
+        );
+        assert!(
+            usage_record
+                .entries
+                .iter()
+                .any(|entry| entry.key == "usage.cache_hit_rate")
+        );
+        let encoded = serde_json::to_string(usage_record).expect("metadata json");
+        assert!(!encoded.contains("hello"));
+    }
+
+    #[test]
+    fn metadata_write_failure_does_not_commit_start_turn_history() {
+        let center = Arc::new(Mutex::new(MetadataCenter::new()));
+        let poison_center = Arc::clone(&center);
+        let _ = std::thread::spawn(move || {
+            let _guard = poison_center.lock().expect("metadata center");
+            panic!("poison metadata center");
+        })
+        .join();
+        let engine = ReasonTurnEngine::with_metadata_center(center);
+        let mut history = session_history();
+        history
+            .stage_compaction(
+                vec![ContextSegment {
+                    segment_id: ContextSegmentId::new("segment-summary"),
+                    kind: ContextSegmentKind::SessionSummary,
+                    stability: ContextStability::SessionStable,
+                    cache_policy: ContextCachePolicy::Cacheable,
+                    role: ContextRole::Developer,
+                    content: "compacted".to_owned(),
+                    token_budget: 64,
+                    provenance: ContextProvenance {
+                        source: "compaction".to_owned(),
+                        reference: None,
+                    },
+                }],
+                "compact stale context",
+            )
+            .expect("rewrite");
+
+        let err = engine
+            .start_turn(&mut history, start_input())
+            .expect_err("metadata write failure must fail start_turn");
+
+        assert!(matches!(err, ReasonTurnError::MetadataWriteFailed(_)));
+        assert_eq!(
+            history.current_rewrite_mode(),
+            ContextRewriteMode::Compaction
+        );
+        assert_eq!(
+            history
+                .rewrite_ledger()
+                .last()
+                .and_then(|record| record.applied_turn_id.clone()),
+            None
+        );
+    }
+
+    #[test]
+    fn metadata_write_failure_does_not_mutate_provider_output_turn_truth() {
+        let center = Arc::new(Mutex::new(MetadataCenter::new()));
+        let engine = ReasonTurnEngine::with_metadata_center(Arc::clone(&center));
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let poison_center = Arc::clone(&center);
+        let _ = std::thread::spawn(move || {
+            let _guard = poison_center.lock().expect("metadata center");
+            panic!("poison metadata center");
+        })
+        .join();
+
+        let err = engine
+            .apply_provider_output(
+                &mut turn,
+                ProviderSemanticOutput::SemanticEvent(
+                    freehand_contracts::ReasonResp01SemanticEvent {
+                        session_id: SessionId::new("session-1"),
+                        turn_id: TurnId::new("turn-1"),
+                        trace_id: TraceId::new("trace-1"),
+                        feature_id: FeatureId::new("reason.turn"),
+                        agent_id: AgentId::new("agent-1"),
+                        kind: freehand_contracts::SemanticEventKind::Text,
+                        content: "provider text".to_owned(),
+                    },
+                ),
+            )
+            .expect_err("metadata write failure must stop provider mutation");
+
+        assert!(matches!(err, ReasonTurnError::MetadataWriteFailed(_)));
+        assert!(turn.semantic_events.is_empty());
     }
 }

@@ -18,10 +18,12 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 - current code baseline now calls `plan_context`, carries typed `context_segments`, stores planner diagnostics separately, and derives provider payload from `input_segments`
 - stable-prefix and volatile-tail separation now exists at planner baseline level, and rewrite sourcing now comes from `SessionHistory`
 - metadata and request-chain content must stay separate types; `freehand-reason` owns request-content composition truth
+- turn startup writes internal control metadata through `metadata.core` after request/provider payload construction and before session-history commit
 
 ## Response Mainline
 
 - provider semantic events become turn truth updates
+- provider semantic outputs write owner/node-provenance metadata before mutating turn truth
 - turn truth broadcasts semantic events for reasoning, text, tool, usage, terminal, and error
 - turn lifecycle and provider-output milestones may emit debug events into `debug.core`
 - terminal result is projected from validated completion schema, not raw provider finish reason
@@ -38,6 +40,7 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 - raw provider events go to debug ledger, not session truth
 - debug emission is observation-only and must not mutate turn/session truth
 - metadata/request boundary violations must be treated as architecture errors, not silently tolerated
+- metadata write failures are explicit `ReasonTurnError::MetadataWriteFailed` errors and must stop the affected mutation instead of being swallowed
 - UI/runtime cancellation is represented as TerminalStatus::Cancelled, not as a failed or successful terminal outcome
 
 ## Shared Multi-Reference Functions
@@ -60,6 +63,12 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
   - allowed callers: reason orchestrator, future runtime bridges
   - related tests: reason debug emission smoke
   - why shared: keeps debug distribution separate from turn truth ownership
+- `MetadataCenter::write`
+  - owner: `crates/freehand-metadata/src/lib.rs`
+  - purpose: receive reason-turn internal control/provenance metadata with writer owner and write-node provenance
+  - allowed callers: reason producer integration, future runtime/provider/node/debug producers
+  - related tests: reason producer metadata provenance, request-text isolation, metadata-write failure tests
+  - why shared: keeps metadata admission and request-data-key rejection in `metadata.core` instead of local reason maps
 
 ## Function Call Table
 
@@ -67,7 +76,9 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create per-turn truth container and provider payload from session-owned rewrite state | session history plus user input plus turn-scoped additions | initialized turn record | CLI/server/node | reason orchestrator | bound |
 | 01 note | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | current startup path reads rewrite mode/version and base context from SessionHistory, invokes planner-owned segment admission, and stores planner diagnostics while keeping them off request content | request-chain content plus session metadata inputs | provider-ready typed request content plus metadata-side cache diagnostics | reason orchestrator | plan_context | bound |
+| 01 metadata | `ReasonTurnEngine::write_metadata` | `crates/freehand-reason/src/lib.rs` | write start-turn control metadata with owner/node provenance after payload construction and before history commit | turn record plus rewrite/model diagnostics | validated metadata envelope in metadata center or explicit metadata error | ReasonTurnEngine::start_turn | MetadataCenter::write | bound |
 | 02 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | materialize provider semantic output into turn truth | provider semantic output | updated turn state | provider boundary | turn state writer | bound |
+| 02 metadata | `ReasonTurnEngine::write_provider_output_metadata` | `crates/freehand-reason/src/lib.rs` | classify provider output control metadata before turn mutation | provider semantic output plus turn identity | metadata entries for output kind, tool/usage/error/provider terminal control facts | ReasonTurnEngine::apply_provider_output | ReasonTurnEngine::write_metadata | bound |
 | 03 | `parse_completion_submission_block` | `crates/freehand-blocks/src/lib.rs` | parse tagged completion schema from model text | model text with tagged JSON | typed completion submission or itemized parse errors | turn/live runtime | completion parser | bound |
 | 04 | `validate_completion_submission` | `crates/freehand-blocks/src/lib.rs` | validate completion schema | completion submission | completion decision or rejection | turn state writer | terminal validator | bound |
 | 05 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | accept or reject terminal outcome | candidate completion payload | terminal event or rejection | turn state writer | terminal validator | bound |
@@ -85,7 +96,9 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 - provider usage conversion into rewrite policy is bound
 - debug emission into `debug.core` is bound for start-turn, provider-output application, completion acceptance/rejection, and explicit failed terminal write
 - current debug emission remains observation-only; `DebugHub::emit` failures are not promoted into turn truth or reason error events
+- metadata emission into `metadata.core` is bound for start-turn and provider-output application
+- metadata write failures are explicit and are tested to prevent start-turn history commit or provider-output turn mutation
 - remaining gap is final CLI/server runtime loop integration with real provider usage events and persisted recovery payloads
-- metadata/request hard isolation is now reflected in request content vs planner diagnostics split, but not yet enforced by a dedicated static gate or separate envelope types
+- metadata/request hard isolation is reflected in request content vs planner diagnostics split and now enforced for reason-turn producer metadata through `metadata.core` key validation and producer tests; static repo-wide metadata leak gate remains pending
 - generated wiki must be regenerated from `docs/mainline-calls/reason.turn.json` when this function-map truth changes
 - reason owner now has explicit cancelled terminal writing via ReasonTurnEngine::cancel_turn

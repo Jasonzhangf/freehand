@@ -37,6 +37,7 @@
     "writable tools without preview/checkpoint support are rejected explicitly",
     "unknown tool names fail explicitly instead of being ignored",
     "registered but unimplemented tool names fail explicitly instead of being treated as successful fallback",
+    "provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`",
     "persistence restore/write failures fail the live bridge explicitly",
     "provider terminal metadata does not become final completion truth without accepted Freehand completion schema"
   ],
@@ -153,7 +154,7 @@
       "file_path": "crates/freehand-reason/src/lib.rs",
       "responsibility": "write provider-neutral outputs into turn truth",
       "input_semantic": "provider semantic output",
-      "output_semantic": "updated turn record plus broadcast",
+      "output_semantic": "updated turn record plus broadcast or explicit provider-output apply error",
       "caller": "live bridge",
       "callee": "reason owner",
       "binding_status": "bound"
@@ -239,6 +240,7 @@
   "sync_status": [
     "current live path supports Anthropic `messages` only",
     "runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, and checkpoint gating without duplicating adapter semantics",
+    "provider-output apply failure classification is code-bound; current failure trigger coverage lives in `reason.turn` metadata-producer tests until runtime metadata-center wiring lands",
     "CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`",
     "generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes"
   ]

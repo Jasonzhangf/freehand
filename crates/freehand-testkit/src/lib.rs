@@ -99,6 +99,8 @@ pub struct ReasonPersistenceSmokeReport {
 pub enum ReasonRuntimeHarnessError {
     #[error("turn start failed: {0}")]
     TurnStartFailed(String),
+    #[error("provider output apply failed: {0}")]
+    ProviderOutputApplyFailed(String),
     #[error("rewrite runtime failed: {0}")]
     RewriteRuntimeFailed(String),
     #[error("reason persistence failed: {0}")]
@@ -147,7 +149,11 @@ impl ReasonRuntimeHarness {
             .map_err(|err| ReasonRuntimeHarnessError::TurnStartFailed(err.to_string()))?;
 
         for output in provider_outputs {
-            self.engine.apply_provider_output(&mut turn, output);
+            self.engine
+                .apply_provider_output(&mut turn, output)
+                .map_err(|err| {
+                    ReasonRuntimeHarnessError::ProviderOutputApplyFailed(err.to_string())
+                })?;
         }
 
         let latest_usage = turn.usage_events.last().map(|event| event.usage.clone());
@@ -340,7 +346,9 @@ pub fn run_reason_persistence_smoke(
             kind: freehand_contracts::SemanticEventKind::Text,
             content: "persisted smoke output".to_owned(),
         });
-    engine.apply_provider_output(&mut turn, output.clone());
+    engine
+        .apply_provider_output(&mut turn, output.clone())
+        .map_err(|err| ReasonRuntimeHarnessError::ProviderOutputApplyFailed(err.to_string()))?;
     persistence
         .record_provider_output_applied(&history, &turn, &output, 0)
         .map_err(|err| ReasonRuntimeHarnessError::ReasonPersistenceFailed(err.to_string()))?;
