@@ -279,6 +279,8 @@ If a problem does not fit this table, update this routing index before making co
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except through `crates/freehand-runtime`
 - required_checks:
   - `cargo test -p freehand-daemon`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
   - daemon bootstrap config coverage
   - config-selected bootstrap coverage
@@ -296,6 +298,8 @@ If a problem does not fit this table, update this routing index before making co
   - real runtime owner injection over shared HTTP/SSE/command transport without app-owned business logic
 - test_design_doc: `docs/testing/app.runtime-daemon.md`
 - function_map_doc: `docs/function-maps/app.runtime-daemon.md`
+- mainline_call_doc: `docs/mainline-calls/app.runtime-daemon.json`
+- generated_wiki_doc: `docs/wiki/app.runtime-daemon.md`
 - debug_artifacts:
   - daemon stdout fixture
 - runtime_paths:
@@ -306,11 +310,13 @@ If a problem does not fit this table, update this routing index before making co
   - runtime transport injection changes
   - daemon bootstrap contract changes
   - shared app transport injection shape changes
+  - generated wiki freshness policy changes
 - lifecycle_checks:
   - daemon depends on `freehand-runtime`, not directly on reason/node/provider/config owners
   - app transport remains shared and protocol-only
   - runtime dispatch and UI projection stay closed-loop through one shared state handle
   - config-selected bootstrap remains one-process-one-agent and rejects slave-mode UI host startup explicitly
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `provider.semantic`
 

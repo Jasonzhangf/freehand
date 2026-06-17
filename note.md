@@ -481,3 +481,7 @@
   - `docs/mainline-calls/app.webui-smoke.json` is the machine-readable source
   - `docs/wiki/app.webui-smoke.md` must be generated, not hand-edited
   - `xtask gates check` must require function map, test design, JSON source, and generated wiki
+- 2026-06-17: app.runtime-daemon migrated mainline/wiki source in progress
+  - `docs/mainline-calls/app.runtime-daemon.json` is the machine-readable source
+  - `docs/wiki/app.runtime-daemon.md` must be generated, not hand-edited
+  - `xtask gates check` must require function map, test design, JSON source, and generated wiki

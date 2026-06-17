@@ -28,6 +28,7 @@
   - daemon slave-mode startup rejection smoke
 - project black-box impact:
   - closes the first real runtime host gap without polluting the protocol-only app boundary
+  - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/state/ui`
   - `~/.freehand/state/turns`
@@ -38,3 +39,4 @@
   - daemon bootstrap helper is landed
   - runtime-backed submit/query/restart-restore/continuous-SSE/provider-failure/direct-message HTTP smoke is landed
   - config-selected bootstrap smoke is landed and uses configured peer topology
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

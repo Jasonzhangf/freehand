@@ -294,3 +294,6 @@
 - 2026-06-17: `app.webui-smoke` migrated into the mainline/wiki chain
   - `docs/mainline-calls/app.webui-smoke.json` is now the machine-readable WebUI transport mainline truth
   - `docs/wiki/app.webui-smoke.md` is generated from it
+- 2026-06-17: `app.runtime-daemon` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/app.runtime-daemon.json` is now the machine-readable daemon host mainline truth
+  - `docs/wiki/app.runtime-daemon.md` is generated from it
