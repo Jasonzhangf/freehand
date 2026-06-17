@@ -870,3 +870,25 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: metadata.core validation-branch slice
+  - owner route: `metadata.core`
+  - audit target: function map error mainline already required explicit rejection for missing `metadata_id`, missing `trace_id`, empty `entries`, and durable-ledger validation-failure lines, but metadata-core white-box coverage only locked adjacent branches
+  - chosen closure:
+    - add one white-box test for empty `metadata_id`
+    - add one white-box test for empty `trace_id`
+    - add one white-box test for empty `entries`
+    - add one white-box test for durable ledger line that parses but fails validation
+  - implementation:
+    - added `metadata_center_rejects_validation_failed_durable_ledger_line`
+    - added `metadata_rejects_missing_metadata_id`
+    - added `metadata_rejects_missing_trace_id`
+    - added `metadata_rejects_empty_entries`
+    - synced `docs/testing/metadata.core.md`
+    - synced `docs/function-maps/metadata.core.md`
+  - verification:
+    - `cargo test -p freehand-metadata metadata_center_rejects_validation_failed_durable_ledger_line -- --nocapture`
+    - `cargo test -p freehand-metadata metadata_rejects_missing_metadata_id -- --nocapture`
+    - `cargo test -p freehand-metadata metadata_rejects_missing_trace_id -- --nocapture`
+    - `cargo test -p freehand-metadata metadata_rejects_empty_entries -- --nocapture`
+    - `cargo test -p freehand-metadata`
+    - `make ci`

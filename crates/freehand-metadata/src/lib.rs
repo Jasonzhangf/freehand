@@ -364,6 +364,49 @@ mod tests {
     }
 
     #[test]
+    fn metadata_center_rejects_validation_failed_durable_ledger_line() {
+        let path = temp_ledger_path("metadata-invalid-ledger");
+        let envelope = MetadataEnvelope {
+            metadata_id: MetadataId::new("meta-1"),
+            kind: MetadataKind::Cache,
+            owner: MetadataWriteOwner {
+                feature_id: FeatureId::new("reason.turn"),
+                crate_name: "freehand-reason".to_owned(),
+                module_path: "freehand_reason".to_owned(),
+                symbol_path: "ReasonTurnEngine::apply_provider_output".to_owned(),
+            },
+            write_node: MetadataWriteNode {
+                pipeline_node: "ReasonResp02Usage".to_owned(),
+                runtime_node_id: Some("master-node".to_owned()),
+            },
+            subject: MetadataSubject {
+                agent_id: Some(AgentId::new("master")),
+                session_id: Some(SessionId::new("session-1")),
+                turn_id: Some(TurnId::new("turn-1")),
+                trace_id: TraceId::new("trace-1"),
+            },
+            entries: vec![MetadataEntry {
+                key: "request.prompt".to_owned(),
+                value: json!("bad"),
+            }],
+        };
+        fs::write(
+            &path,
+            serde_json::to_string(&envelope).expect("encode invalid envelope"),
+        )
+        .expect("write invalid ledger line");
+
+        let err = MetadataCenter::with_ledger_path(&path)
+            .expect_err("validation-failed ledger line must fail");
+
+        assert!(matches!(
+            err,
+            MetadataError::LedgerValidationFailed { line: 1, .. }
+        ));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
     fn metadata_ledger_write_failure_does_not_mutate_in_memory_records() {
         let parent = temp_ledger_path("metadata-ledger-parent-file");
         fs::write(&parent, "not-a-directory").expect("write parent file");
@@ -380,6 +423,16 @@ mod tests {
     }
 
     #[test]
+    fn metadata_rejects_missing_metadata_id() {
+        let mut envelope = sample_envelope();
+        envelope.metadata_id = MetadataId::new(" ");
+
+        let err = validate_metadata_envelope(&envelope).expect_err("missing metadata id must fail");
+
+        assert_eq!(err, MetadataError::EmptyMetadataId);
+    }
+
+    #[test]
     fn metadata_rejects_missing_owner() {
         let mut envelope = sample_envelope();
         envelope.owner.symbol_path = " ".to_owned();
@@ -390,6 +443,16 @@ mod tests {
     }
 
     #[test]
+    fn metadata_rejects_missing_trace_id() {
+        let mut envelope = sample_envelope();
+        envelope.subject.trace_id = TraceId::new(" ");
+
+        let err = validate_metadata_envelope(&envelope).expect_err("missing trace id must fail");
+
+        assert_eq!(err, MetadataError::EmptyTraceId);
+    }
+
+    #[test]
     fn metadata_rejects_missing_write_node() {
         let mut envelope = sample_envelope();
         envelope.write_node.pipeline_node.clear();
@@ -397,6 +460,16 @@ mod tests {
         let err = validate_metadata_envelope(&envelope).expect_err("missing node must fail");
 
         assert_eq!(err, MetadataError::EmptyPipelineNode);
+    }
+
+    #[test]
+    fn metadata_rejects_empty_entries() {
+        let mut envelope = sample_envelope();
+        envelope.entries.clear();
+
+        let err = validate_metadata_envelope(&envelope).expect_err("empty entries must fail");
+
+        assert_eq!(err, MetadataError::EmptyEntries);
     }
 
     #[test]

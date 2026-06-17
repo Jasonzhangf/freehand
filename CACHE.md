@@ -13,7 +13,7 @@
 - Current verified head:
   - `make ci` -> passed after daemon checkpoint failure-transport hardening and doc/mainline/wiki sync
 - Current working slice:
-  - `reason.persistence` snapshot-integrity and recovery-failure lock
+  - `metadata.core` validation-branch lock
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -41,6 +41,7 @@
   - `provider.reason-live-bridge` now has explicit white-box regression coverage that unknown tool names and registered-but-unimplemented tool names fail as `RuntimeLiveBridgeError::ToolExecutionFailed(...)` and do not materialize tool-result or terminal-success truth
   - `reason.persistence` now has explicit white-box regression coverage that ledger sequence gaps block recovery and that provider-raw-only or UI-sidecar-only artifacts still return `MissingRecoveryTruth`
   - `reason.persistence` now also has explicit white-box regression coverage that invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate ledger sequence numbers fail recovery explicitly
+  - `metadata.core` now has explicit white-box regression coverage that missing `metadata_id`, missing `trace_id`, empty `entries`, and validation-failed durable-ledger lines are rejected explicitly
   - checkpoint preview is limited to file-mutation tools: `write_file`, `edit_file`, `multi_edit`; `bash` executes without checkpoint ledger
   - `debug.core` now exposes a dedicated observation-failure stream for sink-dispatch failures
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
@@ -82,6 +83,11 @@
   - provider raw ledgers remain debug-only and never participate in restore or session truth
   - if provider raw retention is enabled and the raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - Latest verification:
+  - `cargo test -p freehand-metadata metadata_center_rejects_validation_failed_durable_ledger_line -- --nocapture`
+  - `cargo test -p freehand-metadata metadata_rejects_missing_metadata_id -- --nocapture`
+  - `cargo test -p freehand-metadata metadata_rejects_missing_trace_id -- --nocapture`
+  - `cargo test -p freehand-metadata metadata_rejects_empty_entries -- --nocapture`
+  - `cargo test -p freehand-metadata`
   - `cargo test -p freehand-reason restore_rejects_invalid_persisted_snapshot_json_explicitly -- --nocapture`
   - `cargo test -p freehand-reason restore_rejects_invalid_snapshot_coherence_explicitly -- --nocapture`
   - `cargo test -p freehand-reason restore_rejects_duplicate_reason_ledger_sequence_explicitly -- --nocapture`

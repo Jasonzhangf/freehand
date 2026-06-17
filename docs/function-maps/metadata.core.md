@@ -90,5 +90,6 @@
 - first producer integration is wired from `reason.turn` through `ReasonTurnEngine::start_turn` and `ReasonTurnEngine::apply_provider_output`
 - `reason.turn` producer tests now prove durable-ledger persistence without request-text leakage when a ledger-backed center is supplied
 - runtime live bridge producer integration is now wired through `freehand-runtime` and shares the same durable metadata ledger path with `reason.turn`
+- direct white-box locks for missing metadata id, missing trace id, empty entries, and durable-ledger validation-failure paths are now landed in `metadata.core`
 - broader provider/debug producers remain pending
 - generated wiki must be regenerated from `docs/mainline-calls/metadata.core.json` when this function-map truth changes
