@@ -1,15 +1,12 @@
-# Function Map: `runtime.ui-command-dispatch`
+# Wiki: `runtime.ui-command-dispatch`
 
-- feature_id: `runtime.ui-command-dispatch`
+Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not edit by hand.
+
 - owner crate: `crates/freehand-runtime`
 - owner module: `crates/freehand-runtime/src/lib.rs`
-- owner entry symbols:
-  - `RuntimeCommandDispatcher::new`
-  - `RuntimeCommandDispatcher::from_selected_agent`
-  - `RuntimeCommandDispatcher::from_default_config`
-  - `RuntimeCommandDispatcher::dispatch`
-  - `RuntimeCommandDispatcher::ui_state`
-  - `run_live_reason_turn_with_hooks`
+- function map: `docs/function-maps/runtime.ui-command-dispatch.md`
+- generated wiki: `docs/wiki/runtime.ui-command-dispatch.md`
+- test design: `docs/testing/runtime.ui-command-dispatch.md`
 
 ## Request Mainline
 
@@ -58,12 +55,12 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `RuntimeCommandDispatcher::new` | `crates/freehand-runtime/src/lib.rs` | compose first runtime owner wiring for reason/node command dispatch | runtime config | runtime dispatcher | runtime bootstrap/tests | runtime owner | bound |
 | 02 | `RuntimeCommandDispatcher::from_selected_agent` | `crates/freehand-runtime/src/lib.rs` | derive runtime bootstrap config from one selected agent config | selected agent config | runtime dispatcher | daemon/bootstrap tests | runtime bootstrap | bound |
-| 03 | `RuntimeCommandDispatcher::from_default_config` | `crates/freehand-runtime/src/lib.rs` | load default config and bootstrap one runtime dispatcher | agent name | runtime dispatcher | daemon host | config owner + runtime bootstrap | bound |
+| 03 | `RuntimeCommandDispatcher::from_default_config` | `crates/freehand-runtime/src/lib.rs` | load default config and bootstrap one runtime dispatcher | agent name | runtime dispatcher | daemon host | config owner plus runtime bootstrap | bound |
 | 04 | `RuntimeCommandDispatcher::dispatch` | `crates/freehand-runtime/src/lib.rs` | execute protocol-owned dispatch envelope through the correct owner adapter | dispatch envelope | dispatch receipt or failure | app/daemon runtime boundary | reason/node owner adapter | bound |
 | 05 | `RuntimeCommandDispatcher::ui_state` | `crates/freehand-runtime/src/lib.rs` | expose derived UI projection state for runtime-side consumers/tests | runtime dispatcher | shared derived UI state | runtime tests/future daemon | UI protocol state | bound |
-| 06 | `run_live_reason_turn_with_hooks` | `crates/freehand-runtime/src/lib.rs` | execute a live provider turn while streaming reason/debug callbacks to runtime-owned consumers | selected live config + live request + callbacks | live turn outcome plus incremental callbacks | runtime dispatch/tests | live bridge owner | bound |
+| 06 | `run_live_reason_turn_with_hooks` | `crates/freehand-runtime/src/lib.rs` | execute a live provider turn while streaming reason/debug callbacks to runtime-owned consumers | selected live config plus live request plus callbacks | live turn outcome plus incremental callbacks | runtime dispatch/tests | live bridge owner | bound |
 
-## Sync Status Against Code
+## Sync Status Against Mainline Call
 
 - runtime dispatch owner baseline is now bound in code
 - provider-backed submit input and cancel dispatch through `reason.turn` and update derived UI turn projections
@@ -73,4 +70,4 @@
 - config-selected runtime bootstrap is now bound in code
 - config-selected runtime bootstrap uses explicit peer-topology config instead of synthetic paired node ids
 - config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
-- migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`
+- generated wiki must be regenerated from `docs/mainline-calls/runtime.ui-command-dispatch.json` when this function-map truth changes

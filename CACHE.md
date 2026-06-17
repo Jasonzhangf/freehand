@@ -270,3 +270,6 @@
 - 2026-06-17: `debug.core` migrated into the mainline/wiki chain
   - `docs/mainline-calls/debug.core.json` is now the machine-readable debug mainline truth
   - `docs/wiki/debug.core.md` is generated from it
+- 2026-06-17: `runtime.ui-command-dispatch` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/runtime.ui-command-dispatch.json` is now the machine-readable runtime-dispatch mainline truth
+  - `docs/wiki/runtime.ui-command-dispatch.md` is generated from it

@@ -43,3 +43,4 @@
   - reason-backed cancel dispatch is covered
   - node-backed direct-message dispatch is covered
   - explicit unsupported resume dispatch is covered
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

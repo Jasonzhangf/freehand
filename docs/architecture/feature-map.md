@@ -849,7 +849,7 @@ If a problem does not fit this table, update this routing index before making co
 ### `runtime.ui-command-dispatch`
 
 - owner: `crates/freehand-runtime`
-- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/architecture/**`
+- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/architecture/**`, `docs/mainline-calls/**`, `docs/wiki/**`
 - forbidden_paths: `apps/freehand-server/**` except protocol-only transport injection, `crates/freehand-provider-*/**`
 - required_checks:
   - `cargo test -p freehand-runtime`
@@ -870,6 +870,8 @@ If a problem does not fit this table, update this routing index before making co
   - runtime dispatch owner stays outside app boundary smoke
 - test_design_doc: `docs/testing/runtime.ui-command-dispatch.md`
 - function_map_doc: `docs/function-maps/runtime.ui-command-dispatch.md`
+- mainline_call_doc: `docs/mainline-calls/runtime.ui-command-dispatch.json`
+- generated_wiki_doc: `docs/wiki/runtime.ui-command-dispatch.md`
 - debug_artifacts:
   - runtime dispatch smoke fixtures
 - runtime_paths:
