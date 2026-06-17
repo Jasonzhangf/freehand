@@ -1,0 +1,163 @@
+{
+  "feature_id": "node.master-slave",
+  "owner_crate": "crates/freehand-node",
+  "owner_module": "crates/freehand-node/src/lib.rs",
+  "function_map_doc": "docs/function-maps/node.master-slave.md",
+  "test_design_doc": "docs/testing/node.master-slave.md",
+  "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
+  "generated_wiki_doc": "docs/wiki/node.master-slave.md",
+  "request_mainline": [
+    "local master accepts user input or task delegation intent",
+    "master may dispatch to the paired slave only after `LocalNodeRuntime::pair_slave`",
+    "slave accepts task, projection, or direct-message input only from the active paired source node",
+    "pairing loss reverts slave runtime back to listening state for later re-pairing"
+  ],
+  "response_mainline": [
+    "slave returns progress, status, direct conversation, or turn stream updates",
+    "`UiProtocolState` stores node status, progress, and latest slave turn",
+    "master may subscribe to slave output while preserving node and source identity through protocol projections"
+  ],
+  "error_mainline": [
+    "pairing failure, health failure, or unauthorized input to slave return explicit node errors",
+    "pairing rejection materializes node status as `rejected`",
+    "pairing loss materializes node status as `listening`",
+    "slave continues listening after pairing loss"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "UiProtocolState::set_node_status",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "store node status through the protocol owner instead of a duplicate node-local cache",
+      "allowed_callers": [
+        "freehand-node",
+        "tests"
+      ],
+      "related_tests": [
+        "node status snapshot smoke"
+      ],
+      "why_shared": "keeps node-status query truth aligned with the UI protocol owner"
+    },
+    {
+      "symbol": "UiProtocolState::set_progress",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "store delegated task progress through the protocol owner",
+      "allowed_callers": [
+        "freehand-node",
+        "tests"
+      ],
+      "related_tests": [
+        "slave progress query smoke"
+      ],
+      "why_shared": "keeps progress snapshots aligned with the shared query surface"
+    },
+    {
+      "symbol": "UiProtocolState::apply_turn_projection",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "publish slave turn projections through the shared UI truth",
+      "allowed_callers": [
+        "freehand-node",
+        "tests"
+      ],
+      "related_tests": [
+        "slave turn publication smoke"
+      ],
+      "why_shared": "keeps slave turn subscription and latest-turn query on one stored projection truth"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "LocalNodeRuntime::new",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "responsibility": "validate local one-master/one-slave bootstrap and seed listening state",
+      "input_semantic": "master/slave runtime config",
+      "output_semantic": "node runtime with listening status",
+      "caller": "CLI/server wiring",
+      "callee": "node runtime bootstrap",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "LocalNodeRuntime::pair_slave",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "responsibility": "validate websocket pairing source, ip, and token and materialize paired or rejected status",
+      "input_semantic": "pairing request",
+      "output_semantic": "paired or rejected node status",
+      "caller": "master runtime",
+      "callee": "slave runtime state",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "LocalNodeRuntime::lose_slave_pairing",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "responsibility": "materialize pairing loss and return slave to listening state",
+      "input_semantic": "paired slave runtime",
+      "output_semantic": "listening node status",
+      "caller": "health/runtime wiring",
+      "callee": "slave runtime state",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "LocalNodeRuntime::delegate_task",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "responsibility": "accept master delegated task and materialize progress snapshot",
+      "input_semantic": "delegated task intent",
+      "output_semantic": "progress projection",
+      "caller": "master runtime",
+      "callee": "slave progress truth",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "LocalNodeRuntime::send_direct_message",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "responsibility": "accept authorized direct message from paired source and materialize paired conversation event",
+      "input_semantic": "direct message intent",
+      "output_semantic": "slave direct-message projection",
+      "caller": "master runtime",
+      "callee": "paired slave runtime",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "LocalNodeRuntime::publish_slave_turn",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "responsibility": "accept authorized slave turn projection and publish to subscribers",
+      "input_semantic": "slave turn projection",
+      "output_semantic": "UI turn projection stream",
+      "caller": "slave runtime",
+      "callee": "subscribed master or UI surfaces",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "LocalNodeRuntime::query_node_status",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "responsibility": "expose latest slave node status snapshot",
+      "input_semantic": "node id",
+      "output_semantic": "node status snapshot",
+      "caller": "query surface",
+      "callee": "UiProtocolState",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "LocalNodeRuntime::query_task_progress",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "responsibility": "expose latest delegated task progress snapshot",
+      "input_semantic": "turn id",
+      "output_semantic": "progress snapshot",
+      "caller": "query surface",
+      "callee": "UiProtocolState",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "function-map bindings now cover pairing, pairing loss, direct message, progress query, and slave turn publication on `LocalNodeRuntime`",
+    "node runtime still writes status, progress, and slave turn through `freehand-ui-protocol` instead of duplicate storage",
+    "real websocket IO adapter remains intentionally out of scope for this first runtime semantic layer",
+    "generated wiki must be regenerated from `docs/mainline-calls/node.master-slave.json` when this function-map truth changes"
+  ]
+}

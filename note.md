@@ -465,3 +465,7 @@
   - `docs/mainline-calls/contracts.core.json` is the machine-readable source
   - `docs/wiki/contracts.core.md` must be generated, not hand-edited
   - `xtask gates check` must require function map, test design, JSON source, and generated wiki
+- 2026-06-17: node.master-slave migrated mainline/wiki source in progress
+  - `docs/mainline-calls/node.master-slave.json` is the machine-readable source
+  - `docs/wiki/node.master-slave.md` must be generated, not hand-edited
+  - `xtask gates check` must require function map, test design, JSON source, and generated wiki

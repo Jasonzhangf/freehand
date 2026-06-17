@@ -282,3 +282,6 @@
 - 2026-06-17: `contracts.core` migrated into the mainline/wiki chain
   - `docs/mainline-calls/contracts.core.json` is now the machine-readable shared-contract mainline truth
   - `docs/wiki/contracts.core.md` is generated from it
+- 2026-06-17: `node.master-slave` migrated into the mainline/wiki chain
+  - `docs/mainline-calls/node.master-slave.json` is now the machine-readable node-topology mainline truth
+  - `docs/wiki/node.master-slave.md` is generated from it

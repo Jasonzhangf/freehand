@@ -952,6 +952,8 @@ If a problem does not fit this table, update this routing index before making co
 - forbidden_paths: `crates/freehand-provider-*/**`, `apps/**` except wiring-only entrypoint glue
 - required_checks:
   - `cargo test -p freehand-node`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
   - master/slave pairing tests
   - paired slave input-restriction tests
@@ -968,6 +970,8 @@ If a problem does not fit this table, update this routing index before making co
   - master-subscribe-slave-turn smoke
 - test_design_doc: `docs/testing/node.master-slave.md`
 - function_map_doc: `docs/function-maps/node.master-slave.md`
+- mainline_call_doc: `docs/mainline-calls/node.master-slave.json`
+- generated_wiki_doc: `docs/wiki/node.master-slave.md`
 - debug_artifacts:
   - pairing ledger path
   - slave mode transition replay path
@@ -986,9 +990,11 @@ If a problem does not fit this table, update this routing index before making co
   - slave startup config changes
   - websocket pairing changes
   - turn subscription changes
+  - generated wiki freshness policy changes
 - lifecycle_checks:
   - input-permission lifecycle is complete
   - pairing path and rejection path are both explicit
   - runtime evidence remains traceable
   - local one-master one-slave scope remains explicit
   - pairing-loss and re-listen path remain explicit
+  - migrated mainline call source and generated wiki stay in sync with the function map

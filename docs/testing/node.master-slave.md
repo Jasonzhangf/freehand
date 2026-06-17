@@ -16,6 +16,7 @@
   - slave turn publication visible through subscription surface
 - project black-box impact:
   - master can delegate work and subscribe to slave turn stream through runtime wiring
+  - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - websocket handshake replays
   - pairing ledgers
@@ -27,3 +28,4 @@
 - sync status between design and implementation:
   - `LocalNodeRuntime` baseline implemented
   - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, and direct-message guardrails
+  - migrated mainline-call source and generated wiki are kept in sync with this test design

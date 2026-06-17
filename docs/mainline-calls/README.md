@@ -15,6 +15,7 @@ Current migrated features:
 - `contracts.core`
 - `config.core`
 - `foundation.workspace`
+- `node.master-slave`
 - `provider.anthropic-adapter`
 - `provider.openai-adapter`
 - `provider.reason-live-bridge`
