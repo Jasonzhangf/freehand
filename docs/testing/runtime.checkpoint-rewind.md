@@ -30,9 +30,9 @@
   - `~/.freehand/state/turns`
   - `~/.freehand/ledgers/reason`
 - known gaps:
-  - checkpoint store and rewind owner code are not landed yet
   - command ingress for explicit rewind is not wired yet
 - sync status between design and implementation:
   - design is locked
-  - code binding is still pending
+  - runtime checkpoint store, live writable pre-execute checkpointing, and explicit rewind owner API are now code-bound
+  - runtime tests now cover create-file rewind, modify-file rewind, and previewless writable-tool rejection
   - migrated mainline-call source and generated wiki must stay in sync with this test design

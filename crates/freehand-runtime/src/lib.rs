@@ -1,9 +1,12 @@
 //! Runtime wiring owner for UI command dispatch.
 
 use std::env;
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::{
     CompletionDecision, CompletionSchemaRejection, completion_schema_guidance,
@@ -17,7 +20,8 @@ use freehand_config::{
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
     ContextSegmentKind, ContextStability, FeatureId, ReasonReq04ToolCall,
-    ReasonReq05ToolResultReentry, SessionId, ToolResultContract, TraceId, TurnId,
+    ReasonReq05ToolResultReentry, SessionId, ToolPreviewChangeKind, ToolPreviewContract,
+    ToolResultContract, TraceId, TurnId,
 };
 use freehand_debug::{DebugEvent, DebugHub};
 use freehand_node::{
@@ -41,6 +45,7 @@ use freehand_ui_protocol::{
     UiCommandDispatchPortError, UiCommandDispatchReceipt, UiProtocolState, UiTurnProjection,
     turn_projection_for_client, turn_projection_from_events,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,8 +90,421 @@ pub enum RuntimeLiveBridgeError {
     AnthropicExecutorFailed(String),
     #[error("reason persistence failed: {0}")]
     ReasonPersistenceFailed(String),
+    #[error("writable tool checkpoint failed: {0}")]
+    ToolCheckpointFailed(String),
     #[error("live tool execution failed: {0}")]
     ToolExecutionFailed(String),
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RuntimeCheckpointError {
+    #[error("checkpoint store bootstrap failed: {0}")]
+    StoreBootstrapFailed(String),
+    #[error("writable tool `{tool}` is not checkpointable: {message}")]
+    UncheckpointableTool { tool: String, message: String },
+    #[error("checkpoint snapshot mismatch for `{path}`: {message}")]
+    SnapshotMismatch { path: String, message: String },
+    #[error("checkpoint persistence failed: {0}")]
+    PersistenceFailed(String),
+    #[error("checkpoint `{0}` manifest is missing")]
+    MissingManifest(String),
+    #[error("checkpoint `{checkpoint_id}` blob `{blob}` is missing")]
+    MissingBlob { checkpoint_id: String, blob: String },
+    #[error("checkpoint rewind failed for `{path}`: {message}")]
+    RewindFailed { path: String, message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeCheckpointManifest {
+    checkpoint_id: String,
+    agent_id: String,
+    session_id: String,
+    turn_id: String,
+    tool_call_id: String,
+    workspace_root: String,
+    entries: Vec<RuntimeCheckpointEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeCheckpointEntry {
+    locked_path: String,
+    kind: ToolPreviewChangeKind,
+    blob_file: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeCheckpointLedgerRow {
+    event: RuntimeCheckpointLedgerEvent,
+    checkpoint_id: String,
+    turn_id: String,
+    tool_call_id: String,
+    changed_paths: Vec<String>,
+    detail: Option<String>,
+    unix_seconds: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+enum RuntimeCheckpointLedgerEvent {
+    Created,
+    Applied,
+    Failed,
+    Restored,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeCheckpointStore {
+    workspace_root: PathBuf,
+    manifests_dir: PathBuf,
+    ledger_path: PathBuf,
+    agent_id: AgentId,
+    session_id: SessionId,
+}
+
+impl RuntimeCheckpointStore {
+    fn new(
+        runtime_home: &Path,
+        agent_id: &AgentId,
+        session_id: &SessionId,
+    ) -> Result<Self, RuntimeCheckpointError> {
+        let workspace_root = env::current_dir()
+            .map_err(|err| RuntimeCheckpointError::StoreBootstrapFailed(err.to_string()))?;
+        let manifests_dir = runtime_home
+            .join("state")
+            .join("checkpoints")
+            .join(agent_id.as_str())
+            .join(session_id.as_str());
+        let ledger_dir = runtime_home
+            .join("ledgers")
+            .join("checkpoints")
+            .join(agent_id.as_str());
+        fs::create_dir_all(&manifests_dir)
+            .map_err(|err| RuntimeCheckpointError::StoreBootstrapFailed(err.to_string()))?;
+        fs::create_dir_all(&ledger_dir)
+            .map_err(|err| RuntimeCheckpointError::StoreBootstrapFailed(err.to_string()))?;
+        Ok(Self {
+            workspace_root,
+            manifests_dir,
+            ledger_path: ledger_dir.join(format!("{}.jsonl", session_id.as_str())),
+            agent_id: agent_id.clone(),
+            session_id: session_id.clone(),
+        })
+    }
+
+    fn create_from_preview(
+        &self,
+        turn: &TurnRecord,
+        preview: &ToolPreviewContract,
+        tool_name: &str,
+    ) -> Result<RuntimeCheckpointManifest, RuntimeCheckpointError> {
+        if preview.changes.is_empty() {
+            return Err(RuntimeCheckpointError::UncheckpointableTool {
+                tool: tool_name.to_owned(),
+                message: "preview returned no changes".to_owned(),
+            });
+        }
+        let checkpoint_id =
+            checkpoint_id_for(turn.request.turn_id.as_str(), preview.tool_call_id.as_str());
+        let checkpoint_dir = self.manifests_dir.join(&checkpoint_id);
+        fs::create_dir_all(&checkpoint_dir)
+            .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?;
+
+        let mut entries = Vec::with_capacity(preview.changes.len());
+        for (index, change) in preview.changes.iter().enumerate() {
+            let path = PathBuf::from(&change.locked_path);
+            self.ensure_locked_path(&path)?;
+            let blob_file = match change.kind {
+                ToolPreviewChangeKind::Create => {
+                    if change.before_text.is_some() {
+                        return Err(RuntimeCheckpointError::UncheckpointableTool {
+                            tool: tool_name.to_owned(),
+                            message: format!(
+                                "preview for `{}` marked create but still carries before_text",
+                                path.display()
+                            ),
+                        });
+                    }
+                    if path.exists() {
+                        return Err(RuntimeCheckpointError::SnapshotMismatch {
+                            path: path.display().to_string(),
+                            message: "path already exists but preview expected create".to_owned(),
+                        });
+                    }
+                    None
+                }
+                ToolPreviewChangeKind::Modify | ToolPreviewChangeKind::Delete => {
+                    let expected = change.before_text.as_ref().ok_or_else(|| {
+                        RuntimeCheckpointError::UncheckpointableTool {
+                            tool: tool_name.to_owned(),
+                            message: format!(
+                                "preview for `{}` is missing before_text",
+                                path.display()
+                            ),
+                        }
+                    })?;
+                    let current = fs::read_to_string(&path).map_err(|err| {
+                        RuntimeCheckpointError::SnapshotMismatch {
+                            path: path.display().to_string(),
+                            message: err.to_string(),
+                        }
+                    })?;
+                    if current != *expected {
+                        return Err(RuntimeCheckpointError::SnapshotMismatch {
+                            path: path.display().to_string(),
+                            message: "filesystem pre-image no longer matches preview".to_owned(),
+                        });
+                    }
+                    let blob_file = format!("blob-{index}.txt");
+                    write_text_atomic(&checkpoint_dir.join(&blob_file), &current)?;
+                    Some(blob_file)
+                }
+            };
+            entries.push(RuntimeCheckpointEntry {
+                locked_path: path.to_string_lossy().into_owned(),
+                kind: change.kind,
+                blob_file,
+            });
+        }
+
+        let manifest = RuntimeCheckpointManifest {
+            checkpoint_id: checkpoint_id.clone(),
+            agent_id: self.agent_id.as_str().to_owned(),
+            session_id: self.session_id.as_str().to_owned(),
+            turn_id: turn.request.turn_id.as_str().to_owned(),
+            tool_call_id: preview.tool_call_id.as_str().to_owned(),
+            workspace_root: self.workspace_root.to_string_lossy().into_owned(),
+            entries,
+        };
+        self.write_manifest(&manifest)?;
+        self.append_ledger_row(RuntimeCheckpointLedgerRow {
+            event: RuntimeCheckpointLedgerEvent::Created,
+            checkpoint_id,
+            turn_id: turn.request.turn_id.as_str().to_owned(),
+            tool_call_id: preview.tool_call_id.as_str().to_owned(),
+            changed_paths: manifest
+                .entries
+                .iter()
+                .map(|entry| entry.locked_path.clone())
+                .collect(),
+            detail: None,
+            unix_seconds: now_unix_seconds(),
+        })?;
+        Ok(manifest)
+    }
+
+    fn mark_applied(
+        &self,
+        manifest: &RuntimeCheckpointManifest,
+    ) -> Result<(), RuntimeCheckpointError> {
+        self.append_outcome_row(manifest, RuntimeCheckpointLedgerEvent::Applied, None)
+    }
+
+    fn mark_failed(
+        &self,
+        manifest: &RuntimeCheckpointManifest,
+        detail: &str,
+    ) -> Result<(), RuntimeCheckpointError> {
+        self.append_outcome_row(
+            manifest,
+            RuntimeCheckpointLedgerEvent::Failed,
+            Some(detail.to_owned()),
+        )
+    }
+
+    fn rewind(
+        &self,
+        checkpoint_id: &str,
+    ) -> Result<RuntimeCheckpointManifest, RuntimeCheckpointError> {
+        let manifest = self.load_manifest(checkpoint_id)?;
+        if manifest.workspace_root != self.workspace_root.to_string_lossy() {
+            return Err(RuntimeCheckpointError::RewindFailed {
+                path: manifest.workspace_root,
+                message: format!(
+                    "current workspace root `{}` does not match manifest workspace root",
+                    self.workspace_root.display()
+                ),
+            });
+        }
+
+        for entry in &manifest.entries {
+            let path = PathBuf::from(&entry.locked_path);
+            self.ensure_locked_path(&path)?;
+            match entry.kind {
+                ToolPreviewChangeKind::Create => {
+                    if path.is_dir() {
+                        return Err(RuntimeCheckpointError::RewindFailed {
+                            path: path.display().to_string(),
+                            message: "expected file path but found directory".to_owned(),
+                        });
+                    }
+                    if path.exists() {
+                        fs::remove_file(&path).map_err(|err| {
+                            RuntimeCheckpointError::RewindFailed {
+                                path: path.display().to_string(),
+                                message: err.to_string(),
+                            }
+                        })?;
+                    }
+                }
+                ToolPreviewChangeKind::Modify | ToolPreviewChangeKind::Delete => {
+                    let blob = entry.blob_file.as_ref().ok_or_else(|| {
+                        RuntimeCheckpointError::MissingBlob {
+                            checkpoint_id: manifest.checkpoint_id.clone(),
+                            blob: "(missing blob reference)".to_owned(),
+                        }
+                    })?;
+                    let blob_path = self.manifests_dir.join(&manifest.checkpoint_id).join(blob);
+                    let content = fs::read_to_string(&blob_path).map_err(|err| {
+                        if blob_path.exists() {
+                            RuntimeCheckpointError::RewindFailed {
+                                path: path.display().to_string(),
+                                message: err.to_string(),
+                            }
+                        } else {
+                            RuntimeCheckpointError::MissingBlob {
+                                checkpoint_id: manifest.checkpoint_id.clone(),
+                                blob: blob.clone(),
+                            }
+                        }
+                    })?;
+                    write_text_atomic(&path, &content)?;
+                }
+            }
+        }
+
+        self.append_outcome_row(&manifest, RuntimeCheckpointLedgerEvent::Restored, None)?;
+        Ok(manifest)
+    }
+
+    fn load_manifest(
+        &self,
+        checkpoint_id: &str,
+    ) -> Result<RuntimeCheckpointManifest, RuntimeCheckpointError> {
+        let path = self.manifest_path(checkpoint_id);
+        let raw = fs::read_to_string(&path).map_err(|err| {
+            if path.exists() {
+                RuntimeCheckpointError::PersistenceFailed(err.to_string())
+            } else {
+                RuntimeCheckpointError::MissingManifest(checkpoint_id.to_owned())
+            }
+        })?;
+        serde_json::from_str(&raw)
+            .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))
+    }
+
+    fn write_manifest(
+        &self,
+        manifest: &RuntimeCheckpointManifest,
+    ) -> Result<(), RuntimeCheckpointError> {
+        let text = serde_json::to_string_pretty(manifest)
+            .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?;
+        write_text_atomic(&self.manifest_path(&manifest.checkpoint_id), &text)
+    }
+
+    fn manifest_path(&self, checkpoint_id: &str) -> PathBuf {
+        self.manifests_dir.join(checkpoint_id).join("manifest.json")
+    }
+
+    fn append_outcome_row(
+        &self,
+        manifest: &RuntimeCheckpointManifest,
+        event: RuntimeCheckpointLedgerEvent,
+        detail: Option<String>,
+    ) -> Result<(), RuntimeCheckpointError> {
+        self.append_ledger_row(RuntimeCheckpointLedgerRow {
+            event,
+            checkpoint_id: manifest.checkpoint_id.clone(),
+            turn_id: manifest.turn_id.clone(),
+            tool_call_id: manifest.tool_call_id.clone(),
+            changed_paths: manifest
+                .entries
+                .iter()
+                .map(|entry| entry.locked_path.clone())
+                .collect(),
+            detail,
+            unix_seconds: now_unix_seconds(),
+        })
+    }
+
+    fn append_ledger_row(
+        &self,
+        row: RuntimeCheckpointLedgerRow,
+    ) -> Result<(), RuntimeCheckpointError> {
+        if let Some(parent) = self.ledger_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?;
+        }
+        let encoded = serde_json::to_string(&row)
+            .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.ledger_path)
+            .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?;
+        writeln!(file, "{encoded}")
+            .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))
+    }
+
+    fn ensure_locked_path(&self, path: &Path) -> Result<(), RuntimeCheckpointError> {
+        if path.starts_with(&self.workspace_root) {
+            return Ok(());
+        }
+        Err(RuntimeCheckpointError::SnapshotMismatch {
+            path: path.display().to_string(),
+            message: format!(
+                "path is outside locked workspace root `{}`",
+                self.workspace_root.display()
+            ),
+        })
+    }
+}
+
+pub fn rewind_checkpoint(
+    runtime_home: impl AsRef<Path>,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    checkpoint_id: &str,
+) -> Result<(), RuntimeCheckpointError> {
+    let store = RuntimeCheckpointStore::new(runtime_home.as_ref(), agent_id, session_id)?;
+    let _ = store.rewind(checkpoint_id)?;
+    Ok(())
+}
+
+fn checkpoint_id_for(turn_id: &str, tool_call_id: &str) -> String {
+    format!(
+        "checkpoint-{}-{}-{}",
+        sanitize_identifier(turn_id),
+        sanitize_identifier(tool_call_id),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos()
+    )
+}
+
+fn sanitize_identifier(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect()
+}
+
+fn now_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time")
+        .as_secs()
+}
+
+fn write_text_atomic(path: &Path, content: &str) -> Result<(), RuntimeCheckpointError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?;
+    }
+    let temp_path = path.with_extension(format!("tmp-{}", now_unix_seconds()));
+    fs::write(&temp_path, content)
+        .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))?;
+    fs::rename(&temp_path, path)
+        .map_err(|err| RuntimeCheckpointError::PersistenceFailed(err.to_string()))
 }
 
 pub fn run_live_reason_turn(
@@ -269,7 +687,12 @@ where
         let completed_tool_calls = pending_completed_tool_calls(&turn, &executed_tool_call_ids);
         if !completed_tool_calls.is_empty() {
             for tool_call in completed_tool_calls {
-                let tool_result = execute_registry_tool_call(&tool_registry, &turn, &tool_call)?;
+                let tool_result = execute_registry_tool_call(
+                    &tool_registry,
+                    &request.runtime_home,
+                    &turn,
+                    &tool_call,
+                )?;
                 let output = ProviderSemanticOutput::ToolResultReentry(tool_result.clone());
                 engine.apply_provider_output(&mut turn, output.clone());
                 persistence
@@ -1034,6 +1457,7 @@ fn pending_completed_tool_calls(
 
 fn execute_registry_tool_call(
     registry: &BuiltinToolRegistry,
+    runtime_home: &Path,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ReasonReq05ToolResultReentry, RuntimeLiveBridgeError> {
@@ -1041,6 +1465,48 @@ fn execute_registry_tool_call(
         return Err(RuntimeLiveBridgeError::ToolExecutionFailed(
             "cannot execute incomplete tool arguments".to_owned(),
         ));
+    }
+    let tool_name = tool_call.tool_call.tool_name.as_str();
+    if registry.read_only(tool_name) == Some(false) {
+        let store = RuntimeCheckpointStore::new(
+            runtime_home,
+            &turn.request.agent_id,
+            &turn.request.session_id,
+        )
+        .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
+        let preview = registry.preview(tool_call).map_err(|err| {
+            RuntimeLiveBridgeError::ToolCheckpointFailed(
+                RuntimeCheckpointError::UncheckpointableTool {
+                    tool: tool_name.to_owned(),
+                    message: err.to_string(),
+                }
+                .to_string(),
+            )
+        })?;
+        let manifest = store
+            .create_from_preview(turn, &preview, tool_name)
+            .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
+        let output = match registry.execute(tool_call) {
+            Ok(output) => output,
+            Err(err) => {
+                let _ = store.mark_failed(&manifest, &err.to_string());
+                return Err(RuntimeLiveBridgeError::ToolExecutionFailed(err.to_string()));
+            }
+        };
+        store
+            .mark_applied(&manifest)
+            .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
+        return Ok(ReasonReq05ToolResultReentry {
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+            agent_id: turn.request.agent_id.clone(),
+            tool_result: ToolResultContract {
+                tool_call_id: tool_call.tool_call.tool_call_id.clone(),
+                output: output.text,
+            },
+        });
     }
     let output = registry
         .execute(tool_call)
@@ -1212,10 +1678,14 @@ mod tests {
     use super::*;
     use freehand_contracts::{SemanticEventKind, TerminalStatus};
     use freehand_ui_protocol::{UiQueryResult, build_command_dispatch_envelope};
+    use serde_json::json;
+    use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
+    use std::sync::{Mutex, OnceLock};
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -1314,6 +1784,70 @@ mod tests {
             prompt: "reply exactly pong".to_owned(),
             stream,
         }
+    }
+
+    fn with_temp_workspace<F>(test: F)
+    where
+        F: FnOnce(&Path),
+    {
+        with_locked_cwd(|| {
+            let original = std::env::current_dir().expect("current dir");
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "freehand-runtime-tools-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&root).expect("create temp workspace");
+            std::env::set_current_dir(&root).expect("set cwd");
+            let restore = RestoreCwd { original };
+            test(&root);
+            drop(restore);
+            fs::remove_dir_all(&root).expect("cleanup temp workspace");
+        });
+    }
+
+    fn with_locked_cwd<F, R>(test: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let _lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        test()
+    }
+
+    fn cwd_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct RestoreCwd {
+        original: PathBuf,
+    }
+
+    impl Drop for RestoreCwd {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
+
+    fn checkpoint_ledger_rows(
+        runtime_home: &Path,
+        agent_id: &str,
+        session_id: &SessionId,
+    ) -> Vec<RuntimeCheckpointLedgerRow> {
+        let path = runtime_home
+            .join("ledgers")
+            .join("checkpoints")
+            .join(agent_id)
+            .join(format!("{}.jsonl", session_id.as_str()));
+        let raw = fs::read_to_string(path).expect("read checkpoint ledger");
+        raw.lines()
+            .map(|line| serde_json::from_str(line).expect("decode ledger row"))
+            .collect()
     }
 
     fn spawn_mock_server(
@@ -1499,6 +2033,57 @@ mod tests {
         r#"{"content":[{"type":"tool_use","id":"toolu_read_1","name":"read_file","input":{"path":"Cargo.toml","offset":0,"limit":2}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
     }
 
+    fn tool_use_write_file_response(path: &str, content: &str) -> String {
+        json!({
+            "content": [{
+                "type": "tool_use",
+                "id": "toolu_write_1",
+                "name": "write_file",
+                "input": {
+                    "path": path,
+                    "content": content
+                }
+            }],
+            "usage": {"input_tokens": 20, "output_tokens": 16},
+            "stop_reason": "tool_use"
+        })
+        .to_string()
+    }
+
+    fn tool_use_edit_file_response(path: &str, old_string: &str, new_string: &str) -> String {
+        json!({
+            "content": [{
+                "type": "tool_use",
+                "id": "toolu_edit_1",
+                "name": "edit_file",
+                "input": {
+                    "path": path,
+                    "old_string": old_string,
+                    "new_string": new_string
+                }
+            }],
+            "usage": {"input_tokens": 20, "output_tokens": 16},
+            "stop_reason": "tool_use"
+        })
+        .to_string()
+    }
+
+    fn tool_use_bash_response(command: &str) -> String {
+        json!({
+            "content": [{
+                "type": "tool_use",
+                "id": "toolu_bash_1",
+                "name": "bash",
+                "input": {
+                    "command": command
+                }
+            }],
+            "usage": {"input_tokens": 20, "output_tokens": 16},
+            "stop_reason": "tool_use"
+        })
+        .to_string()
+    }
+
     fn complete_stream_response(visible_text: &str) -> String {
         let tagged = tagged_completion_json(
             r#"{"claim":"complete","completion_reason":"done","evidence":"provider returned pong","summary":"pong","learned":"keep tagged completion strict"}"#,
@@ -1530,6 +2115,9 @@ mod tests {
 
     #[test]
     fn live_bridge_runs_single_shot_anthropic_provider_into_turn_truth() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (base_url, rx, handle) =
             spawn_mock_server(200, "application/json", complete_single_response("pong"));
 
@@ -1573,6 +2161,9 @@ mod tests {
 
     #[test]
     fn live_bridge_runs_streaming_anthropic_provider_into_broadcasts() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (base_url, rx, handle) =
             spawn_mock_server(200, "text/event-stream", complete_stream_response("pong"));
 
@@ -1603,6 +2194,9 @@ mod tests {
 
     #[test]
     fn live_bridge_applies_stream_outputs_before_provider_finishes() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let tagged = tagged_completion_json(
             r#"{"claim":"complete","completion_reason":"done","evidence":"provider returned pong","summary":"pong","learned":"keep tagged completion strict"}"#,
         );
@@ -1672,6 +2266,9 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
     #[test]
     fn live_bridge_retries_invalid_schema_then_completes() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (base_url, rx, handle) = spawn_sequence_server(
             "application/json",
             vec![
@@ -1705,6 +2302,9 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
     #[test]
     fn live_bridge_uses_continue_next_step_for_next_round() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (base_url, rx, handle) = spawn_sequence_server(
             "application/json",
             vec![
@@ -1737,6 +2337,9 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
     #[test]
     fn live_bridge_executes_real_registry_tool_reenters_result_and_persists_terminal_turn() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (base_url, rx, handle) = spawn_sequence_server(
             "application/json",
             vec![
@@ -1797,6 +2400,9 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
     #[test]
     fn live_bridge_fails_after_three_invalid_schema_retries() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (base_url, _rx, handle) = spawn_sequence_server(
             "application/json",
             vec![
@@ -1844,7 +2450,160 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
+    fn live_bridge_creates_checkpoint_for_write_file_and_rewinds_created_file() {
+        with_temp_workspace(|root| {
+            fs::create_dir_all(root.join("scratch")).expect("create parent directory");
+            let (base_url, rx, handle) = spawn_sequence_server(
+                "application/json",
+                vec![
+                    tool_use_write_file_response("scratch/note.txt", "pong\n"),
+                    complete_single_response("write done"),
+                ],
+            );
+            let request = live_request(false);
+            let runtime_home = request.runtime_home.clone();
+            let session_id = request.session_id.clone();
+
+            let outcome = run_live_reason_turn(
+                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+                request,
+            )
+            .expect("live bridge");
+            let _ = rx.recv().expect("first provider request");
+            let _ = rx.recv().expect("second provider request");
+            handle.join().expect("join");
+
+            assert_eq!(outcome.tool_executions, 1);
+            let file_path = root.join("scratch/note.txt");
+            assert_eq!(
+                fs::read_to_string(&file_path).expect("written file"),
+                "pong\n"
+            );
+
+            let rows = checkpoint_ledger_rows(&runtime_home, "agent-live", &session_id);
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0].event, RuntimeCheckpointLedgerEvent::Created);
+            assert_eq!(rows[1].event, RuntimeCheckpointLedgerEvent::Applied);
+            let checkpoint_id = rows[0].checkpoint_id.clone();
+
+            let store = RuntimeCheckpointStore::new(
+                &runtime_home,
+                &AgentId::new("agent-live"),
+                &session_id,
+            )
+            .expect("checkpoint store");
+            let manifest = store.load_manifest(&checkpoint_id).expect("manifest");
+            assert_eq!(manifest.entries.len(), 1);
+            assert_eq!(manifest.entries[0].kind, ToolPreviewChangeKind::Create);
+            assert_eq!(manifest.entries[0].blob_file, None);
+
+            rewind_checkpoint(
+                &runtime_home,
+                &AgentId::new("agent-live"),
+                &session_id,
+                &checkpoint_id,
+            )
+            .expect("rewind");
+            assert!(!file_path.exists());
+
+            let rows = checkpoint_ledger_rows(&runtime_home, "agent-live", &session_id);
+            assert_eq!(rows.len(), 3);
+            assert_eq!(rows[2].event, RuntimeCheckpointLedgerEvent::Restored);
+        });
+    }
+
+    #[test]
+    fn live_bridge_rewinds_modify_checkpoint_back_to_original_text() {
+        with_temp_workspace(|root| {
+            let file_path = root.join("edit-target.txt");
+            fs::write(&file_path, "before\n").expect("seed file");
+
+            let (base_url, rx, handle) = spawn_sequence_server(
+                "application/json",
+                vec![
+                    tool_use_edit_file_response("edit-target.txt", "before", "after"),
+                    complete_single_response("edit done"),
+                ],
+            );
+            let request = live_request(false);
+            let runtime_home = request.runtime_home.clone();
+            let session_id = request.session_id.clone();
+
+            let outcome = run_live_reason_turn(
+                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+                request,
+            )
+            .expect("live bridge");
+            let _ = rx.recv().expect("first provider request");
+            let _ = rx.recv().expect("second provider request");
+            handle.join().expect("join");
+
+            assert_eq!(outcome.tool_executions, 1);
+            assert_eq!(
+                fs::read_to_string(&file_path).expect("edited file"),
+                "after\n"
+            );
+
+            let rows = checkpoint_ledger_rows(&runtime_home, "agent-live", &session_id);
+            assert_eq!(rows[0].event, RuntimeCheckpointLedgerEvent::Created);
+            assert_eq!(rows[1].event, RuntimeCheckpointLedgerEvent::Applied);
+            let checkpoint_id = rows[0].checkpoint_id.clone();
+
+            let store = RuntimeCheckpointStore::new(
+                &runtime_home,
+                &AgentId::new("agent-live"),
+                &session_id,
+            )
+            .expect("checkpoint store");
+            let manifest = store.load_manifest(&checkpoint_id).expect("manifest");
+            assert_eq!(manifest.entries[0].kind, ToolPreviewChangeKind::Modify);
+            assert_eq!(manifest.entries[0].blob_file.as_deref(), Some("blob-0.txt"));
+
+            rewind_checkpoint(
+                &runtime_home,
+                &AgentId::new("agent-live"),
+                &session_id,
+                &checkpoint_id,
+            )
+            .expect("rewind");
+            assert_eq!(
+                fs::read_to_string(&file_path).expect("rewound file"),
+                "before\n"
+            );
+        });
+    }
+
+    #[test]
+    fn live_bridge_rejects_writable_tool_without_preview_support() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, _rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![tool_use_bash_response("printf 'pong'")],
+        );
+
+        let err = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            live_request(false),
+        )
+        .expect_err("must fail");
+        handle.join().expect("join");
+
+        match err {
+            RuntimeLiveBridgeError::ToolCheckpointFailed(message) => {
+                assert!(message.contains("bash"));
+                assert!(message.contains("preview"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn bootstrap_with_live_restore_recovers_ui_projection_and_next_turn_ordinal() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let runtime_home = temp_runtime_home();
         let session_id = SessionId::new("runtime-session-agent-live");
         let (first_url, first_rx, first_handle) = spawn_sequence_server(

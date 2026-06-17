@@ -226,6 +226,11 @@
   - shared preview contracts added in `freehand-contracts`
   - `BuiltinToolRegistry::preview` now works for `write_file`, `edit_file`, and `multi_edit`
   - next concrete step is `runtime.checkpoint-rewind` pre-execute snapshot wiring
+- 2026-06-17: `runtime.checkpoint-rewind` baseline landed
+  - `freehand-runtime` now owns `RuntimeCheckpointStore`, `rewind_checkpoint`, and live writable-tool `preview -> snapshot -> execute` gating
+  - live writable `write_file` and `edit_file` paths now create checkpoint manifests under `~/.freehand/state/checkpoints` and lifecycle ledgers under `~/.freehand/ledgers/checkpoints`
+  - writable tools without preview support are now rejected explicitly on the live runtime path
+  - workspace verification passed: `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
 - 2026-06-16: `tool.registry` harness rule locked
   - `freehand-tools` is the only owner for built-in tool specs and execution truth
   - every tool must have explicit spec + implemented state before runtime/provider exposure

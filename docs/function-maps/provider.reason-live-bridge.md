@@ -18,7 +18,7 @@
 - the first tool-capable request exposes a Reasonix-aligned runtime tool registry through provider-neutral request metadata
 - Anthropic live executor runs the HTTP/SSE request and returns provider-neutral semantic outputs for each round
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
-- completed provider tool calls are executed by `freehand-tools`, written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a tool result exchange
+- completed provider tool calls are executed by `freehand-tools`; writable tool calls first go through runtime checkpoint preview/snapshot/execute gating, then are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a tool result exchange
 - completion schema is parsed from tagged text, validated, and either accepted, rejected with field-level feedback, or used to schedule the next round
 - runtime dispatch callers may consume the same bridge through CLI or daemon command ingress without owning provider DTOs
 
@@ -39,6 +39,7 @@
 - provider execution failures are returned explicitly
 - invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times
 - incomplete tool calls are not executed and do not become tool-result truth
+- writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names fail explicitly instead of being ignored
 - registered but unimplemented tool names fail explicitly instead of being treated as successful fallback
 - persistence restore/write failures fail the live bridge explicitly
@@ -72,7 +73,7 @@
 | 07 | `AnthropicExecutor::execute_stream_with` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one stream Anthropic request and call back per semantic batch before completion | provider semantic request + auth/base URL + callback | incremental semantic output batches + accumulated outputs | live bridge | anthropic executor | bound |
 | 08 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | write provider-neutral outputs into turn truth | provider semantic output | updated turn record + broadcast | live bridge | reason owner | bound |
 | 09 | `ReasonPersistence::record_provider_output_applied` | `crates/freehand-reason/src/persistence.rs` | persist live semantic output application | session history + active turn + provider-neutral output | reason ledger row + active-turn snapshot | live bridge | persistence owner | bound |
-| 10 | `BuiltinToolRegistry::reasonix_aligned` / `BuiltinToolRegistry::execute` | `crates/freehand-tools/src/lib.rs` | export Reasonix-aligned tool schemas and execute implemented tool calls | complete tool call | tool execution output or explicit tool error | live bridge | tool registry owner | bound |
+| 10 | `BuiltinToolRegistry::reasonix_aligned` / `execute_registry_tool_call` | `crates/freehand-runtime/src/lib.rs` | export Reasonix-aligned tool schemas and route writable tool calls through runtime checkpoint gating before execute | complete tool call | tool execution output or explicit tool error | live bridge | tool registry owner | bound |
 | 11 | `parse_completion_submission_block` | `crates/freehand-blocks/src/lib.rs` | parse tagged completion schema from model text | model text | typed submission or schema rejection list | live bridge | blocks owner | bound |
 | 12 | `ReasonPersistence::record_completion_rejected` | `crates/freehand-reason/src/persistence.rs` | persist schema rejection evidence | schema rejection + active turn | reason ledger row + active-turn snapshot | live bridge | persistence owner | bound |
 | 13 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | write accepted completed/blocked terminal truth | validated completion submission | terminal event | live bridge | reason owner | bound |
@@ -82,6 +83,6 @@
 ## Sync Status Against Code
 
 - current live path supports Anthropic `messages` only
-- runtime owner path preserves incremental stream apply, completion schema loop, persistence, and registry-backed tool loop without duplicating adapter semantics
+- runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, and checkpoint gating without duplicating adapter semantics
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`
 - the generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes

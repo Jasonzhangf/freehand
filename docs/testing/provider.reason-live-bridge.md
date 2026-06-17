@@ -28,11 +28,14 @@
   - live turn start/provider-output/schema-rejection/terminal persistence writes
   - registry-backed tool schema export path
   - implemented registry read-only tool execution path
+  - writable tool checkpoint creation and rewind-safe manifest/ledger path
+  - previewless writable-tool rejection path
   - tool-result re-entry passed to Anthropic as `tool_result`
   - runtime dispatch submit-user-input path invokes the live bridge and updates UI projection
 - module black-box plan:
   - one selected anthropic provider drives text/reasoning/usage into turn truth through the bridge and closes via accepted completion schema
   - one selected anthropic provider emits an implemented registered tool call, receives tool result, then closes via accepted completion schema
+  - one selected anthropic provider emits a writable file tool call, gets checkpointed before execute, and can be rewound by runtime owner truth
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
   - invalid completion schema retries exactly 3 times and closes failed terminal without early success
   - provider HTTP failure returns explicit dispatch failure and does not project a successful terminal

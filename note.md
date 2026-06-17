@@ -258,6 +258,12 @@
 - 2026-06-16: UI next-step decision
   - `ui.protocol` already owns query/subscribe/projection truth; WebUI must consume it instead of inventing its own semantics
   - repo already had `apps/freehand-server`; using it as the minimal WebUI smoke boundary avoids a second UI app boundary
+- 2026-06-17: runtime.checkpoint-rewind implementation start
+  - target owner remains `crates/freehand-runtime`
+  - live writable tool path will be changed to `preview -> snapshot -> execute`
+  - checkpoint truth will live under `~/.freehand/state/checkpoints` and `~/.freehand/ledgers/checkpoints`
+  - explicit rewind owner API will land in runtime first; UI/command ingress wiring remains non-goal for this slice
+  - writable tools without preview support must be rejected explicitly on the live runtime path
 - 2026-06-16: tool registry harness closeout
   - `freehand-tools` already owns Reasonix-aligned tool registry baseline
   - missing durable truth was the top-level design + workflow lock

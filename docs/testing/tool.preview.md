@@ -25,8 +25,8 @@
   - `~/.freehand/ledgers/checkpoints`
 - known gaps:
   - `delete_range` preview remains pending until its anchor semantics are locked in code
-  - no current live runtime path consumes preview before writable execution
 - sync status between design and implementation:
   - code-bound preview implementation is landed for `write_file`, `edit_file`, and `multi_edit`
   - owner tests now lock preview/execute parity for those three tools
+  - runtime tests now prove live writable execution consumes preview before checkpointed execute
   - migrated mainline-call source and generated wiki must stay in sync with this test design

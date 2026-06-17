@@ -293,6 +293,7 @@ dependencies = [
  "freehand-reason",
  "freehand-tools",
  "freehand-ui-protocol",
+ "serde",
  "serde_json",
  "thiserror",
 ]

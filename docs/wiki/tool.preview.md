@@ -72,5 +72,5 @@ Generated from `docs/mainline-calls/tool.preview.json`. Do not edit by hand.
 - `BuiltinToolRegistry::preview` is now code-bound for `write_file`, `edit_file`, and `multi_edit`
 - preview/execute parity now runs through one shared transform path for those three writable tools
 - `delete_range` preview is still pending because its anchor semantics are not locked in code yet
-- current live runtime path does not yet consume preview before writable execution
+- current live runtime path now consumes preview before writable execution and rejects previewless writable tools explicitly
 - generated wiki must be regenerated from `docs/mainline-calls/tool.preview.json` when this function-map truth changes
