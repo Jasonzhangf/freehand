@@ -126,6 +126,8 @@
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
+- unknown tool names and registered-but-unimplemented tool names are expected to surface as explicit `RuntimeLiveBridgeError::ToolExecutionFailed(...)` failures from the runtime-owned tool loop and must not materialize tool-result or terminal success truth
+- runtime white-box coverage now explicitly locks both unknown-tool and registered-but-unimplemented-tool failure paths at the live bridge boundary
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`

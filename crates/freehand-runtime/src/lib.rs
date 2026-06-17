@@ -2732,7 +2732,7 @@ mod tests {
     use freehand_metadata::MetadataEnvelope;
     use freehand_reason::ProviderRawLedgerRow;
     use freehand_ui_protocol::{UiQueryResult, build_command_dispatch_envelope};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -3146,59 +3146,71 @@ mod tests {
         )
     }
 
+    fn tool_use_named_response(tool_call_id: &str, tool_name: &str, input: Value) -> String {
+        json!({
+            "content": [{
+                "type": "tool_use",
+                "id": tool_call_id,
+                "name": tool_name,
+                "input": input
+            }],
+            "usage": {"input_tokens": 20, "output_tokens": 16},
+            "stop_reason": "tool_use"
+        })
+        .to_string()
+    }
+
     fn tool_use_single_response() -> String {
-        r#"{"content":[{"type":"tool_use","id":"toolu_read_1","name":"read_file","input":{"path":"Cargo.toml","offset":0,"limit":2}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
+        tool_use_named_response(
+            "toolu_read_1",
+            "read_file",
+            json!({"path":"Cargo.toml","offset":0,"limit":2}),
+        )
+    }
+
+    fn tool_use_unknown_response() -> String {
+        tool_use_named_response(
+            "toolu_unknown_1",
+            "totally_unknown_tool",
+            json!({"path":"Cargo.toml"}),
+        )
+    }
+
+    fn tool_use_unimplemented_response() -> String {
+        tool_use_named_response("toolu_bg_jobs_1", "bg_jobs", json!({}))
     }
 
     fn tool_use_write_file_response(path: &str, content: &str) -> String {
-        json!({
-            "content": [{
-                "type": "tool_use",
-                "id": "toolu_write_1",
-                "name": "write_file",
-                "input": {
-                    "path": path,
-                    "content": content
-                }
-            }],
-            "usage": {"input_tokens": 20, "output_tokens": 16},
-            "stop_reason": "tool_use"
-        })
-        .to_string()
+        tool_use_named_response(
+            "toolu_write_1",
+            "write_file",
+            json!({
+                "path": path,
+                "content": content
+            }),
+        )
     }
 
     fn tool_use_edit_file_response(path: &str, old_string: &str, new_string: &str) -> String {
-        json!({
-            "content": [{
-                "type": "tool_use",
-                "id": "toolu_edit_1",
-                "name": "edit_file",
-                "input": {
-                    "path": path,
-                    "old_string": old_string,
-                    "new_string": new_string
-                }
-            }],
-            "usage": {"input_tokens": 20, "output_tokens": 16},
-            "stop_reason": "tool_use"
-        })
-        .to_string()
+        tool_use_named_response(
+            "toolu_edit_1",
+            "edit_file",
+            json!({
+                "path": path,
+                "old_string": old_string,
+                "new_string": new_string
+            }),
+        )
     }
 
     fn tool_use_bash_response(command: &str) -> String {
-        json!({
-            "content": [{
-                "type": "tool_use",
-                "id": "toolu_bash_1",
-                "name": "bash",
-                "input": {
-                    "command": command
-                }
-            }],
-            "usage": {"input_tokens": 20, "output_tokens": 16},
-            "stop_reason": "tool_use"
-        })
-        .to_string()
+        tool_use_named_response(
+            "toolu_bash_1",
+            "bash",
+            json!({
+                "command": command
+            }),
+        )
     }
 
     fn complete_stream_response(visible_text: &str) -> String {
@@ -3774,6 +3786,90 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 .iter()
                 .any(|line| line == "tool_call_id=toolu_read_1")
         );
+    }
+
+    #[test]
+    fn live_bridge_fails_explicitly_on_unknown_tool_name() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, _rx, handle) =
+            spawn_mock_server(200, "application/json", tool_use_unknown_response());
+        let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
+
+        let err = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect_err("unknown tool must fail explicitly");
+        handle.join().expect("join");
+
+        match err {
+            RuntimeLiveBridgeError::ToolExecutionFailed(message) => {
+                assert!(message.contains("unknown tool `totally_unknown_tool`"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&session_id)
+            .expect("restore live session");
+        assert!(restored.closed_turns.is_empty());
+        let latest = restored
+            .active_turn
+            .as_ref()
+            .expect("active turn should remain");
+        assert_eq!(latest.turn.tool_calls.len(), 1);
+        assert_eq!(
+            latest.turn.tool_calls[0].tool_call.tool_name.as_str(),
+            "totally_unknown_tool"
+        );
+        assert!(latest.turn.tool_results.is_empty());
+        assert!(latest.turn.terminal_event.is_none());
+    }
+
+    #[test]
+    fn live_bridge_fails_explicitly_on_registered_unimplemented_tool_name() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, _rx, handle) =
+            spawn_mock_server(200, "application/json", tool_use_unimplemented_response());
+        let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
+
+        let err = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect_err("registered but unimplemented tool must fail explicitly");
+        handle.join().expect("join");
+
+        match err {
+            RuntimeLiveBridgeError::ToolExecutionFailed(message) => {
+                assert!(message.contains("tool `bg_jobs` is registered but not implemented yet"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&session_id)
+            .expect("restore live session");
+        assert!(restored.closed_turns.is_empty());
+        let latest = restored
+            .active_turn
+            .as_ref()
+            .expect("active turn should remain");
+        assert_eq!(latest.turn.tool_calls.len(), 1);
+        assert_eq!(
+            latest.turn.tool_calls[0].tool_call.tool_name.as_str(),
+            "bg_jobs"
+        );
+        assert!(latest.turn.tool_results.is_empty());
+        assert!(latest.turn.terminal_event.is_none());
     }
 
     #[test]

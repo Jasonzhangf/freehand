@@ -793,3 +793,28 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: provider live-bridge tool failure slice
+  - owner route: `provider.reason-live-bridge`
+  - audit target: function map and test design already required explicit failure for unknown tool names and registered-but-unimplemented tool names, but runtime white-box coverage did not yet lock either path
+  - chosen closure:
+    - add reusable mock `tool_use` response helper for runtime live tests
+    - add one white-box test for unknown `totally_unknown_tool`
+    - add one white-box test for registered-but-unimplemented `bg_jobs`
+    - assert both fail as `RuntimeLiveBridgeError::ToolExecutionFailed(...)`
+    - assert both preserve active turn truth without tool-result truth or terminal truth
+  - implementation:
+    - added `tool_use_named_response`, `tool_use_unknown_response`, and `tool_use_unimplemented_response`
+    - added `live_bridge_fails_explicitly_on_unknown_tool_name`
+    - added `live_bridge_fails_explicitly_on_registered_unimplemented_tool_name`
+    - synced `docs/function-maps/provider.reason-live-bridge.md`
+    - synced `docs/testing/provider.reason-live-bridge.md`
+    - synced `docs/mainline-calls/provider.reason-live-bridge.json`
+    - regenerated `docs/wiki/provider.reason-live-bridge.md`
+  - verification:
+    - `cargo test -p freehand-runtime live_bridge_fails_explicitly_on_unknown_tool_name -- --nocapture`
+    - `cargo test -p freehand-runtime live_bridge_fails_explicitly_on_registered_unimplemented_tool_name -- --nocapture`
+    - `cargo test -p freehand-runtime`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

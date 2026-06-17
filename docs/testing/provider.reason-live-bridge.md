@@ -38,6 +38,8 @@
   - registry-backed tool schema export path
   - registry-backed tool schema fingerprint reaches planner diagnostics
   - implemented registry read-only tool execution path
+  - unknown tool-name execution path fails explicitly and does not materialize tool-result truth
+  - registered but unimplemented tool-name execution path fails explicitly and does not materialize tool-result truth
   - writable tool checkpoint creation and rewind-safe manifest/ledger path
   - previewless writable-tool rejection path
   - tool-result re-entry passed to Anthropic as `tool_result`
@@ -72,5 +74,6 @@
   - runtime live bridge now writes restore/request/tool/terminal lifecycle metadata through `metadata.core` and fails explicitly on metadata write errors
   - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
   - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
+  - runtime white-box coverage now explicitly locks both unknown-tool and registered-but-unimplemented-tool failures, proving they stop with explicit `RuntimeLiveBridgeError::ToolExecutionFailed(...)` and do not materialize tool-result or terminal-success truth
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates
