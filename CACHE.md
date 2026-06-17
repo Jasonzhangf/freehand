@@ -9,7 +9,7 @@
   - `cargo run -p xtask -- gates check`
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
 - Latest local full gate:
-  - `make ci` -> passed after `reason.turn` metadata producer integration
+  - `make ci` -> passed after `foundation.workspace` metadata/request isolation gate closeout
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -31,6 +31,7 @@
   - `reason.turn` surfaces debug sink failures through that observation-only stream without mutating turn truth
   - `metadata.core` now supports durable metadata ledger append/reload inside `freehand-metadata`
   - `reason.turn` producer tests now prove durable metadata persistence without request-text leakage when a ledger-backed metadata center is supplied
+  - `foundation.workspace` now enforces a static metadata/request isolation gate in `xtask`: `ReasonReq*` request structs may not carry metadata/debug owner types or obvious metadata/debug fields, stray `Metadata*` owner types outside `crates/freehand-metadata` fail fast, and metadata owner structs may not introduce request-payload fields/types
 - Docs/mainline sync:
   - updated function maps, test designs, `docs/mainline-calls/**`, and regenerated `docs/wiki/**`
   - generated wiki must continue to come from `cargo run -p xtask -- mainlines generate`
@@ -40,6 +41,7 @@
   - `xtask gates check` now validates migrated mainline `bound` call-table rows against existing source files and resolvable symbols
   - `make ci` is the canonical full local gate and now includes `cargo run -p xtask -- mainlines check` before `cargo run -p xtask -- gates check`
   - `xtask gates check` now validates CI/CD command alignment so pre-push, GitHub CI, and release paths cannot silently skip the full gate
+  - `xtask gates check` now also validates the low-noise metadata/request boundary gate with positive and negative `cargo test -p xtask` coverage
 - Metadata core update:
   - `metadata.core` now owns internal control/provenance metadata in `crates/freehand-metadata`
   - metadata writes must carry `MetadataWriteOwner` and `MetadataWriteNode`

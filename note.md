@@ -584,3 +584,9 @@
   - negative rule locked: ledger parse/validation/render/io failure stays explicit and does not mutate in-memory metadata truth
   - producer proof: `reason.turn` persists start-turn plus provider-output metadata through a ledger-backed metadata center and the raw ledger must not contain request text
   - verification target: `cargo test -p freehand-metadata`, `cargo test -p freehand-reason`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `make ci`
+- 2026-06-18: foundation.workspace metadata/request static gate slice
+  - owner route confirmed: `foundation.workspace` in `xtask`
+  - repo truth before change was inconsistent: docs/function-map/mainline already claimed a metadata/request isolation gate, but `run_gates_check` still did not call any verifier and `xtask` had no white-box coverage for it
+  - landed narrow source-level rule only: `verify_metadata_request_boundaries` checks `ReasonReq*` structs for metadata/debug owner types and obvious metadata/debug field names, rejects stray `pub struct/enum Metadata*` outside `crates/freehand-metadata`, and rejects request-payload field names/types inside metadata owner structs
+  - white-box closeout includes positive + negative tests for request metadata type leaks, request debug field leaks, stray metadata owner types, metadata prompt fields, and metadata request-payload types
+  - doc follow-up: removed the stale `reason.turn` note that said the repo-wide metadata leak gate was still pending

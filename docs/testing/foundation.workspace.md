@@ -9,6 +9,7 @@
   - `make ci` is the canonical full local gate and includes mainline freshness before architecture gates
   - pre-push, CI, and release paths consume the same full gate instead of drifting into partial gate stacks
   - gate command can validate policy locks
+  - gate command can reject metadata/request boundary leaks at the repo source level
   - mainline generation command can render wiki from JSON truth
   - mainline check command rejects stale wiki
 - white-box plan:
@@ -18,12 +19,14 @@
   - mainline manifest cross-link logic between JSON, feature map, function map, test design, and generated wiki path
   - mainline call-table file and symbol binding logic for migrated `bound` rows
   - CI/CD and local hook command-alignment logic
+  - metadata/request boundary leak logic for request-node contracts and metadata-owner uniqueness
 - module black-box plan:
   - `xtask gates check` smoke from repo root
   - `xtask mainlines check` smoke from repo root
   - `cargo test -p xtask` manifest-link positive and negative tests
   - `cargo test -p xtask` call-table binding positive and negative tests
   - `cargo test -p xtask` CI/CD command-alignment positive and negative tests
+  - `cargo test -p xtask` metadata/request leak-gate positive and negative tests
 - project black-box impact:
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
   - machine-readable mainline truth remains the only source for generated wiki artifacts
@@ -37,4 +40,5 @@
   - mainline manifest cross-link checks are implemented in `xtask`
   - mainline call-table binding checks are implemented in `xtask`
   - CI/CD command-alignment checks are implemented in `xtask`
+  - metadata/request leak gate must stay implemented in `xtask`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

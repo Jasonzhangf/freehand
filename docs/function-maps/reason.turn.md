@@ -111,5 +111,5 @@
 - reason metadata producers can now persist durably through a ledger-backed `MetadataCenter` without request-text leakage
 - metadata write failures are explicit and are tested to prevent start-turn history commit or provider-output turn mutation
 - remaining gap is final CLI/server runtime loop integration with real provider usage events and persisted recovery payloads
-- metadata/request hard isolation is reflected in request content vs planner diagnostics split and now enforced for reason-turn producer metadata through `metadata.core` key validation and producer tests; static repo-wide metadata leak gate remains pending
+- metadata/request hard isolation is reflected in request content vs planner diagnostics split and now enforced for reason-turn producer metadata through `metadata.core` key validation, producer tests, and the repo-wide static metadata/request boundary gate in `xtask`
 - the generated wiki must be regenerated from `docs/mainline-calls/reason.turn.json` when this function-map truth changes

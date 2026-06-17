@@ -101,3 +101,13 @@ This keeps mainline call maps code-bound instead of becoming stale review prose.
 - release workflow must run `make ci` before release build/publish steps
 
 This prevents pre-push, CI, and release from silently drifting into partial gate stacks.
+
+## Metadata/Request Isolation Gate
+
+`xtask gates check` validates one low-noise static boundary for metadata/request separation:
+
+- request-node contract structs must not introduce metadata/debug owner types or obvious metadata/debug/cache payload fields
+- metadata owner types must stay inside `crates/freehand-metadata`
+- metadata owner structs must not introduce request payload fields such as prompt text, message arrays, or context payload content
+
+This gate is intentionally narrow. It exists to fail obvious boundary regressions early without inventing fallback or runtime heuristics.

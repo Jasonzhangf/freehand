@@ -204,6 +204,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_mainline_manifest_links(&root)?;
     verify_mainline_call_table_bindings(&root)?;
     verify_ci_cd_gate_commands(&root)?;
+    verify_metadata_request_boundaries(&root)?;
     verify_webui_app_boundary(&root)?;
     verify_runtime_daemon_boundary(&root)?;
     Ok(())
@@ -829,6 +830,75 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_metadata_request_boundaries(root: &Path) -> Result<(), String> {
+    let contracts_path = root.join("crates/freehand-contracts/src/lib.rs");
+    let contracts = fs::read_to_string(&contracts_path)
+        .map_err(|err| format!("read contracts source {}: {err}", contracts_path.display()))?;
+    for block in extract_struct_blocks(&contracts) {
+        if !block.name.starts_with("ReasonReq") {
+            continue;
+        }
+        for field in parse_struct_fields(&block.body) {
+            if field.ty.contains("Metadata") || field.ty.contains("Debug") {
+                return Err(format!(
+                    "request-node `{}` introduces forbidden owner type `{}` via field `{}`",
+                    block.name, field.ty, field.name
+                ));
+            }
+            if is_forbidden_request_field_name(field.name) {
+                return Err(format!(
+                    "request-node `{}` introduces forbidden metadata/debug field `{}`",
+                    block.name, field.name
+                ));
+            }
+        }
+    }
+
+    let metadata_path = root.join("crates/freehand-metadata/src/lib.rs");
+    let metadata = fs::read_to_string(&metadata_path)
+        .map_err(|err| format!("read metadata source {}: {err}", metadata_path.display()))?;
+    for source_path in rust_source_paths(root)? {
+        if source_path == metadata_path {
+            continue;
+        }
+        let source = fs::read_to_string(&source_path)
+            .map_err(|err| format!("read source file {}: {err}", source_path.display()))?;
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("pub struct Metadata")
+                || trimmed.starts_with("pub enum Metadata")
+            {
+                return Err(format!(
+                    "metadata owner type must stay inside crates/freehand-metadata: {}",
+                    relative_slash_path(root, &source_path)?
+                ));
+            }
+        }
+    }
+
+    for block in extract_struct_blocks(&metadata) {
+        if !block.name.starts_with("Metadata") {
+            continue;
+        }
+        for field in parse_struct_fields(&block.body) {
+            if is_forbidden_metadata_field_name(field.name) {
+                return Err(format!(
+                    "metadata owner struct `{}` introduces forbidden request payload field `{}`",
+                    block.name, field.name
+                ));
+            }
+            if is_forbidden_metadata_field_type(field.ty) {
+                return Err(format!(
+                    "metadata owner struct `{}` introduces forbidden request payload type `{}` via field `{}`",
+                    block.name, field.ty, field.name
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn split_binding_segments(value: &str) -> Vec<String> {
     value
         .split(" / ")
@@ -856,6 +926,140 @@ fn symbol_resolves_in_files(
         }
     }
     Ok(false)
+}
+
+fn rust_source_paths(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut paths = Vec::new();
+    for rel in ["crates", "apps"] {
+        collect_rust_source_paths(&root.join(rel), &mut paths)?;
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+fn collect_rust_source_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), String> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir).map_err(|err| format!("read dir {}: {err}", dir.display()))? {
+        let entry = entry.map_err(|err| err.to_string())?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rust_source_paths(&path, paths)?;
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn extract_struct_blocks(source: &str) -> Vec<StructBlock<'_>> {
+    let mut blocks = Vec::new();
+    let mut lines = source.lines().enumerate().peekable();
+    while let Some((index, line)) = lines.next() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("pub struct ") || !trimmed.contains('{') {
+            continue;
+        }
+
+        let Some(after_prefix) = trimmed.strip_prefix("pub struct ") else {
+            continue;
+        };
+        let Some(name) = after_prefix
+            .split(|ch: char| ch == '{' || ch.is_whitespace())
+            .find(|part| !part.is_empty())
+        else {
+            continue;
+        };
+
+        let body_start = index + 1;
+        let mut body_end = body_start;
+        let mut depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
+        while depth > 0 {
+            let Some((next_index, next_line)) = lines.next() else {
+                break;
+            };
+            depth += next_line.matches('{').count() as i32;
+            depth -= next_line.matches('}').count() as i32;
+            body_end = next_index;
+        }
+        let body = source
+            .lines()
+            .skip(body_start)
+            .take(body_end.saturating_sub(body_start))
+            .collect::<Vec<_>>()
+            .join("\n");
+        blocks.push(StructBlock { name, body });
+    }
+    blocks
+}
+
+fn parse_struct_fields(body: &str) -> Vec<StructField<'_>> {
+    body.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim().trim_end_matches(',');
+            if trimmed.is_empty()
+                || trimmed.starts_with('#')
+                || trimmed.starts_with("//")
+                || !trimmed.contains(':')
+            {
+                return None;
+            }
+            let (name_part, ty_part) = trimmed.split_once(':')?;
+            let name = name_part
+                .trim()
+                .strip_prefix("pub ")
+                .unwrap_or(name_part.trim());
+            let ty = ty_part.trim();
+            if name.is_empty() || ty.is_empty() {
+                return None;
+            }
+            Some(StructField { name, ty })
+        })
+        .collect()
+}
+
+fn is_forbidden_request_field_name(name: &str) -> bool {
+    let normalized = name.trim().to_ascii_lowercase();
+    normalized.contains("metadata")
+        || normalized.contains("debug")
+        || matches!(
+            normalized.as_str(),
+            "cache_payload" | "cache_metadata" | "cache_debug"
+        )
+}
+
+fn is_forbidden_metadata_field_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "prompt"
+            | "prompt_text"
+            | "messages"
+            | "message"
+            | "message_text"
+            | "user_text"
+            | "context_segments"
+            | "input_segments"
+            | "tool_result"
+            | "content"
+            | "text"
+    )
+}
+
+fn is_forbidden_metadata_field_type(ty: &str) -> bool {
+    ty.contains("ReasonReq") || ty.contains("ContextSegment") || ty.contains("ToolResultContract")
+}
+
+struct StructBlock<'a> {
+    name: &'a str,
+    body: String,
+}
+
+struct StructField<'a> {
+    name: &'a str,
+    ty: &'a str,
 }
 
 fn symbol_lookup_candidates(symbol: &str) -> Vec<String> {
@@ -1224,6 +1428,67 @@ mod tests {
         assert!(err.contains(".github/workflows/ci.yml"), "{err}");
     }
 
+    #[test]
+    fn metadata_request_boundaries_accept_aligned_sources() {
+        let root = test_repo_root("metadata-boundary-aligned");
+        write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::Aligned);
+
+        verify_metadata_request_boundaries(&root).expect("aligned metadata/request boundary");
+    }
+
+    #[test]
+    fn metadata_request_boundaries_reject_request_metadata_type() {
+        let root = test_repo_root("metadata-boundary-request-type");
+        write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::RequestMetadataType);
+
+        let err = verify_metadata_request_boundaries(&root)
+            .expect_err("request metadata type leak must fail");
+        assert!(err.contains("ReasonReq01UserRawInput"), "{err}");
+        assert!(err.contains("MetadataEnvelope"), "{err}");
+    }
+
+    #[test]
+    fn metadata_request_boundaries_reject_request_debug_field_name() {
+        let root = test_repo_root("metadata-boundary-request-debug-field");
+        write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::RequestDebugFieldName);
+
+        let err = verify_metadata_request_boundaries(&root)
+            .expect_err("request debug field leak must fail");
+        assert!(err.contains("debug_payload"), "{err}");
+    }
+
+    #[test]
+    fn metadata_request_boundaries_reject_stray_metadata_owner_type() {
+        let root = test_repo_root("metadata-boundary-stray-owner");
+        write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::StrayMetadataOwnerType);
+
+        let err = verify_metadata_request_boundaries(&root)
+            .expect_err("stray metadata owner type must fail");
+        assert!(err.contains("freehand-runtime/src/lib.rs"), "{err}");
+    }
+
+    #[test]
+    fn metadata_request_boundaries_reject_metadata_prompt_field() {
+        let root = test_repo_root("metadata-boundary-metadata-prompt-field");
+        write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::MetadataPromptField);
+
+        let err =
+            verify_metadata_request_boundaries(&root).expect_err("metadata prompt field must fail");
+        assert!(err.contains("MetadataEnvelope"), "{err}");
+        assert!(err.contains("prompt_text"), "{err}");
+    }
+
+    #[test]
+    fn metadata_request_boundaries_reject_metadata_request_payload_type() {
+        let root = test_repo_root("metadata-boundary-metadata-request-type");
+        write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::MetadataRequestType);
+
+        let err = verify_metadata_request_boundaries(&root)
+            .expect_err("metadata request payload type must fail");
+        assert!(err.contains("MetadataEnvelope"), "{err}");
+        assert!(err.contains("ContextSegment"), "{err}");
+    }
+
     enum FixtureMode {
         Aligned,
         WrongFunctionMapPath,
@@ -1234,6 +1499,15 @@ mod tests {
         Aligned,
         MakeCiMissingMainlines,
         CiWorkflowPartialGate,
+    }
+
+    enum MetadataBoundaryFixtureMode {
+        Aligned,
+        RequestMetadataType,
+        RequestDebugFieldName,
+        StrayMetadataOwnerType,
+        MetadataPromptField,
+        MetadataRequestType,
     }
 
     fn test_repo_root(name: &str) -> PathBuf {
@@ -1359,5 +1633,81 @@ ci: build fmt clippy test gates\n"
         ] {
             fs::create_dir_all(root.join(rel)).expect("create fixture dir");
         }
+    }
+
+    fn write_metadata_boundary_fixture(root: &Path, mode: MetadataBoundaryFixtureMode) {
+        for rel in [
+            "crates/freehand-contracts/src",
+            "crates/freehand-metadata/src",
+            "crates/freehand-runtime/src",
+            "apps/freehand-server/src",
+            "xtask/src",
+        ] {
+            fs::create_dir_all(root.join(rel)).expect("create metadata boundary fixture dir");
+        }
+
+        let request_extra = match mode {
+            MetadataBoundaryFixtureMode::Aligned
+            | MetadataBoundaryFixtureMode::StrayMetadataOwnerType
+            | MetadataBoundaryFixtureMode::MetadataPromptField
+            | MetadataBoundaryFixtureMode::MetadataRequestType => String::new(),
+            MetadataBoundaryFixtureMode::RequestMetadataType => {
+                "    pub metadata: MetadataEnvelope,\n".to_owned()
+            }
+            MetadataBoundaryFixtureMode::RequestDebugFieldName => {
+                "    pub debug_payload: String,\n".to_owned()
+            }
+        };
+        fs::write(
+            root.join("crates/freehand-contracts/src/lib.rs"),
+            format!(
+                "pub struct ContextSegment {{\n    pub content: String,\n}}\n\n\
+pub struct ReasonReq01UserRawInput {{\n    pub session_id: String,\n    pub text: String,\n{request_extra}}}\n\n\
+pub struct ReasonReq02ContextComposedInput {{\n    pub user_text: String,\n    pub context_segments: Vec<ContextSegment>,\n}}\n"
+            ),
+        )
+        .expect("write contracts fixture");
+
+        let metadata_envelope_extra = match mode {
+            MetadataBoundaryFixtureMode::Aligned
+            | MetadataBoundaryFixtureMode::RequestMetadataType
+            | MetadataBoundaryFixtureMode::RequestDebugFieldName
+            | MetadataBoundaryFixtureMode::StrayMetadataOwnerType => String::new(),
+            MetadataBoundaryFixtureMode::MetadataPromptField => {
+                "    prompt_text: String,\n".to_owned()
+            }
+            MetadataBoundaryFixtureMode::MetadataRequestType => {
+                "    segments: Vec<ContextSegment>,\n".to_owned()
+            }
+        };
+        fs::write(
+            root.join("crates/freehand-metadata/src/lib.rs"),
+            format!(
+                "pub struct MetadataId(String);\n\n\
+pub struct MetadataEnvelope {{\n    entries: Vec<String>,\n{metadata_envelope_extra}}}\n\n\
+pub struct MetadataCenter {{\n    records: Vec<MetadataEnvelope>,\n}}\n"
+            ),
+        )
+        .expect("write metadata fixture");
+
+        let runtime_source = match mode {
+            MetadataBoundaryFixtureMode::StrayMetadataOwnerType => {
+                "pub struct MetadataLeak {\n    pub id: String,\n}\n"
+            }
+            _ => "pub struct RuntimeOk;\n",
+        };
+        fs::write(
+            root.join("crates/freehand-runtime/src/lib.rs"),
+            runtime_source,
+        )
+        .expect("write runtime fixture");
+
+        fs::write(
+            root.join("apps/freehand-server/src/lib.rs"),
+            "pub fn app() {}\n",
+        )
+        .expect("write app fixture");
+        fs::write(root.join("xtask/src/lib.rs"), "pub fn helper() {}\n")
+            .expect("write xtask fixture");
     }
 }
