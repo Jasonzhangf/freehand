@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 freehand-contracts = { path = "../freehand-contracts" }
+freehand-debug = { path = "../freehand-debug" }
 freehand-metadata = { path = "../freehand-metadata" }
 freehand-reason = { path = "../freehand-reason" }
 freehand-ui-protocol = { path = "../freehand-ui-protocol" }

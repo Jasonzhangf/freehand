@@ -13,7 +13,7 @@
 - Current verified head:
   - `make ci` -> passed after runtime shared node-metadata-ledger bootstrap-failure hardening
 - Current working slice:
-  - `runtime.ui-command-dispatch` now explicitly rejects unwritable shared node metadata ledgers during live bootstrap; next pending audit remains broader provider/debug metadata producers or node transport policy
+  - `node.master-slave` is now a real `debug.core` producer; next pending audit remains direct provider-adapter debug emitters or broader node transport policy
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -22,6 +22,9 @@
   - final latest-turn query preserved original user prompt in `turn.user_text` and `public_conversation[0].body`
   - final terminal text completed after `read_file` tool execution
 - Latest landed behavior:
+  - `node.master-slave` now emits shared debug snapshots for bootstrap, pairing acceptance/rejection, pairing loss, delegated progress, and slave-turn publication through `DebugHub`
+  - node debug snapshots exclude pair-token, user-turn, reasoning-text, answer-text, and terminal-text leakage
+  - node debug sink failures are observable through `DebugHub::subscribe_failures` and do not block node status/progress/turn truth mutation
   - `UiTurnProjection.user_text` feeds public conversation user cards
   - latest-turn subscribe waits on blank state; query remains snapshot-only
   - live runtime publishes prompt-first UI projection before provider output
@@ -90,6 +93,7 @@
   - provider raw ledgers remain debug-only and never participate in restore or session truth
   - if provider raw retention is enabled and the raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - Latest verification:
+  - `cargo test -p freehand-node`
   - `cargo run -p xtask -- mainlines generate`
   - `cargo test -p freehand-runtime`
   - `cargo run -p xtask -- mainlines check`

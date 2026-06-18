@@ -27,13 +27,14 @@
 - project black-box impact:
   - UI debug-state projection consumes `freehand-debug` snapshot truth instead of duplicating a DTO
   - runtime-owned `provider.reason-live-bridge` lifecycle boundaries now emit through the same debug snapshot truth as `reason.turn`
+  - `node.master-slave` lifecycle boundaries now emit through the same debug snapshot truth as `reason.turn`
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/ledgers`
   - `~/.freehand/replays`
   - `~/.freehand/logs`
 - known gaps:
   - no standardized runtime-owned debug ledger path contract yet
-  - node emitters and direct provider-adapter emitters are still not wired into `debug.core`
+  - direct provider-adapter emitters are still not wired into `debug.core`
 - sync status between design and implementation:
   - crate/test baseline is landed
   - runtime hub fanout, subscriber delivery, and sink dispatch are implemented and covered
@@ -41,4 +42,5 @@
   - file-sink append semantics, real file-io failure surfacing, and disabled-hub no-dispatch behavior are now explicitly covered in owner white-box tests
   - `reason.turn` emission smoke now covers one real producer without mutating turn truth, including sink-failure surfacing
   - `provider.reason-live-bridge` runtime tests now cover a second real producer for restore/request/tool/terminal lifecycle debug snapshots without prompt or tool-result leakage
+  - `node.master-slave` tests now cover a third real producer for bootstrap/pairing/slave-turn lifecycle debug snapshots without pair-token, user-text, reasoning-text, or terminal-text leakage
   - migrated mainline-call source and generated wiki are kept in sync with this test design

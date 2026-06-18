@@ -11,7 +11,7 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 ## Request Mainline
 
 - local master accepts user input or task delegation intent
-- node runtime may optionally receive one shared MetadataCenter before any state mutation
+- node runtime may optionally receive one shared MetadataCenter and/or one shared DebugHub before any state mutation
 - master may dispatch to the paired slave only after `LocalNodeRuntime::pair_slave`
 - slave accepts task, projection, or direct-message input only from the active paired source node
 - pairing loss reverts slave runtime back to listening state for later re-pairing
@@ -20,6 +20,7 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 
 - slave returns progress, status, direct conversation, or turn stream updates
 - accepted bootstrap, pairing, progress, and slave-turn publications may emit owner-tagged metadata before node truth mutates
+- bootstrap, pairing, pairing-loss, delegated-task, and slave-turn publication may emit read-only debug snapshots through `debug.core`
 - `UiProtocolState` stores node status, progress, and latest slave turn
 - master may subscribe to slave output while preserving node and source identity through protocol projections
 
@@ -27,6 +28,7 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 
 - pairing failure, health failure, or unauthorized input to slave return explicit node errors
 - metadata write failure returns explicit node errors and must not materialize rejected status, progress, or slave-turn truth
+- debug sink failure is observation-only through `DebugHub::subscribe_failures` and must not block node truth mutation
 - pairing rejection materializes node status as `rejected`
 - pairing loss materializes node status as `listening`
 - slave continues listening after pairing loss
@@ -51,6 +53,12 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
   - allowed callers: freehand-node, runtime live bootstrap, tests
   - related tests: node metadata ledger smoke
   - why shared: keeps node metadata admission in `metadata.core` instead of inventing node-local metadata stores
+- `DebugHub::emit`
+  - owner: `crates/freehand-debug/src/lib.rs`
+  - purpose: emit read-only node lifecycle snapshots through the shared debug owner without inventing a node-local observation bus
+  - allowed callers: freehand-node, tests
+  - related tests: node debug snapshot subscription smoke, debug sink failure observation-only tests
+  - why shared: keeps node lifecycle observation aligned with `debug.core` instead of duplicating debug contracts in the node owner
 - `UiProtocolState::apply_turn_projection`
   - owner: `crates/freehand-ui-protocol/src/lib.rs`
   - purpose: publish slave turn projections through the shared UI truth
@@ -76,7 +84,8 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 
 - function-map bindings now cover pairing, pairing loss, direct message, progress query, and slave turn publication on `LocalNodeRuntime`
 - metadata producer wiring is now bound on `LocalNodeRuntime::with_metadata_center` and proves owner/write-node provenance before node truth mutation
-- direct white-box locks now cover unauthorized pair source node, unauthorized pair source ip, empty delegated task status, pre-pair or intruder slave-turn publication, metadata write failure no-truth-materialization, and request-text-free metadata persistence
+- debug producer wiring is now bound on `LocalNodeRuntime::with_debug_hub` and `LocalNodeRuntime::with_debug_hub_and_metadata_center` and proves bootstrap, pairing rejection, and slave-turn snapshots exclude pair-token, user-turn, reasoning-text, and terminal-text leakage
+- direct white-box locks now cover unauthorized pair source node, unauthorized pair source ip, empty delegated task status, pre-pair or intruder slave-turn publication, metadata write failure no-truth-materialization, debug sink failure observation-only delivery, and request-text-free metadata persistence
 - node runtime still writes status, progress, and slave turn through `freehand-ui-protocol` instead of duplicate storage
 - real websocket IO adapter remains intentionally out of scope for this first runtime semantic layer
 - generated wiki must be regenerated from `docs/mainline-calls/node.master-slave.json` when this function-map truth changes

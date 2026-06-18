@@ -51,7 +51,7 @@ Generated from `docs/mainline-calls/debug.core.json`. Do not edit by hand.
   - owner: `crates/freehand-debug/src/lib.rs`
   - purpose: expose a dedicated observation-failure stream for sink-dispatch failures
   - allowed callers: reason/provider/node/testkit/UI protocol adapters
-  - related tests: sink failure surfacing tests, reason producer observation-failure smoke
+  - related tests: sink failure surfacing tests, reason producer observation-failure smoke, node producer observation-failure smoke
   - why shared: keeps observation failures separate from business error truth while remaining queryable
 
 ## Function Call Table
@@ -70,7 +70,8 @@ Generated from `docs/mainline-calls/debug.core.json`. Do not edit by hand.
 
 - debug core crate, reusable snapshot/envelope contracts, hub fanout, subscriber registration, and file/stdout sink classes are bound in code
 - dedicated observation-failure stream is bound in code through `DebugObservationFailure` and `DebugHub::subscribe_failures`
-- current landed emitters are `freehand-reason` lifecycle milestones plus runtime-owned `provider.reason-live-bridge` restore/request/tool/terminal boundaries; node producers and direct provider-adapter emitters remain future integration work
+- current landed emitters are `freehand-reason` lifecycle milestones, runtime-owned `provider.reason-live-bridge` restore/request/tool/terminal boundaries, and `node.master-slave` bootstrap/pairing/pairing-loss/delegated-task/slave-turn lifecycle boundaries; direct provider-adapter emitters remain future integration work
 - sink failures are explicit at `DebugHub::emit`, surface through the dedicated observation-failure stream, and current reason-side integration keeps them observation-only without promoting them into reason truth
+- node-side integration now also keeps debug sink failure observation-only: failure subscribers can observe node lifecycle sink failures while pairing/status/progress/turn truth still materializes through the node owner path
 - direct white-box locks now cover file-sink append semantics, real file-io failure surfacing, and disabled-hub no-dispatch behavior
 - generated wiki must be regenerated from `docs/mainline-calls/debug.core.json` when this function-map truth changes

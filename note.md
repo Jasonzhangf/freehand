@@ -258,6 +258,13 @@
   - verification: `cargo test -p freehand-tools -p freehand-blocks -p freehand-reason -p freehand-runtime`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `make ci`
 - 2026-06-18: runtime live bridge metadata producer slice
   - rooted from owner map: `metadata.core` owns envelope/ledger bootstrap truth; `provider.reason-live-bridge` owns runtime lifecycle producer writes
+- 2026-06-18: node debug producer slice
+  - rooted from owner map: `node.master-slave` owns node lifecycle emission sites; `debug.core` owns hub/sink observation semantics
+  - inherited dirty state already wired `freehand-node` to `freehand-debug`, but the crate did not compile and had no producer tests
+  - chosen fix: keep debug producer ownership inside `LocalNodeRuntime`, add owner white-box tests for bootstrap/pair-reject/slave-turn leakage boundaries plus sink-failure observation-only behavior, then sync function maps/testing/mainlines/wiki
+  - implementation status: `LocalNodeRuntime` now has `with_debug_hub` and `with_debug_hub_and_metadata_center`; debug emission covers bootstrap, pair accept/reject, pairing loss, delegated progress, and slave-turn publication
+  - verification: `cargo test -p freehand-node`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `make ci`
+  - workflow note: `xtask mainlines generate` and `xtask mainlines check` cannot be run in parallel; doing so raced generated wiki freshness and produced a false stale-wiki failure for `docs/wiki/debug.core.md`
   - chosen fix: runtime live bridge now bootstraps one shared metadata ledger under `~/.freehand/ledgers/metadata/<agent>/<session>.jsonl`, passes the same center into `reason.turn`, and writes runtime-owned restore/request/tool/terminal lifecycle records without request text or tool-result content
   - negative rule locked: metadata ledger bootstrap or write failure is explicit `RuntimeLiveBridgeError::MetadataFailed`; live bridge does not silently continue or degrade
   - white-box evidence: positive tests for single-shot runtime metadata persistence and tool-execution metadata, negative test for unwritable metadata ledger path

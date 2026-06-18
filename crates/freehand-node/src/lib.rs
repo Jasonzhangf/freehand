@@ -4,6 +4,10 @@ use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 
 use freehand_contracts::{AgentId, SessionId, TurnId};
+use freehand_debug::{
+    DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
+    DebugTraceEnvelope,
+};
 use freehand_metadata::{
     MetadataCenter, MetadataEntry, MetadataEnvelope, MetadataError, MetadataId, MetadataKind,
     MetadataSubject, MetadataWriteNode, MetadataWriteOwner,
@@ -109,7 +113,6 @@ pub enum NodeRuntimeError {
     MetadataWriteFailed(String),
 }
 
-#[derive(Debug)]
 pub struct LocalNodeRuntime {
     master: MasterNodeConfig,
     slave: SlaveNodeConfig,
@@ -117,12 +120,48 @@ pub struct LocalNodeRuntime {
     active_pair_source_node_id: Option<String>,
     ui_state: UiProtocolState,
     subscribers: Mutex<Vec<SyncSender<UiProjection>>>,
+    debug_hub: Option<std::sync::Arc<DebugHub>>,
     metadata_center: Option<std::sync::Arc<Mutex<MetadataCenter>>>,
+}
+
+impl std::fmt::Debug for LocalNodeRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalNodeRuntime")
+            .field("master", &self.master)
+            .field("slave", &self.slave)
+            .field("slave_pairing_state", &self.slave_pairing_state)
+            .field(
+                "active_pair_source_node_id",
+                &self.active_pair_source_node_id,
+            )
+            .field("ui_state", &self.ui_state)
+            .field(
+                "subscriber_count",
+                &self.subscribers.lock().map(|v| v.len()).ok(),
+            )
+            .field(
+                "debug_hub_enabled",
+                &self.debug_hub.as_ref().map(|hub| hub.is_enabled()),
+            )
+            .field(
+                "metadata_center_enabled",
+                &self.metadata_center.as_ref().map(|_| true).unwrap_or(false),
+            )
+            .finish()
+    }
 }
 
 impl LocalNodeRuntime {
     pub fn new(master: MasterNodeConfig, slave: SlaveNodeConfig) -> Result<Self, NodeRuntimeError> {
-        Self::new_inner(master, slave, None)
+        Self::new_inner(master, slave, None, None)
+    }
+
+    pub fn with_debug_hub(
+        master: MasterNodeConfig,
+        slave: SlaveNodeConfig,
+        debug_hub: std::sync::Arc<DebugHub>,
+    ) -> Result<Self, NodeRuntimeError> {
+        Self::new_inner(master, slave, None, Some(debug_hub))
     }
 
     pub fn with_metadata_center(
@@ -130,13 +169,23 @@ impl LocalNodeRuntime {
         slave: SlaveNodeConfig,
         metadata_center: std::sync::Arc<Mutex<MetadataCenter>>,
     ) -> Result<Self, NodeRuntimeError> {
-        Self::new_inner(master, slave, Some(metadata_center))
+        Self::new_inner(master, slave, Some(metadata_center), None)
+    }
+
+    pub fn with_debug_hub_and_metadata_center(
+        master: MasterNodeConfig,
+        slave: SlaveNodeConfig,
+        debug_hub: std::sync::Arc<DebugHub>,
+        metadata_center: std::sync::Arc<Mutex<MetadataCenter>>,
+    ) -> Result<Self, NodeRuntimeError> {
+        Self::new_inner(master, slave, Some(metadata_center), Some(debug_hub))
     }
 
     fn new_inner(
         master: MasterNodeConfig,
         slave: SlaveNodeConfig,
         metadata_center: Option<std::sync::Arc<Mutex<MetadataCenter>>>,
+        debug_hub: Option<std::sync::Arc<DebugHub>>,
     ) -> Result<Self, NodeRuntimeError> {
         if master.node_id.trim().is_empty() {
             return Err(NodeRuntimeError::EmptyMasterNodeId);
@@ -161,6 +210,7 @@ impl LocalNodeRuntime {
             active_pair_source_node_id: None,
             ui_state: UiProtocolState::default(),
             subscribers: Mutex::new(Vec::new()),
+            debug_hub,
             metadata_center,
         };
         let listening_snapshot = runtime.slave_status_snapshot(PairingState::Listening);
@@ -187,6 +237,21 @@ impl LocalNodeRuntime {
                 },
             ],
         })?;
+        runtime.emit_debug(NodeDebugEmitSpec {
+            session_id: runtime.synthetic_session_id(),
+            turn_id: runtime.synthetic_turn_id("bootstrap-listening"),
+            trace_id: runtime.synthetic_trace_id("bootstrap-listening"),
+            pipeline_node: "NodeReq01BootstrapListening",
+            function: "LocalNodeRuntime::new_inner",
+            status_text: "node runtime bootstrapped in listening state",
+            detail_lines: vec![
+                "pairing_state=listening".to_owned(),
+                format!(
+                    "allowed_pair_ip_present={}",
+                    runtime.slave.allowed_pair_ip.is_some()
+                ),
+            ],
+        });
         runtime.ui_state.set_node_status(listening_snapshot.clone());
         runtime.publish(UiProjection::NodeStatus(listening_snapshot));
         Ok(runtime)
@@ -265,6 +330,21 @@ impl LocalNodeRuntime {
                 },
             ],
         })?;
+        self.emit_debug(NodeDebugEmitSpec {
+            session_id: self.synthetic_session_id(),
+            turn_id: self.synthetic_turn_id("pair-accepted"),
+            trace_id: self.synthetic_trace_id("pair-accepted"),
+            pipeline_node: "NodeReq02PairingAccepted",
+            function: "LocalNodeRuntime::pair_slave",
+            status_text: "node pairing accepted",
+            detail_lines: vec![
+                format!("source_node_id={}", request.source_node_id),
+                format!(
+                    "allowed_pair_ip_filter={}",
+                    self.allowed_pair_ip_filter_state(&request)
+                ),
+            ],
+        });
         self.slave_pairing_state = PairingState::Paired;
         self.active_pair_source_node_id = Some(request.source_node_id);
         self.ui_state.set_node_status(snapshot.clone());
@@ -302,6 +382,18 @@ impl LocalNodeRuntime {
                 },
             ],
         })?;
+        self.emit_debug(NodeDebugEmitSpec {
+            session_id: self.synthetic_session_id(),
+            turn_id: self.synthetic_turn_id("pairing-lost"),
+            trace_id: self.synthetic_trace_id("pairing-lost"),
+            pipeline_node: "NodeResp03PairingLostListening",
+            function: "LocalNodeRuntime::lose_slave_pairing",
+            status_text: "node pairing lost and listening resumed",
+            detail_lines: vec![
+                "pairing_state=listening".to_owned(),
+                "relisten=true".to_owned(),
+            ],
+        });
         self.slave_pairing_state = PairingState::Listening;
         self.active_pair_source_node_id = None;
         self.ui_state.set_node_status(snapshot.clone());
@@ -318,21 +410,23 @@ impl LocalNodeRuntime {
         if task.status_text.trim().is_empty() {
             return Err(NodeRuntimeError::EmptyTaskStatus);
         }
+        let task_session_id = task.session_id.clone();
+        let task_turn_id = task.turn_id.clone();
 
         let snapshot = TaskProgressSnapshot {
             source: UiSource {
                 source_agent_id: self.slave.agent_id.clone(),
                 source_node_id: self.slave.node_id.clone(),
-                source_turn_id: Some(task.turn_id.clone()),
+                source_turn_id: Some(task_turn_id.clone()),
                 stream_kind: UiStreamKind::Progress,
             },
-            turn_id: task.turn_id.clone(),
+            turn_id: task_turn_id.clone(),
             status_text: task.status_text,
         };
         self.write_metadata(NodeMetadataWriteSpec {
             metadata_id: format!(
                 "{}:{}:delegated_task",
-                task.session_id.as_str(),
+                task_session_id.as_str(),
                 snapshot.turn_id.as_str()
             ),
             kind: MetadataKind::RuntimeState,
@@ -340,10 +434,10 @@ impl LocalNodeRuntime {
             symbol_path: "LocalNodeRuntime::delegate_task",
             trace_id: format!(
                 "node-task:{}:{}:delegated",
-                task.session_id.as_str(),
+                task_session_id.as_str(),
                 snapshot.turn_id.as_str()
             ),
-            session_id: Some(task.session_id),
+            session_id: Some(task_session_id.clone()),
             turn_id: Some(snapshot.turn_id.clone()),
             entries: vec![
                 MetadataEntry {
@@ -360,6 +454,23 @@ impl LocalNodeRuntime {
                 },
             ],
         })?;
+        self.emit_debug(NodeDebugEmitSpec {
+            session_id: task_session_id.clone(),
+            turn_id: snapshot.turn_id.clone(),
+            trace_id: freehand_contracts::TraceId::new(format!(
+                "node-task:{}:{}:progress",
+                task_session_id.as_str(),
+                snapshot.turn_id.as_str()
+            )),
+            pipeline_node: "NodeReq04DelegatedTaskAccepted",
+            function: "LocalNodeRuntime::delegate_task",
+            status_text: "delegated task progress updated",
+            detail_lines: vec![
+                format!("source_node_id={source_node_id}"),
+                "status_present=true".to_owned(),
+                "status_changed=true".to_owned(),
+            ],
+        });
         self.ui_state.set_progress(snapshot.clone());
         self.publish(UiProjection::Progress(snapshot.clone()));
         Ok(snapshot)
@@ -435,6 +546,26 @@ impl LocalNodeRuntime {
                 },
             ],
         })?;
+        self.emit_debug(NodeDebugEmitSpec {
+            session_id: projection.session_id.clone(),
+            turn_id: projection.turn_id.clone(),
+            trace_id: freehand_contracts::TraceId::new(format!(
+                "node-slave-turn:{}:{}:published",
+                projection.session_id.as_str(),
+                projection.turn_id.as_str()
+            )),
+            pipeline_node: "NodeResp05SlaveTurnPublished",
+            function: "LocalNodeRuntime::publish_slave_turn",
+            status_text: "slave turn projection published",
+            detail_lines: vec![
+                format!("source_node_id={source_node_id}"),
+                format!("tool_call_count={}", projection.tool_calls.len()),
+                format!(
+                    "terminal_status_present={}",
+                    projection.terminal_status.is_some()
+                ),
+            ],
+        });
         self.ui_state.apply_turn_projection(projection.clone());
         self.publish(UiProjection::Turn(projection));
         Ok(())
@@ -549,6 +680,18 @@ impl LocalNodeRuntime {
                 },
             ],
         })?;
+        self.emit_debug(NodeDebugEmitSpec {
+            session_id: self.synthetic_session_id(),
+            turn_id: self.synthetic_turn_id("pair-rejected"),
+            trace_id: self.synthetic_trace_id("pair-rejected"),
+            pipeline_node: "NodeErr02PairingRejected",
+            function: "LocalNodeRuntime::pair_slave",
+            status_text: "node pairing rejected",
+            detail_lines: vec![
+                format!("source_node_id={}", request.source_node_id),
+                format!("reject_reason={reason}"),
+            ],
+        });
         self.slave_pairing_state = PairingState::Rejected;
         self.active_pair_source_node_id = None;
         self.ui_state.set_node_status(snapshot.clone());
@@ -607,6 +750,58 @@ impl LocalNodeRuntime {
             .write(envelope)
             .map_err(|err: MetadataError| NodeRuntimeError::MetadataWriteFailed(err.to_string()))
     }
+
+    fn emit_debug(&self, spec: NodeDebugEmitSpec) {
+        let Some(hub) = &self.debug_hub else {
+            return;
+        };
+        let semantic = DebugSemanticPosition {
+            feature_id: freehand_contracts::FeatureId::new("node.master-slave"),
+            session_id: spec.session_id,
+            turn_id: spec.turn_id,
+            trace_id: spec.trace_id,
+            agent_id: Some(self.slave.agent_id.clone()),
+            pipeline_node: Some(spec.pipeline_node.to_owned()),
+        };
+        let scene = DebugScenePosition {
+            crate_name: "freehand-node".to_owned(),
+            file: "crates/freehand-node/src/lib.rs".to_owned(),
+            function: spec.function.to_owned(),
+            line: None,
+            artifact_path: None,
+            raw_exchange_id: None,
+        };
+        let snapshot = DebugStateSnapshot::new(
+            semantic.clone(),
+            scene.clone(),
+            spec.status_text,
+            spec.detail_lines,
+        );
+        let event = DebugEvent {
+            envelope: DebugTraceEnvelope {
+                semantic,
+                scene,
+                input_hash: None,
+                output_hash: None,
+                artifact_path: None,
+                timestamp: unix_timestamp_string(),
+            },
+            snapshot: Some(snapshot),
+        };
+        let _ = hub.emit(event);
+    }
+
+    fn synthetic_session_id(&self) -> SessionId {
+        SessionId::new(format!("node-session-{}", self.slave.node_id))
+    }
+
+    fn synthetic_turn_id(&self, suffix: &str) -> TurnId {
+        TurnId::new(format!("node-turn-{}-{suffix}", self.slave.node_id))
+    }
+
+    fn synthetic_trace_id(&self, suffix: &str) -> freehand_contracts::TraceId {
+        freehand_contracts::TraceId::new(format!("node-trace-{}-{suffix}", self.slave.node_id))
+    }
 }
 
 struct NodeMetadataWriteSpec<'a> {
@@ -620,6 +815,23 @@ struct NodeMetadataWriteSpec<'a> {
     entries: Vec<MetadataEntry>,
 }
 
+struct NodeDebugEmitSpec {
+    session_id: SessionId,
+    turn_id: TurnId,
+    trace_id: freehand_contracts::TraceId,
+    pipeline_node: &'static str,
+    function: &'static str,
+    status_text: &'static str,
+    detail_lines: Vec<String>,
+}
+
+fn unix_timestamp_string() -> String {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs().to_string(),
+        Err(_) => "0".to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +840,7 @@ mod tests {
         ReasonResp02UsageEvent, ReasonResp03TerminalEvent, RecoveryPolicy, SemanticEventKind,
         TerminalStatus, TokenUsage, TraceId,
     };
+    use freehand_debug::{DebugSink, DebugSinkError, DebugSinkKind};
     use freehand_ui_protocol::{TurnProjectionInput, turn_projection_from_events};
     use serde_json::{Value, json};
     use std::sync::{Arc, Mutex};
@@ -668,6 +881,37 @@ mod tests {
             center,
         )
         .expect("runtime")
+    }
+
+    fn sample_runtime_with_debug(hub: Arc<DebugHub>) -> LocalNodeRuntime {
+        LocalNodeRuntime::with_debug_hub(
+            MasterNodeConfig {
+                node_id: "master-node".to_owned(),
+                agent_id: AgentId::new("master-agent"),
+                paired_slave_node_id: "slave-node".to_owned(),
+            },
+            SlaveNodeConfig {
+                node_id: "slave-node".to_owned(),
+                agent_id: AgentId::new("slave-agent"),
+                paired_master_node_id: "master-node".to_owned(),
+                pair_token: "pair-secret".to_owned(),
+                allowed_pair_ip: Some("127.0.0.1".to_owned()),
+            },
+            hub,
+        )
+        .expect("runtime")
+    }
+
+    struct FailingDebugSink;
+
+    impl DebugSink for FailingDebugSink {
+        fn kind(&self) -> DebugSinkKind {
+            DebugSinkKind::ReplayCapture
+        }
+
+        fn handle(&self, _event: &DebugEvent) -> Result<(), DebugSinkError> {
+            Err(DebugSinkError::Io("node debug sink failed".to_owned()))
+        }
     }
 
     fn metadata_entry<'a>(entries: &'a [MetadataEntry], key: &str) -> &'a Value {
@@ -814,6 +1058,36 @@ mod tests {
     }
 
     #[test]
+    fn debug_bootstrap_emits_listening_snapshot_without_secret_leakage() {
+        let hub = Arc::new(DebugHub::new(true));
+        let receiver = hub.subscribe(1);
+
+        let _runtime = sample_runtime_with_debug(Arc::clone(&hub));
+
+        let event = receiver.recv().expect("bootstrap debug event");
+        assert_eq!(
+            event.envelope.semantic.feature_id,
+            FeatureId::new("node.master-slave")
+        );
+        assert_eq!(
+            event.envelope.semantic.pipeline_node.as_deref(),
+            Some("NodeReq01BootstrapListening")
+        );
+        assert_eq!(event.envelope.scene.function, "LocalNodeRuntime::new_inner");
+        assert_eq!(
+            event
+                .snapshot
+                .as_ref()
+                .expect("bootstrap snapshot")
+                .status_text,
+            "node runtime bootstrapped in listening state"
+        );
+        let serialized = serde_json::to_string(&event).expect("serialize debug event");
+        assert!(!serialized.contains("pair-secret"));
+        assert!(!serialized.contains("delegate to slave"));
+    }
+
+    #[test]
     fn performs_local_websocket_pairing_and_reports_status() {
         let mut runtime = sample_runtime();
         let snapshot = runtime.pair_slave(pair_request()).expect("pair");
@@ -861,6 +1135,46 @@ mod tests {
         );
         let serialized = serde_json::to_string(record).expect("serialize metadata");
         assert!(!serialized.contains("pair-secret"));
+    }
+
+    #[test]
+    fn pairing_rejection_debug_snapshot_excludes_presented_token_text() {
+        let hub = Arc::new(DebugHub::new(true));
+        let receiver = hub.subscribe(4);
+        let mut runtime = sample_runtime_with_debug(Arc::clone(&hub));
+        let _ = receiver.recv().expect("bootstrap event");
+
+        let attempted_token = "wrong-secret".to_owned();
+        let err = runtime
+            .pair_slave(PairingRequest {
+                presented_token: attempted_token.clone(),
+                ..pair_request()
+            })
+            .expect_err("must reject");
+
+        assert_eq!(err, NodeRuntimeError::PairTokenMismatch);
+        let event = receiver.recv().expect("pair rejection debug event");
+        assert_eq!(
+            event.envelope.semantic.pipeline_node.as_deref(),
+            Some("NodeErr02PairingRejected")
+        );
+        assert_eq!(
+            event.envelope.scene.function,
+            "LocalNodeRuntime::pair_slave"
+        );
+        assert_eq!(
+            event
+                .snapshot
+                .as_ref()
+                .expect("pair rejection snapshot")
+                .detail_lines,
+            vec![
+                "source_node_id=master-node".to_owned(),
+                "reject_reason=pair_token_mismatch".to_owned(),
+            ]
+        );
+        let serialized = serde_json::to_string(&event).expect("serialize debug event");
+        assert!(!serialized.contains(&attempted_token));
     }
 
     #[test]
@@ -966,6 +1280,65 @@ mod tests {
         );
         let serialized = serde_json::to_string(record).expect("serialize metadata");
         assert!(!serialized.contains(&status_text));
+    }
+
+    #[test]
+    fn debug_sink_failure_is_observable_without_blocking_node_truth() {
+        let hub = Arc::new(DebugHub::new(true));
+        let receiver = hub.subscribe(4);
+        let failure_receiver = hub.subscribe_failures(4);
+        hub.add_sink(FailingDebugSink);
+        let mut runtime = sample_runtime_with_debug(Arc::clone(&hub));
+
+        let bootstrap_event = receiver.recv().expect("bootstrap event");
+        let bootstrap_failure = failure_receiver.recv().expect("bootstrap failure");
+        assert_eq!(bootstrap_failure.sink_kind, DebugSinkKind::ReplayCapture);
+        assert_eq!(
+            bootstrap_failure
+                .event_envelope
+                .semantic
+                .pipeline_node
+                .as_deref(),
+            Some("NodeReq01BootstrapListening")
+        );
+        assert_eq!(
+            bootstrap_event.envelope.semantic.pipeline_node.as_deref(),
+            Some("NodeReq01BootstrapListening")
+        );
+        assert_eq!(
+            runtime
+                .query_node_status()
+                .expect("bootstrap status")
+                .pairing_state,
+            "listening"
+        );
+
+        let paired = runtime
+            .pair_slave(pair_request())
+            .expect("pair still succeeds");
+        assert_eq!(paired.pairing_state, "paired");
+        let pair_event = receiver.recv().expect("pair event");
+        let pair_failure = failure_receiver.recv().expect("pair failure");
+        assert_eq!(
+            pair_event.envelope.semantic.pipeline_node.as_deref(),
+            Some("NodeReq02PairingAccepted")
+        );
+        assert_eq!(
+            pair_failure
+                .event_envelope
+                .semantic
+                .pipeline_node
+                .as_deref(),
+            Some("NodeReq02PairingAccepted")
+        );
+        assert_eq!(pair_failure.message, "io failure: node debug sink failed");
+        assert_eq!(
+            runtime
+                .query_node_status()
+                .expect("paired status")
+                .pairing_state,
+            "paired"
+        );
     }
 
     #[test]
@@ -1077,6 +1450,43 @@ mod tests {
         );
         let serialized = serde_json::to_string(record).expect("serialize metadata");
         assert!(!serialized.contains("delegate to slave"));
+        assert!(!serialized.contains("final answer"));
+    }
+
+    #[test]
+    fn slave_turn_debug_snapshot_omits_user_and_terminal_text() {
+        let hub = Arc::new(DebugHub::new(true));
+        let receiver = hub.subscribe(8);
+        let mut runtime = sample_runtime_with_debug(Arc::clone(&hub));
+        let _ = receiver.recv().expect("bootstrap event");
+        runtime.pair_slave(pair_request()).expect("pair");
+        let _ = receiver.recv().expect("pair event");
+
+        runtime
+            .publish_slave_turn("master-node", sample_slave_turn())
+            .expect("publish turn");
+
+        let event = receiver.recv().expect("slave turn debug event");
+        assert_eq!(
+            event.envelope.semantic.pipeline_node.as_deref(),
+            Some("NodeResp05SlaveTurnPublished")
+        );
+        assert_eq!(
+            event
+                .snapshot
+                .as_ref()
+                .expect("slave turn snapshot")
+                .detail_lines,
+            vec![
+                "source_node_id=master-node".to_owned(),
+                "tool_call_count=1".to_owned(),
+                "terminal_status_present=true".to_owned(),
+            ]
+        );
+        let serialized = serde_json::to_string(&event).expect("serialize debug event");
+        assert!(!serialized.contains("delegate to slave"));
+        assert!(!serialized.contains("thinking"));
+        assert!(!serialized.contains("answer"));
         assert!(!serialized.contains("final answer"));
     }
 

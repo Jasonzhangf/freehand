@@ -5,7 +5,9 @@
 - owner module: `crates/freehand-node/src/lib.rs`
 - owner entry symbols:
   - `LocalNodeRuntime::new`
+  - `LocalNodeRuntime::with_debug_hub`
   - `LocalNodeRuntime::with_metadata_center`
+  - `LocalNodeRuntime::with_debug_hub_and_metadata_center`
   - `LocalNodeRuntime::pair_slave`
   - `LocalNodeRuntime::lose_slave_pairing`
   - `LocalNodeRuntime::delegate_task`
@@ -17,7 +19,7 @@
 ## Request Mainline
 
 - local master accepts user input or task delegation intent
-- node runtime may optionally receive one shared `MetadataCenter` before any state mutation
+- node runtime may optionally receive one shared `MetadataCenter` and/or one shared `DebugHub` before any state mutation
 - master may dispatch to the paired slave only after `LocalNodeRuntime::pair_slave`
 - slave accepts task/projection/message input only from the active paired source node
 - pairing loss reverts slave runtime back to listening state for later re-pairing
@@ -26,6 +28,7 @@
 
 - slave returns progress, status, direct conversation, or turn stream updates
 - accepted bootstrap, pairing, progress, and slave-turn publications may emit owner-tagged metadata before node truth mutates
+- bootstrap, pairing, pairing-loss, delegated-task, and slave-turn publication may emit read-only debug snapshots through `debug.core`
 - `UiProtocolState` stores node status, progress, and latest slave turn
 - master may subscribe to slave output while preserving node/source identity through `UiProjection`
 
@@ -33,6 +36,7 @@
 
 - pairing failure, health failure, or unauthorized input to slave return explicit node errors
 - metadata write failure returns explicit node errors and must not materialize rejected status, progress, or slave-turn truth
+- debug sink failure is observation-only through `DebugHub::subscribe_failures` and must not block node truth mutation
 - pairing rejection materializes node status as `rejected`
 - pairing loss materializes node status as `listening`
 - slave continues listening after pairing loss
@@ -47,6 +51,8 @@
   - reused so slave turn subscription and latest-turn query share one stored projection truth
 - `MetadataCenter::write`
   - reused so node runtime emits control/provenance metadata through the shared owner instead of inventing node-local metadata stores
+- `DebugHub::emit`
+  - reused so node runtime emits read-only lifecycle snapshots through the shared debug owner instead of inventing a node-local observation bus
 
 ## Function Call Table
 
@@ -66,6 +72,7 @@
 
 - function-map bindings now cover pairing, pairing loss, direct message, progress query, and slave turn publication on `LocalNodeRuntime`
 - metadata producer wiring is now bound on `LocalNodeRuntime::with_metadata_center` and proves owner/write-node provenance before node truth mutation
-- direct white-box locks now cover unauthorized pair source node, unauthorized pair source ip, empty delegated task status, pre-pair or intruder slave-turn publication, metadata write failure no-truth-materialization, and request-text-free metadata persistence
+- debug producer wiring is now bound on `LocalNodeRuntime::with_debug_hub` / `LocalNodeRuntime::with_debug_hub_and_metadata_center` and proves bootstrap, pairing rejection, and slave-turn snapshots exclude pair-token, user-turn, reasoning-text, and terminal-text leakage
+- direct white-box locks now cover unauthorized pair source node, unauthorized pair source ip, empty delegated task status, pre-pair or intruder slave-turn publication, metadata write failure no-truth-materialization, debug sink failure observation-only delivery, and request-text-free metadata persistence
 - real websocket IO adapter remains intentionally out of scope for this first runtime semantic layer
 - generated wiki must be regenerated from `docs/mainline-calls/node.master-slave.json` when this function-map truth changes

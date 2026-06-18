@@ -1111,7 +1111,7 @@ If a problem does not fit this table, update this routing index before making co
 ### `node.master-slave`
 
 - owner: `crates/freehand-node`
-- allowed_paths: `crates/freehand-node/**`, `crates/freehand-contracts/**`, `crates/freehand-metadata/**`, `crates/freehand-ui-protocol/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
+- allowed_paths: `crates/freehand-node/**`, `crates/freehand-contracts/**`, `crates/freehand-debug/**`, `crates/freehand-metadata/**`, `crates/freehand-ui-protocol/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
 - forbidden_paths: `crates/freehand-provider-*/**`, `apps/**` except wiring-only entrypoint glue
 - required_checks:
   - `cargo test -p freehand-node`
@@ -1123,6 +1123,8 @@ If a problem does not fit this table, update this routing index before making co
   - slave startup config permission tests
   - local websocket handshake tests
   - metadata producer owner and write-node provenance tests
+  - debug producer bootstrap/pairing/slave-turn emission tests
+  - debug sink failure observation-only tests
   - metadata write failure no-truth-materialization tests
   - pairing-loss relisten tests
   - slave turn subscription tests
@@ -1131,6 +1133,7 @@ If a problem does not fit this table, update this routing index before making co
   - node status snapshot smoke
   - slave progress query smoke
   - node metadata ledger smoke
+  - node debug snapshot subscription smoke
 - required_project_black_box_tests:
   - master-delegate/slave-progress smoke
   - master-subscribe-slave-turn smoke

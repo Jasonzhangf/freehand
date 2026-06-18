@@ -7,12 +7,15 @@
   - slave input permission locks to paired source
   - pairing loss returns slave to listening state
   - status and progress query remain available
+  - debug producer snapshots stay observation-only and request-text-free
 - white-box plan:
   - pairing state transitions, permission checks, handshake validation, relisten behavior
   - config bootstrap validation for master/slave ownership fields
   - direct-message permission validation
   - metadata bootstrap owner/write-node provenance validation
   - metadata emission for pairing, delegated task, and slave turn publication without request/body leakage
+  - debug emission for bootstrap, pairing rejection, and slave-turn publication without pair-token or turn-text leakage
+  - debug sink failure observable through `DebugHub::subscribe_failures` without blocking node truth mutation
   - metadata write failure before rejected status or other node-truth materialization
   - pairing rejection for unauthorized source node and unauthorized source ip
   - delegated-task empty-status rejection
@@ -21,6 +24,7 @@
   - status snapshot and progress query through node boundary
   - slave turn publication visible through subscription surface
   - shared metadata-center smoke through node boundary
+  - shared debug-hub snapshot smoke through node boundary
 - project black-box impact:
   - master can delegate work and subscribe to slave turn stream through runtime wiring
   - config-selected live runtime bootstrap shares one metadata ledger path with node bootstrap and pairing writes
@@ -35,5 +39,5 @@
   - transport heartbeat and reconnect timing policy not yet defined
 - sync status between design and implementation:
   - `LocalNodeRuntime` baseline implemented
-  - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, direct-message guardrails, metadata bootstrap/provenance, metadata leak prevention, metadata write failure no-truth-materialization, and explicit rejection for unauthorized source node/ip, empty task status, and unauthorized slave-turn publication
+  - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, direct-message guardrails, metadata bootstrap/provenance, metadata leak prevention, debug bootstrap/pairing/slave-turn leak prevention, debug sink failure observation-only delivery, metadata write failure no-truth-materialization, and explicit rejection for unauthorized source node/ip, empty task status, and unauthorized slave-turn publication
   - migrated mainline-call source and generated wiki are kept in sync with this test design
