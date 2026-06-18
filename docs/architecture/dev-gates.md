@@ -113,10 +113,11 @@ This prevents pre-push, CI, and release from silently drifting into partial gate
 
 ## Metadata/Request Isolation Gate
 
-`xtask gates check` validates one low-noise static boundary for metadata/request separation:
+`xtask gates check` validates one low-noise static boundary for data/control separation:
 
-- request-node contract structs must not introduce metadata/debug owner types or obvious metadata/debug/cache payload fields
+- request-node contract structs must not introduce metadata/debug/control owner types or obvious metadata/debug/cache/control payload fields
 - metadata owner types must stay inside `crates/freehand-metadata`
 - metadata owner structs must not introduce request payload fields such as prompt text, message arrays, or context payload content
+- metadata owner structs must not introduce control execution payloads such as routing policy, checkpoint payload, cancel token, retry policy, or gate decision
 
-This gate is intentionally narrow. It exists to fail obvious boundary regressions early without inventing fallback or runtime heuristics.
+This gate is intentionally narrow. It exists to fail obvious boundary regressions early without inventing fallback or runtime heuristics. Control state must stay in owner modules, ledgers, metadata, or debug channels; it must not be represented by ad hoc request/prompt/provider-payload rewrites.

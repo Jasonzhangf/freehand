@@ -15,7 +15,7 @@
   - `render_mainline_wiki`
   - `verify_generated_wiki`
   - `verify_ci_cd_gate_commands`
-  - `verify_metadata_request_boundaries`
+  - `verify_data_control_boundaries`
   - `verify_feature_map_unique_entries`
 
 ## Request Mainline
@@ -28,7 +28,7 @@
 - gate runner verifies feature-map seed entries stay unique per `feature_id`
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
-- gate runner verifies static metadata/request boundary rules on source-owned request and metadata types
+- gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 - generated wiki writer materializes `docs/wiki/*.md` and `docs/wiki/README.md` from the JSON truth
 
@@ -39,7 +39,7 @@
 - gate returns success when feature-map seed entries stay unique and owner routing has one seed entry per `feature_id`
 - gate returns success when migrated mainline call-table bindings resolve to source files and symbols
 - gate returns success when local and remote automation routes through the same full gate stack
-- gate returns success when request-node contracts remain free of metadata/debug types and metadata owner types remain free of request payload fields
+- gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
 - gate returns explicit failure with missing path or missing policy snippet
 - mainline generation returns fresh wiki artifacts derived from machine-readable source
 - mainline freshness check returns explicit failure when any generated wiki is stale against current JSON truth
@@ -51,8 +51,8 @@
 - missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure
 - duplicate feature-map seed entries for one `feature_id` surface as gate failure
 - missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
-- request-node structs that introduce metadata/debug/cache payload fields or types surface as gate failure
-- ad hoc metadata owner types outside `freehand-metadata` or metadata owner structs that introduce request payload fields surface as gate failure
+- request-node structs that introduce metadata/debug/cache/control payload fields or types surface as gate failure
+- ad hoc metadata owner types outside `freehand-metadata` or metadata owner structs that introduce request or control payload fields surface as gate failure
 - invalid JSON mainline source surfaces as generation/check failure
 - stale generated wiki surfaces as explicit freshness failure
 - no fallback path exists
@@ -80,11 +80,11 @@
 | 13 | `verify_mainline_manifest_links` | `xtask/src/main.rs` | validate migrated mainline manifest cross-links | JSON mainline truth plus feature/function/testing docs | pass/fail | `run_gates_check` | filesystem and mainline loader | bound |
 | 14 | `verify_mainline_call_table_bindings` | `xtask/src/main.rs` | validate migrated mainline call-table file and symbol bindings | JSON mainline truth plus source files | pass/fail | `run_gates_check` | filesystem and symbol resolver | bound |
 | 15 | `verify_ci_cd_gate_commands` | `xtask/src/main.rs` | validate local hook, Makefile, CI, and release full-gate command alignment | automation config files | pass/fail | `run_gates_check` | filesystem and policy snippets | bound |
-| 16 | `verify_metadata_request_boundaries` | `xtask/src/main.rs` | validate static metadata/request isolation rules on source-owned request and metadata types | Rust source files for contracts and metadata owners | pass/fail | `run_gates_check` | source scanners | bound |
+| 16 | `verify_data_control_boundaries` | `xtask/src/main.rs` | validate static data/control isolation rules on source-owned request and metadata types | Rust source files for contracts and metadata owners | pass/fail | `run_gates_check` | source scanners | bound |
 | 17 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that `docs/architecture/feature-map.md` keeps one seed entry per `feature_id` | feature-map markdown | pass/fail | `run_gates_check` | feature-map scanner | bound |
 
 ## Sync Status Against Code
 
 - workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code
-- current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static metadata/request boundary checks
+- current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static data/control boundary checks
 - generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes

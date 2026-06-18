@@ -72,7 +72,9 @@
 - Test ownership follows the same single-truth rule as runtime semantics.
 - `freehand-reason` must not depend on provider adapter crates.
 - Provider adapter crates must not depend on `freehand-reason`.
-- Metadata/debug/provider/cache fields and request-chain content fields must use separate types and separate builders.
+- Metadata/debug/provider/cache/control fields and request-chain content fields must use separate types and separate builders.
 - Metadata must not be embedded into request text unless an explicit context builder converted it into request data.
+- Control semantics must be extracted from data pipelines. Cancellation, retry, routing, checkpoint, gate, debug, and metadata control state must not be encoded by rewriting request payloads, provider payloads, prompt text, or context text.
+- If control state needs to become model-visible data, a single owning context builder must deliberately convert it into typed request data; ad hoc prompt/payload rewriting is forbidden.
 - subagent transcript truth stays outside parent prompt history; only typed final conclusion segments may be admitted into parent context.
 - authoritative persistence is `freehand-reason` truth only; UI sidecars and provider raw ledgers are rebuildable derivatives

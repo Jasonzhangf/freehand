@@ -29,7 +29,7 @@ Metadata is not request data.
 
 Metadata may carry:
 
-- control state
+- control/provenance facts
 - routing provenance
 - provider/model metadata
 - cache metadata
@@ -46,7 +46,10 @@ Metadata must not carry:
 - message arrays
 - context segment content
 - tool result content
+- control execution payloads such as cancel tokens, retry policies, checkpoint payloads, route policies, or gate decisions
 - any field that becomes a fallback source for request-chain content
+
+Control execution state belongs to its owner module and may be summarized into metadata only as owner/provenance facts. It must not be encoded by rewriting request payloads, provider payloads, prompt text, or context text.
 
 ## Required Provenance
 
@@ -109,6 +112,6 @@ Update this doc when:
 
 - metadata envelope fields change
 - writer owner or write-node provenance changes
-- metadata/request isolation policy changes
+- data/control isolation policy changes
 - runtime producer ownership or lifecycle write points change
 - metadata ledger persistence is implemented

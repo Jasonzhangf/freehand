@@ -99,6 +99,8 @@ Use this skill for any non-trivial work in this repo.
 - Internal control/provenance metadata lives in `crates/freehand-metadata`.
 - Every metadata write must carry writer owner and write-node provenance through `metadata.core`.
 - Metadata entries must not carry request text, prompt content, message arrays, provider request payloads, or context segment content.
+- Control semantics must be extracted from data pipelines and must not be encoded by rewriting request payloads, provider payloads, prompt text, or context text.
+- Cancellation, retry, routing, checkpoint, gate, debug, and metadata control state must stay in explicit owner modules/ledgers/metadata/debug channels, not in `ReasonReq*` request-node payload fields.
 - Shared pure semantic logic lives in `crates/freehand-blocks`.
 - Before adding any function, inspect existing blocks and owner crates first.
 - Do not add temporary helpers to `crates/freehand-reason` or `crates/freehand-node`.
@@ -172,8 +174,9 @@ Use this skill for any non-trivial work in this repo.
 - `reason.persistence` inside `freehand-reason` owns authoritative snapshot and reason-ledger persistence; UI sidecars and provider raw ledgers remain derived or debug-only.
 - Non-ordinary rewrite modes may enter planner only through explicit session-history gate methods for compaction, rollback, or resume rebuild.
 - `freehand-reason` and provider adapter crates must remain independent; neither side may depend on the other's implementation crate.
-- Metadata/debug/provider/cache fields and request-chain content fields must stay hard-isolated by type and builder ownership.
+- Metadata/debug/provider/cache/control fields and request-chain content fields must stay hard-isolated by type and builder ownership.
 - Metadata must not be smuggled into request text, and request content must not be recovered from metadata/debug fields.
+- Control state must not be smuggled into request text or provider payload text; if control state needs model-visible expression, a single owning context builder must deliberately convert it into typed request data.
 - Debug may observe metadata later, but debug is not the metadata write owner.
 - When wiring a module as a metadata producer, add tests proving writer owner, write-node provenance, request-content absence, and explicit failure behavior before the producer mutates its owned truth.
 - Restart recovery must use authoritative snapshots plus reason-ledger replay; UI sidecars and provider raw ledgers are never recovery truth.

@@ -17,7 +17,7 @@ This directory answers:
 - how error mainline runs
 - which shared functions are reused from multiple sites
 - how function calls bind back to code
-- where metadata and request data remain type-isolated when a mainline crosses modules
+- where data and control state remain type-isolated when a mainline crosses modules
 - where metadata writes route through `metadata.core` with writer owner and write-node provenance
 - where context segment admission is locked when a feature adds model-visible context
 - where the test orchestration document lives through the paired `test_design_doc`
@@ -53,7 +53,7 @@ Every feature function-map doc must contain:
 - shared multi-reference functions
 - function call table
 - sync status against code
-- metadata/request isolation notes when feature crosses module boundaries
+- data/control isolation notes when feature crosses module boundaries
 - metadata owner/write-node notes when feature writes internal control metadata
 - paired `test_design_doc` awareness through the feature map
 - for migrated features, the machine-readable mainline call source path
@@ -92,7 +92,7 @@ When code changes:
 - update request/response/error mainlines
 - update shared-function descriptions
 - update sync status
-- update metadata/request isolation notes for cross-module paths
+- update data/control isolation notes for cross-module paths
 - update metadata owner/write-node notes when metadata write behavior changes
 - if the feature is migrated, update the machine-readable mainline call source and regenerate wiki
 

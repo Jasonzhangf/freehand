@@ -206,7 +206,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_mainline_manifest_links(&root)?;
     verify_mainline_call_table_bindings(&root)?;
     verify_ci_cd_gate_commands(&root)?;
-    verify_metadata_request_boundaries(&root)?;
+    verify_data_control_boundaries(&root)?;
     verify_webui_app_boundary(&root)?;
     verify_runtime_daemon_boundary(&root)?;
     Ok(())
@@ -272,6 +272,7 @@ fn verify_skill_rules(root: &Path) -> Result<(), String> {
         "resolvable symbols",
         "crates/freehand-metadata",
         "writer owner and write-node provenance",
+        "Control semantics must be extracted from data pipelines",
         "Do not add temporary helpers to `crates/freehand-reason` or `crates/freehand-node`.",
         "module white-box tests",
         "module black-box tests",
@@ -314,6 +315,7 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
                 "freehand-blocks",
                 "Function map drives owner lookup and debug entry.",
                 "freehand-metadata",
+                "Control semantics must be extracted from data pipelines.",
             ],
         ),
         (
@@ -338,7 +340,7 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
                 "test_design_doc",
                 "function_map_doc",
                 "tool-facing features must not expose a new tool before the function map binds that tool surface and its execution path",
-                "metadata/request isolation notes",
+                "data/control isolation notes",
                 "metadata owner/write-node notes",
                 "request mainline description",
                 "function call table",
@@ -383,6 +385,8 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
                 "CI/CD Command Alignment Gate",
                 "make ci",
                 "cargo run -p xtask -- mainlines check",
+                "data/control separation",
+                "metadata/debug/control owner types",
             ],
         ),
         (
@@ -857,7 +861,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn verify_metadata_request_boundaries(root: &Path) -> Result<(), String> {
+fn verify_data_control_boundaries(root: &Path) -> Result<(), String> {
     let contracts_path = root.join("crates/freehand-contracts/src/lib.rs");
     let contracts = fs::read_to_string(&contracts_path)
         .map_err(|err| format!("read contracts source {}: {err}", contracts_path.display()))?;
@@ -866,15 +870,15 @@ fn verify_metadata_request_boundaries(root: &Path) -> Result<(), String> {
             continue;
         }
         for field in parse_struct_fields(&block.body) {
-            if field.ty.contains("Metadata") || field.ty.contains("Debug") {
+            if is_forbidden_request_field_type(field.ty) {
                 return Err(format!(
-                    "request-node `{}` introduces forbidden owner type `{}` via field `{}`",
+                    "request-node `{}` introduces forbidden control/metadata/debug type `{}` via field `{}`",
                     block.name, field.ty, field.name
                 ));
             }
             if is_forbidden_request_field_name(field.name) {
                 return Err(format!(
-                    "request-node `{}` introduces forbidden metadata/debug field `{}`",
+                    "request-node `{}` introduces forbidden control/metadata/debug field `{}`",
                     block.name, field.name
                 ));
             }
@@ -1052,10 +1056,43 @@ fn is_forbidden_request_field_name(name: &str) -> bool {
     let normalized = name.trim().to_ascii_lowercase();
     normalized.contains("metadata")
         || normalized.contains("debug")
+        || normalized.contains("control")
+        || normalized.contains("routing")
+        || normalized.contains("checkpoint")
+        || normalized.contains("cancel")
+        || normalized.contains("retry")
+        || normalized.contains("gate")
         || matches!(
             normalized.as_str(),
-            "cache_payload" | "cache_metadata" | "cache_debug"
+            "cache_payload"
+                | "cache_metadata"
+                | "cache_debug"
+                | "route_policy"
+                | "routing_policy"
+                | "rewrite_policy"
+                | "execution_policy"
+                | "control_policy"
+                | "control_envelope"
+                | "control_payload"
         )
+}
+
+fn is_forbidden_request_field_type(ty: &str) -> bool {
+    [
+        "Metadata",
+        "Debug",
+        "Control",
+        "Routing",
+        "Checkpoint",
+        "Cancellation",
+        "CancelToken",
+        "RetryPolicy",
+        "GateDecision",
+        "UiCommand",
+        "RuntimeCheckpoint",
+    ]
+    .iter()
+    .any(|forbidden| ty.contains(forbidden))
 }
 
 fn is_forbidden_metadata_field_name(name: &str) -> bool {
@@ -1072,11 +1109,26 @@ fn is_forbidden_metadata_field_name(name: &str) -> bool {
             | "tool_result"
             | "content"
             | "text"
+            | "control_payload"
+            | "control_envelope"
+            | "routing_policy"
+            | "route_policy"
+            | "checkpoint_payload"
+            | "cancel_token"
+            | "retry_policy"
+            | "gate_decision"
     )
 }
 
 fn is_forbidden_metadata_field_type(ty: &str) -> bool {
-    ty.contains("ReasonReq") || ty.contains("ContextSegment") || ty.contains("ToolResultContract")
+    ty.contains("ReasonReq")
+        || ty.contains("ContextSegment")
+        || ty.contains("ToolResultContract")
+        || ty.contains("Control")
+        || ty.contains("Routing")
+        || ty.contains("RuntimeCheckpoint")
+        || ty.contains("CancelToken")
+        || ty.contains("RetryPolicy")
 }
 
 struct StructBlock<'a> {
@@ -1479,7 +1531,7 @@ mod tests {
         let root = test_repo_root("metadata-boundary-aligned");
         write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::Aligned);
 
-        verify_metadata_request_boundaries(&root).expect("aligned metadata/request boundary");
+        verify_data_control_boundaries(&root).expect("aligned data/control boundary");
     }
 
     #[test]
@@ -1487,7 +1539,7 @@ mod tests {
         let root = test_repo_root("metadata-boundary-request-type");
         write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::RequestMetadataType);
 
-        let err = verify_metadata_request_boundaries(&root)
+        let err = verify_data_control_boundaries(&root)
             .expect_err("request metadata type leak must fail");
         assert!(err.contains("ReasonReq01UserRawInput"), "{err}");
         assert!(err.contains("MetadataEnvelope"), "{err}");
@@ -1498,9 +1550,22 @@ mod tests {
         let root = test_repo_root("metadata-boundary-request-debug-field");
         write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::RequestDebugFieldName);
 
-        let err = verify_metadata_request_boundaries(&root)
-            .expect_err("request debug field leak must fail");
+        let err =
+            verify_data_control_boundaries(&root).expect_err("request debug field leak must fail");
         assert!(err.contains("debug_payload"), "{err}");
+    }
+
+    #[test]
+    fn metadata_request_boundaries_reject_request_control_envelope_field() {
+        let root = test_repo_root("metadata-boundary-request-control-field");
+        write_metadata_boundary_fixture(
+            &root,
+            MetadataBoundaryFixtureMode::RequestControlEnvelopeField,
+        );
+
+        let err = verify_data_control_boundaries(&root)
+            .expect_err("request control field leak must fail");
+        assert!(err.contains("control_envelope"), "{err}");
     }
 
     #[test]
@@ -1508,8 +1573,8 @@ mod tests {
         let root = test_repo_root("metadata-boundary-stray-owner");
         write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::StrayMetadataOwnerType);
 
-        let err = verify_metadata_request_boundaries(&root)
-            .expect_err("stray metadata owner type must fail");
+        let err =
+            verify_data_control_boundaries(&root).expect_err("stray metadata owner type must fail");
         assert!(err.contains("freehand-runtime/src/lib.rs"), "{err}");
     }
 
@@ -1519,7 +1584,7 @@ mod tests {
         write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::MetadataPromptField);
 
         let err =
-            verify_metadata_request_boundaries(&root).expect_err("metadata prompt field must fail");
+            verify_data_control_boundaries(&root).expect_err("metadata prompt field must fail");
         assert!(err.contains("MetadataEnvelope"), "{err}");
         assert!(err.contains("prompt_text"), "{err}");
     }
@@ -1529,10 +1594,21 @@ mod tests {
         let root = test_repo_root("metadata-boundary-metadata-request-type");
         write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::MetadataRequestType);
 
-        let err = verify_metadata_request_boundaries(&root)
+        let err = verify_data_control_boundaries(&root)
             .expect_err("metadata request payload type must fail");
         assert!(err.contains("MetadataEnvelope"), "{err}");
         assert!(err.contains("ContextSegment"), "{err}");
+    }
+
+    #[test]
+    fn metadata_request_boundaries_reject_metadata_control_payload_type() {
+        let root = test_repo_root("metadata-boundary-metadata-control-type");
+        write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::MetadataControlType);
+
+        let err = verify_data_control_boundaries(&root)
+            .expect_err("metadata control payload type must fail");
+        assert!(err.contains("MetadataEnvelope"), "{err}");
+        assert!(err.contains("RuntimeCheckpoint"), "{err}");
     }
 
     enum FixtureMode {
@@ -1556,9 +1632,11 @@ mod tests {
         Aligned,
         RequestMetadataType,
         RequestDebugFieldName,
+        RequestControlEnvelopeField,
         StrayMetadataOwnerType,
         MetadataPromptField,
         MetadataRequestType,
+        MetadataControlType,
     }
 
     fn test_repo_root(name: &str) -> PathBuf {
@@ -1715,12 +1793,16 @@ ci: build fmt clippy test gates\n"
             MetadataBoundaryFixtureMode::Aligned
             | MetadataBoundaryFixtureMode::StrayMetadataOwnerType
             | MetadataBoundaryFixtureMode::MetadataPromptField
-            | MetadataBoundaryFixtureMode::MetadataRequestType => String::new(),
+            | MetadataBoundaryFixtureMode::MetadataRequestType
+            | MetadataBoundaryFixtureMode::MetadataControlType => String::new(),
             MetadataBoundaryFixtureMode::RequestMetadataType => {
                 "    pub metadata: MetadataEnvelope,\n".to_owned()
             }
             MetadataBoundaryFixtureMode::RequestDebugFieldName => {
                 "    pub debug_payload: String,\n".to_owned()
+            }
+            MetadataBoundaryFixtureMode::RequestControlEnvelopeField => {
+                "    pub control_envelope: String,\n".to_owned()
             }
         };
         fs::write(
@@ -1737,6 +1819,7 @@ pub struct ReasonReq02ContextComposedInput {{\n    pub user_text: String,\n    p
             MetadataBoundaryFixtureMode::Aligned
             | MetadataBoundaryFixtureMode::RequestMetadataType
             | MetadataBoundaryFixtureMode::RequestDebugFieldName
+            | MetadataBoundaryFixtureMode::RequestControlEnvelopeField
             | MetadataBoundaryFixtureMode::StrayMetadataOwnerType => String::new(),
             MetadataBoundaryFixtureMode::MetadataPromptField => {
                 "    prompt_text: String,\n".to_owned()
@@ -1744,11 +1827,15 @@ pub struct ReasonReq02ContextComposedInput {{\n    pub user_text: String,\n    p
             MetadataBoundaryFixtureMode::MetadataRequestType => {
                 "    segments: Vec<ContextSegment>,\n".to_owned()
             }
+            MetadataBoundaryFixtureMode::MetadataControlType => {
+                "    checkpoint: RuntimeCheckpoint,\n".to_owned()
+            }
         };
         fs::write(
             root.join("crates/freehand-metadata/src/lib.rs"),
             format!(
                 "pub struct MetadataId(String);\n\n\
+pub struct RuntimeCheckpoint {{\n    id: String,\n}}\n\n\
 pub struct MetadataEnvelope {{\n    entries: Vec<String>,\n{metadata_envelope_extra}}}\n\n\
 pub struct MetadataCenter {{\n    records: Vec<MetadataEnvelope>,\n}}\n"
             ),

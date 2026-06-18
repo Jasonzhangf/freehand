@@ -265,6 +265,14 @@
   - implementation status: `LocalNodeRuntime` now has `with_debug_hub` and `with_debug_hub_and_metadata_center`; debug emission covers bootstrap, pair accept/reject, pairing loss, delegated progress, and slave-turn publication
   - verification: `cargo test -p freehand-node`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `make ci`
   - workflow note: `xtask mainlines generate` and `xtask mainlines check` cannot be run in parallel; doing so raced generated wiki freshness and produced a false stale-wiki failure for `docs/wiki/debug.core.md`
+- 2026-06-18: control/data isolation gate slice
+  - owner route: `foundation.workspace`
+  - user requirement: control semantic must be extracted from the whole pipeline and must not mix with request/response data or force unnecessary payload/prompt rewrites
+  - read-only audit: existing `metadata/request` isolation rule and `verify_metadata_request_boundaries` gate covered metadata/debug/cache leakage, but did not explicitly cover broader control semantic names such as control envelope, routing, checkpoint, cancellation, retry, or gate/policy payload fields in request-node contracts
+  - planned closure: extend the existing xtask boundary gate instead of adding a second gate owner; update architecture docs, freehand-dev skill, function map, test design, mainline JSON, generated wiki, and memory in the same change
+  - implementation: renamed owner gate to `verify_data_control_boundaries`, added request-node forbidden control field/type scanning, added metadata-owner forbidden control execution payload scanning, and added positive/negative xtask tests for request `control_envelope` plus metadata `RuntimeCheckpoint` leakage
+  - doc sync: updated freehand-dev skill, workspace layout, dev gates, function map spec, function map README, metadata design, foundation function map/test design/mainline JSON, and generated wiki
+  - verification: `cargo fmt --all`; `cargo test -p xtask`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`
   - chosen fix: runtime live bridge now bootstraps one shared metadata ledger under `~/.freehand/ledgers/metadata/<agent>/<session>.jsonl`, passes the same center into `reason.turn`, and writes runtime-owned restore/request/tool/terminal lifecycle records without request text or tool-result content
   - negative rule locked: metadata ledger bootstrap or write failure is explicit `RuntimeLiveBridgeError::MetadataFailed`; live bridge does not silently continue or degrade
   - white-box evidence: positive tests for single-shot runtime metadata persistence and tool-execution metadata, negative test for unwritable metadata ledger path

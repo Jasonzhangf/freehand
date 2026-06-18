@@ -15,7 +15,7 @@
     "gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path",
     "gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols",
     "gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness",
-    "gate runner verifies static metadata/request boundary rules on source-owned request and metadata types",
+    "gate runner verifies static data/control boundary rules on source-owned request and metadata types",
     "mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`"
   ],
   "response_mainline": [
@@ -24,7 +24,7 @@
     "gate returns success when migrated mainline manifests are deterministically linked to their owner docs",
     "gate returns success when migrated mainline call-table bindings resolve to source files and source symbols",
     "gate returns success when local and remote automation routes through the same full gate stack",
-    "gate returns success when request-node contracts remain free of metadata/debug types and metadata owner types remain free of request payload fields",
+    "gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields",
     "gate returns explicit failure with missing path, missing policy snippet, or stale generated wiki",
     "mainline generation writes `docs/wiki/*.md` and `docs/wiki/README.md` from JSON truth",
     "mainline freshness check returns success only when current generated wiki matches current JSON source"
@@ -35,8 +35,8 @@
     "mismatched mainline manifest source path, function map path, test design path, generated wiki path, or feature-map link surfaces as gate failure",
     "missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure",
     "missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure",
-    "request-node structs that introduce metadata/debug/cache payload fields or types surface as gate failure",
-    "ad hoc metadata owner types outside `freehand-metadata` or metadata owner structs that introduce request payload fields surface as gate failure",
+    "request-node structs that introduce metadata/debug/cache/control payload fields or types surface as gate failure",
+    "ad hoc metadata owner types outside `freehand-metadata` or metadata owner structs that introduce request or control payload fields surface as gate failure",
     "invalid JSON mainline source surfaces as generation/check failure",
     "stale generated wiki surfaces as explicit freshness failure",
     "no fallback path exists"
@@ -210,9 +210,9 @@
     },
     {
       "step": "16",
-      "symbol_path": "verify_metadata_request_boundaries",
+      "symbol_path": "verify_data_control_boundaries",
       "file_path": "xtask/src/main.rs",
-      "responsibility": "validate static metadata/request isolation rules on source-owned request and metadata types",
+      "responsibility": "validate static data/control isolation rules on source-owned request and metadata types",
       "input_semantic": "Rust source files for contracts and metadata owners",
       "output_semantic": "pass/fail",
       "caller": "run_gates_check",
@@ -233,7 +233,7 @@
   ],
   "sync_status": [
     "workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code",
-    "current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static metadata/request boundary checks",
+    "current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static data/control boundary checks",
     "generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes"
   ]
 }
