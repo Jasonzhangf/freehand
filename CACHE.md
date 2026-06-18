@@ -9,11 +9,11 @@
   - `cargo run -p xtask -- gates check`
   - `make ci` -> passed (`build`, `fmt`, `clippy`, `test`, `mainlines`, `gates`)
 - Latest local full gate:
-  - `make ci` -> passed after node.metadata producer wiring and runtime shared-ledger bootstrap
+  - `make ci` -> passed after runtime shared node-metadata-ledger bootstrap-failure hardening
 - Current verified head:
-  - `make ci` -> passed after node.metadata producer wiring and runtime shared-ledger bootstrap
+  - `make ci` -> passed after runtime shared node-metadata-ledger bootstrap-failure hardening
 - Current working slice:
-  - `node.master-slave` metadata producer wiring and `runtime.ui-command-dispatch` shared-ledger bootstrap completed; next pending audit remains broader provider/debug metadata producers or node transport policy
+  - `runtime.ui-command-dispatch` now explicitly rejects unwritable shared node metadata ledgers during live bootstrap; next pending audit remains broader provider/debug metadata producers or node transport policy
 - Real provider daemon smoke passed on 2026-06-17:
   - started `target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:3419` with temp HOME and configured `minimonth`
   - blank `GET /ui/query/latest-active-turn` returned 404
@@ -53,6 +53,7 @@
   - `node.master-slave` now emits owner/write-node metadata for bootstrap, pairing, delegated progress, and slave-turn publication before node truth mutation
   - `node.master-slave` metadata write failures are explicit `NodeRuntimeError::MetadataWriteFailed(...)` errors and must not materialize rejected status, progress, or slave-turn truth
   - `runtime.ui-command-dispatch` live bootstrap now injects a shared metadata ledger path into `LocalNodeRuntime` and persists node bootstrap/pairing provenance under `~/.freehand/ledgers/metadata/<agent>/<session>.jsonl`
+  - `runtime.ui-command-dispatch` now has explicit negative coverage that an unwritable shared node metadata ledger fails live bootstrap as `NodeRuntimeInit(...)` before any dispatcher materializes
   - `foundation.workspace` now enforces a static metadata/request isolation gate in `xtask`: `ReasonReq*` request structs may not carry metadata/debug owner types or obvious metadata/debug fields, stray `Metadata*` owner types outside `crates/freehand-metadata` fail fast, and metadata owner structs may not introduce request-payload fields/types
 - Docs/mainline sync:
   - updated function maps, test designs, `docs/mainline-calls/**`, and regenerated `docs/wiki/**`
@@ -89,8 +90,8 @@
   - provider raw ledgers remain debug-only and never participate in restore or session truth
   - if provider raw retention is enabled and the raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - Latest verification:
-  - `cargo test -p freehand-node`
   - `cargo run -p xtask -- mainlines generate`
+  - `cargo test -p freehand-runtime`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
   - `make ci`

@@ -49,6 +49,7 @@
 - wrong slave target node returns explicit dispatch-port failures
 - missing config, invalid agent selection, paired-token mismatch, or slave-mode host selection return explicit bootstrap failures
 - invalid persisted recovery truth or node-metadata bootstrap failure returns explicit runtime bootstrap failure
+- unwritable shared node metadata ledgers fail bootstrap explicitly as `NodeRuntimeInit` and must not materialize a runtime dispatcher
 
 ## Shared Multi-Reference Functions
 
@@ -96,5 +97,6 @@
 - config-selected runtime bootstrap is now bound in code
 - config-selected runtime bootstrap uses explicit peer-topology config instead of synthetic paired node ids
 - config-selected live bootstrap now seeds a shared metadata ledger path into `node.master-slave` before the first command runs
+- unwritable shared node metadata ledgers are now regression-locked as explicit bootstrap failures
 - config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

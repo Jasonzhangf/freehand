@@ -22,6 +22,7 @@
   - runtime bootstrap coverage
   - config-selected bootstrap coverage
   - config-selected live shared node-metadata-ledger bootstrap coverage
+  - config-selected live shared node-metadata-ledger bootstrap failure coverage
   - persisted latest-turn restore coverage
   - next runtime turn ordinal restore coverage
   - submit/cancel reason dispatch coverage
@@ -59,6 +60,7 @@
   - runtime dispatch owner baseline is landed
   - config-selected bootstrap is landed and consumes explicit peer-topology config truth
   - config-selected live bootstrap now seeds node-owned metadata records into the shared metadata ledger before first command ingress
+  - config-selected live bootstrap now rejects unwritable shared node metadata ledgers explicitly before a dispatcher can materialize
   - provider-backed submit dispatch plus persisted restore/bootstrap is covered
   - live provider submit now streams incremental UI state updates through runtime-owned hooks
   - reason-backed cancel dispatch is covered

@@ -1024,6 +1024,7 @@ If a problem does not fit this table, update this routing index before making co
 - required_white_box_tests:
   - config-selected runtime bootstrap tests
   - shared metadata-ledger bootstrap tests
+  - shared metadata-ledger bootstrap failure tests
   - submit-input dispatch routing tests
   - cancel-turn dispatch tests
   - rewind-checkpoint dispatch tests

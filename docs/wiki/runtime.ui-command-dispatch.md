@@ -41,6 +41,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - missing checkpoint manifests return explicit dispatch target-not-found failures
 - wrong slave target node returns explicit dispatch-port failures
 - missing config, invalid agent selection, paired-token mismatch, or slave-mode host selection return explicit bootstrap failures
+- unwritable shared node metadata ledgers fail bootstrap explicitly as NodeRuntimeInit and must not materialize a runtime dispatcher
 - invalid persisted recovery truth or node-metadata bootstrap failure returns explicit runtime bootstrap failure
 - cancelled live turns return explicit cancelled dispatch failure to the original submitter and must not overwrite cancelled UI projection with later provider success
 - live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries
@@ -87,6 +88,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - config-selected runtime bootstrap is now bound in code
 - config-selected runtime bootstrap uses explicit peer-topology config instead of synthetic paired node ids
 - config-selected live bootstrap now seeds a shared metadata ledger path into `node.master-slave` before the first command runs
+- unwritable shared node metadata ledgers are now regression-locked as explicit bootstrap failures
 - config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
 - generated wiki must be regenerated from `docs/mainline-calls/runtime.ui-command-dispatch.json` when this function-map truth changes
 - live submit now releases the runtime mutex before provider IO so CancelTurn can enter concurrently

@@ -1024,3 +1024,28 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `make ci`
+- 2026-06-18: runtime shared node-metadata-ledger bootstrap-failure slice
+  - owner route: `runtime.ui-command-dispatch`
+  - audit target:
+    - live bootstrap now injects shared metadata ledger into `LocalNodeRuntime`
+    - positive smoke existed for successful shared-ledger bootstrap, but no negative lock proved bootstrap fails explicitly when that ledger path is unwritable
+    - this left a high-risk startup regression path only covered indirectly by code reading
+  - chosen closure:
+    - poison `metadata_ledger_path(runtime_home, agent-live, runtime-session-agent-live)` as a directory
+    - assert `RuntimeCommandDispatcher::from_selected_agent_with_live(...)` fails before materializing a dispatcher
+    - assert failure vocabulary stays `RuntimeCommandDispatcherError::NodeRuntimeInit(...)` with metadata ledger io evidence
+    - sync runtime owner docs and migrated mainline/wiki
+  - implementation:
+    - added `bootstrap_rejects_unwritable_node_metadata_ledger_explicitly`
+    - updated `docs/architecture/feature-map.md`
+    - updated `docs/function-maps/runtime.ui-command-dispatch.md`
+    - updated `docs/testing/runtime.ui-command-dispatch.md`
+    - updated `docs/mainline-calls/runtime.ui-command-dispatch.json`
+    - regenerated `docs/wiki/runtime.ui-command-dispatch.md`
+  - verification:
+    - `cargo fmt --all`
+    - `cargo test -p freehand-runtime`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`

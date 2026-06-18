@@ -4903,6 +4903,39 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
+    fn bootstrap_rejects_unwritable_node_metadata_ledger_explicitly() {
+        let runtime_home = temp_runtime_home();
+        let metadata_path = metadata_ledger_path(
+            &runtime_home,
+            &AgentId::new("agent-live"),
+            &SessionId::new("runtime-session-agent-live"),
+        );
+        fs::create_dir_all(&metadata_path).expect("poison metadata path as directory");
+
+        let err = match RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        ) {
+            Ok(_) => panic!("bootstrap must fail"),
+            Err(err) => err,
+        };
+
+        match err {
+            RuntimeCommandDispatcherError::NodeRuntimeInit(message) => {
+                assert!(message.contains("metadata write failed"));
+                assert!(message.contains("metadata ledger io failed"));
+            }
+            other => panic!("unexpected bootstrap error: {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(&runtime_home);
+    }
+
+    #[test]
     fn bootstrap_rejects_slave_mode_agent_for_ui_host() {
         let mut selected = selected_master_agent();
         selected.mode = AgentMode::Slave;
