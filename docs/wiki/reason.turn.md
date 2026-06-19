@@ -44,6 +44,7 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 - metadata/request boundary violations must be treated as architecture errors, not silently tolerated
 - metadata write failures are explicit `ReasonTurnError::MetadataWriteFailed` errors and must stop the affected mutation instead of being swallowed
 - UI/runtime cancellation is represented as TerminalStatus::Cancelled, not as a failed or successful terminal outcome
+- cancel_turn on an already-terminal turn returns the existing terminal without overwriting or broadcasting
 
 ## Shared Multi-Reference Functions
 
@@ -97,6 +98,8 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 
 ## Sync Status Against Mainline Call
 
+- cancel_turn now guards against overwriting a completed terminal and returns the existing terminal without broadcast
+- cancel_turn guard has paired negative test proving no overwrite on already-terminal turn
 - turn startup, provider-output materialization, completion parsing/validation, failed terminal writing, and session projection are bound in code
 - planner baseline is implemented and called from turn startup
 - turn startup now forwards optional tool-schema fingerprint input into planner diagnostics while keeping request content and tool registry ownership separate

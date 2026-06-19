@@ -94,7 +94,7 @@
 | 04 | `validate_completion_submission` | `crates/freehand-blocks/src/lib.rs` | validate completion schema | completion submission | completion decision or rejection | turn state writer | terminal validator | bound |
 | 05 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | accept or reject terminal outcome | candidate completion payload | terminal event or rejection | turn state writer | terminal validator | bound |
 | 06 | `ReasonTurnEngine::fail_turn` | `crates/freehand-reason/src/lib.rs` | write explicit failed terminal outcome after retry exhaustion | failure reason | failed terminal event | turn/live runtime | turn state writer | bound |
-| 06a | `ReasonTurnEngine::cancel_turn` | `crates/freehand-reason/src/lib.rs` | write explicit cancelled terminal outcome for user/runtime cancellation | cancellation reason | cancelled terminal event | runtime cancel dispatch | turn state writer | bound |
+| 06a | `ReasonTurnEngine::cancel_turn` | `crates/freehand-reason/src/lib.rs` | write explicit cancelled terminal outcome for user/runtime cancellation; returns existing terminal if turn already terminal, does not overwrite | cancellation reason | cancelled terminal event | runtime cancel dispatch | turn state writer | bound |
 | 07 | `ReasonTurnEngine::project_session` | `crates/freehand-reason/src/lib.rs` | project conversation view from turns | turn records | projected session view | UI/session consumers | projector | bound |
 | 08 | `ReasonTurnEngine::emit_debug` | `crates/freehand-reason/src/lib.rs` | emit observation-only debug event for turn lifecycle or provider-output milestones | turn truth + scene metadata + status/detail text | debug event fanout | reason orchestrator | `DebugHub::emit` | bound |
 

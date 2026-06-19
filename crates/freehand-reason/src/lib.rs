@@ -430,6 +430,12 @@ impl ReasonTurnEngine {
         turn: &mut TurnRecord,
         summary: impl Into<String>,
     ) -> ReasonResp03TerminalEvent {
+        if turn.terminal_event.is_some() {
+            return turn
+                .terminal_event
+                .clone()
+                .expect("terminal event already set");
+        }
         let event = ReasonResp03TerminalEvent {
             session_id: turn.request.session_id.clone(),
             turn_id: turn.request.turn_id.clone(),
@@ -881,7 +887,38 @@ mod tests {
             other => panic!("unexpected broadcast: {other:?}"),
         }
     }
+    #[test]
+    fn cancel_already_terminal_turn_does_not_overwrite_terminal() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let submission = CompletionSubmission {
+            claim: CompletionClaim::Complete,
+            completion_reason: Some("done".to_owned()),
+            evidence: Some("tests passed".to_owned()),
+            summary: Some("completed task".to_owned()),
+            learned: Some("keep schema strict".to_owned()),
+            next_step: None,
+            blocked_reason: None,
+        };
+        let terminal = engine
+            .submit_completion(&mut turn, &submission)
+            .expect("terminal");
+        assert_eq!(terminal.status, TerminalStatus::Success);
 
+        let second = engine.cancel_turn(&mut turn, "cancelled after terminal");
+        assert_eq!(second.status, TerminalStatus::Success);
+        assert_eq!(second.summary, terminal.summary);
+        assert!(
+            turn.terminal_event
+                .as_ref()
+                .expect("terminal")
+                .summary
+                .contains("completed task")
+        );
+    }
     #[test]
     fn slow_subscriber_does_not_block_main_path() {
         let engine = ReasonTurnEngine::new();

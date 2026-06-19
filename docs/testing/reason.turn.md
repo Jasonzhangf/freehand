@@ -11,6 +11,7 @@
   - tool result re-entry returns to the owning turn
   - completion schema controls terminal acceptance
   - cancellation writes an explicit cancelled terminal event rather than failed/success terminal truth
+  - cancel_turn on an already-terminal turn returns existing terminal without overwriting
   - completion schema is extracted from tagged JSON in model text
   - invalid completion schema feedback identifies exact invalid entries
   - invalid schema retry exhaustion writes failed terminal outcome
@@ -18,7 +19,7 @@
   - start-turn rewrite mode/version are sourced from session history truth
   - start-turn optional tool-schema fingerprint is forwarded into planner diagnostics without moving tool schema truth into reason owners
 - white-box plan:
-  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, cancelled terminal write, non-blocking subscriber behavior, ordinary-turn rewrite-state stability, tool-schema fingerprint forwarding, debug emission, metadata provenance writes, metadata write failure stop path
+  - turn projection, schema parse/validation, itemized rejection path, failed terminal write, cancelled terminal write, cancel_turn overwrite guard, non-blocking subscriber behavior, ordinary-turn rewrite-state stability, tool-schema fingerprint forwarding, debug emission, metadata provenance writes, metadata write failure stop path
 - module black-box plan:
   - reason turn boundary emits semantic stream and handles rejection/retry behavior
   - reason turn boundary emits debug observations through `debug.core`
@@ -45,6 +46,7 @@
   - provider usage can feed rewrite policy through shared prompt-token conversion
   - debug emission to `debug.core` is landed for start-turn, provider-output, completion, and fail-turn milestones
   - explicit cancelled terminal write and broadcast are landed through `ReasonTurnEngine::cancel_turn`
+  - cancel_turn guard prevents overwriting a completed terminal; negative test proves the guard
   - debug sink-dispatch failures are now observable through `debug.core` without mutating turn truth
   - `reason.turn` is the first metadata producer and has positive/negative metadata write coverage plus durable-ledger persistence coverage
 - mainline/wiki sync:
