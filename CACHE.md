@@ -113,3 +113,15 @@
 - Cleanup note:
   - daemon sessions started via non-tty tool sessions may keep stdin closed; avoid starting long-lived daemons without a deterministic shutdown future or known PID.
   - targeted cargo tests that rely on timestamp-based temp runtime helpers should be verified serially; parallel spot-checks can collide across separate cargo processes and create false persistence failures.
+
+## Architecture Completeness Audit (2026-06-21)
+
+- All 24 function-maps have matching mainline JSON and generated wiki
+- All 24 feature-map seed entries are present (no missing seeds)
+- `xtask mainlines check`: ok
+- `xtask gates check`: ok
+- `make ci`: EXIT 0 (321 tests)
+- No uncommitted changes after sync
+- Documented pending items (not sync failures):
+  - `metadata.core`: broader provider/debug producers wiring (pending)
+  - `tool.preview`: `delete_range` anchor semantics not locked in code (pending)
