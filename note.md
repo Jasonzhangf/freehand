@@ -1082,3 +1082,18 @@ Full gate stack is solid baseline; every truth change must sync function map + t
 - evidence: git log: 84d15da + 67ed410; make ci EXIT 0; 321 tests; xtask mainlines check ok; xtask gates check ok; CACHE.md updated with audit record
 
 架构本身已完整；wiki无需每次regenerate(内容未变时); mainlines generate在无变化时输出无diff是正常行为
+
+- 2026-06-23: multi-platform UI architecture design + Android v1 static mock
+  - wrote `docs/design/multi-platform-ui-architecture.md` locking one protocol truth, one adaptive design system, three-layer navigation (rail / conversation / inspector)
+  - locked v1: WebView wrapper for Android/iOS, no native shell
+  - extended `theme.css` to a token-based design system; mobile / tablet / desktop breakpoints
+  - TurnCard render contract: colored borders per role, tool call blocks with status colors, collapsible details
+  - new feature-map entry: `ui.platform-architecture`
+  - committed + pushed architecture doc + feature-map update
+  - wrote `apps/freehand-server/assets/mocks/android/mobile-mock.html` + `mobile-mock.css` as static design preview
+  - mock layout: top bar with two agent tiles (current + slaves overview) + collapsed slave strip + turn timeline + status banner + sticky input bar + bottom nav + right-slide drawer
+  - status semantics: idle / running / tool / error / done with pulse animation; tool call blocks with spinner; pill labels (running / success / error / blocked)
+  - real-time status is shown in banner only, not persisted to session (per user requirement)
+  - added `freehand-server` route `/mock/android` + `assets::asset_response` whitelist for mock HTML + mock CSS
+  - added test `android_mock_route_returns_design_preview` (passing)
+  - curl verification: `GET /mock/android` 200, `GET /assets/mocks/android/mobile-mock.css` 200

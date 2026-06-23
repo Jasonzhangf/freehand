@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Freehand Android Mock</title>
+  <link rel="stylesheet" href="/assets/theme.css" />
+  <link rel="stylesheet" href="/assets/mocks/android/mobile-mock.css" />
+</head>
+<body class="theme-dark">
+  <div class="mock-mobile">
+    <header class="topbar">
+      <button class="menu-btn" id="openDrawer" aria-label="open quick control menu">☰</button>
+
+      <div class="agent-tile active" title="当前 agent：freehand / running">
+        <div class="agent-avatar">FH</div>
+        <div class="agent-name">freehand</div>
+        <div class="agent-status"><span class="status-dot running"></span>running</div>
+      </div>
+
+      <div class="agent-tile" title="slave 概览：2 busy / 1 idle">
+        <div class="agent-avatar">SL</div>
+        <div class="agent-name">slaves</div>
+        <div class="agent-status"><span class="status-dot tool"></span>2 busy</div>
+      </div>
+    </header>
+
+    <div class="slave-strip" aria-label="collapsed slave agent strip">
+      <div class="slave-pill active"><span class="status-dot running"></span>writer-1</div>
+      <div class="slave-pill"><span class="status-dot idle"></span>search-2</div>
+      <div class="slave-pill"><span class="status-dot tool"></span>coder-3</div>
+      <div class="slave-pill"><span class="status-dot done"></span>review-4</div>
+    </div>
+
+    <main class="conv" aria-label="conversation timeline">
+      <div class="day-sep">今天 13:07</div>
+
+      <article class="turn user">
+        <div class="turn-meta">
+          <span class="role">user</span>
+          <span>master / main session</span>
+        </div>
+        <div class="turn-body">先切到 <code>writer-1</code>，看下它刚才的 edit 结果，然后继续执行。</div>
+      </article>
+
+      <article class="turn assistant">
+        <div class="turn-meta">
+          <span class="role">freehand</span>
+          <span>master · MiniMax-M3</span>
+          <span class="pill running">thinking</span>
+        </div>
+        <div class="turn-body">已切换到 <code>writer-1</code>。当前正在检查上一个 patch 的写入位置，并准备继续下一轮工具调用。</div>
+        <div class="tool run">
+          <div class="tool-head">
+            <span class="tool-icon search">S</span>
+            <span>read function map</span>
+          </div>
+          <div class="tool-body"><span class="tool-spinner"></span>docs/function-maps/tool.registry.md</div>
+        </div>
+      </article>
+
+      <article class="turn slave">
+        <div class="turn-meta">
+          <span class="role">writer-1</span>
+          <span>slave</span>
+          <span class="pill success">tool done</span>
+        </div>
+        <div class="turn-body">已完成编辑预览，等待 master 确认是否提交。</div>
+        <div class="tool ok">
+          <div class="tool-head">
+            <span class="tool-icon write">W</span>
+            <span>apply_patch preview</span>
+          </div>
+          <div class="tool-body">apps/freehand-server/assets/webui.js<br/>+132 -18</div>
+        </div>
+      </article>
+
+      <article class="turn assistant">
+        <div class="turn-meta">
+          <span class="role">freehand</span>
+          <span>master · MiniMax-M3</span>
+          <span class="pill blocked">waiting</span>
+        </div>
+        <div class="turn-body">检测到 <code>coder-3</code> 也在执行文件修改。为避免 owner 冲突，已暂停自动提交，等待你切换查看详细差异。</div>
+      </article>
+
+      <article class="turn slave">
+        <div class="turn-meta">
+          <span class="role">coder-3</span>
+          <span>slave</span>
+          <span class="pill error">failed</span>
+        </div>
+        <div class="turn-body">工具执行失败：目标文件 owner 不匹配，已拒绝继续写入。</div>
+        <div class="tool fail">
+          <div class="tool-head">
+            <span class="tool-icon shell">!</span>
+            <span>tool gate rejected</span>
+          </div>
+          <div class="tool-body">feature_id mismatch: ui.protocol expected, app.webui-smoke got</div>
+        </div>
+      </article>
+    </main>
+
+    <div class="status-banner tool">
+      <span class="status-dot tool"></span>
+      当前 agent 正在调用工具，状态仅做实时提示，不写入 session。
+    </div>
+
+    <div class="inputbar">
+      <textarea rows="1" placeholder="给当前 agent 发消息，或切换到指定 slave 查看细节…"></textarea>
+      <button class="send" aria-label="send">➤</button>
+    </div>
+
+    <nav class="bottomnav" aria-label="bottom navigation">
+      <button class="tab active" type="button">
+        <span>💬</span>
+        <span>Chat</span>
+      </button>
+      <button class="tab" type="button">
+        <span>🤖</span>
+        <span>Agents</span>
+      </button>
+      <button class="tab" type="button">
+        <span>⚙</span>
+        <span>Settings</span>
+      </button>
+    </nav>
+
+    <div class="scrim" id="scrim"></div>
+
+    <aside class="drawer" id="drawer" aria-label="quick control drawer">
+      <div class="drawer-head">
+        <div class="title">快速控制</div>
+        <button class="close" id="closeDrawer" aria-label="close drawer">×</button>
+      </div>
+
+      <section class="drawer-section">
+        <h3>Agent 切换</h3>
+        <div class="agent-row">
+          <div class="agent-avatar">FH</div>
+          <div class="name">freehand<div class="role">master</div></div>
+          <div class="badge master">active</div>
+        </div>
+        <div class="agent-row">
+          <div class="agent-avatar">W1</div>
+          <div class="name">writer-1<div class="role">slave · busy</div></div>
+          <div class="badge slave">switch</div>
+        </div>
+        <div class="agent-row">
+          <div class="agent-avatar">S2</div>
+          <div class="name">search-2<div class="role">slave · idle</div></div>
+          <div class="badge slave">switch</div>
+        </div>
+        <div class="agent-row">
+          <div class="agent-avatar">C3</div>
+          <div class="name">coder-3<div class="role">slave · failed</div></div>
+          <div class="badge slave">detail</div>
+        </div>
+      </section>
+
+      <section class="drawer-section">
+        <h3>Session 快切</h3>
+        <div class="session-row">
+          <div class="s-title">设计 Android 多平台 UI</div>
+          <div class="s-meta"><span>freehand</span><span>13:07</span><span>running</span></div>
+        </div>
+        <div class="session-row">
+          <div class="s-title">工具迁移检查</div>
+          <div class="s-meta"><span>writer-1</span><span>12:55</span><span>waiting</span></div>
+        </div>
+        <div class="session-row">
+          <div class="s-title">reasonix 差异对比</div>
+          <div class="s-meta"><span>search-2</span><span>12:38</span><span>done</span></div>
+        </div>
+      </section>
+
+      <section class="drawer-section">
+        <h3>快速操作</h3>
+        <div class="session-row">
+          <div class="s-title">查看当前 turn 详情</div>
+          <div class="s-meta"><span>不切换 session</span></div>
+        </div>
+        <div class="session-row">
+          <div class="s-title">暂停当前 agent</div>
+          <div class="s-meta"><span>只改实时状态，不写 session</span></div>
+        </div>
+        <div class="session-row">
+          <div class="s-title">订阅 slave 子流</div>
+          <div class="s-meta"><span>独立卡片展示</span></div>
+        </div>
+      </section>
+
+      <div class="drawer-actions">
+        <button class="primary" type="button">＋ 新建 Session</button>
+        <button type="button">⇄ 切换主 Agent</button>
+        <button type="button">◴ 查看最近失败</button>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const drawer = document.getElementById('drawer');
+    const scrim = document.getElementById('scrim');
+    const openDrawer = document.getElementById('openDrawer');
+    const closeDrawer = document.getElementById('closeDrawer');
+
+    function setDrawer(open) {
+      drawer.classList.toggle('open', open);
+      scrim.classList.toggle('open', open);
+      document.body.style.overflow = open ? 'hidden' : '';
+    }
+
+    openDrawer.addEventListener('click', () => setDrawer(true));
+    closeDrawer.addEventListener('click', () => setDrawer(false));
+    scrim.addEventListener('click', () => setDrawer(false));
+  </script>
+</body>
+</html>

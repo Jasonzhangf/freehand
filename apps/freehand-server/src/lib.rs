@@ -65,6 +65,7 @@ pub fn build_webui_router(
 ) -> Router {
     Router::new()
         .route("/", get(handle_root))
+        .route("/mock/android", get(handle_android_mock))
         .route("/assets/{*path}", get(handle_asset))
         .route("/health", get(handle_health))
         .route("/ui/command", post(handle_command_ingress))
@@ -120,6 +121,10 @@ pub fn seed_webui_protocol_state() -> UiProtocolState {
 
 async fn handle_root() -> Html<String> {
     Html(render_webui_smoke())
+}
+
+async fn handle_android_mock() -> Html<String> {
+    Html(include_str!("../assets/mocks/android/mobile-mock.html").to_owned())
 }
 
 async fn handle_asset(Path(path): Path<String>) -> Result<impl IntoResponse, StatusCode> {
@@ -555,6 +560,39 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/webui.js"));
         assert!(html.contains("data-turn-query=\"/ui/query/latest-active-turn\""));
+    }
+
+    #[tokio::test]
+    async fn android_mock_route_returns_design_preview() {
+        let server = TestServer::spawn().await;
+        let client = Client::builder().build().expect("client");
+
+        let page = client
+            .get(format!("{}/mock/android", server.base_url))
+            .send()
+            .await
+            .expect("mock page");
+        assert_eq!(page.status(), StatusCode::OK);
+        let body = page.text().await.expect("mock body");
+        assert!(body.contains("mock-mobile"));
+        assert!(body.contains("/assets/mocks/android/mobile-mock.css"));
+        assert!(body.contains("/assets/theme.css"));
+        assert!(body.contains("快速控制"));
+
+        let css = client
+            .get(format!(
+                "{}/assets/mocks/android/mobile-mock.css",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("mock css");
+        assert_eq!(css.status(), StatusCode::OK);
+        let css_body = css.text().await.expect("mock css body");
+        assert!(css_body.contains("mock-mobile"));
+        assert!(css_body.contains(".drawer.open"));
+
+        server.stop().await;
     }
 
     #[tokio::test]
