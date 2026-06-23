@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">Freehand</string>
     <string name="menu_open">打开快速控制菜单</string>
     <string name="drawer_close">关闭</string>
     <string name="drawer_title">快速控制</string>

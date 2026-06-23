@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+title>Freehand Mobile Shell</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<style>
+  :root { --bg: #0F172A; --bg-2: #111827; --line: #1F2937; --text: #E5E7EB; --muted: #94A3B8; --accent: #2563EB; --ok: #22C55E; --err: #EF4444; --tool: #F59E0B; --user: #2563EB; --assistant: #8B5CF6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", Arial, sans-serif; font-size: 14px; }
+  .empty { padding: 32px 16px; text-align: center; color: var(--muted); }
+  .turn { display: flex; flex-direction: column; margin: 8px 12px; padding: 10px 12px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--line); }
+  .turn.user { border-left: 4px solid var(--user); }
+  .turn.assistant { border-left: 4px solid var(--assistant); }
+  .turn.error { border-left: 4px solid var(--err); }
+  .turn.running { border-left: 4px solid var(--tool); }
+  .turn .role { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .turn .text { white-space: pre-wrap; word-break: break-word; }
+  .turn .status { margin-top: 6px; font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="timeline">
+  <div class="empty" id="empty">当前没有 turn 记录，发起一次输入后会在此显示。</div>
+</div>
+<script>
+(function () {
+  var timeline = document.getElementById('timeline');
+  var empty = document.getElementById('empty');
+  function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]; }); }
+  function renderTurns(snapshot) {
+    timeline.innerHTML = '';
+    if (!snapshot || !snapshot.turns || snapshot.turns.length === 0) {
+      timeline.appendChild(empty);
+      return;
+    }
+    for (var i = 0; i < snapshot.turns.length; i++) {
+      var t = snapshot.turns[i];
+      var role = t.role || (i % 2 === 0 ? 'user' : 'assistant');
+      var div = document.createElement('div');
+      div.className = 'turn ' + role + ' ' + (t.status || '');
+      div.innerHTML =
+        '<div class="role">' + escapeHtml(t.id || '') + ' · ' + escapeHtml(t.status || '') + '</div>' +
+        '<div class="text">' + escapeHtml(t.text || t.assistant || t.user || '') + '</div>';
+      timeline.appendChild(div);
+    }
+  }
+  window.__freehand = {
+    applySnapshot: function (snapshotJson) {
+      try {
+        var snapshot = JSON.parse(snapshotJson);
+        renderTurns(snapshot);
+      } catch (e) {
+        // ignore malformed snapshot
+      }
+    },
+  };
+})();
+</script>
+</body>
+</html>
