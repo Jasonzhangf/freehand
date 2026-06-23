@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_turn_card"
+    android:padding="@dimen/fh_space_md"
+    android:layout_marginBottom="@dimen/fh_space_sm">
+
+    <!-- 左侧 3dp 角色色条用 drawable 实现：外层包一个 FrameLayout 或用 background 层 -->
+    <!-- 这里用 background 的 inset 不可行，改用插入式 layer-list：此处使用 stroke 替代 -->
+    <!-- 为保持 3dp 角色色条，使用 9-patch 概念不可行，改为 setBackground 用 layer-list 动态构造 -->
+    <!-- 实际开发里，View 初始化时调用 setBackgroundResource(turnCardDrawableFor(role)) 切换 -->
+
+    <include layout="@layout/include_turn_card" />
+</LinearLayout>

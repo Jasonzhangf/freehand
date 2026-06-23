@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:parentTag="android.widget.LinearLayout">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- 工具图标 -->
+        <TextView
+            android:id="@+id/tool_icon"
+            android:layout_width="@dimen/fh_tool_icon"
+            android:layout_height="@dimen/fh_tool_icon"
+            android:gravity="center"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF" />
+
+        <TextView
+            android:id="@+id/tool_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/fh_space_sm"
+            android:textSize="@dimen/fh_text_sm"
+            android:textStyle="bold"
+            android:textColor="@color/fh_text_primary_light" />
+
+        <!-- 运行中时显示 spinner -->
+        <ProgressBar
+            android:id="@+id/tool_spinner"
+            android:layout_width="@dimen/fh_tool_spinner"
+            android:layout_height="@dimen/fh_tool_spinner"
+            android:visibility="gone"
+            android:indeterminate="true" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tool_body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/fh_space_xs"
+        android:fontFamily="monospace"
+        android:textSize="@dimen/fh_text_xs"
+        android:textColor="@color/fh_text_secondary_light" />
+</merge>

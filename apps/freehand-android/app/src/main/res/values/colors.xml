@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主色 -->
+    <color name="fh_accent">#2563EB</color>
+    <color name="fh_accent_dark">#1D4ED8</color>
+    <color name="fh_accent_alpha15">#262563EB</color>
+
+    <!-- 状态色 -->
+    <color name="fh_status_idle">#94A3B8</color>
+    <color name="fh_status_running">#2563EB</color>
+    <color name="fh_status_tool">#F59E0B</color>
+    <color name="fh_status_error">#EF4444</color>
+    <color name="fh_status_done">#22C55E</color>
+
+    <!-- 角色色（Turn 卡片左边框） -->
+    <color name="fh_role_user">#2563EB</color>
+    <color name="fh_role_assistant">#8B5CF6</color>
+    <color name="fh_role_slave">#06B6D4</color>
+
+    <!-- 工具色 -->
+    <color name="fh_tool_read">#3B82F6</color>
+    <color name="fh_tool_write">#8B5CF6</color>
+    <color name="fh_tool_shell">#F59E0B</color>
+    <color name="fh_tool_search">#06B6D4</color>
+
+    <!-- 浅色主题 -->
+    <color name="fh_bg_primary_light">#FAFAFA</color>
+    <color name="fh_bg_secondary_light">#F0F0F0</color>
+    <color name="fh_text_primary_light">#1A1A1A</color>
+    <color name="fh_text_secondary_light">#666666</color>
+    <color name="fh_line_light">#E5E5E5</color>
+
+    <!-- 深色主题 -->
+    <color name="fh_bg_primary_dark">#0F172A</color>
+    <color name="fh_bg_secondary_dark">#1E293B</color>
+    <color name="fh_text_primary_dark">#E2E8F0</color>
+    <color name="fh_text_secondary_dark">#94A3B8</color>
+    <color name="fh_line_dark">#334155</color>
+
+    <!-- 透明遮罩 -->
+    <color name="fh_scrim">#80000000</color>
+</resources>

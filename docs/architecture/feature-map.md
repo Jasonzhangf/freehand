@@ -61,6 +61,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | CLI live provider turn and completion loop smoke | `app.cli-live-turn` | `apps/freehand-cli` | `docs/function-maps/app.cli-live-turn.md` | `docs/testing/app.cli-live-turn.md` |
 | WebUI/protocol-only app boundary smoke | `app.webui-smoke` | `apps/freehand-server` | `docs/function-maps/app.webui-smoke.md` | `docs/testing/app.webui-smoke.md` |
 | runtime-backed HTTP/SSE UI daemon host | `app.runtime-daemon` | `apps/freehand-daemon` | `docs/function-maps/app.runtime-daemon.md` | `docs/testing/app.runtime-daemon.md` |
+| Android/protocol-only app boundary client | `app.android-client` | `apps/freehand-android` | `docs/function-maps/app.android-client.md` | `docs/testing/app.android-client.md` |
 
 If a problem does not fit this table, update this routing index before making code changes. Do not create a second owner by patching an adjacent module.
 
@@ -336,6 +337,51 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - runtime dispatch and UI projection stay closed-loop through one shared state handle
   - config-selected bootstrap remains one-process-one-agent and rejects slave-mode UI host startup explicitly
   - migrated mainline call source and generated wiki stay in sync with the function map
+### `app.android-client`
+
+- owner: `apps/freehand-android`
+- allowed_paths: `apps/freehand-android/**`, `apps/freehand-server/assets/mocks/android/**`, `docs/function-maps/app.android-client.md`, `docs/testing/app.android-client.md`, `docs/mainline-calls/app.android-client.json`, `docs/wiki/app.android-client.md`, `docs/design/multi-platform-ui-architecture.md`, `docs/design/android-client-v1-execution.md`
+- forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-runtime/**` except through `freehand-ui-protocol` projections
+- required_checks:
+  - `cargo test -p freehand-server --lib` (mock route smoke remains green)
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - manual: open `apps/freehand-server/assets/mocks/android/mobile-mock.html` via `file://` and verify render
+- required_white_box_tests:
+  - none (no Android Rust crate exists yet; rows are explicitly `binding pending` until app shell lands)
+- required_module_black_box_tests:
+  - self-contained `mobile-mock.html` opens via `file://` and renders the locked multi-platform layout
+  - `mobile-mock.html` remains inlined-CSS (no external `/assets/...` dependency) for design-review previews
+  - `mobile-mock.html` route at `/mock/android` returns HTTP 200 and contains `mock-mobile`
+  - reverse gate: Android client does not import `freehand-reason`, `freehand-provider-*`, `freehand-node`, `freehand-config`, or `freehand-runtime` as a direct dep (only via `freehand-ui-protocol` projection)
+  - reverse gate: Android client does not own session truth, debug ledger, provider payload, or turn-status truth (validated by doc + future code review)
+- required_project_black_box_tests:
+  - Android app boundary consumes `freehand-ui-protocol` projection truth without reason/provider imports
+  - Android mock render matches the locked multi-platform screen grammar
+- test_design_doc: `docs/testing/app.android-client.md`
+- function_map_doc: `docs/function-maps/app.android-client.md`
+- mainline_call_doc: `docs/mainline-calls/app.android-client.json` (binding pending — generated when Android app crate lands)
+- generated_wiki_doc: `docs/wiki/app.android-client.md` (binding pending — generated when Android app crate lands)
+- debug_artifacts:
+  - self-contained `mobile-mock.html` render screenshot
+  - `mobile-mock.html` HTTP route response body
+- runtime_paths:
+  - `~/.freehand/state/android` (future)
+  - `~/.freehand/replays/android` (future)
+- update_triggers:
+  - Android app crate is created
+  - Android client binds to a real protocol endpoint
+  - `ui.protocol` projection shape changes
+  - `mobile-mock.html` layout changes
+  - generated wiki freshness policy changes
+- lifecycle_checks:
+  - Android remains app/render boundary only
+  - Android consumes `freehand-ui-protocol` truth
+  - Android does not own reason / debug / session / provider / metadata truth
+  - Android local state stays limited to drawer, tab, scroll, draft, transient connection banner
+  - Android command ingress stays protocol-only and does not become a second dispatch port
+  - migrated mainline call source and generated wiki stay in sync with the function map
+
 
 ### `provider.semantic`
 

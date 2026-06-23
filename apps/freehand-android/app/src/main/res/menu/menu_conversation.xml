@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 占位：用于未来添加溢出操作，例如复制 / 暂停 / 中断 turn -->
+</menu>

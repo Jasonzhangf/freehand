@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 间距 -->
+    <dimen name="fh_space_xs">4dp</dimen>
+    <dimen name="fh_space_sm">8dp</dimen>
+    <dimen name="fh_space_md">12dp</dimen>
+    <dimen name="fh_space_lg">16dp</dimen>
+    <dimen name="fh_space_xl">24dp</dimen>
+
+    <!-- 圆角 -->
+    <dimen name="fh_radius_sm">4dp</dimen>
+    <dimen name="fh_radius_md">8dp</dimen>
+    <dimen name="fh_radius_lg">12dp</dimen>
+    <dimen name="fh_radius_pill">999dp</dimen>
+
+    <!-- 高度 -->
+    <dimen name="fh_topbar_height">56dp</dimen>
+    <dimen name="fh_slave_strip_height">36dp</dimen>
+    <dimen name="fh_inputbar_height">64dp</dimen>
+    <dimen name="fh_bottomnav_height">56dp</dimen>
+    <dimen name="fh_status_banner_height">32dp</dimen>
+
+    <!-- 状态点 -->
+    <dimen name="fh_status_dot">8dp</dimen>
+    <dimen name="fh_avatar_sm">28dp</dimen>
+    <dimen name="fh_avatar_md">32dp</dimen>
+    <dimen name="fh_avatar_lg">40dp</dimen>
+
+    <!-- 工具图标 -->
+    <dimen name="fh_tool_icon">18dp</dimen>
+    <dimen name="fh_tool_spinner">12dp</dimen>
+
+    <!-- 触摸目标 -->
+    <dimen name="fh_touch_min">44dp</dimen>
+
+    <!-- 文字 -->
+    <dimen name="fh_text_xs">11sp</dimen>
+    <dimen name="fh_text_sm">12sp</dimen>
+    <dimen name="fh_text_base">14sp</dimen>
+    <dimen name="fh_text_lg">15sp</dimen>
+    <dimen name="fh_text_xl">18sp</dimen>
+
+    <!-- 抽屉宽度 -->
+    <dimen name="fh_drawer_width">320dp</dimen>
+</resources>

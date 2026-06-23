@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="menu_open">打开快速控制菜单</string>
+    <string name="drawer_close">关闭</string>
+    <string name="drawer_title">快速控制</string>
+    <string name="section_agents">Agent 切换</string>
+    <string name="section_sessions">Session 快切</string>
+    <string name="section_quick_actions">快速操作</string>
+    <string name="action_new_session">＋ 新建 Session</string>
+    <string name="action_switch_main">⇄ 切换主 Agent</string>
+    <string name="action_view_failed">◴ 查看最近失败</string>
+    <string name="bottom_chat">Chat</string>
+    <string name="bottom_agents">Agents</string>
+    <string name="bottom_settings">Settings</string>
+    <string name="input_hint">给当前 agent 发消息，或切换到指定 slave 查看细节…</string>
+    <string name="input_send">发送</string>
+    <string name="status_banner">当前 agent 正在调用工具，状态仅做实时提示，不写入 session。</string>
+    <string name="agent_master_active">active</string>
+    <string name="agent_slave_switch">switch</string>
+    <string name="agent_slave_detail">detail</string>
+    <string name="session_meta_running">running</string>
+    <string name="session_meta_waiting">waiting</string>
+    <string name="session_meta_done">done</string>
+</resources>

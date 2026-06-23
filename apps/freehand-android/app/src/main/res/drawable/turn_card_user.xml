@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 左侧 3dp 角色色条 -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/fh_radius_md" />
+            <solid android:color="@color/fh_bg_secondary_light" />
+            <stroke android:width="1dp" android:color="@color/fh_line_light" />
+        </shape>
+    </item>
+    <item
+        android:left="0dp"
+        android:top="0dp"
+        android:right="0dp"
+        android:bottom="0dp">
+        <shape android:shape="rectangle">
+            <corners
+                android:topLeftRadius="@dimen/fh_radius_md"
+                android:bottomLeftRadius="@dimen/fh_radius_md" />
+            <solid android:color="@color/fh_role_user" />
+        </shape>
+    </item>
+    <item
+        android:left="3dp"
+        android:top="0dp"
+        android:right="0dp"
+        android:bottom="0dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/fh_radius_md" />
+            <solid android:color="@color/fh_bg_secondary_light" />
+            <stroke android:width="1dp" android:color="@color/fh_line_light" />
+        </shape>
+    </item>
+</layer-list>

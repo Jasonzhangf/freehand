@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:parentTag="android.widget.LinearLayout">
+
+    <!-- 顶部 meta：role + 来源 + 状态 pill -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/turn_role"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="@dimen/fh_text_sm"
+            android:textStyle="bold"
+            android:textColor="@color/fh_text_primary_light" />
+
+        <TextView
+            android:id="@+id/turn_source"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/fh_space_sm"
+            android:textSize="@dimen/fh_text_xs"
+            android:textColor="@color/fh_text_secondary_light" />
+
+        <TextView
+            android:id="@+id/turn_pill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_pill"
+            android:paddingHorizontal="@dimen/fh_space_sm"
+            android:paddingVertical="2dp"
+            android:textSize="@dimen/fh_text_xs"
+            android:textColor="@color/fh_text_secondary_light" />
+    </LinearLayout>
+
+    <!-- 正文 -->
+    <TextView
+        android:id="@+id/turn_body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/fh_space_xs"
+        android:textSize="@dimen/fh_text_base"
+        android:textColor="@color/fh_text_primary_light"
+        android:lineSpacingExtra="2dp" />
+
+    <!-- 工具调用块容器：动态添加 tool 块 -->
+    <LinearLayout
+        android:id="@+id/turn_tools"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/fh_space_xs"
+        android:orientation="vertical" />
+
+    <!-- 详情折叠：默认隐藏，展开后显示 debug/usage -->
+    <LinearLayout
+        android:id="@+id/turn_details"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/fh_space_xs"
+        android:visibility="gone"
+        android:orientation="vertical"
+        android:padding="@dimen/fh_space_sm"
+        android:background="@drawable/bg_tool_block">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Details"
+            android:textSize="@dimen/fh_text_xs"
+            android:textColor="@color/fh_text_secondary_light" />
+        <TextView
+            android:id="@+id/turn_details_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/fh_space_xs"
+            android:fontFamily="monospace"
+            android:textSize="@dimen/fh_text_xs"
+            android:textColor="@color/fh_text_secondary_light" />
+    </LinearLayout>
+</merge>
