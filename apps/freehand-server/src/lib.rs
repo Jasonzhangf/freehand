@@ -575,8 +575,9 @@ mod tests {
         assert_eq!(page.status(), StatusCode::OK);
         let body = page.text().await.expect("mock body");
         assert!(body.contains("mock-mobile"));
-        assert!(body.contains("/assets/mocks/android/mobile-mock.css"));
-        assert!(body.contains("/assets/theme.css"));
+        assert!(body.contains("<style>"));
+        assert!(body.contains(".mock-mobile"));
+        assert!(!body.contains("/assets/mocks/android/mobile-mock.css"));
         assert!(body.contains("快速控制"));
 
         let css = client
