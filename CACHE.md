@@ -125,3 +125,8 @@
 - Documented pending items (not sync failures):
   - `metadata.core`: broader provider/debug producers wiring (pending)
   - `tool.preview`: `delete_range` anchor semantics not locked in code (pending)
+- Architecture gap registry landed (2026-06-23):
+  - `docs/architecture/architecture-gaps.md` owns non-violation pending items
+  - `docs/architecture/feature-map.md` routes to gap registry
+  - 2 documented gaps: `tool.preview` delete_range (no preview/execute), `metadata.core` provider/debug producers (only reason/runtime/node wired)
+  - full gate still green: make ci EXIT 0, 321 tests, mainlines/gates check ok
