@@ -1174,3 +1174,35 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - local one-master one-slave scope remains explicit
   - pairing-loss and re-listen path remain explicit
   - migrated mainline call source and generated wiki stay in sync with the function map
+
+## `ui.platform-architecture`
+
+- feature_id: `ui.platform-architecture`
+- owner crate: `apps/freehand-server` (WebUI), `apps/freehand-android` (Android WebView shell)
+- owner: `docs/design/multi-platform-ui-architecture.md`
+- function_map_doc: `docs/design/multi-platform-ui-architecture.md` (embedded in Section 6-9)
+- test_design_doc: `docs/design/multi-platform-ui-architecture.md` (Section 11)
+- mainline_call_doc: (not yet migrated)
+- generated_wiki_doc: (not yet migrated)
+- debug_artifacts:
+  - responsive layout screenshots
+  - mobile viewport render evidence
+  - Android WebView render evidence
+- runtime_paths:
+  - `apps/freehand-server/assets/webui.css`
+  - `apps/freehand-server/assets/theme.css`
+  - `apps/freehand-server/assets/webui.js`
+  - `apps/freehand-android/app/` (future)
+- update_triggers:
+  - design token system changes
+  - responsive breakpoint changes
+  - navigation model changes
+  - TurnCard render contract changes
+  - Android WebView bridge API changes
+  - transport protocol changes
+- lifecycle_checks:
+  - design tokens extracted from hardcoded values
+  - TurnCard contract matches `ui.protocol` projection truth
+  - responsive breakpoints cover desktop/tablet/mobile
+  - Android WebView loads same WebUI assets
+  - JS Bridge does not duplicate protocol logic

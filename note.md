@@ -1073,3 +1073,12 @@
 - evidence: make ci EXIT:0 | cargo test 321 passed | xtask mainlines check ok | xtask gates check ok
 
 Full gate stack is solid baseline; every truth change must sync function map + test design + mainline JSON + wiki
+
+## 2026-06-21T00:49:32.021Z stopless learned
+
+- requestId: openai-responses-minimonth.key1-MiniMax-M2.7-20260621T084906173-379346-4388
+- sessionId: 019ec8e6-9975-7d63-bc73-db8708b21596
+- stopReason: 已完成并推送：note.md sync + 架构完整性审计记录。全部 gate 通过（make ci EXIT 0, 321 tests, mainlines check, gates check）。function-map/mainline/wiki 24组全部对齐，无同步缺陷。2个文档化待办项不影响完整性。
+- evidence: git log: 84d15da + 67ed410; make ci EXIT 0; 321 tests; xtask mainlines check ok; xtask gates check ok; CACHE.md updated with audit record
+
+架构本身已完整；wiki无需每次regenerate(内容未变时); mainlines generate在无变化时输出无diff是正常行为
