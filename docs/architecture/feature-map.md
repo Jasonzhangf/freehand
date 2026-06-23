@@ -64,6 +64,10 @@ Use this table before grep or implementation. Every bug or feature request must 
 
 If a problem does not fit this table, update this routing index before making code changes. Do not create a second owner by patching an adjacent module.
 
+## Architecture Gap Registry
+
+Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Each gap has explicit `feature_id`, owner, risk, and closure path. Gaps are not regressions; they document known-incomplete scope without gate violation.
+
 ## Seed Entries
 
 ### `foundation.workspace`
