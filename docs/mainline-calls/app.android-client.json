@@ -1,0 +1,261 @@
+{
+  "feature_id": "app.android-client",
+  "owner_crate": "apps/freehand-android",
+  "owner_module": "apps/freehand-android/app/src/main/java/com/freehand/android/",
+  "function_map_doc": "docs/function-maps/app.android-client.md",
+  "test_design_doc": "docs/testing/app.android-client.md",
+  "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+  "generated_wiki_doc": "docs/wiki/app.android-client.md",
+  "request_mainline": [
+    "user input enters via InputBarController -> CommandIngress::submit wraps SubmitUserInput UiCommand -> ProtocolClient::postCommand POSTs to /ui/command",
+    "cancel enters via MainActivity onKeyDown Escape -> CommandIngress::cancelLatest wraps CancelLatestActiveTurn -> ProtocolClient::postCommand POSTs to /ui/command",
+    "Android client never mutates session/reason/debug/metadata/provider truth"
+  ],
+  "response_mainline": [
+    "daemon SSE emits UiSubscriptionEvent with UiProjection::Turn -> SseEventStream receives Event -> TimelineProjector::apply updates state + latestRawTurnProjection",
+    "MainActivity::pushSnapshotToWebView calls window.__freehand.applySnapshot(json) on bridge.html",
+    "bridge.html JS renders public_conversation items as DOM turn cards"
+  ],
+  "error_mainline": [
+    "SSE onError -> projector.setConnectionState('error') + statusBanner.showPersistent",
+    "ProtocolClient::postCommand HTTP error -> CommandResponse(ok=false, code='http_NNN')",
+    "TimelineProjector::applyError marks turn as error state"
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "com.freehand.android.ui.MainActivity::onCreate",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "app shell entrypoint: load config, create controllers, start discovery",
+      "input_semantic": "activity intent",
+      "output_semantic": "app process",
+      "caller": "Android framework",
+      "callee": "ClientConfig::load, HostStore::load, controller ctors",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "com.freehand.android.data.ClientConfig::load",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/ClientConfig.kt",
+      "responsibility": "load bundled daemon config from assets/config/client.json with SharedPreferences overrides",
+      "input_semantic": "Android Context",
+      "output_semantic": "ClientConfig",
+      "caller": "MainActivity::onCreate",
+      "callee": "Gson asset parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "com.freehand.android.data.HostStore::load",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/HostStore.kt",
+      "responsibility": "load persisted host:port from SharedPreferences",
+      "input_semantic": "Android Context",
+      "output_semantic": "HostConfig",
+      "caller": "MainActivity::onCreate",
+      "callee": "SharedPreferences",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "com.freehand.android.data.ProtocolClient::getLatestTurn",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/ProtocolClient.kt",
+      "responsibility": "HTTP GET to ui/query/latest-active-turn",
+      "input_semantic": "no",
+      "output_semantic": "JsonObject?",
+      "caller": "Android app shell",
+      "callee": "HTTP GET HostConfig::latestTurnUrl",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "com.freehand.android.data.ProtocolClient::postCommand",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/ProtocolClient.kt",
+      "responsibility": "HTTP POST to ui/command with UiCommand external-tag JSON",
+      "input_semantic": "UiCommand JSON",
+      "output_semantic": "CommandResponse",
+      "caller": "CommandIngress",
+      "callee": "HTTP POST HostConfig::commandUrl",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "com.freehand.android.data.CommandIngress::submit",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt",
+      "responsibility": "wrap user text in SubmitUserInput UiCommand and dispatch",
+      "input_semantic": "user text",
+      "output_semantic": "CommandResponse",
+      "caller": "InputBarController",
+      "callee": "ProtocolClient::postCommand",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "com.freehand.android.data.CommandIngress::cancelLatest",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt",
+      "responsibility": "wrap CancelLatestActiveTurn UiCommand and dispatch",
+      "input_semantic": "no",
+      "output_semantic": "fire-and-forget",
+      "caller": "MainActivity::onKeyDown Escape",
+      "callee": "ProtocolClient::postCommand",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "com.freehand.android.data.SseEventStream::start",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/SseEventStream.kt",
+      "responsibility": "OkHttp SSE subscribe to ui/subscribe/turn/latest",
+      "input_semantic": "no",
+      "output_semantic": "Event stream",
+      "caller": "MainActivity::connectToDaemon",
+      "callee": "OkHttp EventSources.createFactory",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "com.freehand.android.data.SseEventStream::stop",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/SseEventStream.kt",
+      "responsibility": "cancel active SSE EventSource",
+      "input_semantic": "no",
+      "output_semantic": "no",
+      "caller": "MainActivity::onPause, connectToDaemon",
+      "callee": "OkHttp EventSource::cancel",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "com.freehand.android.data.TimelineProjector::apply",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt",
+      "responsibility": "apply SSE event to internal turn/slave state; update latestRawTurnProjection",
+      "input_semantic": "SseEventStream.Event",
+      "output_semantic": "updated projector state",
+      "caller": "SseEventStream onEvent callback",
+      "callee": "applyTurnEnvelope, applyNodeStatus, applyError, applyTerminal, applyProgress",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11",
+      "symbol_path": "com.freehand.android.data.TimelineProjector::snapshot",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt",
+      "responsibility": "emit full UI state map including latest_turn for native controllers",
+      "input_semantic": "no",
+      "output_semantic": "Map<String, Any?>",
+      "caller": "MainActivity::pushSnapshotToWebView",
+      "callee": "internal state",
+      "binding_status": "bound"
+    },
+    {
+      "step": "12",
+      "symbol_path": "com.freehand.android.data.TimelineProjector::latestTurnProjectionJson",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt",
+      "responsibility": "emit canonical UiPublicTurnProjection JSON for JS bridge",
+      "input_semantic": "no",
+      "output_semantic": "String?",
+      "caller": "MainActivity::pushSnapshotToWebView",
+      "callee": "latestRawTurnProjection",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "com.freehand.android.ui.MainActivity::pushSnapshotToWebView",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "call window.__freehand.applySnapshot(json) on WebView via evaluateJavascript",
+      "input_semantic": "projector snapshot",
+      "output_semantic": "JS bridge invocation",
+      "caller": "SSE event callback, onPageFinished",
+      "callee": "TimelineProjector::latestTurnProjectionJson",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "applySnapshot",
+      "file_path": "apps/freehand-android/app/src/main/assets/bridge.html",
+      "responsibility": "render UiPublicTurnProjection.public_conversation items as DOM turn cards",
+      "input_semantic": "JSON snapshot",
+      "output_semantic": "DOM cards",
+      "caller": "native evaluateJavascript",
+      "callee": "DOM API",
+      "binding_status": "bound"
+    },
+    {
+      "step": "15",
+      "symbol_path": "com.freehand.android.data.HostStore::save",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/HostStore.kt",
+      "responsibility": "persist host:port to SharedPreferences",
+      "input_semantic": "HostConfig",
+      "output_semantic": "no",
+      "caller": "DrawerController callback, selectPreferredHost",
+      "callee": "SharedPreferences",
+      "binding_status": "bound"
+    },
+    {
+      "step": "16",
+      "symbol_path": "com.freehand.android.ui.MainActivity::selectPreferredHost",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "override legacy localhost / 192.168.* / port 4040 saved values with bundled config",
+      "input_semantic": "saved + bundled HostConfig",
+      "output_semantic": "resolved HostConfig",
+      "caller": "discoverDaemon",
+      "callee": "HostStore::save, ClientConfig::saveOverride",
+      "binding_status": "bound"
+    },
+    {
+      "step": "17",
+      "symbol_path": "freehand_server::handle_android_mock",
+      "file_path": "apps/freehand-server/src/lib.rs",
+      "responsibility": "serve self-contained mobile-mock.html for design review",
+      "input_semantic": "HTTP GET /mock/android",
+      "output_semantic": "HTML body",
+      "caller": "design-review operator",
+      "callee": "embedded mock asset",
+      "binding_status": "bound"
+    }
+  ],
+  "shared_functions": [
+    {
+      "symbol": "handle_android_mock",
+      "owner": "apps/freehand-server/src/lib.rs",
+      "purpose": "serve self-contained mobile-mock.html for design review",
+      "allowed_callers": [
+        "design-review operator"
+      ],
+      "related_tests": [
+        "android_mock_route_returns_design_preview"
+      ],
+      "why_shared": "single preview route for all surfaces"
+    },
+    {
+      "symbol": "UiSubscriptionEvent SSE projection",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "daemon emits UiSubscriptionEvent with UiProjection::Turn for any subscribing UI consumer",
+      "allowed_callers": [
+        "Android SseEventStream",
+        "WebUI EventSource",
+        "any protocol-only UI consumer"
+      ],
+      "related_tests": [
+        "app.android-client TimelineProjectorTest"
+      ],
+      "why_shared": "Android and WebUI consume the same SSE event shape"
+    },
+    {
+      "symbol": "UiCommand enum",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "protocol-owned command ingress shape shared by all UI consumers",
+      "allowed_callers": [
+        "Android CommandIngress",
+        "WebUI webui.js",
+        "CLI"
+      ],
+      "related_tests": [
+        "CommandIngressProtocolTest"
+      ],
+      "why_shared": "prevents a second command shape from being invented per UI surface"
+    }
+  ],
+  "sync_status": [
+    "all 17 call table rows bound to real Kotlin symbols in apps/freehand-android/app/src/main/java/com/freehand/android/",
+    "unit tests exist for TimelineProjector (14 tests), HostConfig (5 tests), CommandIngress protocol (5 tests)",
+    "mainline JSON generated from function map",
+    "generated wiki must be regenerated from docs/mainline-calls/app.android-client.json when this function-map truth changes"
+  ]
+}

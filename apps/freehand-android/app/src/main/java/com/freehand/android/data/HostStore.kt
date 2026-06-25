@@ -24,7 +24,7 @@ class HostStore(context: Context) {
         private const val PREFS = "freehand_host"
         private const val KEY_HOST = "host"
         private const val KEY_PORT = "port"
-        const val DEFAULT_HOST = "127.0.0.1"
-        const val DEFAULT_PORT = 4040
+        const val DEFAULT_HOST = "100.66.1.82"
+        const val DEFAULT_PORT = 4041
     }
 }

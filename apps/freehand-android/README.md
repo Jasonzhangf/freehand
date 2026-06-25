@@ -47,7 +47,7 @@ open apps/freehand-server/assets/mocks/android/mobile-mock.html
 - `app/src/main/java/com/freehand/android/data/ProtocolClient.kt` — HTTP query + command POST against `freehand-ui-protocol`.
 - `app/src/main/java/com/freehand/android/data/CommandIngress.kt` — submit / cancel entry points with explicit success/failure callback.
 - `app/src/main/java/com/freehand/android/data/TimelineProjector.kt` — single source of UI-local state; only consumes `ui.protocol` events.
-- `app/src/main/assets/mobile-shell.html` — WebView rendering layer; receives projection snapshots via `window.__freehand.applySnapshot(json)`.
+- `app/src/main/assets/bridge.html` — WebView rendering layer; receives projection snapshots via `window.__freehand.applySnapshot(json)`.
 
 ## Reference
 
@@ -65,7 +65,7 @@ cd apps/freehand-android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The default host is `127.0.0.1:4040`; change it from the right-slide drawer at runtime (persisted across restarts).
+The bundled default host is `100.66.1.82:4041`; change it from the right-slide drawer at runtime (persisted across restarts).
 
 ## Hard Constraints (must not be violated)
 

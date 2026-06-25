@@ -15,8 +15,12 @@ class CommandIngress(
     fun submit(userText: String) {
         if (userText.isBlank()) return
         val payload = JsonObject().apply {
-            addProperty("type", "SubmitUserInput")
-            addProperty("text", userText)
+            add(
+                "SubmitUserInput",
+                JsonObject().apply {
+                    addProperty("text", userText)
+                },
+            )
         }
         executor.execute {
             try {
@@ -30,7 +34,7 @@ class CommandIngress(
 
     fun cancelLatest() {
         val payload = JsonObject().apply {
-            addProperty("type", "CancelLatestActiveTurn")
+            add("CancelLatestActiveTurn", JsonObject())
         }
         executor.execute {
             try {
