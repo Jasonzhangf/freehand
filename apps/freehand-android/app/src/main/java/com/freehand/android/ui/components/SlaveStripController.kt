@@ -29,7 +29,7 @@ class SlaveStripController(
         }
         strip = HorizontalScrollView(context).apply {
             addView(row)
-            visibility = GONE
+            visibility = View.GONE
         }
         root.addView(
             strip,

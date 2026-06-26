@@ -15,8 +15,8 @@ import com.freehand.android.data.HostConfig
 import com.freehand.android.data.HostStore
 
 /**
- * Right-slide drawer for quick control: switch host, switch session, run a quick action.
- * The drawer only mutates local UI state; it never touches session/reason/provider truth.
+ * Right-slide drawer for low-frequency connection settings only.
+ * No fake session switching, no demo actions, no reason/session mutation.
  */
 class DrawerController(
     context: Context,
@@ -55,22 +55,14 @@ class DrawerController(
         panel.addView(title)
         panel.addView(spacer(8))
 
-        panel.addView(sectionLabel(panel.context.getString(R.string.section_agents)))
+        panel.addView(sectionLabel(panel.context.getString(R.string.section_connection)))
         panel.addView(spacer(6))
-        panel.addView(actionButton(panel.context.getString(R.string.action_switch_main)) {
-            toggle()
+        panel.addView(TextView(panel.context).apply {
+            text = "profile: tailscale-main"
+            textSize = 12f
+            setTextColor(Color.parseColor("#94A3B8"))
         })
-        panel.addView(spacer(12))
-
-        panel.addView(sectionLabel(panel.context.getString(R.string.section_sessions)))
-        panel.addView(spacer(6))
-        panel.addView(actionButton(panel.context.getString(R.string.action_new_session)) {
-            toggle()
-        })
-        panel.addView(spacer(16))
-
-        panel.addView(sectionLabel("Host"))
-        panel.addView(spacer(6))
+        panel.addView(spacer(8))
         val hostInput = EditText(panel.context).apply {
             inputType = InputType.TYPE_CLASS_TEXT
             setText(initialHost.host)
@@ -87,7 +79,7 @@ class DrawerController(
         panel.addView(spacer(6))
         panel.addView(portInput)
         panel.addView(spacer(8))
-        panel.addView(actionButton("保存") {
+        panel.addView(actionButton(panel.context.getString(R.string.action_save_connection)) {
             val newHost = HostConfig(
                 host = hostInput.text.toString().ifBlank { HostStore.DEFAULT_HOST },
                 port = portInput.text.toString().toIntOrNull() ?: HostStore.DEFAULT_PORT,

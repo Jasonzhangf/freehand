@@ -29,11 +29,9 @@ Metadata is not request data.
 
 Metadata may carry:
 
-- control/provenance facts
 - routing provenance
 - provider/model metadata
 - cache metadata
-- debug artifact links
 - runtime state markers
 - trace/session/turn identity
 - writer owner and writer node identity
@@ -89,13 +87,15 @@ The key guard is not a semantic payload scanner. It is the first hard gate again
 
 ## Debug Relationship
 
-`debug.core` and `metadata.core` are separate:
+`debug.core` and `metadata.core` are separate and have no producer relationship:
 
 - debug owns observation envelopes, snapshots, hubs, and sinks
 - metadata owns internal control/provenance records
-- debug may later point to metadata ids or artifacts
+- debug sinks have their own JSONL append path; they are not metadata producers
 - metadata admission must not depend on debug sinks
-- debug records must not become metadata write truth unless explicitly converted by the metadata owner
+- debug records must not become metadata write truth
+
+`MetadataKind` no longer carries a `DebugLink` variant because the two systems stay physically separate instead of cross-referencing each other through the metadata center.
 
 ## Runtime Persistence Direction
 

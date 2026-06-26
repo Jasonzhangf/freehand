@@ -74,5 +74,5 @@ Generated from `docs/mainline-calls/metadata.core.json`. Do not edit by hand.
 - runtime live bridge producer integration is now wired through `freehand-runtime` and shares the same durable metadata ledger path with `reason.turn`
 - node runtime producer integration is now wired through `freehand-node` and shared live bootstrap wiring in `freehand-runtime`
 - direct white-box locks for missing metadata id, owner feature id/crate name/module path/symbol path, missing pipeline node, missing trace id, empty entry key, empty entries, and durable-ledger validation-failure paths are now landed in `metadata.core`
-- broader provider/debug producers remain pending
+- broader provider producers remain pending; freehand-debug is not a metadata producer and stays in its own sink path
 - generated wiki must be regenerated from `docs/mainline-calls/metadata.core.json` when this function-map truth changes

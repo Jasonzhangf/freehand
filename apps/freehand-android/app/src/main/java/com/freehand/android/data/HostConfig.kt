@@ -6,7 +6,7 @@ data class HostConfig(
 ) {
     val baseUrl: String get() = "http://$host:$port"
     val commandUrl: String get() = "$baseUrl/ui/command"
-    val latestTurnUrl: String get() = "$baseUrl/ui/query/turn/latest"
+    val latestTurnUrl: String get() = "$baseUrl/ui/query/latest-active-turn"
     val latestTurnSseUrl: String get() = "$baseUrl/ui/subscribe/turn/latest"
     val debugSnapshotUrl: String get() = "$baseUrl/ui/query/debug/latest"
     val debugSnapshotSseUrl: String get() = "$baseUrl/ui/subscribe/debug/latest"

@@ -35,12 +35,12 @@
   - `reason.turn` producer tests cover both in-memory admission and durable-ledger persistence
   - `provider.reason-live-bridge` producer tests cover runtime-owned lifecycle metadata admission into the same durable ledger without request-text leakage
   - `node.master-slave` producer tests cover node-owned bootstrap/pair/progress/turn metadata admission into the shared ledger without request/body leakage
-  - broader provider/debug producers are not claimed in this slice
+  - broader provider producers are not claimed in this slice; `freehand-debug` is not a metadata producer
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/ledgers/metadata`
   - `~/.freehand/replays/metadata`
 - known gaps:
-  - provider adapter crates and debug emitters are not yet wired to the metadata center
+  - provider adapter crates are not yet wired to the metadata center; `freehand-debug` keeps an independent sink/failure stream and is not a metadata producer
 - sync status between design and implementation:
   - crate/test baseline is landed
   - metadata center validation, in-memory write/query behavior, and durable ledger behavior are implemented and covered together

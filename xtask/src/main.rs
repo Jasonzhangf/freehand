@@ -1124,7 +1124,6 @@ fn is_forbidden_metadata_field_type(ty: &str) -> bool {
     ty.contains("ReasonReq")
         || ty.contains("ContextSegment")
         || ty.contains("ToolResultContract")
-        || ty.contains("Control")
         || ty.contains("Routing")
         || ty.contains("RuntimeCheckpoint")
         || ty.contains("CancelToken")

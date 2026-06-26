@@ -33,7 +33,6 @@ android {
 
     kotlinOptions { jvmTarget = "17" }
 
-    buildFeatures { webView = true }
 }
 
 dependencies {
@@ -45,6 +44,7 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     testImplementation("junit:junit:4.13.2")

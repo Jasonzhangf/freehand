@@ -1,1099 +1,192 @@
-# note
+# note.md
 
-- 2026-06-15: initial scaffold task
-  - create workspace skeleton
-  - lock project AGENTS
-  - add local freehand-dev skill
-  - add architecture entry docs
-- 2026-06-15: user locked extra architecture rule
-  - write new functions only after checking existing function libraries
-  - no temporary helper functions in orchestrator crates
-  - blocks own helper/semantic logic; orchestrators stay pure
-- 2026-06-15: user locked workflow truth
-  - runtime home `~/.freehand`
-  - dev/debug path starts from function map and owner
-  - if feature truth changes, update docs + skill + memory in same task
-- 2026-06-15: design docs grounded from confirmed discussion only
-  - overview
-  - provider and reasoning
-  - debug and observability
-  - UI and runtime topology
-  - unknown details left as TBD, not invented
-- 2026-06-15: master/slave semantics clarified
-  - master = main user-facing dispatcher
-  - slave = paired task receiver
-  - paired slave only accepts master input
-- 2026-06-15: master/slave semantics refined
-  - this is input-permission configuration
-  - master = whichever side accepts user input
-  - slave accepts paired source only
-  - paired source may be user or master
-- 2026-06-15: startup config clarified
-  - each agent has startup config file
-  - startup config decides mode
-  - slave config includes interface + allowed IP + pairing token
-- 2026-06-15: workflow rule added
-  - features and bugs both need lifecycle management
-  - self-check information / logic / lifecycle before coding or closing
-  - read-only trace first, ask user only if local truth cannot answer
-- 2026-06-15: config truth clarified
-  - local multiple agents managed by `config.toml`
-  - one config may define multiple agents
-- 2026-06-15: config.core module answers locked
-  - only `~/.freehand/config.toml`
-  - `[agents.<name>]`
-  - one process starts one agent
-  - restart-only config activation
-  - `allowed_pair_ip` optional
-  - `pair_token` by env-var reference
-- 2026-06-15: contracts.core module answers locked
-  - shared semantic types only
-  - includes IDs and error contracts
-  - excludes config schema, UI projection, debug envelope
-  - request/response chains split into explicit nodes
-  - types default to serializable + replayable + persistable
-- 2026-06-15: provider.semantic module answers locked
-  - support OpenAI-compatible + Anthropic
-  - require request/response + stream
-  - raw reasoning/events preserved in debug, semantic layer always present
-  - capabilities include web search, multimodal, vision, reasoning
-  - periodic recovery unit is seconds
-  - periodic default windows: half hour, five hours, daily midnight
-- 2026-06-15: reason.turn module answers locked
-  - per-turn truth, projected conversation
-  - only freehand-reason writes truth
-  - semantic broadcast: reasoning/text/tool/usage/terminal/error
-  - slow subscribers may drop, no back-pressure
-  - provider raw events go to debug ledger, not session truth
-  - stop decided by completion schema, not provider finish_reason
-- 2026-06-15: node.master-slave module answers locked
-  - local only one master one slave
-  - websocket handshake pairing
-  - slave fixed pairing source, restart to change
-  - pairing loss -> keep listening
-  - master can delegate, query progress, talk, subscribe slave turn
-- 2026-06-15: ui.protocol module answers locked
-  - first version CLI + WebUI
-  - display surface all-in
-  - completion result only as final projected text
-  - slave turn is WebUI separate card, CLI omitted
-  - query and subscribe separated
-  - explicit source identity fields
-  - black-box targets locked
-- 2026-06-15: test workflow truth locked
-  - every feature maps white-box tests, module black-box tests, and project black-box tests
-  - compile/regression gate must run workspace build/lint plus mapped tests
-  - `cargo test --workspace` is the umbrella for all three test layers as coverage lands
-  - `xtask` gate now checks that these rules stay present in docs and skill
-- 2026-06-15: function-map truth expanded
-  - `feature-map` owns feature owner and validation entry
-  - `function-map` owns code-bound request/response/error mainlines and call tables
-  - multi-reference shared functions must be described once with owner and caller constraints
-  - function-map docs must evolve with code and may not fake symbol bindings before implementation exists
-- 2026-06-15: config.core implementation landed
-  - `freehand-config` now loads only `~/.freehand/config.toml`
-  - validates `[agents.<name>]`, requires `name`, `mode`, `pair_token`
-  - `name` must match table key
-  - `pair_token` is env-var name and resolves during agent selection
-  - `freehand-cli --agent <name>` now exercises default config-path startup selection
-  - white-box, module black-box, and project black-box baseline tests pass
-- 2026-06-15: contracts.core implementation landed
-  - shared ID newtypes added for `agent/session/turn/trace/feature`
-  - first shared request nodes, semantic response node, usage, terminal, tool call/result, and error contracts added
-  - serialization baseline and request validation landed in `freehand-contracts`
-  - function-map bindings updated from pending to concrete symbols
-- 2026-06-15: provider.semantic baseline landed
-  - OpenAI-compatible side explicitly locked to `responses`
-  - provider-core now defines provider family/protocol/capabilities/raw-retention and semantic request builder
-  - normalized adapter events map into shared semantic outputs
-  - provider recovery classification baseline landed
-  - local provider protocol reference snapshots and query skill added
-- 2026-06-15: reason.turn baseline landed
-  - turn truth now materializes per turn in `freehand-reason`
-  - completion schema validation moved to `freehand-blocks`
-  - provider terminal events no longer auto-stop turns
-  - valid completion emits terminal, blocked emits blocked terminal, invalid schema rejects, next-step requests continue
-  - non-blocking broadcast path for reasoning/text/tool/usage/terminal/error is covered by tests
-- 2026-06-15: node.master-slave baseline landed
-  - `freehand-node` now has `LocalNodeRuntime` as first code-bound owner
-  - current baseline is semantic websocket pairing intent, not real socket IO
-  - node status writes through `UiProtocolState` instead of duplicate storage
-  - tests cover pairing success/failure, permission lock, relisten, progress query, turn subscription, direct-message guardrails
-- 2026-06-15: provider adapter baseline landed
-  - added local `openai-chat-completions` protocol snapshot and updated provider skill routing
-  - `freehand-provider-openai` now renders/parses `responses` and `chat completions`
-  - `freehand-provider-anthropic` now renders/parses Messages single-shot and SSE
-  - partial tool arguments accumulate in adapter state and emit `arguments_complete=false` until valid completion
-  - shared `freehand-blocks` now owns tool-arguments JSON parsing/rendering
-  - shared contracts now preserve structured tool arguments and richer usage metadata
-- 2026-06-15: reason/provider architecture correction
-  - current reason baseline has not yet been fully aligned with `../Deepseek-reasonix`
-  - real context planner must inspect reasonix first and preserve stable/volatile segment boundaries for cache improvement
-  - `freehand-reason` and provider adapters must remain implementation-independent
-  - metadata/debug/provider/cache fields must be hard-isolated from request-chain content fields
-  - this is now documented in design docs, feature map, function maps, and local skill
-- 2026-06-15: read-only reference analysis for context planner design
-  - Reasonix evidence: `internal/agent/agent.go` keeps cache-friendly bits stable; plan-mode/gate toggles happen at execute time, not by mutating system prompt or tool schema.
-  - Reasonix evidence: `internal/agent/cache_shape.go` hashes system prompt, normalized tools, and rewrite version to explain cache misses.
-  - Reasonix evidence: `internal/agent/coordinator.go` runs planner and executor in separate sessions; planner session grows append-only and does not mix into executor prefix except as explicit handoff.
-  - Reasonix evidence: `internal/agent/compact.go` treats compaction as low-frequency cache reset, preserves system head and bounded recent tail, archives folded originals, and prunes stale tool results before summarizing.
-  - Codex evidence: `context-fragments/src/fragment.rs` defines typed `ContextualUserFragment` with markers and rendering; injected model-visible context is recognizable later.
-  - Codex evidence: `context-fragments/src/additional_context.rs` caps additional context values to 1000 tokens before rendering.
-  - Codex evidence: `core/src/client_common.rs` keeps model-visible `Prompt.input` separate from tools, base instructions, output schema, and request options.
-  - Codex evidence: `core/src/client.rs` builds Responses payload from `Prompt` while telemetry, headers, trace, auth, and transport options are separate inputs, not hidden inside `input`.
-  - Codex evidence: `core/src/context_manager/history.rs` owns normalized history, `history_version`, call/output invariants, token estimates, and rollback trimming of contextual pre-turn fragments.
-- 2026-06-15: context-planner design locked from references
-  - Freehand adds `reason.context-planner` as a semantic feature owned by `freehand-blocks` with `freehand-reason` orchestration wiring
-  - context lock model is four-part: stable-prefix lock, append-only-tail lock, rewrite-gate lock, subagent-conclusion-only lock
-  - parent context expansion prefers Reasonix-style subagent search final reports; child transcript truth stays separate in runtime/debug storage
-- 2026-06-15: contracts baseline moved toward locked planner design
-  - `freehand-contracts` now defines typed context segments and request validators for context-composed input and provider payload
-  - `freehand-reason` start-turn path now emits typed user-turn segment into provider payload
-  - `freehand-provider-openai` and `freehand-provider-anthropic` now render from typed `input_segments` through shared block rendering logic
-- 2026-06-15: reason.context-planner baseline implemented
-  - `freehand-blocks` now owns `plan_context` and planner-side cache diagnostics
-  - planner enforces segment ordering, segment-contract validation, token-budget rejection, and raw subagent transcript rejection by provenance
-  - `freehand-reason` now delegates turn-start request planning to the planner and stores diagnostics off the request content path
-  - remaining gap is runtime-owned rewrite mode/version and explicit compaction/rollback/resume rewrite orchestration
-- 2026-06-15: reason.session-history / rewrite-gate baseline implemented
-  - `freehand-reason` now owns `SessionHistory` with `base_context_segments`, `rewrite_version`, `current_rewrite_mode`, and `rewrite_ledger`
-  - `ReasonTurnEngine::start_turn` now reads rewrite mode/version from session history instead of hardcoding ordinary-turn mode with version `0`
-  - explicit `stage_compaction`, `stage_rollback`, and `stage_resume_rebuild` gates now exist and are the only owner paths that bump rewrite version
-  - session history is persistable via JSON and filesystem round-trip helpers
-  - planner diagnostics now include `rewrite_mode` as well as `rewrite_version`
-- 2026-06-15: reason.rewrite-policy baseline implemented
-  - `freehand-blocks` now owns pure trigger policy for compaction, rollback, and resume rebuild
-  - Reasonix evidence was used only for compaction thresholds and stuck-loop behavior
-  - rollback and resume-rebuild trigger policy is explicitly Freehand-owned because the reference project has no matching persisted session-history gate
-  - unexpected cases now have typed policy outcomes: hold, prune-stale-only, compact, rollback, resume rebuild, or explicit block
-  - `ReasonRewriteRuntime` now consumes policy decisions before calling `SessionHistory::stage_*`
-  - provider `TokenUsage.input_tokens` now enters rewrite policy only through `prompt_tokens_from_usage`
-  - `freehand-testkit::ReasonRuntimeHarness` now provides project black-box coverage from provider semantic output to turn truth to usage-driven rewrite policy
-  - production CLI/server runtime loop wiring with real provider usage events and persisted recovery payloads is still pending
-- 2026-06-15: app.cli-runtime-smoke baseline implemented
-  - `freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>` now exists as app-boundary E2E smoke
-  - CLI loads real `~/.freehand/config.toml`, selects one agent, then routes into shared testkit/runtime harness instead of duplicating reason semantics
-  - app integration tests now prove config selection + reason rewrite policy from the binary boundary
-- 2026-06-15: config.core provider registry expansion
-  - user required provider config example support plus multi-provider switching
-  - locked config shape to `[providers.<id>]` + per-agent `provider` binding, not app-side ad hoc provider selection
-  - accepted user-style aliases `baseURL/defaultModel/apiKey/apiKeyEnv` at parse edge while keeping snake_case canonical doc truth
-  - provider auth is explicit union: `api_key` xor `api_key_env`
-  - workspace test failure after first pass was env-var race between config tests; fixed by generating unique env names per test instead of shared names
-- 2026-06-15: config.core correction after user protocol review
-  - user clarified `mini27` is OpenAI chat protocol, not Responses
-  - removed implicit protocol guessing entirely
-  - `protocol` is now mandatory for every provider entry
-  - added negative test to reject provider entries without explicit protocol
-- 2026-06-15: live provider probe for `mini27`
-  - `http://guizhouyun.site:2080` root returns One API HTML panel
-  - OpenAI-compatible API path is under `/v1/...`, not root
-  - `/v1/models` and `/v1/chat/completions` both accept auth header shape but return `401`
-  - response body says token expired: `该令牌已过期`
-  - current blocker is credential validity, not protocol path mismatch
-- 2026-06-15: config.core field cleanup after user review
-  - removed unused `transport_backend` / `transportBackend` from provider config truth
-  - provider raw tables now deny unknown fields
-  - added red test proving `transportBackend` is rejected instead of silently accepted
-  - local runtime config now uses `minimonth` with Anthropic `messages` and no transport field
-- 2026-06-15: provider.anthropic-adapter live fixture replay
-  - live single-shot `minimonth` response saved as `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
-  - live SSE `minimonth` stream saved as `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
-  - tests replay fixture bodies through real `AnthropicAdapter` parser entrypoints
-  - locked semantics: thinking -> reasoning event, text -> text event, usage cache counters, `end_turn` terminal success
-- 2026-06-15: provider.anthropic-adapter executor baseline
-  - added `AnthropicExecutorConfig` and `AnthropicExecutor`
-  - executor posts rendered Messages request to `base_url + /v1/messages`
-  - executor sends `x-api-key`, `anthropic-version`, and `content-type: application/json`
-  - single-shot path parses response through `AnthropicAdapter::parse_response`
-  - stream path currently collects SSE response, extracts `data:` lines, then parses each via `AnthropicAdapter::parse_stream_event`
-  - local mock-server tests cover single-shot success, SSE success, and non-2xx error
-- 2026-06-15: provider.reason-live-bridge and CLI live-turn
-  - added feature docs for `provider.reason-live-bridge` owner `freehand-testkit`
-  - added `run_live_reason_turn(selected, request)` for Anthropic `messages` only
-  - bridge starts one reason turn, builds provider semantic request, executes live provider path, applies outputs into turn truth, and captures broadcasts
-  - current bridge sets executor `anthropic-version` to `2023-06-01` and `max_tokens` to `512`
-  - current bridge does not submit completion schema, so provider terminal metadata does not become final turn terminal truth
-  - added `freehand-cli reason-live --agent <name> --prompt <text> [--stream]`
-  - CLI tests use local mock server with selected config, not live credentials
-- 2026-06-15: provider/live-stream incremental closeout in progress
-  - owner targets: freehand-provider-anthropic, freehand-testkit
-- 2026-06-17: normal WebUI conversation closeout slice
-  - rooted from owner map: `ui.protocol`, `app.webui-smoke`, `runtime.ui-command-dispatch`, `app.runtime-daemon`
-  - identified two blockers: blank latest-turn SSE returned 404 before first turn, and public conversation projection lost user input after real turn projection arrived
-  - chosen fix: query remains snapshot-only 404 on blank state; subscribe stays open and waits for first matching turn; `UiTurnProjection` carries optional `user_text` from reason request truth into public conversation projection
-  - goal: replace collected-SSE runtime path with true incremental callback/apply path
-- 2026-06-17: stability-quality gate slice
-  - rooted from owner map: `foundation.workspace`
-  - evidence: existing gate enforces required files, policy snippets, workspace members, app dependency boundaries, and generated wiki freshness
-  - identified low-noise gap: migrated mainline JSON sources are generated into wiki, but gate does not yet validate the compiled-manifest cross-links back to feature map, function map, and test design
-  - chosen fix: add `xtask` mainline manifest link validation with positive and negative tests, keeping product behavior unchanged
-- 2026-06-17: stability-quality symbol-binding gate slice
-  - rooted from owner map: `foundation.workspace`, with one app.webui-smoke doc drift found during read-only audit
-  - full-symbol text check was too strict for Rust `Type::method` rows because source files contain `fn method`; normalized last-segment method matching leaves one real drift
-  - real drift: `app.webui-smoke` step 09 used natural-language `submit handler`, and its human function map missed the checkpoint-query step present in mainline JSON
-  - chosen fix: normalize the WebUI call map symbol to `submitUserInput`, sync app.webui-smoke function map, and add an xtask gate that bound call-table files exist and symbols resolve to source text
-- 2026-06-17: metadata producer integration slice
-  - rooted from owner map: `metadata.core` owns envelope/center, `reason.turn` owns the first producer write sites
-  - user requirement: internal metadata/control information must stay separated from request data, and every metadata write must identify writer owner and write node
-  - current dirty state already added an optional metadata center to `ReasonTurnEngine`, but compile fails on stale error field names and call sites still ignore the new `Result`
-  - chosen fix: keep metadata admission in `freehand-metadata`, make reason producer write failures explicit, update callers, and add positive/negative producer tests proving provenance and request-text isolation
-  - implementation status: `reason.turn` now writes metadata on start-turn and provider-output application through `MetadataCenter::write`
-  - negative behavior locked: poisoned metadata center returns `ReasonTurnError::MetadataWriteFailed`; start-turn does not commit session-history, provider-output does not mutate turn truth
-  - doc sync: updated feature map, reason/metadata function maps, test designs, mainline JSON, generated wiki, local skill, CACHE, MEMORY
-  - targeted verification: `cargo fmt --all --check`; `cargo test -p freehand-reason`; `cargo test -p freehand-metadata -p freehand-runtime -p freehand-testkit`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`
-  - final verification: `make ci` passed after all docs/wiki/memory updates
-- 2026-06-18: debug observation failure slice
-  - rooted from owner map: `debug.core` owns sink-dispatch surfacing; `reason.turn` owns producer-side non-mutation guarantee
-  - current documented gap: `DebugHub::emit` failure is explicit, but reason-side has no dedicated observation-failure chain to observe it
-  - chosen fix: add a separate debug failure subscription path in `freehand-debug`, keep sink failures observation-only, and prove `reason.turn` producer still does not mutate turn truth when sink dispatch fails
-  - implementation status: `DebugObservationFailure` and `DebugHub::subscribe_failures` landed in `freehand-debug`; `reason.turn` now has a producer smoke proving sink failure is surfaced while turn truth stays unchanged
-  - doc sync: updated debug/reason function maps, test designs, mainline JSON, generated wiki, design docs, feature map, CACHE, MEMORY
-  - verification: `cargo test -p freehand-debug`; `cargo test -p freehand-reason`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `cargo fmt --all --check`; `make ci`
-- 2026-06-18: tool-schema fingerprint planner-diagnostics slice
-  - rooted from owner map: `tool.registry` -> `reason.turn` -> `provider.reason-live-bridge` with planner-consumer sync in `reason.context-planner`
-  - chosen fix: keep implemented-tool schema canonicalization and fingerprint truth in `freehand-tools`, forward optional fingerprint through `TurnStartInput`, and stamp it from the runtime live bridge before provider request build
-  - implementation status: `BuiltinToolRegistry::implemented_schema_fingerprint` landed with stability/change tests; `ReasonTurnEngine::start_turn` forwards `tool_schema_fingerprint`; runtime live bridge computes registry fingerprint and injects it into each live round
-  - doc sync: updated feature docs, mainline JSON, generated wiki, and stale metadata/testing wording; refreshed design docs so the remaining gap is now runtime metrics/recovery closeout rather than fingerprint wiring
-  - verification: `cargo test -p freehand-tools -p freehand-blocks -p freehand-reason -p freehand-runtime`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `make ci`
-- 2026-06-18: runtime live bridge metadata producer slice
-  - rooted from owner map: `metadata.core` owns envelope/ledger bootstrap truth; `provider.reason-live-bridge` owns runtime lifecycle producer writes
-- 2026-06-18: node debug producer slice
-  - rooted from owner map: `node.master-slave` owns node lifecycle emission sites; `debug.core` owns hub/sink observation semantics
-  - inherited dirty state already wired `freehand-node` to `freehand-debug`, but the crate did not compile and had no producer tests
-  - chosen fix: keep debug producer ownership inside `LocalNodeRuntime`, add owner white-box tests for bootstrap/pair-reject/slave-turn leakage boundaries plus sink-failure observation-only behavior, then sync function maps/testing/mainlines/wiki
-  - implementation status: `LocalNodeRuntime` now has `with_debug_hub` and `with_debug_hub_and_metadata_center`; debug emission covers bootstrap, pair accept/reject, pairing loss, delegated progress, and slave-turn publication
-  - verification: `cargo test -p freehand-node`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `make ci`
-  - workflow note: `xtask mainlines generate` and `xtask mainlines check` cannot be run in parallel; doing so raced generated wiki freshness and produced a false stale-wiki failure for `docs/wiki/debug.core.md`
-- 2026-06-18: control/data isolation gate slice
-  - owner route: `foundation.workspace`
-  - user requirement: control semantic must be extracted from the whole pipeline and must not mix with request/response data or force unnecessary payload/prompt rewrites
-  - read-only audit: existing `metadata/request` isolation rule and `verify_metadata_request_boundaries` gate covered metadata/debug/cache leakage, but did not explicitly cover broader control semantic names such as control envelope, routing, checkpoint, cancellation, retry, or gate/policy payload fields in request-node contracts
-  - planned closure: extend the existing xtask boundary gate instead of adding a second gate owner; update architecture docs, freehand-dev skill, function map, test design, mainline JSON, generated wiki, and memory in the same change
-  - implementation: renamed owner gate to `verify_data_control_boundaries`, added request-node forbidden control field/type scanning, added metadata-owner forbidden control execution payload scanning, and added positive/negative xtask tests for request `control_envelope` plus metadata `RuntimeCheckpoint` leakage
-  - doc sync: updated freehand-dev skill, workspace layout, dev gates, function map spec, function map README, metadata design, foundation function map/test design/mainline JSON, and generated wiki
-  - verification: `cargo fmt --all`; `cargo test -p xtask`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`
-  - chosen fix: runtime live bridge now bootstraps one shared metadata ledger under `~/.freehand/ledgers/metadata/<agent>/<session>.jsonl`, passes the same center into `reason.turn`, and writes runtime-owned restore/request/tool/terminal lifecycle records without request text or tool-result content
-  - negative rule locked: metadata ledger bootstrap or write failure is explicit `RuntimeLiveBridgeError::MetadataFailed`; live bridge does not silently continue or degrade
-  - white-box evidence: positive tests for single-shot runtime metadata persistence and tool-execution metadata, negative test for unwritable metadata ledger path
-  - doc sync: updated metadata/runtime/provider function maps, test designs, mainline JSON, generated wiki, metadata design doc, runtime directory doc, CACHE, MEMORY
-  - verification: `cargo fmt --all`; `cargo test -p freehand-runtime -p freehand-metadata -p freehand-reason`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `make ci`
-- 2026-06-15: completion schema loop requirement confirmed
-  - must guide schema in prompt/context
-  - must validate schema structurally and semantically
-  - invalid schema feedback must identify exact offending fields/items
-- 2026-06-15: completion loop implementation started
-  - schema format locked to tagged block: <freehand_completion>{...}</freehand_completion>
-  - claim=continue auto-continues next round
-  - invalid schema auto-rejected up to 3 retries then terminal failed
-- 2026-06-15: persistence audit against Codex and Reasonix
-  - Codex evidence: `codex-rs/core/src/context_manager/history.rs` separates normalized model-visible history from broader session runtime state and bumps `history_version` only on rewrite-style mutations
-  - Codex evidence: `codex-rs/core/src/state/session.rs` keeps session-scoped mutable runtime fields adjacent to history but not mixed into prompt-visible truth
-  - Codex evidence: `codex-rs/core/src/session/rollout_reconstruction.rs` rebuilds effective history and resume metadata from replay/rollout artifacts instead of trusting UI-side projections
-  - Reasonix evidence: `internal/agent/session.go` keeps persisted session core intentionally small: message log + rewrite version, with single-writer discipline and snapshot-safe reads
-  - Reasonix evidence: `internal/agent/cache_shape.go` persists cache diagnostics around system hash, tool hash, prefix hash, and rewrite version so cache misses are explainable
-  - Reasonix evidence: `desktop/sessions.go` treats transcript JSONL as the durable artifact and keeps titles/display/trash metadata as separate sidecars
-  - provisional Freehand recommendation: split persistence into authoritative session-truth snapshot, append-only replay/debug ledger, and derived projection/index sidecars; keep only `freehand-reason` as truth writer and keep provider raw events out of session truth
-- 2026-06-15: reason.persistence baseline implementation landed
-  - added `crates/freehand-reason/src/persistence.rs`
-  - persisted truth now includes `session-history.json`, `session-cursor.json`, `active-turn.json`, per-turn terminal files, reason JSONL ledger, UI sidecar, and agent session-index cache
-  - recovery covers both snapshot-plus-ledger-tail and ledger-only rebuild
-  - provider raw debug files are explicitly ignored by restore tests
-- 2026-06-15: live-provider readiness audit after persistence baseline
-  - current real HTTP live path exists only for Anthropic Messages-compatible providers through `freehand-testkit::run_live_reason_turn` -> `run_live_anthropic_reason_turn_with_hook`
-  - OpenAI-compatible adapters have render/parse only; no HTTP executor or live bridge exists yet
-  - current live Anthropic path still constructs fresh `SessionHistory` in-memory per CLI invocation and does not read/write `ReasonPersistence`
-  - current CLI `reason-live` uses fixed `session_id`, `turn_id`, and `trace_id`, so it is smoke-grade and not a resumable session runtime yet
-  - current live path does not append provider raw ledgers, reason ledgers, active-turn snapshots, or terminal-turn snapshots during real streamed execution
-- 2026-06-15: live E2E tool-loop implementation strategy
-  - target remains Anthropic Messages only for this milestone
-  - provider-core needs provider-neutral tool request metadata so adapter wire DTOs stay private
-  - Anthropic request rendering must use official `tools`, assistant `tool_use`, and user `tool_result` message shape instead of hiding tool results in metadata
-  - live bridge must restore/create session through `ReasonPersistence`, persist start/output/rejection/terminal events, execute deterministic `echo_json`, and re-enter tool result before final completion schema
-- 2026-06-15: live E2E tool-loop closed with real smoke
-  - workspace verification passed: `cargo build --workspace`, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
-  - real provider `master -> minimonth` passed on `real-smoke-1`: first run `tool_executions=1`, `rounds=3`, `schema_rejections=1`, `restore_status=created_new`
-  - second run on same `session_id=real-smoke-1` passed with `restore_status=restored_existing` and `restored_closed_turns=1`
-- 2026-06-16: UI next-step decision
-  - `ui.protocol` already owns query/subscribe/projection truth; WebUI must consume it instead of inventing its own semantics
-  - repo already had `apps/freehand-server`; using it as the minimal WebUI smoke boundary avoids a second UI app boundary
-- 2026-06-17: runtime.checkpoint-rewind implementation start
-  - target owner remains `crates/freehand-runtime`
-  - live writable tool path will be changed to `preview -> snapshot -> execute`
-  - checkpoint truth will live under `~/.freehand/state/checkpoints` and `~/.freehand/ledgers/checkpoints`
-  - explicit rewind owner API will land in runtime first; UI/command ingress wiring remains non-goal for this slice
-  - writable tools without preview support must be rejected explicitly on the live runtime path
-- 2026-06-17: runtime.checkpoint-rewind ingress closeout
-  - added `UiCommand::RewindCheckpoint { checkpoint_id }`
-  - protocol owner now validates non-empty checkpoint ids and routes rewind to `runtime.checkpoint-rewind`
-  - `RuntimeCommandDispatcher` now dispatches rewind through runtime owner path and leaves turn/session/UI truth untouched
-  - daemon HTTP black-box now proves writable submit -> checkpoint created -> rewind command -> workspace restored
-- 2026-06-16: tool registry harness closeout
-  - `freehand-tools` already owns Reasonix-aligned tool registry baseline
-  - missing durable truth was the top-level design + workflow lock
-  - follow-up change adds design doc and elevates tool spec / implemented-state / runtime-exposure rules into architecture docs and skill
-- 2026-06-16: first real tool batch implementation
-  - selected first batch stayed read-only: `read_file`, `glob`, `grep`, `ls`
-  - implementation was aligned to local Reasonix reference direction:
-    - `read_file` line windowing
-    - `glob` recursive filename fallback
-    - `grep` recursive regex search
-    - `ls` flat/recursive listing
-  - Freehand-specific boundary added: path tools are locked to canonical cwd root and reject escapes
-  - runtime correction removed forced first-round `todo_write`; mock live loops in runtime/CLI/daemon now exercise real `read_file`
-  - full verification passed after updating CLI project black-box assertions
-- 2026-06-16: WebUI submit not appearing to start reasoning root cause
-  - runtime-backed daemon path is live, but startup requires `FREEHAND_PAIR_TOKEN_SHARED`
-  - `/ui/command` on daemon really runs provider inference and returns a completed receipt
-  - the previous SSE bug was two-part: subscribe routes emitted only one snapshot, and the WebUI submit handler relied on that for visible updates
-  - first fix was submit-success active refresh; second fix is now landed continuous SSE:
-    - `freehand-ui-protocol` now owns a subscription channel and incremental shared-contract turn projection updates
-    - `freehand-runtime` now streams reason/debug updates into `UiProtocolState` during live turns
-    - `freehand-server` subscribe routes now keep one connection open and emit later matching updates
-  - tests also needed lifecycle closure: open SSE responses must be dropped before graceful shutdown or daemon/server tests hang
-- 2026-06-16: WebUI design proposal started after user rejected current smoke usability
-  - goal changed from runtime-only validation to operator-usable WebUI design
-  - current deliverable is proposal doc + offline static prototype, not runtime wiring
-  - proposal direction is control-room console, not chat-first layout
-  - must clearly separate currently backed transport truth from mock-only proposal regions
-- 2026-06-16: WebUI proposal corrected by user review
-  - user rejected the first one-page heavy layout
-  - low-frequency and configuration work must live on a separate settings page with categories
-  - future phone version is a first-class target, not just responsive shrink
-  - structural reference should move closer to OpenCode shell layering
-  - revised prototype now splits into workspace/settings pages and uses a mobile bottom-nav fallback
-  - workspace keeps only high-frequency reading + command ingress; settings owns providers/agents/pairing/debug/runtime categories
-  - after direct OpenCode inspection, main workspace direction is corrected again: chat/conversation first, input composer persistent, tool/process output shown as semantic cards rather than raw JSON/payload dumps
-  - latest correction: design must use autonomous regions; top bar owns expandable slave-agent status, conversation owns fixed message blocks, assistant/model messages left, user messages right, tool/text/success/failure states have fixed colors and details disclosure
-- 2026-06-16: runtime-host transport injection baseline
-  - avoided a duplicate second HTTP/SSE/command implementation by turning `freehand-server` into a protocol-only transport library plus smoke bin
-  - added `apps/freehand-daemon` as the runtime host owner
-  - daemon reuses shared transport and injects `freehand-runtime::RuntimeCommandDispatcher`
-  - xtask now checks both `freehand-server` protocol-only boundary and `freehand-daemon` runtime-host boundary
-- 2026-06-16: config-selected daemon bootstrap baseline
-  - user-facing daemon startup now moves from fixed bootstrap to `serve --agent <name>`
-  - chose `freehand-runtime` as the owner of config-selected bootstrap so daemon host stays thin and gate can still forbid direct app->config dependency
-  - found a real gap: config truth still lacks explicit master->slave peer topology fields, so current bootstrap derives synthetic local slave ids in the in-memory host model
-  - added explicit negative coverage for slave-mode host rejection
-- 2026-06-16: peer-topology config truth closeout
-  - `config.core` now requires explicit `node_id` and `paired_agent` for every agent
-  - validation rejects self-pairing, missing paired agent, same-mode paired agents, and non-reciprocal pairing
-  - selected config projects paired agent mode, paired node id, paired allowed IP, and paired pair-token env for runtime bootstrap
-  - `freehand-runtime` now consumes configured local/paired node ids instead of deriving synthetic peer ids
-  - targeted verification passed: `cargo test -p freehand-config`, `cargo test -p freehand-runtime`, `cargo test -p freehand-daemon`
-- 2026-06-16: debug.core runtime and reason emission closeout
-  - `freehand-debug` now has runtime `DebugHub`, subscriber fanout, `StdoutDebugSink`, and `FileDebugSink`
-  - `freehand-reason` now emits observation-only debug events on start-turn, provider-output apply, completion accept/reject/continue, and fail-turn
-  - minimal verification passed before doc closeout: `cargo test -p freehand-debug`, `cargo test -p freehand-reason`, `cargo run -p xtask -- gates check`
-  - final workspace verification passed: `cargo fmt --all`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
-  - current known gap is not compile/test related: `DebugHub::emit` failures are explicit in `freehand-debug`, but `freehand-reason` currently keeps them observation-only and does not surface them through a dedicated error chain
-- 2026-06-16: ui.protocol debug receiver bridge in progress
-  - `freehand-ui-protocol` now owns `apply_debug_event`, `drain_debug_receiver`, and `debug_projection_from_event`
-  - protocol can now ingest `debug.core` receiver events into read-only per-turn debug state without becoming a truth writer
-  - `freehand-server webui-smoke` now renders debug query projection in addition to terminal/slave-card projection while still depending only on `freehand-ui-protocol`
-  - targeted verification passed: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo run -p xtask -- gates check`
-- 2026-06-16: app.webui transport smoke baseline landed
-  - first WebUI transport is now locked to HTTP query + SSE subscribe, separate from node WebSocket pairing
-  - `freehand-server` now serves protocol-only routes for latest-turn query, per-turn debug query, latest-turn SSE subscribe, and per-turn debug SSE subscribe
-  - `freehand-server` still depends only on `freehand-ui-protocol` plus shared contracts even after adding transport
-  - final verification passed: `cargo fmt --all --check`, `cargo test -p freehand-server`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
-- 2026-06-16: ui command ingress ack baseline landed
-  - `freehand-ui-protocol` now owns `accept_command_ingress` and `protocol_rejection`
-  - POST `/ui/command` accepts only mutation-intent commands and returns protocol-owned ack/rejection payloads
-  - query/subscribe commands sent to command ingress are now explicit misuse, not silently accepted
-  - targeted verification passed: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo run -p xtask -- gates check`
-- 2026-06-16: ui command dispatch-port baseline landed
-  - `freehand-ui-protocol` now owns `build_command_dispatch_envelope`, `UiCommandDispatchPort`, and dispatch receipt/failure contracts
-  - accepted UI commands are now routed to declared owner targets before leaving the protocol boundary:
-    - `SubmitUserInput` / `CancelTurn` / `ResumeTurn` -> `reason.turn`
-    - `SendDirectMessageToSlave` -> `node.master-slave`
-  - `freehand-server` now returns dispatch receipts from a protocol-owned static smoke port instead of plain ack-only acceptance
-  - targeted verification passed: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo run -p xtask -- gates check`
-- 2026-06-16: runtime.ui-command-dispatch baseline landed
-  - new crate `freehand-runtime` is now the runtime wiring owner for UI command dispatch
-  - it composes `ReasonTurnEngine`, `SessionHistory`, `LocalNodeRuntime`, and derived `UiProtocolState` without making app crates runtime owners
-  - submit/cancel now dispatch through `reason.turn`, direct slave message dispatches through `node.master-slave`, resume returns explicit unsupported error
-  - full workspace verification passed: `cargo fmt --all --check`, `cargo test -p freehand-runtime`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p xtask -- gates check`
-  - `turn_projection_for_client` is the protocol-owned client-specific gate for slave-card visibility
-  - the first UI milestone is a protocol-consumer smoke, not a full transport stack or polished browser app
-- 2026-06-16: webui decoupling lock
-  - `freehand-server` dependency boundary is now being locked to protocol-only
-  - direct `freehand-reason` / provider / node / config dependencies in the WebUI app are forbidden
-  - `xtask gates check` should fail fast if that boundary regresses
-- 2026-06-16: UI/input truth clarified by user
-  - UI is not limited to WebUI; any UI must stay decoupled from reasoning
-  - UI is an input ingress plus read-only consumer of turn-state and debug-state projections
-  - UI must not directly mutate reason/debug/session truth
-- 2026-06-16: ui.protocol debug contract closeout started
-  - first landed contract should stay minimal: query/subscribe debug state by `turn_id`
-  - UI debug projection should expose summary + ordered detail lines only
-  - raw provider/debug ledger artifacts remain outside `ui.protocol`
-- 2026-06-16: ui.protocol debug contract landed
-  - `freehand-ui-protocol` now supports per-turn debug snapshot query and subscribe
-  - debug projection stays read-only and carries `status_text` + `detail_lines`
-  - package test and workspace gate stack passed after landing
-- 2026-06-16: debug.core module started
-  - `freehand-debug` is the independent observation module
-  - it owns debug semantic/scene positions, trace envelope, and reusable debug snapshot shape
-  - UI protocol now consumes debug snapshots from `freehand-debug` instead of defining its own DTO
-- 2026-06-16: owner/test routing sedimented
-  - problem location now starts from `Owner Routing Index` in `feature-map`
-  - feature routing must go `feature_id -> owner -> function map -> test-design doc`
-  - `xtask gates check` now verifies routing-policy snippets in docs/skill
-- 2026-06-16: runtime live bridge owner migration closeout
-  - starting point was mid-migration breakage: `freehand-testkit` had deleted live implementation but still kept live tests and imports
-  - fixed by moving live mock helpers/tests into `freehand-runtime` test module and deleting duplicate live tests from `freehand-testkit`
-  - `apps/freehand-cli` needed direct `freehand-runtime` dependency after import switch
-  - `apps/freehand-daemon` black-box tests were invalid because they still pointed at real `api.53hk.cn`; replaced with local anthropic mock servers for success and provider-failure cases
-  - found runtime host boundary bug: protocol-only async command ingress called sync live provider dispatch inline, which panicked with Tokio blocking-runtime drop; fixed by wrapping dispatch in `tokio::task::spawn_blocking`
-  - post-fix verification passed: `cargo test -p freehand-testkit`, `cargo test -p freehand-runtime`, `cargo test -p freehand-daemon`, `cargo test -p freehand-cli`, workspace build/clippy/test, and `xtask gates check`
-- 2026-06-16: daemon restore/ordinal closeout
-  - detected remaining goal gap after green tests: runtime bootstrap did not restore persisted UI projections and reset `next_turn_ordinal`, so restart could have served empty query/SSE and reused `runtime-turn-1`
-  - fixed by restoring persisted turns during `RuntimeCommandDispatcher::new` when live config is present, replaying projections into `UiProtocolState`, and deriving next ordinal from persisted `runtime-turn-*` ids
-  - added runtime white-box proving restored projection + resumed ordinal, plus daemon black-box proving restart query/SSE restore and post-restart next-turn continuation
-  - online verification needed one local config correction: `~/.freehand/config.toml` was missing locked `node_id` / `paired_agent` truth and only had `master`; patched it to reciprocal `master/worker` with shared pair-token env so real daemon bootstrap could pass config validation
-  - real online verification passed:
-    - CLI `reason-live` against configured `minimonth`
-    - daemon HTTP submit against real provider returned `rounds=2`, `tool_executions=1`
-    - daemon restart served restored `runtime-turn-1-r2` through query and SSE
-    - second real daemon submit after restart advanced to `runtime-turn-2-r2`
-- 2026-06-16: WebUI static prototype visual correction
-  - user confirmed the latest layout is much better but the palette still looked bad
-  - adjusted prototype to preserve the improved autonomous-region layout while moving colors toward cleaner neutral canvas plus restrained blue/green/amber/red status colors
-  - reduced large warm fills on tool/failure cards; status is now carried mainly by side rails and badges instead of dirty full-card backgrounds
-  - next correction added three concrete UI truths: larger command composer, full-card colored borders/title rows for semantic blocks, and white/black dual theme switching on the static prototype
-- 2026-06-16: WebUI/provider correction after live inference
-  - user reported real inference succeeds but WebUI exposes internal reasoning/raw schema/tool-debug details and does not feel like live SSE
-  - owner trace: SSE transport is continuous; visible problem is main WebUI renderer consuming full `UiTurnProjection` instead of a public conversation projection
-  - owner trace: live bridge still advertises demo `echo_json`; Reasonix evidence uses Tool trait + per-run registry + stable schema export + read_only marker
-  - fix direction: add protocol-owned `UiPublicTurnProjection`, route WebUI query/SSE through it, and move tool surface into `freehand-tools`
-- 2026-06-16: function-map/mainline/wiki automation started
-  - user required `function map`, `mainline call`, and `wiki` to be synchronized, with wiki generated from mainline call
-  - current repo truth before change: only human-maintained `docs/function-maps/*.md`, no machine-readable mainline truth, no generated wiki chain
-  - implementation direction locked:
-    - `docs/mainline-calls/<feature>.json` = machine-readable mainline call source
-    - `docs/wiki/<feature>.md` = generated wiki artifact
-    - `cargo run -p xtask -- mainlines generate|check` = generation/freshness gate
-  - first migrated sample is `tool.registry`
-- 2026-06-16: second migrated mainline/wiki sample landed
-  - migrated `ui.protocol` into `docs/mainline-calls/ui.protocol.json`
-  - generated `docs/wiki/ui.protocol.md`
-  - caught and removed a duplicate `ui.protocol` owner entry from `docs/architecture/feature-map.md`
-- 2026-06-16: third migrated mainline/wiki sample landed
-  - migrated `reason.turn` into `docs/mainline-calls/reason.turn.json`
-  - generated `docs/wiki/reason.turn.md`
-  - `feature-map`, function-map, testing doc, mainline source, and wiki now all point to the same reason-turn owner path
-- 2026-06-16: fourth migrated mainline/wiki sample landed in progress
-  - migrated `provider.reason-live-bridge` into `docs/mainline-calls/provider.reason-live-bridge.json`
-  - generated `docs/wiki/provider.reason-live-bridge.md`
-  - live bridge now has the same mainline/wiki split as tool, UI protocol, and reason turn
-- 2026-06-16: fifth migrated mainline/wiki sample landed in progress
-  - migrated `provider.semantic` into `docs/mainline-calls/provider.semantic.json`
-  - generated `docs/wiki/provider.semantic.md`
-  - provider semantic owner now has machine-readable mainline truth alongside the function map
-- 2026-06-16: sixth migrated mainline/wiki sample landed in progress
-  - migrated `provider.anthropic-adapter` into `docs/mainline-calls/provider.anthropic-adapter.json`
-  - generated `docs/wiki/provider.anthropic-adapter.md`
-  - Anthropic wire owner now has machine-readable mainline truth alongside the function map
-- 2026-06-16: seventh migrated mainline/wiki sample landed in progress
-  - migrated `provider.openai-adapter` into `docs/mainline-calls/provider.openai-adapter.json`
-  - generated `docs/wiki/provider.openai-adapter.md`
-  - OpenAI-compatible wire owner now has machine-readable mainline truth alongside the function map
-- 2026-06-17: reason.persistence migrated mainline/wiki source in progress
-  - `docs/mainline-calls/reason.persistence.json` is the machine-readable source
-  - `docs/wiki/reason.persistence.md` must be generated, not hand-edited
-  - `xtask gates check` must require both files
-- 2026-06-17: reason.session-history migrated mainline/wiki source in progress
-  - `docs/mainline-calls/reason.session-history.json` is the machine-readable source
-  - `docs/wiki/reason.session-history.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: reason.rewrite-policy migrated mainline/wiki source in progress
-  - `docs/mainline-calls/reason.rewrite-policy.json` is the machine-readable source
-  - `docs/wiki/reason.rewrite-policy.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: reason.context-planner migrated mainline/wiki source in progress
-  - `docs/mainline-calls/reason.context-planner.json` is the machine-readable source
-  - `docs/wiki/reason.context-planner.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: debug.core migrated mainline/wiki source in progress
-  - `docs/mainline-calls/debug.core.json` is the machine-readable source
-  - `docs/wiki/debug.core.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: runtime.ui-command-dispatch migrated mainline/wiki source in progress
-  - `docs/mainline-calls/runtime.ui-command-dispatch.json` is the machine-readable source
-  - `docs/wiki/runtime.ui-command-dispatch.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: foundation.workspace migrated mainline/wiki source in progress
-  - `docs/mainline-calls/foundation.workspace.json` is the machine-readable source
-  - `docs/wiki/foundation.workspace.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: config.core migrated mainline/wiki source in progress
-  - `docs/mainline-calls/config.core.json` is the machine-readable source
-  - `docs/wiki/config.core.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: contracts.core migrated mainline/wiki source in progress
-  - `docs/mainline-calls/contracts.core.json` is the machine-readable source
-  - `docs/wiki/contracts.core.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: node.master-slave migrated mainline/wiki source in progress
-  - `docs/mainline-calls/node.master-slave.json` is the machine-readable source
-  - `docs/wiki/node.master-slave.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: app.cli-runtime-smoke migrated mainline/wiki source in progress
-  - `docs/mainline-calls/app.cli-runtime-smoke.json` is the machine-readable source
-  - `docs/wiki/app.cli-runtime-smoke.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: app.cli-live-turn migrated mainline/wiki source in progress
-  - `docs/mainline-calls/app.cli-live-turn.json` is the machine-readable source
-  - `docs/wiki/app.cli-live-turn.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: app.webui-smoke migrated mainline/wiki source in progress
-  - `docs/mainline-calls/app.webui-smoke.json` is the machine-readable source
-  - `docs/wiki/app.webui-smoke.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: app.runtime-daemon migrated mainline/wiki source in progress
-  - `docs/mainline-calls/app.runtime-daemon.json` is the machine-readable source
-  - `docs/wiki/app.runtime-daemon.md` must be generated, not hand-edited
-  - `xtask gates check` must require function map, test design, JSON source, and generated wiki
-- 2026-06-17: tool.registry writable batch implementation
-  - implemented `write_file`, `edit_file`, and `multi_edit` inside `freehand-tools`
-  - writable path resolution needed a separate helper because target files may not exist yet
-  - `edit_file` is locked to exact single-match semantics; `multi_edit` carries ordered edit and `replace_all` behavior
-  - gate initially failed because a locked policy snippet expected the old read-only wording; function map and JSON were updated to preserve the old locked phrase while adding writable semantics
-- 2026-06-17: tool.registry foreground bash implementation
-  - locked scope to synchronous foreground `bash` only; `bg_jobs` / `kill_shell` / `wait_job` remain explicitly unimplemented
-  - `bash` now starts in the locked workspace root, defaults to 900-second timeout, captures combined stdout/stderr, and fails explicitly on timeout or non-zero exit
-  - first owner-test pass caught two real issues in the test harness: macOS canonical `pwd` path differs by `/private` prefix, and cwd-lock poisoning hid later failures after the first panic
-  - fixed by comparing against canonicalized temp roots and allowing poisoned cwd-lock recovery in the test harness
-  - real live verification also needed `FREEHAND_PAIR_TOKEN_SHARED` set because selected-agent bootstrap validates the configured pair-token env even for CLI `reason-live`
-- 2026-06-17: reasonix comparison for tool/edit/rewrite gap
-  - Reasonix built-in write surface is materially ahead of current Freehand: `edit_file`, `multi_edit`, `delete_range`, `delete_symbol`, `notebook_edit`, `bash`, background-job companions, and `web_fetch` all exist with owner-local execution semantics
-  - Reasonix edit tools preserve file encoding and line endings; deletion/symbol/notebook tools return diff-style or structure-aware results instead of summary-only text
-  - current Freehand tool registry is still missing `delete_range`, `delete_symbol`, `notebook_edit`, `web_fetch`, and background bash job lifecycle even though some specs are already registered
-  - Reasonix compaction summary prompt explicitly carries `Errors & fixes`, `Commands & outcomes`, and `Pending & next step`; current Freehand rewrite gate only stages externally supplied rewritten base segments and policy decisions, but does not yet own a real summarizer/orchestrated error-to-summary rewrite pipeline
-  - Reasonix rewrite state is lightweight (`Session.Replace` + `IncrementRewrite`) and planner/executor sessions are fully separate; current Freehand has stronger typed rewrite gates and persistence truth, but still lacks tool-schema fingerprint wiring into planner diagnostics and lacks a concrete error-driven rewrite materializer
-- 2026-06-17: new durable owner split from the Reasonix comparison
-  - `tool.preview` is now locked as the owner for no-write writable-tool preview truth and preview/execute parity
-  - `runtime.checkpoint-rewind` is now locked as the owner for workspace snapshot, restore manifest, and explicit rewind lifecycle
-  - current closeout direction is checkpointed writable mutation first; error-driven rewrite summarization stays under `reason.rewrite-policy` / `reason.context-planner`
-- 2026-06-17: tool.preview first code slice landed
-  - added shared preview contracts in `freehand-contracts`
-  - `BuiltinToolRegistry::preview` is now bound for `write_file`, `edit_file`, and `multi_edit`
-  - execute paths now reuse the same `plan_*` semantic transform helpers as preview
-  - `delete_range` preview and runtime checkpoint consumption remain pending
-- 2026-06-17: checkpoint query/projection implementation
-  - owner route confirmed: checkpoint query belongs to `runtime.checkpoint-rewind`, protocol projection belongs to `ui.protocol`, app server must stay protocol-only
-  - added runtime summary list from manifest + ledger truth; no UI/app filesystem parsing
-  - added `QueryCheckpoints` and WebUI secondary checkpoint inspector; no checkpoint SSE in this slice
-  - verification evidence: runtime/server/daemon targeted tests passed; workspace build/fmt/clippy/test/mainlines/gates passed
-- 2026-06-17: UI stop/cancel closeout
-  - root cause: WebUI Cancel only cleared local input, and runtime live submit held dispatcher mutex while provider IO ran, so `CancelTurn` could not enter until provider completion
-  - reason owner now has `ReasonTurnEngine::cancel_turn` and writes `TerminalStatus::Cancelled`
-  - UI protocol now preserves `terminal_status` separately from terminal text and maps cancelled terminal public status to `cancelled`
-  - runtime live submit now registers an active cancel token, releases runtime mutex before provider IO, checks cancellation across live-loop boundaries, and prevents later provider success from overwriting cancelled projection
-  - WebUI Cancel/Escape now sends `CancelTurn`; if submit is in flight before a concrete `turn_id` reaches the browser, it sends protocol-owned `CancelLatestActiveTurn`
-  - verification evidence: `cargo fmt --all --check`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` -> 221 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
-- 2026-06-17: stability-quality CI/CD full-gate alignment
-  - owner route confirmed: `foundation.workspace`
-  - drift found: full gate docs required `cargo run -p xtask -- mainlines check`, but `make ci`, pre-push via `make ci`, release via `make ci`, and GitHub CI did not all explicitly include that freshness check
-  - fix direction: make `make ci` the canonical full local gate, add a `mainlines` target before `gates`, make GitHub CI run `make ci`, and add `xtask gates check` coverage so the automation cannot silently drift back to partial gates
-  - targeted verification so far: `cargo test -p xtask` -> 8 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
-- 2026-06-17: metadata.core baseline
-  - user requirement: internal control metadata and request data must be separated, and metadata writes must show writer owner plus write node
-  - owner route created: `metadata.core` in `crates/freehand-metadata`
-  - landed minimal center: `MetadataEnvelope`, `MetadataWriteOwner`, `MetadataWriteNode`, `MetadataSubject`, `MetadataCenter`, and `validate_metadata_envelope`
-  - first guard rejects missing owner/node/trace/entries and request-data-like metadata keys such as `request.*`, `payload.*`, `prompt.*`, `input.*`, `content`, and `text`
-  - known gap after follow-up: runtime/provider/debug producers are not yet wired, and persistent metadata ledger is not implemented yet
-  - targeted verification so far: `cargo fmt --all --check`, `cargo test -p freehand-metadata` -> 6 passed, `cargo test -p xtask` -> 8 passed, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`
-- 2026-06-18: metadata durable-ledger slice
-  - rooted from owner map: `metadata.core` owns durable metadata persistence; `reason.turn` owns first producer proof only
-  - gap before change: metadata center was in-memory only while owner docs already claimed `~/.freehand/ledgers/metadata` as future truth
-  - chosen owner behavior: `MetadataCenter::write` validates -> appends durable ledger -> mutates in-memory records; reload/bootstrap comes from `MetadataCenter::with_ledger_path`
-  - negative rule locked: ledger parse/validation/render/io failure stays explicit and does not mutate in-memory metadata truth
-  - producer proof: `reason.turn` persists start-turn plus provider-output metadata through a ledger-backed metadata center and the raw ledger must not contain request text
-  - verification target: `cargo test -p freehand-metadata`, `cargo test -p freehand-reason`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `make ci`
-- 2026-06-18: foundation.workspace metadata/request static gate slice
-  - owner route confirmed: `foundation.workspace` in `xtask`
-  - repo truth before change was inconsistent: docs/function-map/mainline already claimed a metadata/request isolation gate, but `run_gates_check` still did not call any verifier and `xtask` had no white-box coverage for it
-  - landed narrow source-level rule only: `verify_metadata_request_boundaries` checks `ReasonReq*` structs for metadata/debug owner types and obvious metadata/debug field names, rejects stray `pub struct/enum Metadata*` outside `crates/freehand-metadata`, and rejects request-payload field names/types inside metadata owner structs
-  - white-box closeout includes positive + negative tests for request metadata type leaks, request debug field leaks, stray metadata owner types, metadata prompt fields, and metadata request-payload types
-  - doc follow-up: removed the stale `reason.turn` note that said the repo-wide metadata leak gate was still pending
-- 2026-06-18: debug.core producer expansion slice
-  - owner route: `debug.core` + `provider.reason-live-bridge`
-  - gap before change: runtime live bridge already owned metadata lifecycle writes, but restore/request/tool/terminal boundaries still had no runtime-owned debug snapshots; only `reason.turn` milestones reached `DebugHub`
-  - landed shape: `freehand-runtime` now owns `emit_live_bridge_debug` and emits observation-only snapshots at `RuntimeLive01RestoreResolved`, `RuntimeLive02ProviderRequestBuilt`, `RuntimeLive03ToolExecuted`, and `RuntimeLive04TurnClosed`
-  - leakage rule locked in tests: runtime debug snapshots must not contain the operator prompt, provider payload text, or tool-result content
-  - bug found during verification: terminal close debug snapshot was emitted but not drained before return, so hook consumers missed it; fixed by draining debug receiver immediately after terminal snapshot emission on both success and failed-terminal paths
-  - targeted verification: `cargo test -p freehand-runtime live_bridge_ -- --nocapture`, `cargo test -p freehand-runtime -p freehand-debug`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `make ci`
-- 2026-06-18: provider raw debug-ledger slice
-  - owner route: `provider.anthropic-adapter` -> `provider.reason-live-bridge` -> `reason.persistence`
-  - requirement closure:
-    - raw provider bodies/events stay debug-only
-    - raw provider bodies/events never enter session truth or restore truth
-    - runtime/request data stay isolated from metadata/debug lanes
-  - landed owner chain:
-    - `freehand-provider-anthropic` exposes raw captures before parse through `AnthropicRawCapture`, `execute_once_with_raw`, and `execute_stream_with_raw`
-    - `freehand-runtime` maps raw captures into scene-provenanced writes through `record_live_provider_raw`
-    - `freehand-reason` persists them under `~/.freehand/ledgers/providers/**` through `ReasonPersistence::record_provider_raw_event`
-  - failure policy locked:
-    - if provider raw retention is enabled and the provider raw ledger path is not writable, the live bridge fails explicitly with `RuntimeLiveBridgeError::ReasonPersistenceFailed`
-    - no fallback, no silent skip, no promotion into session truth
-  - docs/test/mainline sync:
-    - updated `provider.anthropic-adapter`, `provider.reason-live-bridge`, and `reason.persistence` function maps
-    - updated matching test designs and mainline JSON manifests
-    - regenerated matching wiki artifacts
-  - verification:
-    - `cargo test -p freehand-provider-anthropic -p freehand-reason -p freehand-runtime`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `cargo fmt --all`
-    - `make ci`
-- 2026-06-18: live cancel checkpoint hardening slice
-  - owner route: `provider.reason-live-bridge` + `runtime.ui-command-dispatch`
-  - gap found during audit: live bridge docs already claimed cancel checks at provider-output/tool-execution/terminal-write boundaries, but code and tests did not lock the terminal-persistence boundary
-  - verification-first path:
-    - added negative tests for cancel after provider output before tool execution
-    - added negative tests for cancel after terminal event before terminal persistence
-    - first red result split into:
-      - test hook bug: tool-execution test was listening to `ReasonBroadcastEvent::Semantic(...ToolCall)` instead of `ReasonBroadcastEvent::Tool(_)`
-      - real runtime gap: completed/failed terminal branches could still persist closed-turn truth after cancel
-  - landed fix:
-    - `run_live_reason_turn` now calls `ensure_live_not_cancelled(&request)?` after terminal broadcast/debug drain and before runtime terminal metadata write + `ReasonPersistence::record_turn_closed`
-    - negative truth locked: cancelling at that boundary returns explicit `RuntimeLiveBridgeError::Cancelled` and does not materialize terminal truth into active or closed turn snapshots
-  - docs synced:
-    - `docs/function-maps/provider.reason-live-bridge.md`
-    - `docs/function-maps/runtime.ui-command-dispatch.md`
-    - `docs/testing/provider.reason-live-bridge.md`
-    - `docs/testing/runtime.ui-command-dispatch.md`
-    - `docs/mainline-calls/provider.reason-live-bridge.json`
-    - `docs/mainline-calls/runtime.ui-command-dispatch.json`
-    - generated `docs/wiki/**`
-  - verification:
-    - `cargo fmt --all`
-    - `cargo fmt --check`
-    - `cargo test -p freehand-runtime live_bridge_cancel_token_stops_ -- --nocapture`
-    - `cargo test -p freehand-runtime`
-    - `make ci`
-- 2026-06-18: checkpoint failure-path hardening slice
-  - owner route: `runtime.checkpoint-rewind` with dispatch projection sync in `runtime.ui-command-dispatch`
-  - audit target: writable-tool checkpointing is already live and side-effectful, but docs claimed explicit failure semantics for missing manifest, missing blob, corrupt ledger, and bootstrap projection failure without full owner-bound regression proof
-  - chosen closure:
-    - lock white-box rewind failure for missing manifest
-    - lock white-box rewind failure for missing blob file after a real modify checkpoint is created
-    - lock checkpoint query failure on corrupt ledger line
-    - lock runtime bootstrap failure when checkpoint projection refresh hits corrupt ledger truth
-    - lock dispatch projection that missing checkpoint rewind maps to `TargetNotFound`, not generic dispatch success/fallback
-  - implementation:
-    - added 5 runtime tests in `crates/freehand-runtime/src/lib.rs`
-    - no product behavior change; existing explicit error contracts were verified and now regression-locked
-  - docs synced:
-    - `docs/function-maps/runtime.checkpoint-rewind.md`
-    - `docs/testing/runtime.checkpoint-rewind.md`
-    - `docs/function-maps/runtime.ui-command-dispatch.md`
-    - `docs/testing/runtime.ui-command-dispatch.md`
-    - `docs/mainline-calls/runtime.checkpoint-rewind.json`
-    - `docs/mainline-calls/runtime.ui-command-dispatch.json`
-    - generated `docs/wiki/runtime.checkpoint-rewind.md`
-    - generated `docs/wiki/runtime.ui-command-dispatch.md`
-  - verification:
-    - `cargo test -p freehand-runtime rewind_checkpoint_ -- --nocapture`
-    - `cargo test -p freehand-runtime list_checkpoints_rejects_corrupt_ledger_line_explicitly -- --nocapture`
-    - `cargo test -p freehand-runtime bootstrap_with_corrupt_checkpoint_ledger_fails_explicitly -- --nocapture`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo test -p freehand-runtime`
-    - `make ci`
-- 2026-06-18: daemon checkpoint failure-transport slice
-  - owner route: `app.runtime-daemon`
-  - audit target: runtime owner already locked missing checkpoint rewind as `TargetNotFound`, but daemon app boundary only had success rewind HTTP smoke and provider-failure smoke; missing-checkpoint rewind was not black-box covered on the real transport path
-  - chosen closure:
-    - create a real writable checkpoint through daemon HTTP submit
-    - physically remove the checkpoint manifest under `~/.freehand/state/checkpoints/**`
-    - call daemon HTTP rewind on the same `/ui/command` ingress
-    - assert protocol-mapped failure payload stays explicit and file state is unchanged
-  - implementation:
-    - added `daemon_rewind_checkpoint_missing_manifest_surfaces_protocol_failure`
-    - imported `UiCommandDispatchFailure` in daemon test module only
-    - no product behavior change; this is app-boundary regression locking
-  - docs synced:
-    - `docs/function-maps/app.runtime-daemon.md`
-    - `docs/testing/app.runtime-daemon.md`
-    - `docs/mainline-calls/app.runtime-daemon.json`
-    - generated `docs/wiki/app.runtime-daemon.md`
-  - verification:
-    - `cargo test -p freehand-daemon daemon_rewind_checkpoint_ -- --nocapture`
-    - `cargo test -p freehand-daemon daemon_submit_input_surfaces_provider_failure_from_runtime_owner -- --nocapture`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo test -p freehand-daemon`
-    - `cargo fmt --all`
-    - `cargo fmt --check`
-    - `make ci`
-- 2026-06-18: webui command-ingress failure slice
-  - owner route: `app.webui-smoke`
-  - audit target: WebUI app boundary only locked command-ingress success and protocol misuse; dispatch-port failure and spawn-blocking join failure were documented as explicit transport failures but not black-box covered
-  - chosen closure:
-    - add a failing injected dispatch port that returns `UiCommandDispatchPortError::DispatchFailed`
-    - add a panic-ing injected dispatch port to force the `dispatch_join_failed` HTTP path
-    - keep app-layer failure vocabulary sourced from `freehand-ui-protocol::dispatch_port_failure`
-    - merge duplicate `app.webui-smoke` entries in `docs/architecture/feature-map.md` back into one owner truth while updating required black-box coverage
-  - implementation:
-    - `apps/freehand-server/src/lib.rs` test server now accepts injected dispatch ports
-    - added `transport_command_ingress_surfaces_dispatch_port_failure_explicitly`
-    - added `transport_command_ingress_surfaces_dispatch_join_failure_explicitly`
-    - synced `docs/function-maps/app.webui-smoke.md`, `docs/testing/app.webui-smoke.md`, `docs/mainline-calls/app.webui-smoke.json`
-  - verification target:
-    - `cargo fmt --all --check`
-    - `cargo test -p freehand-server transport_command_ingress_ -- --nocapture`
-    - `cargo test -p freehand-server`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `make ci`
-- 2026-06-18: daemon corrupt checkpoint-bootstrap slice
-  - owner route: `app.runtime-daemon`
-  - audit target: daemon app boundary already covered checkpoint rewind runtime failures over HTTP, but startup-time checkpoint projection bootstrap corruption was only claimed in docs and not black-box locked at the host boundary
-  - chosen closure:
-    - corrupt `~/.freehand/ledgers/checkpoints/master/runtime-session-master.jsonl` before daemon bootstrap
-    - assert `build_runtime_dispatcher_from_default_config("master")` fails explicitly before transport serve
-    - sync daemon owner docs, test design, mainline JSON, and generated wiki to name this startup failure path
-  - implementation:
-    - added `daemon_bootstrap_rejects_corrupt_checkpoint_projection_truth`
-    - synced `docs/function-maps/app.runtime-daemon.md`, `docs/testing/app.runtime-daemon.md`, `docs/mainline-calls/app.runtime-daemon.json`, `docs/wiki/app.runtime-daemon.md`
-  - verification target:
-    - `cargo test -p freehand-daemon daemon_bootstrap_rejects_corrupt_checkpoint_projection_truth -- --nocapture`
-    - `cargo test -p freehand-daemon`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: runtime dispatch missing-target failure slice
-  - owner route: `runtime.ui-command-dispatch`
-  - audit target: runtime dispatch docs already required explicit target-not-found semantics for missing `CancelTurn`, empty `CancelLatestActiveTurn`, and wrong-node direct-message, but those negative paths were not individually regression-locked
-  - chosen closure:
-    - add dedicated negative tests for unknown `CancelTurn`
-    - add dedicated negative tests for empty-state `CancelLatestActiveTurn`
-    - add dedicated negative tests for wrong-node `SendDirectMessageToSlave`
-    - sync function map, test design, mainline JSON, and generated wiki with the now-landed missing-target coverage truth
-  - implementation:
-    - added `cancel_turn_missing_target_returns_target_not_found`
-    - added `cancel_latest_active_turn_without_any_turn_returns_target_not_found`
-    - added `direct_message_wrong_slave_target_returns_target_not_found`
-    - synced `docs/function-maps/runtime.ui-command-dispatch.md`, `docs/testing/runtime.ui-command-dispatch.md`, `docs/mainline-calls/runtime.ui-command-dispatch.json`
-  - verification target:
-    - `cargo fmt --all --check`
-    - `cargo test -p freehand-runtime cancel_turn_missing_target_returns_target_not_found -- --nocapture`
-    - `cargo test -p freehand-runtime cancel_latest_active_turn_without_any_turn_returns_target_not_found -- --nocapture`
-    - `cargo test -p freehand-runtime direct_message_wrong_slave_target_returns_target_not_found -- --nocapture`
-    - `cargo test -p freehand-runtime`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: feature-map duplicate entry gate slice
-  - owner route: `foundation.workspace`
-  - audit target: `docs/architecture/feature-map.md` previously allowed duplicate seed entries for the same `feature_id`; we manually removed a duplicate `app.webui-smoke` block, but `xtask gates check` had no automated defense against the same drift reappearing
-  - chosen closure:
-    - add one low-noise `xtask` verifier that scans `### \`<feature_id>\`` seed entries and rejects duplicates
-    - add positive and negative `cargo test -p xtask` fixtures for unique vs duplicated feature-map seed entries
-    - sync `foundation.workspace` function map, test design, mainline JSON, generated wiki, `docs/architecture/dev-gates.md`, and local skill rules to document the new gate
-  - implementation:
-    - added `verify_feature_map_unique_entries` to `run_gates_check`
-    - added `feature_map_unique_entries_accept_single_seed_entry`
-    - added `feature_map_unique_entries_reject_duplicate_seed_entry`
-    - synced `docs/function-maps/foundation.workspace.md`, `docs/testing/foundation.workspace.md`, `docs/mainline-calls/foundation.workspace.json`, `docs/architecture/dev-gates.md`, `.agents/skills/freehand-dev/SKILL.md`
-  - verification target:
-    - `cargo fmt --all --check`
-    - `cargo test -p xtask feature_map_unique_entries_accept_single_seed_entry -- --nocapture`
-    - `cargo test -p xtask feature_map_unique_entries_reject_duplicate_seed_entry -- --nocapture`
-    - `cargo test -p xtask`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: provider live-bridge tool failure slice
-  - owner route: `provider.reason-live-bridge`
-  - audit target: function map and test design already required explicit failure for unknown tool names and registered-but-unimplemented tool names, but runtime white-box coverage did not yet lock either path
-  - chosen closure:
-    - add reusable mock `tool_use` response helper for runtime live tests
-    - add one white-box test for unknown `totally_unknown_tool`
-    - add one white-box test for registered-but-unimplemented `bg_jobs`
-    - assert both fail as `RuntimeLiveBridgeError::ToolExecutionFailed(...)`
-    - assert both preserve active turn truth without tool-result truth or terminal truth
-  - implementation:
-    - added `tool_use_named_response`, `tool_use_unknown_response`, and `tool_use_unimplemented_response`
-    - added `live_bridge_fails_explicitly_on_unknown_tool_name`
-    - added `live_bridge_fails_explicitly_on_registered_unimplemented_tool_name`
-    - synced `docs/function-maps/provider.reason-live-bridge.md`
-    - synced `docs/testing/provider.reason-live-bridge.md`
-    - synced `docs/mainline-calls/provider.reason-live-bridge.json`
-    - regenerated `docs/wiki/provider.reason-live-bridge.md`
-  - verification:
-    - `cargo test -p freehand-runtime live_bridge_fails_explicitly_on_unknown_tool_name -- --nocapture`
-    - `cargo test -p freehand-runtime live_bridge_fails_explicitly_on_registered_unimplemented_tool_name -- --nocapture`
-    - `cargo test -p freehand-runtime`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: reason.persistence recovery-failure slice
-  - owner route: `reason.persistence`
-  - audit target: function map and test design already claimed explicit recovery failure for ledger sequence gaps and for debug-only artifacts not becoming recovery truth, but owner white-box coverage did not directly lock those failure paths
-  - chosen closure:
-    - add one white-box test for `LedgerSequenceGap`
-    - add one white-box test proving provider-raw-only presence still returns `MissingRecoveryTruth`
-    - add one white-box test proving UI-sidecar-only presence still returns `MissingRecoveryTruth`
-    - sync error wording from “must not mask truth” to “alone must not mask truth” where needed
-  - implementation:
-    - added `restore_rejects_reason_ledger_sequence_gap_explicitly`
-    - added `provider_raw_only_debug_files_do_not_mask_missing_recovery_truth`
-    - added `ui_sidecar_only_does_not_mask_missing_recovery_truth`
-    - synced `docs/testing/reason.persistence.md`
-    - synced `docs/function-maps/reason.persistence.md`
-    - synced `docs/mainline-calls/reason.persistence.json`
-    - regenerated `docs/wiki/reason.persistence.md`
-  - verification:
-    - `cargo test -p freehand-reason restore_rejects_reason_ledger_sequence_gap_explicitly -- --nocapture`
-    - `cargo test -p freehand-reason provider_raw_only_debug_files_do_not_mask_missing_recovery_truth -- --nocapture`
-    - `cargo test -p freehand-reason ui_sidecar_only_does_not_mask_missing_recovery_truth -- --nocapture`
-    - `cargo test -p freehand-reason`
-    - `cargo test -p freehand-testkit`
-    - `cargo test -p freehand-cli`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-  - verification note:
-    - do not parallel-run multiple `cargo test` processes that share time-stamp-based temp runtime helpers; a parallel spot-check polluted one run with another test's ledger and produced a false `LedgerSequenceGap`
-- 2026-06-18: reason.persistence snapshot-integrity slice
-  - owner route: `reason.persistence`
-  - audit target: function map and test design already claimed explicit rejection for invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate ledger sequence numbers, but owner white-box coverage still relied on indirect code-reading proof
-  - chosen closure:
-    - add one white-box test for corrupt session-history JSON with valid cursor
-    - add one white-box test for invalid cursor/active-turn coherence
-    - add one white-box test for duplicate reason-ledger sequence number
-  - implementation:
-    - added `restore_rejects_invalid_persisted_snapshot_json_explicitly`
-    - added `restore_rejects_invalid_snapshot_coherence_explicitly`
-    - added `restore_rejects_duplicate_reason_ledger_sequence_explicitly`
-    - synced `docs/testing/reason.persistence.md`
-    - synced `docs/function-maps/reason.persistence.md`
-  - verification:
-    - `cargo test -p freehand-reason restore_rejects_invalid_persisted_snapshot_json_explicitly -- --nocapture`
-    - `cargo test -p freehand-reason restore_rejects_invalid_snapshot_coherence_explicitly -- --nocapture`
-    - `cargo test -p freehand-reason restore_rejects_duplicate_reason_ledger_sequence_explicitly -- --nocapture`
-    - `cargo test -p freehand-reason`
-    - `cargo test -p freehand-testkit`
-    - `cargo test -p freehand-cli`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: metadata.core validation-branch slice
-  - owner route: `metadata.core`
-  - audit target: function map error mainline already required explicit rejection for missing `metadata_id`, missing `trace_id`, empty `entries`, and durable-ledger validation-failure lines, but metadata-core white-box coverage only locked adjacent branches
-  - chosen closure:
-    - add one white-box test for empty `metadata_id`
-    - add one white-box test for empty `trace_id`
-    - add one white-box test for empty `entries`
-    - add one white-box test for durable ledger line that parses but fails validation
-  - implementation:
-    - added `metadata_center_rejects_validation_failed_durable_ledger_line`
-    - added `metadata_rejects_missing_metadata_id`
-    - added `metadata_rejects_missing_trace_id`
-    - added `metadata_rejects_empty_entries`
-    - synced `docs/testing/metadata.core.md`
-    - synced `docs/function-maps/metadata.core.md`
-  - verification:
-    - `cargo test -p freehand-metadata metadata_center_rejects_validation_failed_durable_ledger_line -- --nocapture`
-    - `cargo test -p freehand-metadata metadata_rejects_missing_metadata_id -- --nocapture`
-    - `cargo test -p freehand-metadata metadata_rejects_missing_trace_id -- --nocapture`
-    - `cargo test -p freehand-metadata metadata_rejects_empty_entries -- --nocapture`
-    - `cargo test -p freehand-metadata`
-    - `make ci`
-- 2026-06-18: metadata.core owner-field and entry-key hardening slice
-  - owner route: `metadata.core`
-  - audit target: metadata docs already promised writer-owner required-field tests and entry-key validation, but landed white-box coverage only locked one owner field and omitted empty entry keys
-  - chosen closure:
-    - add direct white-box failures for empty owner `feature_id`
-    - add direct white-box failures for empty owner `crate_name`
-    - add direct white-box failures for empty owner `module_path`
-    - keep existing owner `symbol_path` failure and missing pipeline-node failure as explicit siblings
-    - add direct white-box failure for empty metadata entry key
-    - sync function map / test design / migrated mainline JSON / generated wiki to make the closure queryable
-  - implementation:
-    - added `metadata_rejects_missing_owner_feature_id`
-    - added `metadata_rejects_missing_owner_crate_name`
-    - added `metadata_rejects_missing_owner_module_path`
-    - added `metadata_rejects_empty_entry_key`
-    - synced `docs/function-maps/metadata.core.md`
-    - synced `docs/testing/metadata.core.md`
-    - synced `docs/mainline-calls/metadata.core.json`
-    - regenerated `docs/wiki/metadata.core.md`
-  - verification:
-    - `cargo test -p freehand-metadata`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: reason.session-history explicit error-path slice
-  - owner route: `reason.session-history`
-  - audit target: function map already claimed explicit rejection for empty rewrite reason, forbidden rewrite base segments, invalid persisted json, file-io failure, and session mismatch at `ReasonTurnEngine::start_turn`, but crate tests only covered the happy path plus one persisted coherence branch
-  - chosen closure:
-    - add one direct white-box test for empty rewrite reason
-    - add one direct white-box test for forbidden rewrite base segment rejection
-    - add one direct white-box test for invalid persisted json parse failure
-    - add direct white-box tests for persist and load file-io failure
-    - add one direct white-box test for `ReasonTurnEngine::start_turn` session mismatch
-    - sync function map / test design / migrated mainline JSON / generated wiki
-  - implementation:
-    - added `rejects_empty_rewrite_reason_explicitly`
-    - added `rejects_forbidden_rewrite_base_segments_explicitly`
-    - added `rejects_invalid_persisted_json_explicitly`
-    - added `persist_to_path_reports_file_io_failure_explicitly`
-    - added `load_from_path_reports_file_io_failure_explicitly`
-    - added `start_turn_rejects_session_history_mismatch_explicitly`
-    - synced `docs/function-maps/reason.session-history.md`
-    - synced `docs/testing/reason.session-history.md`
-    - synced `docs/mainline-calls/reason.session-history.json`
-    - regenerated `docs/wiki/reason.session-history.md`
-  - verification:
-    - `cargo test -p freehand-reason`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: debug.core sink persistence/failure slice
-  - owner route: `debug.core`
-  - audit target: debug docs already claimed sink dispatch coverage and replayable file-sink classes, but owner white-box tests did not directly lock file-sink append semantics, real file-sink io failure, or disabled-hub no-dispatch behavior
-  - chosen closure:
-    - add one white-box test proving `FileDebugSink` appends multiple JSONL records instead of overwriting
-    - add one white-box test proving a real non-directory parent failure surfaces `DebugSinkError::Io`
-    - add one white-box test proving disabled `DebugHub` does not dispatch to sinks
-    - sync function map / test design / migrated mainline JSON / generated wiki
-  - implementation:
-    - added `file_sink_appends_multiple_events_as_jsonl`
-    - added `file_sink_reports_io_failure_explicitly`
-    - added `disabled_hub_does_not_dispatch_to_sinks`
-    - synced `docs/function-maps/debug.core.md`
-    - synced `docs/testing/debug.core.md`
-    - synced `docs/mainline-calls/debug.core.json`
-    - regenerated `docs/wiki/debug.core.md`
-  - verification:
-    - `cargo test -p freehand-debug`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: node.master-slave explicit rejection slice
-  - owner route: `node.master-slave`
-  - audit target: node docs already claimed explicit pairing failure and unauthorized slave input errors, but owner white-box tests only locked token mismatch, one delegated-task unauthorized-source case, and direct-message preconditions
-  - chosen closure:
-    - add one white-box test for pairing rejection on unauthorized source ip
-    - add one white-box test for pairing rejection on unauthorized source node
-    - add one white-box test for empty delegated-task status
-    - add one white-box test for pre-pair and intruder slave-turn publication rejection
-    - sync function map / test design / migrated mainline JSON / generated wiki
-  - implementation:
-    - added `pairing_rejects_unauthorized_source_ip_explicitly`
-    - added `pairing_rejects_unauthorized_source_node_explicitly`
-    - added `delegated_task_rejects_empty_status_text_explicitly`
-    - added `publish_slave_turn_requires_authorized_pairing_source`
-    - synced `docs/function-maps/node.master-slave.md`
-    - synced `docs/testing/node.master-slave.md`
-    - synced `docs/mainline-calls/node.master-slave.json`
-    - regenerated `docs/wiki/node.master-slave.md`
-  - verification:
-    - `cargo test -p freehand-node`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: node.master-slave metadata producer wiring slice
-  - owner route: `node.master-slave`, plus runtime glue in `runtime.ui-command-dispatch` and shared truth sync in `metadata.core`
-  - audit target:
-    - `freehand-node` had no metadata producer wiring at all
-    - `freehand-runtime` already had shared metadata ledger bootstrap for live provider/reason paths, but node runtime bootstrap still bypassed it
-    - current highest-risk gap was node control/provenance state changing without owner/write-node metadata or shared-ledger audit evidence
-  - chosen closure:
-    - add `LocalNodeRuntime::with_metadata_center(...)` while keeping `LocalNodeRuntime::new(...)`
-    - write metadata before node truth mutation for bootstrap, pair accept/reject, lose-pair relisten, delegated task progress, and slave-turn publication
-    - keep metadata request-clean: no pair token, no task status text, no turn user text, no terminal text
-    - make metadata write failure explicit `NodeRuntimeError::MetadataWriteFailed(...)`
-    - wire `RuntimeCommandDispatcher::new(...)` live bootstrap to inject the same runtime metadata ledger path into node runtime
-    - sync function map / test design / migrated mainline JSON / generated wiki / memory files
-  - implementation:
-    - added `freehand-metadata` + `serde_json` deps to `freehand-node`
-    - added node-local metadata helper/spec and optional metadata center field on `LocalNodeRuntime`
-    - changed `lose_slave_pairing()` to return `Result<..., NodeRuntimeError>` so metadata failure can stay explicit
-    - added node tests:
-      - bootstrap metadata owner/write-node provenance
-      - accepted pairing metadata without token leakage
-      - delegated-task metadata without status-text leakage
-      - metadata-write failure before rejected-status materialization
-      - slave-turn metadata without turn/body leakage
-    - added runtime test `bootstrap_from_selected_live_agent_wires_node_metadata_into_shared_ledger`
-    - updated `map_node_dispatch_error(...)` so node metadata failures surface as explicit dispatch failures
-    - synced `docs/architecture/feature-map.md`, `docs/function-maps/node.master-slave.md`, `docs/testing/node.master-slave.md`, `docs/function-maps/runtime.ui-command-dispatch.md`, `docs/testing/runtime.ui-command-dispatch.md`, `docs/function-maps/metadata.core.md`, `docs/testing/metadata.core.md`, `docs/mainline-calls/{node.master-slave,runtime.ui-command-dispatch,metadata.core}.json`, and regenerated wiki docs
-  - verification:
-    - `cargo fmt --all`
-    - `cargo test -p freehand-node`
-    - `cargo test -p freehand-runtime`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
-- 2026-06-18: runtime shared node-metadata-ledger bootstrap-failure slice
-  - owner route: `runtime.ui-command-dispatch`
-  - audit target:
-    - live bootstrap now injects shared metadata ledger into `LocalNodeRuntime`
-    - positive smoke existed for successful shared-ledger bootstrap, but no negative lock proved bootstrap fails explicitly when that ledger path is unwritable
-    - this left a high-risk startup regression path only covered indirectly by code reading
-  - chosen closure:
-    - poison `metadata_ledger_path(runtime_home, agent-live, runtime-session-agent-live)` as a directory
-    - assert `RuntimeCommandDispatcher::from_selected_agent_with_live(...)` fails before materializing a dispatcher
-    - assert failure vocabulary stays `RuntimeCommandDispatcherError::NodeRuntimeInit(...)` with metadata ledger io evidence
-    - sync runtime owner docs and migrated mainline/wiki
-  - implementation:
-    - added `bootstrap_rejects_unwritable_node_metadata_ledger_explicitly`
-    - updated `docs/architecture/feature-map.md`
-    - updated `docs/function-maps/runtime.ui-command-dispatch.md`
-    - updated `docs/testing/runtime.ui-command-dispatch.md`
-    - updated `docs/mainline-calls/runtime.ui-command-dispatch.json`
-    - regenerated `docs/wiki/runtime.ui-command-dispatch.md`
-  - verification:
-    - `cargo fmt --all`
-    - `cargo test -p freehand-runtime`
-    - `cargo run -p xtask -- mainlines generate`
-    - `cargo run -p xtask -- mainlines check`
-    - `cargo run -p xtask -- gates check`
-    - `make ci`
+- 2026-06-24T08:00+08:00 android-client execution plan locked
+  - reviewed: `apps/freehand-android/` (existing scaffold) vs `apps/freehand-server/assets/mocks/android/mobile-mock.html` (locked design)
+  - gap: WebView loads crude `mobile-shell.html`; no SSE; `TimelineProjector` only handles a tiny subset
+  - plan doc: `docs/design/android-client-v1-android-shell.md`
+  - execution order:
+    1. bundle mobile-mock.html+css into Android assets; flip WebView loadUrl
+    2. add SSE subscribe to ProtocolClient
+    3. expand TimelineProjector to full ui.protocol mapping
+    4. JS bridge: snapshot from projector -> window.__freehand.applySnapshot
+    5. wire native controllers to projector state
+    6. command ingress + cancel via existing CommandIngress
+    7. theme: dark/light via Android night mode
+    8. local.properties for SDK path
+    9. compile + adb install
+    10. run integration smoke against running freehand-daemon
+  - hard constraints unchanged: no direct reason/provider/node imports; only ui.protocol consumer + command ingress
 
-## 2026-06-19T07:10:34.513Z stopless learned
+## 2026-06-24T11:35:57.426Z stopless learned
 
-- requestId: openai-responses-minimonth.key1-MiniMax-M2.7-20260619T151019281-370023-782
+- requestId: openai-responses-XLC.key1-glm-5.2-20260624T193523692-397984-479
 - sessionId: 019ec8e6-9975-7d63-bc73-db8708b21596
-- stopReason: Goal complete: all gates pass, 321 tests pass, wiki/mainlines synced, no open stability gaps in current scope
-- evidence: make ci EXIT:0 | cargo test 321 passed | xtask mainlines check ok | xtask gates check ok
+- stopReason: Android 客户端 milestone 已完成：APK 编译通过，SSE 协议客户端+WebView 渲染壳+native 控制器全部就位，freehand-daemon SSE 路由验证通过。剩余 applySnapshot JS 函数需在 HTML 中补齐（下一步）。
+- evidence: 1. assembleDebug BUILD SUCCESSFUL, app-debug.apk 6.4M 2. curl http://127.0.0.1:4040/ui/subscribe/turn/latest → 200 text/event-stream 3. SseEventStream.kt, TimelineProjector.kt, MainActivity.kt, HostConfig.kt 全部代码已就位
 
-Full gate stack is solid baseline; every truth change must sync function map + test design + mainline JSON + wiki
+OkHttp 4.12 SSE 需要 okhttp-sse 单独 artifact；Android buildFeatures 没有 webView flag；HostConfig URL 必须与 freehand-server 真实路由对齐（latest-active-turn 不是 turn/latest）；emulator 在 exec_command PTY 退出后会被杀，无法在当前环境维持长跑
 
-## 2026-06-21T00:49:32.021Z stopless learned
+## 2026-06-24T13:04:05.537Z stopless learned
 
-- requestId: openai-responses-minimonth.key1-MiniMax-M2.7-20260621T084906173-379346-4388
+- requestId: openai-responses-XLC.key1-glm-5.2-20260624T210335356-398243-738
 - sessionId: 019ec8e6-9975-7d63-bc73-db8708b21596
-- stopReason: 已完成并推送：note.md sync + 架构完整性审计记录。全部 gate 通过（make ci EXIT 0, 321 tests, mainlines check, gates check）。function-map/mainline/wiki 24组全部对齐，无同步缺陷。2个文档化待办项不影响完整性。
-- evidence: git log: 84d15da + 67ed410; make ci EXIT 0; 321 tests; xtask mainlines check ok; xtask gates check ok; CACHE.md updated with audit record
+- stopReason: ADB device 100.104.163.65:5555 connection refused; pairing code expired. Need new pairing code from device.
+- evidence: adb connect 100.104.163.65:5555 -> Connection refused; adb pair -> protocol fault
 
-架构本身已完整；wiki无需每次regenerate(内容未变时); mainlines generate在无变化时输出无diff是正常行为
+Gradle 9.6 incompatible with AGP 8.2.2; must pin Gradle 8.7 via wrapper. ADB pairing codes expire quickly.
 
-- 2026-06-23: multi-platform UI architecture design + Android v1 static mock
-  - wrote `docs/design/multi-platform-ui-architecture.md` locking one protocol truth, one adaptive design system, three-layer navigation (rail / conversation / inspector)
-  - locked v1: WebView wrapper for Android/iOS, no native shell
-  - extended `theme.css` to a token-based design system; mobile / tablet / desktop breakpoints
-  - TurnCard render contract: colored borders per role, tool call blocks with status colors, collapsible details
-  - new feature-map entry: `ui.platform-architecture`
-  - committed + pushed architecture doc + feature-map update
-  - wrote `apps/freehand-server/assets/mocks/android/mobile-mock.html` + `mobile-mock.css` as static design preview
-  - mock layout: top bar with two agent tiles (current + slaves overview) + collapsed slave strip + turn timeline + status banner + sticky input bar + bottom nav + right-slide drawer
-  - status semantics: idle / running / tool / error / done with pulse animation; tool call blocks with spinner; pill labels (running / success / error / blocked)
-  - real-time status is shown in banner only, not persisted to session (per user requirement)
-  - added `freehand-server` route `/mock/android` + `assets::asset_response` whitelist for mock HTML + mock CSS
-  - added test `android_mock_route_returns_design_preview` (passing)
-  - curl verification: `GET /mock/android` 200, `GET /assets/mocks/android/mobile-mock.css` 200
+## 2026-06-24T13:40:03.410Z stopless learned
+
+- requestId: openai-responses-XLC.key1-glm-5.2-20260624T213913294-398413-908
+- sessionId: 019ec8e6-9975-7d63-bc73-db8708b21596
+- stopReason: ADB 100.104.163.65:5555 connection refused, device wireless debug likely off. Need user to re-enable. Meanwhile fixing Gradle build issue (Gradle 9.6 incompatible with AGP 8.2.2, reverting to Gradle 8.7). Also need to sync all code changes, rebuild APK, then install once device is online.
+- evidence: nc -zv 100.104.163.65 5555 -> Connection refused. adb connect 100.104.163.65:5555 -> failed. Device PLZ110 was previously connected via adb pair but connection lost after adb server restart.
+
+ADB wireless debug ports expire; always need fresh connect. Gradle 9.6 incompatible with AGP 8.2.2.
+
+## 2026-06-25T00:05:00+08:00 android-client tailscale-first closeout
+
+- Android app no longer ships demo/mobile-shell assets as runtime truth.
+- removed dead assets:
+  - `apps/freehand-android/app/src/main/assets/mobile-mock.html`
+  - `apps/freehand-android/app/src/main/assets/mobile-shell.html`
+  - `apps/freehand-android/app/src/main/res/layout/activity_main.xml`
+- runtime UI narrowed:
+  - native side keeps the single input bar
+  - drawer keeps only connection settings
+  - fake session / agent quick-switch actions removed
+- connection truth changed to tailscale-first:
+  - bundled config host = `100.66.1.82`
+  - bundled profile = `tailscale-main`
+  - upgrade URLs switched to `100.66.1.82:4040`
+  - `autoLanScan = false`
+  - `HostStore.DEFAULT_HOST = 100.66.1.82`
+  - old persisted localhost / `192.168.*` values are overridden by `MainActivity.selectPreferredHost()`
+- build truth:
+  - stale gradle wrapper lock at `~/.gradle/wrapper/dists/gradle-8.7-bin/.../gradle-8.7-bin.zip.lck`
+  - removed stale lock, downloaded gradle 8.7 successfully
+  - `cd apps/freehand-android && ./gradlew assembleDebug --no-daemon` -> BUILD SUCCESSFUL
+- install truth:
+  - `adb -s 100.104.163.65:5555 install -r .../app-debug.apk` -> Success
+- packaged config truth:
+  - `unzip -p apps/freehand-android/app/build/outputs/apk/debug/app-debug.apk assets/config/client.json`
+  - confirms host `100.66.1.82`, profile `tailscale-main`, `autoLanScan=false`
+- remaining runtime evidence gap:
+  - device screenshots are still covered by lockscreen / black overlay
+  - `dumpsys window` shows `com.freehand.android/.ui.MainActivity` as focused app/task, but screenshot evidence is not user-visible UI yet
+  - this blocks final visual acceptance, not code/build/install truth
+
+## 2026-06-24T23:59:36.327Z stopless learned
+
+- requestId: openai-responses-orangeai.key1-glm-5.2-20260625T075914215-399715-2210
+- sessionId: 019ec8e6-9975-7d63-bc73-db8708b21596
+- stopReason: 闪退根因已修，app 已不闪退。但截图仍然是黑屏（设备锁屏层覆盖），且 daemon 未运行在 Tailscale 地址上，Android 连不上 SSE。下一步：启动 daemon 绑 0.0.0.0:4040，再截图验证 bridge.html 渲染。
+- evidence: 1. SecurityException crash stacktrace: DaemonDiscovery.getWifiIp -> WifiManager.getConnectionInfo -> ACCESS_WIFI_STATE permission missing. 2. 新 APK 已重装并验证不闪退: pid=26255 alive, focusedApp=com.freehand.android. 3. APK 内 config 确认 host=100.66.1.82 profile=tailscale-main. 4. daemon 未运行在 0.0.0.0:4040，设备 SSE 连接返回空. 5. 截图 18KB 黑屏是设备锁屏层覆盖不是 app 问题.
+
+DaemonDiscovery 的 scanLan 路径在 autoLanScan=false 时仍然可以通过 health check 失败 fallback 触发。必须在 discover() 入口就拦截，不能依赖 config flag。另外 Android 新安装的 APK 需要重新 install，不能假设 build 产物已部署。
+
+## 2026-06-25T13:08:00+08:00 android-client protocol and daemon truth closed
+
+- Android bundled daemon truth is now unified to `100.66.1.82:4041`.
+- Removed dead Android discovery owner:
+  - deleted `apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonDiscovery.kt`
+- Fixed Android command ingress protocol shape:
+  - old wrong payload: `{"type":"SubmitUserInput","text":"..."}`
+  - canonical payload now matches `UiCommand` serde external-tag form:
+    - `{"SubmitUserInput":{"text":"..."}}`
+    - `{"CancelLatestActiveTurn":{}}`
+- Fixed old persisted-host override gap:
+  - same Tailscale host + legacy port `4040` now upgrades to bundled `4041`
+- Runtime truth verified on real daemon process:
+  - `env FREEHAND_PAIR_TOKEN_SHARED=devpair target/debug/freehand-daemon serve --agent master --bind 127.0.0.1:4041`
+  - `curl http://127.0.0.1:4041/health` -> `200 ok`
+  - `curl http://127.0.0.1:4041/ui/query/latest-active-turn` after submit returns submitted turn projection
+  - `curl -sN http://127.0.0.1:4041/ui/subscribe/turn/latest` emits canonical `event: turn`
+  - submitted prompt `reply with one short sentence and valid freehand completion schema` completed with `terminal_status=Success`
+- Android build truth reverified:
+  - `cd apps/freehand-android && ./gradlew assembleDebug --no-daemon` -> BUILD SUCCESSFUL
+- Remaining device-side blocker:
+  - `adb connect 100.104.163.65:5555` -> `failed to authenticate`
+  - TCP `5555` is reachable, but host cannot currently reinstall APK or capture fresh runtime logs until device re-authorizes ADB.
+
+Current real root cause split:
+- earlier `connected + daemon unreachable` was app-side premature connected-state mutation plus wrong port collision (`4040` hitting `fin`)
+- current Android command failure root cause was protocol payload mismatch, now fixed
+
+## 2026-06-26 数据/控制 分离审计（只读）
+
+用户要求：审计当前"推理与请求响应生命周期"中数据链 vs metadata 控制流的隔离状态。
+范围：只读 audit。无代码改动。
+
+### A. 核心结构已就位
+
+- `crates/freehand-metadata/src/lib.rs` 是 metadata 唯一 owner
+  - `MetadataCenter` (in-memory) + `MetadataLedger` (durable JSONL)
+  - `MetadataWriteOwner` / `MetadataWriteNode` / `MetadataSubject` / `MetadataEntry` / `MetadataEnvelope` / `MetadataKind`
+  - `validate_metadata_envelope` 强制 owner/node/subject + 拒绝 request-like key (`request.*`/`payload.*`/`prompt.*`/`input.*`/`content`/`text`/`messages` 等)
+  - `is_reserved_request_key` 在 rust 字符串层做白名单，是元数据与请求数据硬隔离的第一道闸
+- `crates/freehand-debug/src/lib.rs` 是 debug 唯一 owner
+  - `DebugHub` + 3 类 sink (Memory / Stdout / File JSONL / Replay)
+  - 独立 `DebugObservationFailure` 流 (`DebugHub::subscribe_failures`)
+  - 观测-only，禁止承载请求内容
+- `crates/freehand-contracts/src/lib.rs` 持有请求节点类型 (`ReasonReq01..05`, `ReasonResp01..03`, `ErrorErr01`)
+- 静态 gate: `xtask/src/main.rs::verify_data_control_boundaries`
+  - 拒绝 `ReasonReq*` 携带 metadata/debug/control 字段或类型
+  - 拒绝 metadata owner struct 携带 request payload 字段
+  - 拒绝 metadata owner struct 携带 control execution payload (cancel token / retry / checkpoint / route policy / gate decision)
+  - 拒绝 `Metadata*` 类型出现在 `crates/freehand-metadata` 之外
+  - 红测在 `cargo test -p xtask`
+
+### B. 中心化元数据写入路径（已落实）
+
+- 单例 ledger 路径: `~/.freehand/ledgers/metadata/<agent_id>/<session_id>.jsonl`
+  - 由 `crates/freehand-runtime/src/lib.rs::metadata_ledger_path` 唯一生成
+  - 没有第二处拼路径的代码（`metadata_ledger_path` 仅在 `freehand-runtime` 内出现）
+- 唯一写入 helper: `write_live_bridge_metadata` (in `freehand-runtime`)
+  - 构造 `MetadataWriteOwner`（`feature_id="provider.reason-live-bridge"`, `crate_name="freehand-runtime"`, `symbol_path` 由 spec 传入）
+  - 构造 `MetadataWriteNode`（`pipeline_node` 显式标注：`RuntimeLive01RestoreResolved` / `RuntimeLive02ProviderRequestBuilt` / `RuntimeLive03ToolExecuted` / `RuntimeLive04TurnClosed`）
+  - 入参是 `RuntimeMetadataWriteSpec`，不是裸 string/JSON
+- 已经接入 metadata 中心化的 producer（按写入次数统计）：
+  - `freehand-reason` (`ReasonTurnEngine::write_metadata`): 2 处 (`start_turn` + `apply_provider_output`)
+  - `freehand-runtime` (`write_live_bridge_metadata`): 5 个 pipeline_node 节点
+  - `freehand-node` (`LocalNodeRuntime::write_metadata`): 6 个节点
+- debug producer 与 metadata 中心化 producer 数量级相同：
+  - `freehand-reason` (`emit_debug`): 14 处生命周期点
+  - `freehand-runtime` (`emit_live_bridge_debug`): 5 个 pipeline_node 节点
+  - `freehand-node` (`emit_debug`): 6 个节点
+- metadata write failure 在所有三个 producer 都是显式错误（`MetadataWriteFailed` / `NodeRuntimeError::MetadataWriteFailed` / `RuntimeLiveBridgeError::MetadataFailed`），无 fallback 吞错
+
+### C. 隔离现状 — 已锁住
+
+- `MetadataKind` 在生产代码只使用 4 个变体：
+  - `RuntimeState` 10 次
+  - `Routing` 5 次
+  - `Cache` 4 次
+  - `Provider` 2 次
+  - `Control` 0 次
+  - `DebugLink` 0 次（声明了但无生产 producer，参见 F）
+- `metadata_ledger_path` 是 metadata 持久化的唯一真源路径生成点
+- `MetadataCenter::by_trace` 是当前唯一的 metadata 查询接口（按 trace_id 反查）
+- 测试覆盖：metadata ledger append/reload、corrupt ledger reject、validation-failed ledger reject、metadata write failure 不污染 turn truth（reason/node 两边都锁）
+
+### D. 已记录的 gap（`docs/architecture/architecture-gaps.md`）
+
+- Gap 2 明确：`metadata.core` 的 provider/debug producer 未全覆盖
+  - 未接 producer：`freehand-provider-anthropic` / `freehand-provider-openai` / `freehand-debug`
+  - 状态：非违规，gate 不会拦，closure path 已写在 gap 文件里
+
+### E. 用户原则对照
+
+1. "数据链与 metadata 控制流要分离" — 已落实：metadata 中心独立 crate + 静态 gate + 类型级禁止（`is_reserved_request_key` + `xtask::is_forbidden_request_field_*`）
+2. "metadata 需要统一中心管理，不能零散写" — 已落实：唯一 ledger 路径 = `metadata_ledger_path`；唯一 helper = `write_live_bridge_metadata`；3 个 producer 都使用同一中心；没有第二份 metadata owner struct
+3. "需要写入记录" — 已落实：ledger append-only JSONL 持久化 + `load_records` 回放 + `by_trace` 查询 + 静态 metadata/request gate 把"想散写"的尝试拦在编译期
+
+### F. 待办（建议顺序，不在本轮 commit）
+
+1. **`MetadataKind::DebugLink` 与 `Control` 是死变体**（hard rule 10 适用）— `crates/freehand-metadata/src/lib.rs:35` 声明了但生产代码 0 次使用。两种处理：
+   - 删除变体（强制 schema 收紧）
+   - 给变体定义明确 producer 计划（推荐：作为 `freehand-debug` 接入 metadata 中心化的 gap 关闭路径之一）
+2. **provider/debug 接入 metadata 中心化**（Gap 2 closure path 第 1-3 步）— 已有 closure plan，优先级低
+3. **`MetadataCenter` 查询接口单一**（`by_trace` 之外）— 没有 `by_owner` / `by_kind` / `by_node` 维度。当前审计只能 grep `MetadataKind::`，多 producer 写入的可观测性受限于 trace_id 单一维度
+4. **MetadataCenter 是 `Mutex<MetadataCenter>` 形式持有** — 写入串行化。`freehand-runtime` 多处持有同一个 `Arc<Mutex<MetadataCenter>>`，并发 producer 写入需要锁
+5. **`verify_data_control_boundaries` 静态扫描只覆盖 `freehand-contracts` 的 `ReasonReq*`** — 不扫描 `ReasonReq*` 之外的请求节点（如 `ReasonReq04ToolCall`/`ReasonReq05ToolResultReentry`/`ReasonResp01..03`/`ErrorErr01`），不扫 `freehand-ui-protocol` 里的 `UiCommand` 是否携带 metadata/debug 字段。已知受限范围（gate 文件注释里没写）

@@ -28,11 +28,9 @@ impl MetadataId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MetadataKind {
-    Control,
     Routing,
     Provider,
     Cache,
-    DebugLink,
     RuntimeState,
 }
 
