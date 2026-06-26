@@ -134,6 +134,7 @@ impl BuiltinToolRegistry {
             "ls" => execute_ls(&call.tool_call.arguments),
             "todo_write" => execute_todo_write(&call.tool_call.arguments),
             "complete_step" => execute_complete_step(&call.tool_call.arguments),
+            "delete_range" => execute_delete_range(&call.tool_call.arguments),
             _ => Err(ToolRegistryError::UnimplementedTool(name.to_owned())),
         }
     }
@@ -154,6 +155,7 @@ impl BuiltinToolRegistry {
             "write_file" => plan_write_file(&call.tool_call.arguments)?.preview_change,
             "edit_file" => plan_edit_file(&call.tool_call.arguments)?.preview_change,
             "multi_edit" => plan_multi_edit(&call.tool_call.arguments)?.preview_change,
+            "delete_range" => plan_delete_range(&call.tool_call.arguments)?.preview_change,
             _ => {
                 return Err(ToolRegistryError::InvalidArguments {
                     tool: name.to_owned(),
@@ -287,7 +289,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
         spec(
             "delete_range",
             false,
-            false,
+            true,
             "Delete a contiguous text range from a file using exact start/end text anchors.",
             json!({
                 "type": "object",
@@ -903,6 +905,84 @@ fn parse_multi_edit_steps(
             })
         })
         .collect()
+}
+
+fn plan_delete_range(arguments: &[ToolArgument]) -> Result<FileMutationPlan, ToolRegistryError> {
+    let path = required_string(arguments, "delete_range", "path")?;
+    let start_anchor = required_string(arguments, "delete_range", "start_anchor")?;
+    let end_anchor = required_string(arguments, "delete_range", "end_anchor")?;
+    let inclusive = argument_value(arguments, "inclusive")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let root = locked_workspace_root("delete_range")?;
+    let path = resolve_locked_path(&root, path, "delete_range", "path")?;
+    let before_text = read_text_file(&path, "delete_range")?;
+    let start_pos =
+        before_text
+            .find(start_anchor)
+            .ok_or_else(|| ToolRegistryError::ExecutionFailed {
+                tool: "delete_range".to_owned(),
+                message: format!("start anchor not found: `{}`", start_anchor),
+            })?;
+    let end_pos =
+        before_text
+            .find(end_anchor)
+            .ok_or_else(|| ToolRegistryError::ExecutionFailed {
+                tool: "delete_range".to_owned(),
+                message: format!("end anchor not found: `{}`", end_anchor),
+            })?;
+    if end_pos < start_pos {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "delete_range".to_owned(),
+            message: "end anchor must not appear before start anchor".to_owned(),
+        });
+    }
+    let after_text = if inclusive {
+        format!(
+            "{}{}",
+            &before_text[..start_pos],
+            &before_text[end_pos + end_anchor.len()..]
+        )
+    } else {
+        // Exclusive mode: keep text before start_anchor and from end_anchor onward.
+        // This removes the range between the two anchors while preserving both anchors.
+        format!(
+            "{}{}",
+            &before_text[..start_pos + start_anchor.len()],
+            &before_text[end_pos..]
+        )
+    };
+    if after_text == before_text {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "delete_range".to_owned(),
+            message: "delete range produced no change".to_owned(),
+        });
+    }
+    let changed_lines = before_text.lines().count() - after_text.lines().count();
+    Ok(FileMutationPlan {
+        success_text: format!(
+            "Deleted range in `{}` ({} line(s) removed).",
+            relative_display(&root, &path),
+            changed_lines.max(1)
+        ),
+        path: path.clone(),
+        preview_change: ToolPreviewFileChange {
+            locked_path: path.to_string_lossy().into_owned(),
+            kind: ToolPreviewChangeKind::Delete,
+            before_text: Some(before_text),
+            after_text: Some(after_text),
+        },
+    })
+}
+
+fn execute_delete_range(
+    arguments: &[ToolArgument],
+) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let plan = plan_delete_range(arguments)?;
+    write_plan(&plan, "delete_range")?;
+    Ok(ToolExecutionOutput {
+        text: plan.success_text,
+    })
 }
 
 fn execute_glob(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
@@ -1667,30 +1747,111 @@ mod tests {
     }
 
     #[test]
-    fn complete_step_executes() {
-        let registry = BuiltinToolRegistry::reasonix_aligned();
-        let output = registry
-            .execute(&tool_call(
-                "complete_step",
+    fn delete_range_preview_execute_parity() {
+        with_temp_workspace(|test_root| {
+            let target = test_root.join("note.txt");
+            // Use a file with unique single-line anchors (no newline in anchors)
+            fs::write(
+                &target,
+                "StartLine
+MiddleContent
+EndLine
+",
+            )
+            .expect("seed file");
+
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            // inclusive=true: delete from start anchor to end anchor inclusive
+            let tool_call = tool_call(
+                "delete_range",
                 vec![
                     ToolArgument {
-                        name: "step".to_owned(),
-                        value: json!("wire tool registry"),
+                        name: "path".to_owned(),
+                        value: json!("note.txt"),
                     },
                     ToolArgument {
-                        name: "result".to_owned(),
-                        value: json!("done"),
+                        name: "start_anchor".to_owned(),
+                        value: json!("StartLine"),
                     },
                     ToolArgument {
-                        name: "evidence".to_owned(),
-                        value: json!([{"kind": "verification", "summary": "tests passed"}]),
+                        name: "end_anchor".to_owned(),
+                        value: json!("EndLine"),
+                    },
+                    ToolArgument {
+                        name: "inclusive".to_owned(),
+                        value: json!(true),
                     },
                 ],
-            ))
-            .expect("complete_step executes");
-        assert!(output.text.contains("wire tool registry"));
+            );
+            let preview = registry.preview(&tool_call).expect("preview");
+            assert_eq!(preview.changes.len(), 1);
+            let change = &preview.changes[0];
+            assert_eq!(change.kind, ToolPreviewChangeKind::Delete);
+            // inclusive=true removes anchors too: everything from "StartLine" through "EndLine" inclusive
+            assert_eq!(
+                change.after_text.as_deref(),
+                Some(
+                    "
+"
+                )
+            );
+            assert_eq!(
+                change.before_text.as_deref(),
+                Some(
+                    "StartLine
+MiddleContent
+EndLine
+"
+                )
+            );
+
+            let output = registry.execute(&tool_call).expect("execute");
+            assert!(output.text.contains("Deleted range"));
+            let persisted = fs::read_to_string(&target).expect("read after execute");
+            assert_eq!(
+                persisted,
+                "
+"
+            );
+        });
     }
 
+    #[test]
+    fn delete_range_preview_rejects_missing_anchors() {
+        with_temp_workspace(|test_root| {
+            let target = test_root.join("note.txt");
+            fs::write(
+                &target,
+                "alpha
+beta
+",
+            )
+            .expect("seed file");
+
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let tool_call = tool_call(
+                "delete_range",
+                vec![
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("note.txt"),
+                    },
+                    ToolArgument {
+                        name: "start_anchor".to_owned(),
+                        value: json!("missing"),
+                    },
+                    ToolArgument {
+                        name: "end_anchor".to_owned(),
+                        value: json!("also-missing"),
+                    },
+                ],
+            );
+            let err = registry
+                .preview(&tool_call)
+                .expect_err("preview must reject missing anchors");
+            assert!(matches!(err, ToolRegistryError::ExecutionFailed { .. }));
+        });
+    }
     #[test]
     fn bash_runs_in_workspace_root_and_returns_output() {
         with_temp_workspace(|root| {

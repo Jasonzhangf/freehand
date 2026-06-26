@@ -65,12 +65,11 @@ Generated from `docs/mainline-calls/tool.preview.json`. Do not edit by hand.
 | 02 | `plan_write_file` | `crates/freehand-tools/src/lib.rs` | compute create/overwrite preview without writing and return the exact post-image later persisted by execute | path plus content | canonical file-change truth | preview dispatch and execute | write tool preview owner | bound |
 | 03 | `plan_edit_file` | `crates/freehand-tools/src/lib.rs` | compute exact-match edit preview without writing and return the exact post-image later persisted by execute | path plus old_string plus new_string | canonical file-change truth | preview dispatch and execute | edit tool preview owner | bound |
 | 04 | `plan_multi_edit` | `crates/freehand-tools/src/lib.rs` | compute ordered multi-edit preview without writing and return the exact post-image later persisted by execute | path plus ordered edits | canonical file-change truth | preview dispatch and execute | multi-edit preview owner | bound |
-| 05 | `pending: delete_range preview entry` | `crates/freehand-tools/src/lib.rs` | compute anchor-based delete preview without writing | path plus range anchors | canonical file-change truth | preview dispatch | delete-range preview owner | pending |
+| 05 | `plan_delete_range` | `crates/freehand-tools/src/lib.rs` | compute anchor-based delete preview without writing and return the exact post-image later persisted by execute | path plus range anchors plus inclusive flag | canonical file-change truth | preview dispatch and execute | delete-range preview owner | bound |
 
 ## Sync Status Against Mainline Call
 
-- `BuiltinToolRegistry::preview` is now code-bound for `write_file`, `edit_file`, and `multi_edit`
-- preview/execute parity now runs through one shared transform path for those three writable tools
-- `delete_range` preview is still pending because its anchor semantics are not locked in code yet
-- current live runtime path now consumes preview before writable execution and rejects previewless writable tools explicitly
-- generated wiki must be regenerated from `docs/mainline-calls/tool.preview.json` when this function-map truth changes
+- code-bound preview implementation is landed for write_file, edit_file, multi_edit, and delete_range
+- owner tests now lock preview/execute parity for write_file, edit_file, multi_edit, and delete_range
+- runtime tests now prove live writable execution consumes preview before checkpointed execute
+- delete_range anchor semantics landed: start_anchor/end_anchor/inclusive, preview+execute+parity test

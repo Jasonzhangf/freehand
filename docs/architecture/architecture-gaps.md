@@ -2,23 +2,6 @@
 
 Non-violation pending items. Not regressions. Not false positives. Each gap has explicit owner, known scope, documented risk, and no active gate violation.
 
-## Gap 1: `tool.preview` — `delete_range` 无 preview/execute 实现
-
-| Field | Value |
-|---|---|
-| feature_id | `tool.preview` |
-| owner crate | `crates/freehand-tools` |
-| gap kind | 能力面未闭环 — 只有 spec（`implemented=false`），缺 `plan_delete_range` + `execute_delete_range` + preview/execute parity test |
-| why not violation | spec 正确声明 `implemented=false`；runtime preview 入口显式拒绝非 `write_file/edit_file/multi_edit` 的工具；未伪装已完成 |
-| risk | 如果后续把 `delete_range` 改为 `implemented=true` 但不补 preview + checkpoint gate，则 writable file-mutation 会绕过 checkpoint ledger，产生不可回滚状态 |
-| gate | 当前 gate 不会拦（因为 xtask gates 不检查 `implemented` 状态与 preview 入口之间的差距） |
-| entry symbol | `BuiltinToolRegistry::preview`（`crates/freehand-tools/src/lib.rs:141`）只 dispatch `write_file/edit_file/multi_edit` |
-| spec location | `crates/freehand-tools/src/lib.rs:288` |
-| test design | `docs/testing/tool.preview.md` — known gaps 已记录 |
-| function map | `docs/function-maps/tool.preview.md` — sync status 已记录 pending |
-| priority | 中 — 当前无外部路径可达 `delete_range`（`implemented=false`），不阻塞任何 E2E 流程 |
-| closure path | 1) 锁定 `delete_range` anchor 语义（start_anchor/end_anchor/inclusive） 2) 实现 `plan_delete_range` → preview + execute 3) 加 preview/execute parity test 4) 暴露到 runtime checkpoint gate |
-
 ## Gap 2: `metadata.core` — provider/debug producers 未全覆盖
 
 | Field | Value |
