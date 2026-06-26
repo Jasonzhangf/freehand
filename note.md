@@ -113,7 +113,30 @@ Current real root cause split:
 - earlier `connected + daemon unreachable` was app-side premature connected-state mutation plus wrong port collision (`4040` hitting `fin`)
 - current Android command failure root cause was protocol payload mismatch, now fixed
 
-## 2026-06-26 数据/控制 分离审计（只读）
+## 2026-06-26 数据/控制 分离审计 + MetadataKind 死变体清理
+
+### 审计结论（见上）
+
+### 死变体清理 - 已完成 commit 5eae53e
+
+### provider adapter error 接入 metadata 中心化 - 已完成 commit e4542f7
+
+用户指令：Gap 2 closure path 第 1-2 步。
+
+设计决策：
+- provider adapter crates 保持 protocol-only，不加 freehand-metadata 依赖
+- metadata 写入发生在 runtime bridge 的 executor 错误返回路径（单次 + 流式）
+- 新 pipeline node: `RuntimeLive05ProviderError`（MetadataKind::Provider）
+- 新 helper: `record_provider_error_metadata` + `emit_provider_error_debug`
+- 白盒测试: HTTP 500 → metadata ledger 写入 RuntimeLive05ProviderError
+
+当前 gap 状态：
+- provider error ✓（RuntimeLive05ProviderError）
+- 请求构造成功路径 — 依赖 RuntimeLive02ProviderRequestBuilt（已有）
+- 响应解析成功路径 — 依赖 raw capture callback（已有可观测性）
+- OpenAI executor — 当前无 executor，未来接入时复用 RuntimeLive05ProviderError 模式
+
+用户指令：物理删除 `MetadataKind::Control` + `MetadataKind::DebugLink`（两个变体生产代码 0 次使用）。
 
 用户要求：审计当前"推理与请求响应生命周期"中数据链 vs metadata 控制流的隔离状态。
 范围：只读 audit。无代码改动。
@@ -190,3 +213,21 @@ Current real root cause split:
 3. **`MetadataCenter` 查询接口单一**（`by_trace` 之外）— 没有 `by_owner` / `by_kind` / `by_node` 维度。当前审计只能 grep `MetadataKind::`，多 producer 写入的可观测性受限于 trace_id 单一维度
 4. **MetadataCenter 是 `Mutex<MetadataCenter>` 形式持有** — 写入串行化。`freehand-runtime` 多处持有同一个 `Arc<Mutex<MetadataCenter>>`，并发 producer 写入需要锁
 5. **`verify_data_control_boundaries` 静态扫描只覆盖 `freehand-contracts` 的 `ReasonReq*`** — 不扫描 `ReasonReq*` 之外的请求节点（如 `ReasonReq04ToolCall`/`ReasonReq05ToolResultReentry`/`ReasonResp01..03`/`ErrorErr01`），不扫 `freehand-ui-protocol` 里的 `UiCommand` 是否携带 metadata/debug 字段。已知受限范围（gate 文件注释里没写）
+
+## 2026-06-26T04:49:25.671Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260626T124912992-402594-347
+- sessionId: 019f0212-cf1b-7003-85bb-b0ada9de6601
+- stopReason: MetadataKind 死变体 Control + DebugLink 物理删除并验证完成
+- evidence: git commit 5eae53e；make ci EXIT 0；enum 验证 grep -A 5 只剩 4 个变体 (Routing/Provider/Cache/RuntimeState)
+
+死变体必须按 hard rule 10 物理删除并同步 docs+gate+tests+memory，不能靠注释保留；本次 make ci 一次通过验证 enum + gate + docs sync 是闭环的
+
+## 2026-06-26T05:18:48.331Z stopless learned
+
+- requestId: openai-responses-mimo.key2-mimo-v2.5-20260626T131837059-403051-804
+- sessionId: 019f0212-cf1b-7003-85bb-b0ada9de6601
+- stopReason: 两轮 commit 均完成，make ci EXIT 0。第一轮物理删除 MetadataKind 死变体 Control+DebugLink；第二轮 provider adapter error 接入 metadata 中心化（RuntimeLive05ProviderError）。docs/function-map/mainline-test/gap 同步更新。
+- evidence: git log: 5eae53e (delete dead variants) + e4542f7 (provider error metadata)。make ci EXIT 0。cargo test: 324 passed。白盒测试 live_bridge_writes_provider_error_metadata_on_executor_failure 验证 HTTP 500 → ledger 写入 RuntimeLive05ProviderError
+
+1. metadata 与 debug 保持物理隔离比通过 DebugLink 变体交叉引用更干净 2. provider adapter 保持 protocol-only 不加 metadata 依赖，metadata 写入在 runtime bridge 错误返回路径 3. RuntimeLive05ProviderError 作为 provider error 的唯一 metadata 入口可复用于未来 OpenAI executor
