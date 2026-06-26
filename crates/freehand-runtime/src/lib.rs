@@ -981,7 +981,24 @@ where
             if let Some(err) = stream_persistence_error.into_inner() {
                 return Err(err);
             }
-            stream_result.map_err(map_anthropic_executor_error)?;
+            if let Err(err) = stream_result {
+                let mapped = map_anthropic_executor_error(err);
+                record_provider_error_metadata(
+                    &metadata_center,
+                    &agent_id,
+                    &request.session_id,
+                    &turn,
+                    &mapped,
+                )?;
+                emit_provider_error_debug(
+                    &debug_hub,
+                    &agent_id,
+                    &request.session_id,
+                    &turn,
+                    &mapped,
+                );
+                return Err(mapped);
+            }
         } else {
             let single_raw_error = RefCell::new(None::<RuntimeLiveBridgeError>);
             let execute_result =
@@ -1009,7 +1026,27 @@ where
             if let Some(err) = single_raw_error.into_inner() {
                 return Err(err);
             }
-            let outputs = execute_result.map_err(map_anthropic_executor_error)?;
+            let outputs = match execute_result {
+                Ok(o) => o,
+                Err(err) => {
+                    let mapped = map_anthropic_executor_error(err);
+                    record_provider_error_metadata(
+                        &metadata_center,
+                        &agent_id,
+                        &request.session_id,
+                        &turn,
+                        &mapped,
+                    )?;
+                    emit_provider_error_debug(
+                        &debug_hub,
+                        &agent_id,
+                        &request.session_id,
+                        &turn,
+                        &mapped,
+                    );
+                    return Err(mapped);
+                }
+            };
             ensure_live_not_cancelled(&request)?;
             let mut apply_ctx = LiveApplyContext {
                 engine: &engine,
@@ -2260,6 +2297,60 @@ fn terminal_debug_details(
 
 fn map_anthropic_executor_error(err: AnthropicExecutorError) -> RuntimeLiveBridgeError {
     RuntimeLiveBridgeError::AnthropicExecutorFailed(err.to_string())
+}
+
+fn record_provider_error_metadata(
+    center: &Arc<Mutex<MetadataCenter>>,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    turn: &TurnRecord,
+    error: &RuntimeLiveBridgeError,
+) -> Result<(), RuntimeLiveBridgeError> {
+    write_live_bridge_metadata(
+        center,
+        agent_id,
+        session_id,
+        RuntimeMetadataWriteSpec {
+            turn_id: Some(&turn.request.turn_id),
+            trace_id: &turn.request.trace_id,
+            kind: MetadataKind::Provider,
+            pipeline_node: "RuntimeLive05ProviderError",
+            metadata_suffix: "provider_error".to_owned(),
+            symbol_path: "run_live_anthropic_reason_turn",
+            entries: vec![
+                MetadataEntry {
+                    key: "error.kind".to_owned(),
+                    value: json!("executor_failure"),
+                },
+                MetadataEntry {
+                    key: "error.summary".to_owned(),
+                    value: json!(error.to_string()),
+                },
+            ],
+        },
+    )
+}
+
+fn emit_provider_error_debug(
+    debug_hub: &DebugHub,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    turn: &TurnRecord,
+    error: &RuntimeLiveBridgeError,
+) {
+    emit_live_bridge_debug(
+        debug_hub,
+        agent_id,
+        session_id,
+        RuntimeDebugEmitSpec {
+            turn_id: &turn.request.turn_id,
+            trace_id: &turn.request.trace_id,
+            pipeline_node: "RuntimeLive05ProviderError",
+            function: "run_live_anthropic_reason_turn",
+            status_text: "provider error occurred",
+            detail_lines: vec![format!("error={}", error)],
+        },
+    );
 }
 
 fn live_is_cancelled(request: &LiveReasonTurnRequest) -> bool {
@@ -3990,6 +4081,60 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             RuntimeLiveBridgeError::UnsupportedLiveProvider { provider, protocol }
                 if provider == "openai" && protocol == "chat_completions"
         ));
+    }
+
+    #[test]
+    fn live_bridge_writes_provider_error_metadata_on_executor_failure() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Return HTTP 500 so the executor returns HttpStatus, which maps to
+        // RuntimeLiveBridgeError::AnthropicExecutorFailed and triggers
+        // RuntimeLive05ProviderError metadata + debug emission.
+        let (base_url, _rx, handle) = spawn_mock_server(
+            500,
+            "application/json",
+            r#"{"error":{"type":"internal_error","message":"server exploded"}}"#.to_string(),
+        );
+        let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let metadata_path = metadata_ledger_path(
+            &runtime_home,
+            &AgentId::new("agent-live"),
+            &request.session_id,
+        );
+
+        let err = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect_err("must fail on HTTP 500");
+
+        assert!(matches!(
+            err,
+            RuntimeLiveBridgeError::AnthropicExecutorFailed(ref msg)
+                if msg.contains("500")
+        ));
+
+        // Verify provider error metadata was written to the durable ledger.
+        let raw = fs::read_to_string(&metadata_path).expect("read metadata ledger");
+        let records: Vec<MetadataEnvelope> = raw
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).expect("decode metadata"))
+            .collect();
+
+        assert!(records.iter().any(|record| {
+            record.kind == MetadataKind::Provider
+                && record.write_node.pipeline_node == "RuntimeLive05ProviderError"
+                && record
+                    .entries
+                    .iter()
+                    .any(|e| e.key == "error.kind" && e.value == json!("executor_failure"))
+        }));
+
+        let _ = handle.join();
+        let _ = fs::remove_dir_all(&runtime_home);
     }
 
     #[test]

@@ -411,6 +411,28 @@
       "caller": "live bridge",
       "callee": "persistence owner",
       "binding_status": "bound"
+    },
+    {
+      "step": "19",
+      "symbol_path": "record_provider_error_metadata",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "write provider executor error metadata when AnthropicExecutorError is returned",
+      "input_semantic": "executor error classification plus turn identity",
+      "output_semantic": "durable provider error metadata record",
+      "caller": "live bridge",
+      "callee": "metadata owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "20",
+      "symbol_path": "emit_provider_error_debug",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "emit provider executor error debug snapshot when AnthropicExecutorError is returned",
+      "input_semantic": "executor error summary plus turn identity",
+      "output_semantic": "runtime-owned debug event",
+      "caller": "live bridge",
+      "callee": "debug.core",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -423,6 +445,7 @@
     "runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation",
     "provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported",
     "CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`",
-    "generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes"
+    "generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes",
+    "provider executor error metadata is now written through `record_provider_error_metadata` at both single-shot and stream error return paths via pipeline node `RuntimeLive05ProviderError`"
   ]
 }

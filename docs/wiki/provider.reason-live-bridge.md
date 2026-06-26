@@ -122,6 +122,8 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 | 24 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned terminal lifecycle metadata before terminal persistence | round/tool/schema-rejection counters plus final terminal status | durable runtime metadata record | live bridge | metadata owner | bound |
 | 25 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned terminal lifecycle debug snapshot before terminal persistence | round/tool/schema-rejection counters plus final terminal status | runtime-owned debug event | live bridge | debug.core | bound |
 | 26 | `ReasonPersistence::record_turn_closed` | `crates/freehand-reason/src/persistence.rs` | materialize terminal live turn | terminal turn truth | closed turn snapshot plus sidecars/index | live bridge | persistence owner | bound |
+| 19 | `record_provider_error_metadata` | `crates/freehand-runtime/src/lib.rs` | write provider executor error metadata when AnthropicExecutorError is returned | executor error classification plus turn identity | durable provider error metadata record | live bridge | metadata owner | bound |
+| 20 | `emit_provider_error_debug` | `crates/freehand-runtime/src/lib.rs` | emit provider executor error debug snapshot when AnthropicExecutorError is returned | executor error summary plus turn identity | runtime-owned debug event | live bridge | debug.core | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -135,3 +137,4 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`
 - generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes
+- provider executor error metadata is now written through `record_provider_error_metadata` at both single-shot and stream error return paths via pipeline node `RuntimeLive05ProviderError`
