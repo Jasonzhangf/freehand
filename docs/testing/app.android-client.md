@@ -41,8 +41,15 @@
 - `HostConfigTest`: 5 tests covering URL construction for different hosts/ports
 - `CommandIngressProtocolTest`: 5 tests covering SubmitUserInput shape, CancelLatestActiveTurn shape, negative (old type field), special characters, empty text
 
+### Protocol Replay Harness
+
+- feed canned `UiSubscriptionEvent` JSON fixtures into `TimelineProjector::apply`
+- assert `snapshotJson()` and `latestTurnProjectionJson()` preserve the canonical `turn` + `public_conversation` shape
+- replay both success and failure paths so null-safe parsing and terminal-state mapping stay locked
+
 ## Module Black-Box Plan
 
+- `cd apps/freehand-android && ./gradlew testDebugUnitTest` runs the JVM-level Android owner tests
 - `ClientConfig::load` parses real bundled `assets/config/client.json` and produces correct `ClientConfig` values
 - `HostStore` round-trips host:port through SharedPreferences
 - `ProtocolClient::postCommand` produces correct HTTP request body (verified by protocol shape tests)
@@ -53,6 +60,7 @@
 - Android app boundary proves protocol-only consumption: submit via `UiCommand` external-tag, SSE via `UiSubscriptionEvent`, query via HTTP GET
 - Android app boundary proves no direct import of `freehand-reason`, `freehand-provider-*`, `freehand-node`, `freehand-config`, or `freehand-runtime`
 - Android app boundary proves Gson JsonNull safety in `TimelineProjector` (JSON null values do not crash)
+- Android app boundary proves `bridge.html` renders the same public conversation projection as the server-side design preview
 
 ## Known Gaps
 

@@ -3,6 +3,7 @@
 ## Status
 
 - **Status**: in-progress
+- **Status note**: historical draft, superseded by `docs/design/android-client-v1-execution.md`
 - **Feature**: `app.android-client`
 - **Owner**: `apps/freehand-android`
 - **Reference design**: `docs/design/multi-platform-ui-architecture.md`

@@ -1,5 +1,11 @@
 # note.md
 
+- 2026-06-27 android-client doc alignment pass
+  - current truth: Android scaffold already exists under `apps/freehand-android`
+  - live render host: `apps/freehand-android/app/src/main/assets/bridge.html`
+  - design preview: `apps/freehand-server/assets/mocks/android/mobile-mock.html`
+  - plan update: align design / execution / testing docs to the real native shell + protocol-only bridge split
+
 - 2026-06-24T08:00+08:00 android-client execution plan locked
   - reviewed: `apps/freehand-android/` (existing scaffold) vs `apps/freehand-server/assets/mocks/android/mobile-mock.html` (locked design)
   - gap: WebView loads crude `mobile-shell.html`; no SSE; `TimelineProjector` only handles a tiny subset

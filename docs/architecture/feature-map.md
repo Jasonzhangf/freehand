@@ -343,13 +343,17 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - allowed_paths: `apps/freehand-android/**`, `apps/freehand-server/assets/mocks/android/**`, `docs/function-maps/app.android-client.md`, `docs/testing/app.android-client.md`, `docs/mainline-calls/app.android-client.json`, `docs/wiki/app.android-client.md`, `docs/design/multi-platform-ui-architecture.md`, `docs/design/android-client-v1-execution.md`
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-runtime/**` except through `freehand-ui-protocol` projections
 - required_checks:
+  - `cd apps/freehand-android && ./gradlew testDebugUnitTest`
   - `cargo test -p freehand-server --lib` (mock route smoke remains green)
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
   - manual: open `apps/freehand-server/assets/mocks/android/mobile-mock.html` via `file://` and verify render
 - required_white_box_tests:
-  - none (no Android Rust crate exists yet; rows are explicitly `binding pending` until app shell lands)
+  - `TimelineProjectorTest`
+  - `HostConfigTest`
+  - `CommandIngressProtocolTest`
 - required_module_black_box_tests:
+  - `cd apps/freehand-android && ./gradlew testDebugUnitTest`
   - self-contained `mobile-mock.html` opens via `file://` and renders the locked multi-platform layout
   - `mobile-mock.html` remains inlined-CSS (no external `/assets/...` dependency) for design-review previews
   - `mobile-mock.html` route at `/mock/android` returns HTTP 200 and contains `mock-mobile`
@@ -357,11 +361,12 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - reverse gate: Android client does not own session truth, debug ledger, provider payload, or turn-status truth (validated by doc + future code review)
 - required_project_black_box_tests:
   - Android app boundary consumes `freehand-ui-protocol` projection truth without reason/provider imports
+  - Android live shell renders `bridge.html` snapshots through `TimelineProjector::latestTurnProjectionJson`
   - Android mock render matches the locked multi-platform screen grammar
 - test_design_doc: `docs/testing/app.android-client.md`
 - function_map_doc: `docs/function-maps/app.android-client.md`
-- mainline_call_doc: `docs/mainline-calls/app.android-client.json` (binding pending — generated when Android app crate lands)
-- generated_wiki_doc: `docs/wiki/app.android-client.md` (binding pending — generated when Android app crate lands)
+- mainline_call_doc: `docs/mainline-calls/app.android-client.json`
+- generated_wiki_doc: `docs/wiki/app.android-client.md`
 - debug_artifacts:
   - self-contained `mobile-mock.html` render screenshot
   - `mobile-mock.html` HTTP route response body
@@ -380,6 +385,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - Android does not own reason / debug / session / provider / metadata truth
   - Android local state stays limited to drawer, tab, scroll, draft, transient connection banner
   - Android command ingress stays protocol-only and does not become a second dispatch port
+  - Android live shell uses `bridge.html` and the server-side `mobile-mock.html` stays preview-only
   - migrated mainline call source and generated wiki stay in sync with the function map
 
 

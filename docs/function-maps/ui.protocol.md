@@ -54,6 +54,7 @@
 - public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, and debug details from the main user-visible stream
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, and debug details from the main user-visible stream
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
+- `bridge.html` in the Android APK renders the same public conversation projection as WebUI, so the live shell and browser shell share one projection truth
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
 - `ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state
 - `ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`
@@ -90,7 +91,7 @@
 - `turn_projection_for_client`
   - owner: `crates/freehand-ui-protocol/src/lib.rs`
   - purpose: gate slave substream visibility by UI client kind without changing turn truth
-  - allowed callers: CLI/WebUI adapters, query handlers
+  - allowed callers: CLI/WebUI/Android adapters, query handlers
   - related tests: slave turn subscription smoke
   - why shared: keeps client-specific projection rules centralized and protocol-owned
 - `DebugStateSnapshot::new`

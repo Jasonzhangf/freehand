@@ -6,7 +6,7 @@
 - **Owner**: `ui.platform-architecture`
 - **Design doc source**: `docs/design/multi-platform-ui-architecture.md`
 - **Feature map ref**: `docs/architecture/feature-map.md` -> `ui.platform-architecture`
-- **Last updated**: 2026-06-23
+- **Last updated**: 2026-06-27
 
 ## 1. Design Goal
 
@@ -16,7 +16,7 @@ Freehand 的 UI 不按平台分裂语义。Web、Android、iOS 共用同一份 p
 
 - **navigation 模式**：desktop 多 panel 平铺 ↔ mobile 单列堆叠/底部导航
 - **系统集成**：推送/后台/文件选择 通过 native bridge 暴露
-- **渲染壳**：Android/iOS v1 使用 WebView 内嵌自适应 WebUI，不做原生重写
+- **渲染壳**：Android/iOS v1 使用 WebView 包装壳；Android v1 当前已落为 native Activity + WebView bridge，不做原生 UI 重写
 
 ## 2. Platform Strategy
 
@@ -24,7 +24,7 @@ Freehand 的 UI 不按平台分裂语义。Web、Android、iOS 共用同一份 p
 |----------|-------|-----------|-----------|---------|
 | Desktop Web | HTML/CSS responsive grid | `apps/freehand-server` serves WebUI assets | HTTP query + SSE subscribe | v1 exists, needs responsive upgrade |
 | Mobile Web | Same HTML/CSS, stacked nav | Same `freehand-server` | Same transport + touch adaptations | v1 pending |
-| Android | WebView wrapper + native bridge | Same WebUI served by `freehand-server` | WebView loads same origin + JS Bridge | v1 pending |
+| Android | WebView wrapper + native bridge | Same protocol truth; live APK uses `bridge.html`, preview uses `mobile-mock.html` | HTTP query + SSE subscribe + command ingress | v1 scaffold present |
 | iOS | WebView wrapper + native bridge | Same WebUI | Same as Android | v2 |
 
 ### Android v1 不做原生壳的理由
@@ -277,17 +277,14 @@ body.theme-dark {
 
 | Operation | Method | Endpoint | Response |
 |-----------|--------|----------|----------|
-| Submit command | POST | `/api/command` | dispatch receipt |
-| Query turn | GET | `/api/query/turn/:turn_id` | snapshot |
-| Query conversation | GET | `/api/query/conversation/:session_id` | public conversation |
-| Query checkpoint | GET | `/api/query/checkpoint/:session_id` | checkpoint summary |
-| Subscribe turn | GET | `/api/subscribe/turn/:turn_id` | SSE stream |
-| Subscribe latest | GET | `/api/subscribe/latest` | SSE stream |
-| Subscribe node | GET | `/api/subscribe/node` | SSE stream |
-| Query debug | GET | `/api/query/debug/:turn_id` | debug snapshot |
-| Subscribe debug | GET | `/api/subscribe/debug/:turn_id` | SSE debug stream |
+| Submit command | POST | `/ui/command` | dispatch receipt |
+| Query latest turn | GET | `/ui/query/latest-active-turn` | snapshot |
+| Query checkpoint | GET | `/ui/query/checkpoints` | checkpoint summary |
+| Query debug | GET | `/ui/query/debug/:turn_id` | debug snapshot |
+| Subscribe latest turn | GET | `/ui/subscribe/turn/latest` | SSE stream |
+| Subscribe debug | GET | `/ui/subscribe/debug/:turn_id` | SSE debug stream |
 
-Android/iOS WebView 通过 HTTP client + EventSource polyfill 复用同样接口。
+Android/iOS WebView 通过 HTTP client + SSE 复用同样接口；Android v1 的 live shell 直接加载本地 `bridge.html`，再向 `ui.protocol` 发起 HTTP query + SSE subscribe + command ingress。
 
 ## 8. Android WebView Bridge (v1)
 
@@ -320,10 +317,11 @@ interface WebToNative {
 
 ### 8.2 Android WebView 配置
 
-- WebView 加载 `http://localhost:<port>/`（freehand-server 监听 localhost）
+- WebView 加载 `file:///android_asset/bridge.html`
 - `JavaScriptEnabled = true`
 - `DomStorageEnabled = true`
-- 启用 `@JavascriptInterface` bridge
+- native 只向 Web 注入 `window.__freehand.applySnapshot(json)`，不反向托管第二套 truth
+- `mobile-mock.html` 保持为独立设计预览页，仍可通过 `file://` 或 `/mock/android` 打开
 - 禁用缩放
 - 匹配系统 safe area（状态栏、导航栏）
 - 后台连接保持：WebView 切后台时不销毁，只暂停 SSE 连接
@@ -351,10 +349,15 @@ interface WebToNative {
 
 ### Step 4: Android WebView 包装
 
-- 新建 `apps/freehand-android` 目录
-- Android 项目骨架（build.gradle, AndroidManifest.xml）
-- WebView 壳 + JS Bridge 接口
-- 验证 SSE 在 WebView 中的行为（EventSource polyfill 或 native SSE client）
+- 当前骨架已落盘到 `apps/freehand-android`
+- 现有模块：
+  - `app/src/main/java/com/freehand/android/ui/MainActivity.kt`
+  - `app/src/main/java/com/freehand/android/ui/components/*`
+  - `app/src/main/java/com/freehand/android/data/*`
+  - `app/src/main/assets/bridge.html`
+- 设计预览仍由 `apps/freehand-server/assets/mocks/android/mobile-mock.html` 提供
+- live shell 使用 native SSE client + HTTP command ingress，不引入第二套协议
+- 验证重点转为 WebView 首屏、协议投影、组件状态映射、断连态恢复
 
 ### Step 5: iOS WKWebView 包装 (v2)
 
@@ -405,22 +408,18 @@ interface WebToNative {
 ```
 apps/freehand-server/
   assets/
-    theme.css          ← 设计令牌层（扩展为完整 token 系统）
-    webui.css           ← 组件样式 + 响应式布局
-    webui.js            ← 组件渲染 + transport + 交互
-    theme.js            ← 主题切换逻辑
+    mocks/android/mobile-mock.html   ← self-contained design preview
+    mocks/android/mobile-mock.css    ← shared token source for mock preview
 
-apps/freehand-android/  (new, v1)
+apps/freehand-android/
   app/
     src/main/
-      java/com/freehand/
-        WebViewActivity.kt
-        FreehandBridge.kt
-      res/
-        layout/
-        values/
-  build.gradle.kts
-  settings.gradle.kts
+      java/com/freehand/android/
+        ui/MainActivity.kt
+        ui/components/*
+        data/*
+      assets/
+        bridge.html                  ← live WebView host
 
 docs/design/
   multi-platform-ui-architecture.md  ← 本文
@@ -430,7 +429,7 @@ docs/design/
 
 | Question | Decision |
 |----------|----------|
-| Android 是否做原生壳？ | v1 不做，WebView wrapper |
+| Android 是否做原生 UI 壳？ | v1 不做，保留 WebView wrapper + native Activity 容器 |
 | 是否重写 WebUI 为框架？ | 不重写，保持纯 HTML/CSS/JS |
 | 是否支持离线模式？ | v1 不支持 |
 | 是否支持 PWA？ | v1 不支持 |
