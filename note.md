@@ -1,5 +1,32 @@
 # note.md
 
+- 2026-06-27 launchd global daemon install closeout
+  - added service scripts:
+    - `scripts/freehand-daemon-launchd.sh`
+    - `scripts/install-launchd.sh`
+    - `scripts/uninstall-launchd.sh`
+  - real install executed: `scripts/install-launchd.sh` exit 0
+  - installed real commands:
+    - `~/.local/bin/freehand-cli`
+    - `~/.local/bin/freehand-server`
+    - `~/.local/bin/freehand-daemon`
+    - `~/.local/bin/freehand-daemon-launchd`
+  - LaunchAgent installed:
+    - label `com.freehand.daemon`
+    - plist `~/Library/LaunchAgents/com.freehand.daemon.plist`
+    - env `~/.freehand/daemon.env` mode 0600
+    - logs `~/.freehand/logs/daemon.stdout.log` and `~/.freehand/logs/daemon.stderr.log`
+    - fixed WebUI `http://127.0.0.1:4041/`
+    - `RunAtLoad=true`, `KeepAlive=true`
+  - verified active daemon:
+    - launchctl showed `pid = 55614`, then exact PID killed to verify KeepAlive
+    - launchd restarted it as `pid = 65923`, `runs = 3`
+    - `curl /health` -> 200 `ok`
+    - `curl /` -> 200, 5040-byte Freehand WebUI HTML
+  - stdout log contains `freehand-daemon listening on http://127.0.0.1:4041`
+  - permission note: localhost bind needs no macOS Accessibility/Full Disk permission; changing bind to LAN/Tailscale may trigger one-time firewall prompt
+  - reinstall behavior note: `scripts/install-launchd.sh install` intentionally re-copies host binaries via `scripts/install-global.sh`, so repeated reinstall can make macOS re-evaluate the daemon binary; ordinary restarts must use `scripts/install-launchd.sh restart` and should not rewrite install state
+
 - 2026-06-27 release/global-install/daemon startup closeout
   - added release truth: `scripts/release.sh` runs `make ci`, Android JVM tests, Rust release binaries, Android release APK, and artifact staging
   - added global install truth: `scripts/install-global.sh` installs `freehand-cli`, `freehand-server`, `freehand-daemon` to `${FREEHAND_PREFIX:-$HOME/.local}/bin`
@@ -245,3 +272,10 @@ Current real root cause split:
 - evidence: git log: 5eae53e (delete dead variants) + e4542f7 (provider error metadata)。make ci EXIT 0。cargo test: 324 passed。白盒测试 live_bridge_writes_provider_error_metadata_on_executor_failure 验证 HTTP 500 → ledger 写入 RuntimeLive05ProviderError
 
 1. metadata 与 debug 保持物理隔离比通过 DebugLink 变体交叉引用更干净 2. provider adapter 保持 protocol-only 不加 metadata 依赖，metadata 写入在 runtime bridge 错误返回路径 3. RuntimeLive05ProviderError 作为 provider error 的唯一 metadata 入口可复用于未来 OpenAI executor
+
+## 2026-06-27 UI status/tool SSE repair
+
+- Root cause: WebUI treated `/ui/query/debug/{turn}` 404 as command failure while turn SSE can arrive before debug snapshot; debug subscribe also returned 404, so late debug could not arrive over SSE. Existing tests only covered debug-present query/SSE, not turn-before-debug race.
+- Fix path: `app.webui-smoke` keeps debug HTTP query snapshot-only but makes debug SSE wait for late snapshots; WebUI renders missing debug as pending instead of command failure.
+- Tool lifecycle gap: `UiTurnProjection.tool_calls` only carried names, so WebUI could only guess running. Added `UiToolActivity` plus `apply_tool_result`; `reason.turn` broadcasts `ReasonBroadcastEvent::ToolResult`; runtime maps it into UI state so latest-turn SSE carries waiting -> completed updates.
+- Locked by tests: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo test -p freehand-reason`, `cargo test -p freehand-runtime`; mainline docs regenerated.
