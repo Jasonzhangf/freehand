@@ -74,7 +74,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `foundation.workspace`
 
 - owner: `xtask`, workspace root
-- allowed_paths: `Cargo.toml`, `Makefile`, `.github/workflows/**`, `.githooks/**`, `.agents/skills/freehand-dev/**`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `CACHE.md`, `MEMORY.md`, `note.md`
+- allowed_paths: `Cargo.toml`, `Makefile`, `.github/workflows/**`, `.githooks/**`, `.agents/skills/freehand-dev/**`, `scripts/**`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `docs/release.md`, `CACHE.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: provider and reason implementation crates unless scaffold-related
 - required_checks:
   - `cargo test --workspace`
@@ -105,6 +105,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - gate policy changes
   - repo workflow changes
   - CI/CD full-gate alignment changes
+  - release or global-install script changes
   - mainline generation shape changes
   - generated wiki freshness policy changes
   - mainline manifest cross-link policy changes

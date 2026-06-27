@@ -2,6 +2,7 @@ package com.freehand.android.data
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import java.io.IOException
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.sse.EventSource
@@ -61,7 +62,10 @@ class SseEventStream(
                     t: Throwable?,
                     response: okhttp3.Response?,
                 ) {
-                    if (t != null) onError(t)
+                    val failure = t ?: IOException(
+                        "sse failed with http_${response?.code ?: "unknown"}${response?.message?.let { ": $it" } ?: ""}",
+                    )
+                    onError(failure)
                 }
             })
     }

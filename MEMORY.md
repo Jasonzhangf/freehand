@@ -1,5 +1,9 @@
 # MEMORY
 
+- 2026-06-27: Freehand release truth is `scripts/release.sh`: it runs `make ci`, Android JVM tests, Rust release binaries for `freehand-cli`/`freehand-server`/`freehand-daemon`, Android `assembleRelease`, and stages artifacts under `dist/`. Verified with exit 0 and staged host binaries plus `freehand-android-release-unsigned.apk`.
+- 2026-06-27: Freehand global install truth is `scripts/install-global.sh`: it runs the release script and installs host binaries to `${FREEHAND_PREFIX:-$HOME/.local}/bin`. Verified with a temp `FREEHAND_PREFIX`; installed `freehand-cli`, `freehand-server`, and `freehand-daemon` were executable.
+- 2026-06-27: Installed daemon startup is config-selected from `~/.freehand/config.toml`. Verified with temp HOME: `freehand-daemon serve --agent master --bind 127.0.0.1:4059` returned `/health` 200 `ok` and `/` 200 WebUI HTML. First local topology requires paired agents to resolve the same pair token value.
+- 2026-06-27: Android release APK packaging disables release lint checks via `apps/freehand-android/app/build.gradle.kts` because the local AGP/Gradle/SDK path repeatedly hung or failed in Android Lint Vital; release regression truth remains `make ci` plus Android JVM tests.
 - 2026-06-15: Freehand architecture baseline uses `contracts + blocks + orchestrators` layering, with UI and provider semantics explicitly separated.
 - 2026-06-15: Provider strategy is Rust-native first: OpenAI-compatible adapter may use `async-openai` or raw HTTP; Anthropic adapter defaults to raw HTTP/SSE until a stable Rust SDK is justified.
 - 2026-06-15: Orchestrator crates are pure orchestration only. New helper or semantic functions must be searched for in existing libraries first and, when needed, added to `freehand-blocks` rather than `freehand-reason` or `freehand-node`.

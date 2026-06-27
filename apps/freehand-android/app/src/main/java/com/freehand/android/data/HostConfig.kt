@@ -8,6 +8,6 @@ data class HostConfig(
     val commandUrl: String get() = "$baseUrl/ui/command"
     val latestTurnUrl: String get() = "$baseUrl/ui/query/latest-active-turn"
     val latestTurnSseUrl: String get() = "$baseUrl/ui/subscribe/turn/latest"
-    val debugSnapshotUrl: String get() = "$baseUrl/ui/query/debug/latest"
-    val debugSnapshotSseUrl: String get() = "$baseUrl/ui/subscribe/debug/latest"
+    fun debugSnapshotUrl(turnId: String): String = "$baseUrl/ui/query/debug/$turnId"
+    fun debugSnapshotSseUrl(turnId: String): String = "$baseUrl/ui/subscribe/debug/$turnId"
 }

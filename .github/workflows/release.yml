@@ -17,18 +17,22 @@ jobs:
         with:
           toolchain: 1.94.1
           components: rustfmt, clippy
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Full gate
         run: make ci
       - name: Build release binaries
-        run: |
-          cargo build --workspace --release
-          mkdir -p dist
-          cp target/release/freehand-cli dist/freehand-cli || true
-          cp target/release/freehand-server dist/freehand-server || true
+        run: scripts/release.sh
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
-
+          files: |
+            dist/bin/*
+            dist/android/*

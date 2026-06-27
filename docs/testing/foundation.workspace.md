@@ -8,6 +8,9 @@
   - required hooks and CI files exist
   - `make ci` is the canonical full local gate and includes mainline freshness before architecture gates
   - pre-push, CI, and release paths consume the same full gate instead of drifting into partial gate stacks
+  - release script runs full regression, Rust release build, Android JVM regression, Android release build, and artifact staging
+  - Android release artifact packaging disables Android release lint checks in Gradle config; release regression truth is `make ci` plus Android JVM tests, not the failing Android Lint Vital task
+  - global install script installs release host binaries into the configured prefix
   - gate command can validate policy locks
   - gate command can reject data/control boundary leaks at the repo source level
   - mainline generation command can render wiki from JSON truth
@@ -20,6 +23,9 @@
   - mainline manifest cross-link logic between JSON, feature map, function map, test design, and generated wiki path
   - mainline call-table file and symbol binding logic for migrated `bound` rows
   - CI/CD and local hook command-alignment logic
+  - release script prerequisite and artifact path logic
+  - Android release packaging config disables Android release lint checks explicitly
+  - global install prefix logic
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
 - module black-box plan:
   - `xtask gates check` smoke from repo root
@@ -27,10 +33,14 @@
   - `cargo test -p xtask` manifest-link positive and negative tests
   - `cargo test -p xtask` call-table binding positive and negative tests
   - `cargo test -p xtask` CI/CD command-alignment positive and negative tests
+  - `bash -n scripts/release.sh`
+  - `bash -n scripts/install-global.sh`
   - `cargo test -p xtask` data/control leak-gate positive and negative tests
   - `cargo test -p xtask` feature-map uniqueness positive and negative tests
 - project black-box impact:
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
+  - `scripts/release.sh` stages host and Android release artifacts under `dist/`
+  - `scripts/install-global.sh` installs `freehand-cli`, `freehand-server`, and `freehand-daemon`
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - repo filesystem layout
@@ -43,5 +53,6 @@
   - mainline manifest cross-link checks are implemented in `xtask`
   - mainline call-table binding checks are implemented in `xtask`
   - CI/CD command-alignment checks are implemented in `xtask`
+  - release/global-install operator docs live in `docs/release.md`
   - data/control leak gate must stay implemented in `xtask`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

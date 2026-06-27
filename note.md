@@ -1,5 +1,15 @@
 # note.md
 
+- 2026-06-27 release/global-install/daemon startup closeout
+  - added release truth: `scripts/release.sh` runs `make ci`, Android JVM tests, Rust release binaries, Android release APK, and artifact staging
+  - added global install truth: `scripts/install-global.sh` installs `freehand-cli`, `freehand-server`, `freehand-daemon` to `${FREEHAND_PREFIX:-$HOME/.local}/bin`
+  - Android `assembleRelease` repeatedly hung/failed in Lint Vital (`lintVitalAnalyzeRelease`, `lintVitalRelease` missing intermediate files); fixed at config owner by `lint { checkReleaseBuilds = false }` in `apps/freehand-android/app/build.gradle.kts`
+  - release script uses Gradle `--no-daemon` to avoid persistent release-script child process leakage
+  - verified release script exit 0 with staged artifacts: `freehand-cli`, `freehand-server`, `freehand-daemon`, `freehand-android-release-unsigned.apk`
+  - verified install-global exit 0 with temp `FREEHAND_PREFIX`; installed binaries executable
+  - verified installed daemon startup with temp `~/.freehand/config.toml`: `freehand-daemon serve --agent master --bind 127.0.0.1:4059`, `/health` 200 `ok`, `/` 200 with WebUI HTML
+  - config smoke lesson: first local topology requires paired agents to resolve the same pair token value; separate env names with different values fail bootstrap explicitly
+
 - 2026-06-27 android-client doc alignment pass
   - current truth: Android scaffold already exists under `apps/freehand-android`
   - live render host: `apps/freehand-android/app/src/main/assets/bridge.html`

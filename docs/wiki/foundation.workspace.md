@@ -18,6 +18,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
+- release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 
@@ -70,6 +71,8 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 | 15 | `verify_ci_cd_gate_commands` | `xtask/src/main.rs` | validate local hook, Makefile, CI, and release full-gate command alignment | automation config files | pass/fail | run_gates_check | filesystem and policy snippets | bound |
 | 16 | `verify_data_control_boundaries` | `xtask/src/main.rs` | validate static data/control isolation rules on source-owned request and metadata types | Rust source files for contracts and metadata owners | pass/fail | run_gates_check | source scanners | bound |
 | 17 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that docs/architecture/feature-map.md keeps one seed entry per feature_id | feature-map markdown | pass/fail | run_gates_check | feature-map scanner | bound |
+| 18 | `run_release` | `scripts/release.sh` | run release regressions and build/stage host + Android artifacts | repo root state | dist/ artifacts | operator / GitHub release workflow | make ci, Cargo, Gradle | bound |
+| 19 | `run_install_global` | `scripts/install-global.sh` | run release script and install host binaries to a global prefix | release artifacts | installed commands | operator | scripts/release.sh, install tool | bound |
 
 ## Sync Status Against Mainline Call
 

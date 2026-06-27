@@ -1,4 +1,4 @@
-.PHONY: build fmt clippy test mainlines gates ci hooks
+.PHONY: build fmt clippy test mainlines gates ci release install-global hooks
 
 build:
 	cargo build --workspace
@@ -19,6 +19,12 @@ gates:
 	cargo run -p xtask -- gates check
 
 ci: build fmt clippy test mainlines gates
+
+release:
+	scripts/release.sh
+
+install-global:
+	scripts/install-global.sh
 
 hooks:
 	git config core.hooksPath .githooks

@@ -828,7 +828,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: build fmt clippy test mainlines gates ci hooks",
+        ".PHONY: build fmt clippy test mainlines gates ci release install-global hooks",
         "Makefile",
     )?;
     require_contains(
@@ -839,6 +839,12 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     require_contains(
         &makefile,
         "ci: build fmt clippy test mainlines gates",
+        "Makefile",
+    )?;
+    require_contains(&makefile, "release:\n\tscripts/release.sh", "Makefile")?;
+    require_contains(
+        &makefile,
+        "install-global:\n\tscripts/install-global.sh",
         "Makefile",
     )?;
 
@@ -855,6 +861,11 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     require_contains(
         &release_workflow,
         "run: make ci",
+        ".github/workflows/release.yml",
+    )?;
+    require_contains(
+        &release_workflow,
+        "run: scripts/release.sh",
         ".github/workflows/release.yml",
     )?;
 
@@ -1708,23 +1719,27 @@ mod tests {
         }
         let makefile = match mode {
             CiFixtureMode::Aligned | CiFixtureMode::CiWorkflowPartialGate => {
-                ".PHONY: build fmt clippy test mainlines gates ci hooks\n\
+                ".PHONY: build fmt clippy test mainlines gates ci release install-global hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
 test:\n\tcargo test --workspace\n\
 mainlines:\n\tcargo run -p xtask -- mainlines check\n\
 gates:\n\tcargo run -p xtask -- gates check\n\
-ci: build fmt clippy test mainlines gates\n"
+ci: build fmt clippy test mainlines gates\n\
+release:\n\tscripts/release.sh\n\
+install-global:\n\tscripts/install-global.sh\n"
             }
             CiFixtureMode::MakeCiMissingMainlines => {
-                ".PHONY: build fmt clippy test gates ci hooks\n\
+                ".PHONY: build fmt clippy test gates ci release install-global hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
 test:\n\tcargo test --workspace\n\
 gates:\n\tcargo run -p xtask -- gates check\n\
-ci: build fmt clippy test gates\n"
+ci: build fmt clippy test gates\n\
+release:\n\tscripts/release.sh\n\
+install-global:\n\tscripts/install-global.sh\n"
             }
         };
         fs::write(root.join("Makefile"), makefile).expect("write Makefile fixture");
@@ -1745,7 +1760,7 @@ ci: build fmt clippy test gates\n"
             .expect("write ci workflow fixture");
         fs::write(
             root.join(".github/workflows/release.yml"),
-            "name: release\njobs:\n  release:\n    steps:\n      - name: Full gate\n        run: make ci\n",
+            "name: release\njobs:\n  release:\n    steps:\n      - name: Full gate\n        run: make ci\n      - name: Build release artifacts\n        run: scripts/release.sh\n",
         )
         .expect("write release workflow fixture");
     }

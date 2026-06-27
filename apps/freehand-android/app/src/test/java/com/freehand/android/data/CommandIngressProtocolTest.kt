@@ -5,6 +5,9 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.junit.Assert.*
 import org.junit.Test
+import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Tests that CommandIngress produces correct UiCommand serde shapes
@@ -92,5 +95,34 @@ class CommandIngressProtocolTest {
         val json = gson.toJson(payload)
         val parsed = JsonParser.parseString(json).asJsonObject
         assertEquals("", parsed.getAsJsonObject("SubmitUserInput").get("text").asString)
+    }
+
+    @Test
+    fun `cancelLatest reports transport failure through callback`() {
+        val latch = CountDownLatch(1)
+        var ok: Boolean? = null
+        var reason: String? = null
+        val ingress = CommandIngress(
+            DummyProtocolClient,
+            { resultOk, resultReason ->
+                ok = resultOk
+                reason = resultReason
+                latch.countDown()
+            },
+            sendCommand = { throw IOException("cancel_failed") },
+        )
+
+        ingress.cancelLatest()
+
+        assertTrue(latch.await(3, TimeUnit.SECONDS))
+        assertEquals(false, ok)
+        assertEquals("cancel_failed", reason)
+    }
+
+    private companion object {
+        val DummyProtocolClient = ProtocolClient(
+            httpClient = okhttp3.OkHttpClient(),
+            host = HostConfig("127.0.0.1", 4041),
+        )
     }
 }

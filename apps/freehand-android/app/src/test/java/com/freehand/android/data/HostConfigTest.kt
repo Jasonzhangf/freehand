@@ -35,4 +35,17 @@ class HostConfigTest {
         assertEquals("http://127.0.0.1:8080", config.baseUrl)
         assertEquals("http://127.0.0.1:8080/ui/command", config.commandUrl)
     }
+
+    @Test
+    fun `debug urls require explicit turn id and match server routes`() {
+        val config = HostConfig("100.66.1.82", 4041)
+        assertEquals(
+            "http://100.66.1.82:4041/ui/query/debug/turn-1",
+            config.debugSnapshotUrl("turn-1"),
+        )
+        assertEquals(
+            "http://100.66.1.82:4041/ui/subscribe/debug/turn-1",
+            config.debugSnapshotSseUrl("turn-1"),
+        )
+    }
 }

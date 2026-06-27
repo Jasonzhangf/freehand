@@ -5,8 +5,9 @@ import com.google.gson.JsonObject
 import java.util.concurrent.Executors
 
 class CommandIngress(
-    private val client: ProtocolClient,
+    client: ProtocolClient,
     private val onResult: (ok: Boolean, reason: String) -> Unit,
+    private val sendCommand: (String) -> CommandResponse = client::postCommand,
 ) {
 
     private val gson = Gson()
@@ -24,7 +25,7 @@ class CommandIngress(
         }
         executor.execute {
             try {
-                val response = client.postCommand(gson.toJson(payload))
+                val response = sendCommand(gson.toJson(payload))
                 onResult(response.ok, response.message.ifBlank { response.code })
             } catch (e: Exception) {
                 onResult(false, e.message ?: "send_failed")
@@ -38,8 +39,10 @@ class CommandIngress(
         }
         executor.execute {
             try {
-                client.postCommand(gson.toJson(payload))
-            } catch (_: Exception) {
+                val response = sendCommand(gson.toJson(payload))
+                onResult(response.ok, response.message.ifBlank { response.code })
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "send_failed")
             }
         }
     }

@@ -90,11 +90,14 @@ class MainActivity : AppCompatActivity() {
         slaveStrip = SlaveStripController(this, root)
         topBar = TopBarController(this, root) { drawer.toggle() }
         // ingress placeholder, rebuilt on connect
-        ingress = CommandIngress(ProtocolClient(httpClient, HostConfig(HostStore.DEFAULT_HOST, HostStore.DEFAULT_PORT))) { ok, reason ->
-            runOnUiThread {
-                if (ok) inputBar.clear() else inputBar.markSendError(reason)
-            }
-        }
+        ingress = CommandIngress(
+            ProtocolClient(httpClient, HostConfig(HostStore.DEFAULT_HOST, HostStore.DEFAULT_PORT)),
+            { ok, reason ->
+                runOnUiThread {
+                    if (ok) inputBar.clear() else inputBar.markSendError(reason)
+                }
+            },
+        )
         inputBar = InputBarController(this, root) { text -> ingress.submit(text) }
         drawer = DrawerController(this, root, onHostChanged = { newHost ->
             hostStore.save(newHost)
@@ -134,11 +137,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun connectToDaemon(host: HostConfig) {
         sse?.stop()
-        ingress = CommandIngress(ProtocolClient(httpClient, host)) { ok, reason ->
-            runOnUiThread {
-                if (ok) inputBar.clear() else inputBar.markSendError(reason)
-            }
-        }
+        ingress = CommandIngress(
+            ProtocolClient(httpClient, host),
+            { ok, reason ->
+                runOnUiThread {
+                    if (ok) inputBar.clear() else inputBar.markSendError(reason)
+                }
+            },
+        )
         topBar.setAgent("${host.host}:${host.port}", "connecting")
         val newSse = SseEventStream(httpClient, host,
             onEvent = { event ->
@@ -177,7 +183,7 @@ class MainActivity : AppCompatActivity() {
         val snapshot = projector.snapshot()
         topBar.setAgent(
             name = (snapshot["agent_name"] as? String)?.ifBlank { "agent" } ?: "agent",
-            status = snapshot["turn_state"] as? String ?: "idle",
+            status = snapshot["connection"] as? String ?: "idle",
         )
         val slaves = (snapshot["slaves"] as? Map<*, *>)?.entries?.mapNotNull { entry ->
             val id = entry.key as? String ?: return@mapNotNull null

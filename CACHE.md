@@ -1,6 +1,11 @@
 # CACHE
 
 - Current branch: `main`.
+- Current verified release/install slice:
+  - `scripts/release.sh` -> exit 0 with `make ci`, Android JVM test, Rust release build, Android release APK, and staged artifacts
+  - `scripts/install-global.sh` with temp `FREEHAND_PREFIX` -> exit 0, installed `freehand-cli`, `freehand-server`, `freehand-daemon`
+  - installed `freehand-daemon serve --agent master --bind 127.0.0.1:4059` with temp HOME/config -> `/health` 200 `ok`, `/` 200 WebUI HTML
+  - Android release lint checks disabled in `apps/freehand-android/app/build.gradle.kts` because Lint Vital repeatedly hung/failed; regression truth remains `make ci` plus Android JVM tests
 - Current milestone: stability-quality gate hardening.
 - Last verified baseline:
   - `cargo test -p xtask` -> 8 passed

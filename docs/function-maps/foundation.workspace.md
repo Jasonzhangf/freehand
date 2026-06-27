@@ -28,6 +28,8 @@
 - gate runner verifies feature-map seed entries stay unique per `feature_id`
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
+- release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
+- global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 - generated wiki writer materializes `docs/wiki/*.md` and `docs/wiki/README.md` from the JSON truth
@@ -39,6 +41,8 @@
 - gate returns success when feature-map seed entries stay unique and owner routing has one seed entry per `feature_id`
 - gate returns success when migrated mainline call-table bindings resolve to source files and symbols
 - gate returns success when local and remote automation routes through the same full gate stack
+- release artifacts include `freehand-cli`, `freehand-server`, `freehand-daemon`, and the Android release APK under `dist/`
+- global install exposes `freehand-cli`, `freehand-server`, and `freehand-daemon` on the chosen install prefix
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
 - gate returns explicit failure with missing path or missing policy snippet
 - mainline generation returns fresh wiki artifacts derived from machine-readable source
@@ -51,6 +55,7 @@
 - missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure
 - duplicate feature-map seed entries for one `feature_id` surface as gate failure
 - missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
+- missing release prerequisites such as Java or Cargo surface as script failure before artifacts are claimed
 - request-node structs that introduce metadata/debug/cache/control payload fields or types surface as gate failure
 - ad hoc metadata owner types outside `freehand-metadata` or metadata owner structs that introduce request or control payload fields surface as gate failure
 - invalid JSON mainline source surfaces as generation/check failure
@@ -82,9 +87,12 @@
 | 15 | `verify_ci_cd_gate_commands` | `xtask/src/main.rs` | validate local hook, Makefile, CI, and release full-gate command alignment | automation config files | pass/fail | `run_gates_check` | filesystem and policy snippets | bound |
 | 16 | `verify_data_control_boundaries` | `xtask/src/main.rs` | validate static data/control isolation rules on source-owned request and metadata types | Rust source files for contracts and metadata owners | pass/fail | `run_gates_check` | source scanners | bound |
 | 17 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that `docs/architecture/feature-map.md` keeps one seed entry per `feature_id` | feature-map markdown | pass/fail | `run_gates_check` | feature-map scanner | bound |
+| 18 | `run_release` | `scripts/release.sh` | run release regressions and build/stage host + Android artifacts | repo root state | `dist/` artifacts | operator / GitHub release workflow | `make ci`, Cargo, Gradle | bound |
+| 19 | `run_install_global` | `scripts/install-global.sh` | run release script and install host binaries to a global prefix | release artifacts | installed commands | operator | `scripts/release.sh`, install tool | bound |
 
 ## Sync Status Against Code
 
 - workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code
 - current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static data/control boundary checks
+- release and global-install scripts are documented in `docs/release.md`
 - generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes

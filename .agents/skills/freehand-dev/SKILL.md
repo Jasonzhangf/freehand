@@ -213,6 +213,9 @@ Use this skill for any non-trivial work in this repo.
   - project black-box tests
 - Do not parallel-run multiple `cargo test` processes that rely on timestamp-based temp runtime helpers inside the same owner area; cross-process temp-path collisions can create false persistence/runtime failures during spot checks.
 - Canonical full local gate is `make ci`.
+- Release closeout must run `scripts/release.sh` end-to-end and prove staged artifacts exist; global install closeout must run `scripts/install-global.sh` with a temp `FREEHAND_PREFIX` and prove installed host binaries execute.
+- Installed daemon closeout must use a temp `HOME` plus real `~/.freehand/config.toml` shape, start `freehand-daemon serve --agent <name>`, curl `/health` and `/`, then stop only the exact daemon PID.
+- Android release packaging currently disables release lint checks in Gradle config; do not reintroduce Android Lint Vital into the release path without first proving it no longer hangs/fails on the pinned local toolchain.
 - Minimum baseline:
   - `cargo build --workspace`
   - `cargo fmt --check`

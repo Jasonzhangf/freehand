@@ -15,6 +15,7 @@
     "gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path",
     "gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols",
     "gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness",
+    "release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging",
     "gate runner verifies static data/control boundary rules on source-owned request and metadata types",
     "mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`"
   ],
@@ -228,6 +229,28 @@
       "output_semantic": "pass/fail",
       "caller": "run_gates_check",
       "callee": "feature-map scanner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "18",
+      "symbol_path": "run_release",
+      "file_path": "scripts/release.sh",
+      "responsibility": "run release regressions and build/stage host + Android artifacts",
+      "input_semantic": "repo root state",
+      "output_semantic": "dist/ artifacts",
+      "caller": "operator / GitHub release workflow",
+      "callee": "make ci, Cargo, Gradle",
+      "binding_status": "bound"
+    },
+    {
+      "step": "19",
+      "symbol_path": "run_install_global",
+      "file_path": "scripts/install-global.sh",
+      "responsibility": "run release script and install host binaries to a global prefix",
+      "input_semantic": "release artifacts",
+      "output_semantic": "installed commands",
+      "caller": "operator",
+      "callee": "scripts/release.sh, install tool",
       "binding_status": "bound"
     }
   ],
