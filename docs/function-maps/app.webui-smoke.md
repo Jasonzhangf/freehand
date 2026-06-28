@@ -50,8 +50,8 @@
 - WebUI cancel path sends `CancelTurn` for the current active turn, clears pending local input only after dispatch, and refreshes protocol truth
 - WebUI cancel path uses `CancelTurn` when `turn_id` is known and `CancelLatestActiveTurn` during the submit-in-flight pre-SSE window
 - front-end script projects protocol-owned ADP `UiQueryResult`, `UiSubscriptionEvent`, and `DebugStateSnapshot` frames into semantic message cards and detail panes, including the user prompt
-- front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket
-- front-end script normalizes tool cards by `tool_call_id`, renders waiting cards with animation, and clears the composer input immediately after submit while keeping the pending user card visible
+- front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket without surfacing verbose tool term text in the main card
+- front-end script normalizes tool cards by `tool_call_id`, renders waiting cards with animation and local elapsed timers, and clears the composer input immediately after submit while keeping the pending user card visible
 - terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
 - theme module owns white/black theme switching and is separated from WebUI layout/runtime scripts
@@ -63,6 +63,7 @@
 - invalid smoke input or missing projection returns explicit app error
 - transport/render wiring failures are surfaced explicitly
 - ADP transport failures, decode failures, and protocol failure frames are rendered as visible failure cards and status text
+- ADP failure cards must not render ahead of the current conversation timeline; transport failure is secondary to the current turn order
 - unknown static assets return explicit 404
 - cancel without an active turn clears only local input and does not invent a runtime mutation
 - transient missing debug snapshots are rendered as pending debug state, not command failure
@@ -126,7 +127,7 @@
 - WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`
 - WebUI tool cards now render protocol-projected waiting/completed/failed lifecycle states from ADP turn projection truth
 - WebUI success/failure sample buttons now load reproducible ADP sample prompts into the composer
-- WebUI same-tool lifecycle updates now normalize by `tool_call_id`, waiting cards animate, and submit clears the input field immediately while retaining pending state in the conversation stream
+- WebUI same-tool lifecycle updates now normalize by `tool_call_id`, waiting cards animate with local elapsed timers, and submit clears the input field immediately while retaining pending state in the conversation stream
 - WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics
 - generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes

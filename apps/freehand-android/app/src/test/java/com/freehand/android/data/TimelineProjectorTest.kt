@@ -95,7 +95,9 @@ class TimelineProjectorTest {
         val json = projector.latestTurnProjectionJson()
         assertNotNull(json)
         assertTrue(json!!.contains("hello adp"))
-        assertTrue(json.contains("Tool call requested: read_file"))
+        assertTrue(json.contains("\"title\":\"read_file\""))
+        assertTrue(json.contains("\"body\":\"waiting\""))
+        assertFalse(json.contains("Tool call requested"))
     }
 
     @Test

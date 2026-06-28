@@ -4,6 +4,7 @@ initializeThemeToggle(document);
 
 const shell = document.querySelector("[data-webui-shell]");
 const messageList = document.getElementById("message-list");
+const sessionList = document.getElementById("session-list");
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
@@ -14,17 +15,27 @@ const samplePrompts = {
   success:
     "ADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.",
   failure:
-    "ADP failure sample: call the ls tool exactly once with path ~/code/codex, then report through the required Freehand completion schema.",
+    "ADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.",
 };
+
+const selectedSessionStorageKey = "freehand-webui-selected-session";
+const shortcutHelp =
+  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /sessions /reload /success /failure /cancel /clear";
 
 const state = {
   turn: null,
+  sessions: [],
+  selectedSessionId: window.localStorage.getItem(selectedSessionStorageKey) || null,
+  sessionTurns: [],
   publicConversation: [],
   debug: null,
   checkpoints: [],
+  toolTimings: new Map(),
+  activeTurnId: null,
   pendingUserInput: null,
   submitInFlight: false,
   commandStatusMessage: "connecting to ADP...",
+  commandStatusStickyUntil: 0,
   adpFailure: null,
   adpStatus: "connecting",
   adpSocket: null,
@@ -72,13 +83,12 @@ function ensureAdpSocket() {
   const socket = new WebSocket(adpUrl());
   state.adpSocket = socket;
   state.adpStatus = "connecting";
-  state.commandStatusMessage = "ADP connecting...";
-  renderCommandStatus();
+  setCommandStatus("ADP connecting...");
 
   state.adpOpened = new Promise((resolve, reject) => {
     socket.addEventListener("open", () => {
       state.adpStatus = "connected";
-      state.commandStatusMessage = "ADP connected; waiting for subscription...";
+      setCommandStatus("ADP connected; waiting for subscription...");
       renderAll();
       resolve(socket);
     });
@@ -87,19 +97,19 @@ function ensureAdpSocket() {
         handleAdpFrame(JSON.parse(event.data));
       } catch (error) {
         state.adpFailure = `ADP decode failed: ${error.message}`;
-        state.commandStatusMessage = state.adpFailure;
+        setCommandStatus(state.adpFailure);
         renderAll();
       }
     });
     socket.addEventListener("error", () => {
       state.adpStatus = "error";
-      state.commandStatusMessage = "ADP transport error";
+      setCommandStatus("ADP transport error");
       renderAll();
       reject(new Error("ADP transport error"));
     });
     socket.addEventListener("close", () => {
       state.adpStatus = "closed";
-      state.commandStatusMessage = "ADP closed";
+      setCommandStatus("ADP closed");
       state.adpSocket = null;
       state.adpOpened = null;
       state.adpSubscriptions.clear();
@@ -148,6 +158,19 @@ function adpSubscribe(subscription, prefix) {
   return requestAdp("subscribe", "subscription", subscription, prefix);
 }
 
+function setCommandStatus(message, options = {}) {
+  state.commandStatusMessage = message;
+  state.commandStatusStickyUntil = options.stickyMs ? Date.now() + options.stickyMs : 0;
+  renderCommandStatus();
+}
+
+function setBackgroundCommandStatus(message) {
+  if (state.commandStatusStickyUntil > Date.now()) {
+    return;
+  }
+  setCommandStatus(message);
+}
+
 function handleAdpFrame(frame) {
   const request = state.adpRequests.get(frame.request_id);
   switch (frame.kind) {
@@ -164,8 +187,7 @@ function handleAdpFrame(frame) {
         state.adpRequests.delete(frame.request_id);
         request.resolve(frame.receipt);
       }
-      state.commandStatusMessage = `${frame.receipt.dispatch_status} -> ${frame.receipt.target_feature_id}`;
-      renderCommandStatus();
+      setBackgroundCommandStatus(`${frame.receipt.dispatch_status} -> ${frame.receipt.target_feature_id}`);
       return;
     case "subscription_accepted":
       state.adpFailure = null;
@@ -174,8 +196,7 @@ function handleAdpFrame(frame) {
         request.resolve(frame.selector);
       }
       state.adpSubscriptions.add(frame.request_id);
-      state.commandStatusMessage = `ADP subscription accepted: ${frame.selector.stream_kind}`;
-      renderCommandStatus();
+      setBackgroundCommandStatus(`ADP subscription accepted: ${frame.selector.stream_kind}`);
       return;
     case "subscription_event":
       state.adpFailure = null;
@@ -187,12 +208,10 @@ function handleAdpFrame(frame) {
         state.adpRequests.delete(frame.request_id);
         request.reject(new Error(frame.failure.message || frame.failure.code));
       }
-      state.commandStatusMessage = `ADP failure: ${frame.failure.code}`;
-      renderCommandStatus();
+      setCommandStatus(`ADP failure: ${frame.failure.code}`);
       return;
     default:
-      state.commandStatusMessage = `unknown ADP frame: ${frame.kind}`;
-      renderCommandStatus();
+      setCommandStatus(`unknown ADP frame: ${frame.kind}`);
   }
 }
 
@@ -262,6 +281,77 @@ function normalizePublicConversation(items) {
   return normalized;
 }
 
+function toolStatusLabel(status) {
+  switch ((status || "").toLowerCase()) {
+    case "waiting":
+      return "等待中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "执行失败";
+    default:
+      return status || "未知状态";
+  }
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return "";
+  }
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${String(remainingMinutes).padStart(2, "0")}m`;
+}
+
+function syncToolTimings(items) {
+  const now = Date.now();
+  const seen = new Set();
+
+  items.forEach((item) => {
+    if (item.kind !== "ToolSummary" || !item.tool_call_id) {
+      return;
+    }
+    seen.add(item.tool_call_id);
+    const previous = state.toolTimings.get(item.tool_call_id);
+    if (!previous) {
+      state.toolTimings.set(item.tool_call_id, {
+        startedAt: now,
+        finishedAt: null,
+        status: item.status,
+      });
+      return;
+    }
+    const next = { ...previous, status: item.status };
+    if (previous.status !== item.status && (item.status === "completed" || item.status === "failed")) {
+      next.finishedAt = now;
+    }
+    state.toolTimings.set(item.tool_call_id, next);
+  });
+
+  for (const toolCallId of Array.from(state.toolTimings.keys())) {
+    if (!seen.has(toolCallId)) {
+      state.toolTimings.delete(toolCallId);
+    }
+  }
+}
+
+function toolSummaryBody(item) {
+  const timing = item.tool_call_id ? state.toolTimings.get(item.tool_call_id) : null;
+  const endAt = timing && timing.finishedAt ? timing.finishedAt : Date.now();
+  const elapsed = timing ? formatDuration(endAt - timing.startedAt) : "";
+  const statusLabel = toolStatusLabel(item.status);
+  return elapsed ? `${statusLabel} · ${elapsed}` : statusLabel;
+}
+
 function variantPayload(value, variant) {
   if (!value || typeof value !== "object" || !(variant in value)) {
     return undefined;
@@ -294,17 +384,10 @@ function derivePublicConversation(turn) {
   });
   (turn.tool_activities || []).forEach((tool) => {
     const status = `${tool.status || "waiting"}`.toLowerCase();
-    const failedDetail = tool.detail ? `: ${tool.detail}` : "";
-    const body =
-      status === "completed"
-        ? `Tool result returned for ${tool.tool_name}`
-        : status === "failed"
-          ? `Tool execution failed for ${tool.tool_name}${failedDetail}`
-          : `Tool call requested: ${tool.tool_name} (waiting for execution)`;
     items.push({
       kind: "ToolSummary",
-      title: "Tool",
-      body,
+      title: tool.tool_name || "Tool",
+      body: status,
       status,
       tool_call_id: tool.tool_call_id,
     });
@@ -339,9 +422,103 @@ function derivePublicConversation(turn) {
   return items;
 }
 
-function setTurnProjection(turn) {
+function conversationItemsForTurn(turn) {
+  return normalizePublicConversation(derivePublicConversation(turn));
+}
+
+function setSelectedSessionId(sessionId) {
+  state.selectedSessionId = sessionId || null;
+  if (state.selectedSessionId) {
+    window.localStorage.setItem(selectedSessionStorageKey, state.selectedSessionId);
+  } else {
+    window.localStorage.removeItem(selectedSessionStorageKey);
+  }
+}
+
+function setSessionList(projection) {
+  state.sessions = (projection && projection.sessions) || [];
+  if (
+    state.selectedSessionId &&
+    !state.sessions.some((session) => session.session_id === state.selectedSessionId)
+  ) {
+    setSelectedSessionId(null);
+  }
+  if (!state.selectedSessionId && state.sessions.length > 0) {
+    const active = state.sessions.find((session) => session.active_turn_id);
+    setSelectedSessionId((active || state.sessions[state.sessions.length - 1]).session_id);
+  }
+}
+
+function setSessionTranscript(projection) {
+  state.sessionTurns = (projection && projection.turns) || [];
+  if (projection && projection.session_id) {
+    setSelectedSessionId(projection.session_id);
+  }
+  const latestTurn = state.sessionTurns[state.sessionTurns.length - 1] || null;
+  setTurnProjection(latestTurn, { preserveSessionTurns: true });
+}
+
+function turnOrderKey(turnId) {
+  const raw = `${turnId || ""}`;
+  const runtimeMatch = raw.match(/^runtime-turn-(\d+)(?:-r(\d+))?$/);
+  if (runtimeMatch) {
+    return {
+      prefix: "runtime-turn-",
+      ordinal: Number.parseInt(runtimeMatch[1], 10),
+      round: Number.parseInt(runtimeMatch[2] || "1", 10),
+      raw,
+    };
+  }
+  const match = raw.match(/^(.*?)(\d+)$/);
+  if (!match) {
+    return { prefix: raw, ordinal: 0, round: 1, raw };
+  }
+  return {
+    prefix: match[1],
+    ordinal: Number.parseInt(match[2], 10),
+    round: 1,
+    raw,
+  };
+}
+
+function compareTurnIds(leftTurnId, rightTurnId) {
+  const left = turnOrderKey(leftTurnId);
+  const right = turnOrderKey(rightTurnId);
+  if (left.prefix !== right.prefix) {
+    return left.prefix.localeCompare(right.prefix);
+  }
+  if (left.ordinal !== right.ordinal) {
+    return left.ordinal - right.ordinal;
+  }
+  if (left.round !== right.round) {
+    return left.round - right.round;
+  }
+  return left.raw.localeCompare(right.raw);
+}
+
+function setTurnProjection(turn, options = {}) {
+  const nextTurnId = turn && turn.turn_id ? turn.turn_id : null;
+  if (state.activeTurnId !== nextTurnId) {
+    state.toolTimings.clear();
+  }
+  state.activeTurnId = nextTurnId;
   state.turn = turn || null;
+  if (state.turn && !state.selectedSessionId) {
+    setSelectedSessionId(state.turn.session_id);
+  }
+  if (state.turn && !options.preserveSessionTurns) {
+    const existingIndex = state.sessionTurns.findIndex(
+      (existing) => existing.turn_id === state.turn.turn_id,
+    );
+    if (existingIndex >= 0) {
+      state.sessionTurns[existingIndex] = state.turn;
+    } else if (!state.selectedSessionId || state.turn.session_id === state.selectedSessionId) {
+      state.sessionTurns.push(state.turn);
+    }
+    state.sessionTurns.sort((left, right) => compareTurnIds(left.turn_id, right.turn_id));
+  }
   state.publicConversation = derivePublicConversation(state.turn);
+  syncToolTimings(state.publicConversation);
   if (state.turn && state.pendingUserInput) {
     state.pendingUserInput = null;
   }
@@ -354,10 +531,21 @@ function applyAdpQueryResult(result) {
     renderAll();
     if (state.turn) {
       refreshDebug().catch((error) => {
-        state.commandStatusMessage = `debug ADP query failed: ${error.message}`;
-        renderCommandStatus();
+        setCommandStatus(`debug ADP query failed: ${error.message}`);
       });
     }
+    return;
+  }
+  const sessionListResult = variantPayload(result, "SessionList");
+  if (sessionListResult !== undefined) {
+    setSessionList(sessionListResult);
+    renderAll();
+    return;
+  }
+  const sessionTurns = variantPayload(result, "SessionTurns");
+  if (sessionTurns !== undefined) {
+    setSessionTranscript(sessionTurns);
+    renderAll();
     return;
   }
   const debug = variantPayload(result, "Debug");
@@ -381,7 +569,7 @@ function applyAdpSubscriptionEvent(event) {
   const turn = variantPayload(projection, "Turn");
   if (turn !== undefined) {
     setTurnProjection(turn);
-    state.commandStatusMessage = "ADP turn update received";
+    setBackgroundCommandStatus("ADP turn update received");
     renderAll();
     ensureDebugSubscription();
     return;
@@ -423,6 +611,10 @@ function liveTurnStatus() {
 }
 
 function renderCommandStatus() {
+  if (state.commandStatusStickyUntil > Date.now()) {
+    setText("command-status", state.commandStatusMessage);
+    return;
+  }
   const liveStatus = liveTurnStatus();
   setText("command-status", liveStatus || state.commandStatusMessage);
 }
@@ -443,19 +635,7 @@ function renderMessages() {
     );
   }
 
-  if (state.adpFailure) {
-    fragments.push(
-      card(
-        "ADP",
-        { className: "failed", label: "failed" },
-        "ADP failure",
-        state.adpFailure,
-        "failure",
-      ),
-    );
-  }
-
-  if (!state.turn) {
+  if (state.sessionTurns.length === 0 && !state.turn) {
     fragments.push(
       card(
         "Assistant",
@@ -466,7 +646,9 @@ function renderMessages() {
       ),
     );
   } else {
-    normalizePublicConversation(state.publicConversation).forEach((item) => {
+    const turns = state.sessionTurns.length > 0 ? state.sessionTurns : [state.turn];
+    turns.filter(Boolean).forEach((turn) => {
+      conversationItemsForTurn(turn).forEach((item) => {
       const variant =
         item.kind === "UserText"
           ? "user"
@@ -486,8 +668,22 @@ function renderMessages() {
               ? "running"
               : "success";
       const identity = item.tool_call_id ? `tool:${item.tool_call_id}` : null;
-      fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, item.body, variant, identity));
+      const body = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
+      fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, body, variant, identity));
+      });
     });
+  }
+
+  if (state.adpFailure) {
+    fragments.push(
+      card(
+        "ADP",
+        { className: "failed", label: "failed" },
+        "ADP failure",
+        state.adpFailure,
+        "failure",
+      ),
+    );
   }
 
   if (fragments.length === 0) {
@@ -503,6 +699,50 @@ function renderMessages() {
   }
 
   fragments.forEach((fragment) => messageList.appendChild(fragment));
+}
+
+function renderSessions() {
+  if (!sessionList) {
+    return;
+  }
+  sessionList.replaceChildren();
+  if (state.sessions.length === 0) {
+    const empty = document.createElement("section");
+    empty.className = "session-item active";
+    empty.innerHTML =
+      "<div class=\"meta-label\">empty</div><div class=\"session-title\">no sessions</div><div class=\"session-copy\">waiting for first turn</div>";
+    sessionList.appendChild(empty);
+    return;
+  }
+
+  state.sessions.forEach((session) => {
+    const item = document.createElement("button");
+    item.className = `session-item session-button${session.session_id === state.selectedSessionId ? " active" : ""}`;
+    item.type = "button";
+    item.dataset.sessionId = session.session_id;
+
+    const label = document.createElement("div");
+    label.className = "meta-label";
+    label.textContent = session.active_turn_id ? "active" : session.latest_status || "session";
+
+    const title = document.createElement("div");
+    title.className = "session-title";
+    title.textContent = session.session_id;
+
+    const copy = document.createElement("div");
+    copy.className = "session-copy";
+    const turnText = session.latest_turn_id ? `${session.latest_turn_id} · ${session.turn_count} turn(s)` : `${session.turn_count} turn(s)`;
+    copy.textContent = session.latest_summary ? `${turnText} · ${session.latest_summary}` : turnText;
+
+    item.append(label, title, copy);
+    item.addEventListener("click", () => {
+      setSelectedSessionId(session.session_id);
+      refreshSelectedSession().catch((error) => {
+        setCommandStatus(`session refresh failed: ${error.message}`);
+      });
+    });
+    sessionList.appendChild(item);
+  });
 }
 
 function renderDebug() {
@@ -540,9 +780,9 @@ function renderCheckpoints() {
 
 function renderTurnMeta() {
   if (!state.turn) {
-    setText("session-title", "waiting for protocol state");
-    setText("session-copy", "no active turn yet");
-    setText("strip-session", "-");
+    setText("session-title", state.selectedSessionId || "waiting for protocol state");
+    setText("session-copy", state.selectedSessionId ? "no turns in selected session" : "no active turn yet");
+    setText("strip-session", state.selectedSessionId || "-");
     setText("strip-turn", "-");
     setText("conversation-turn", "latest active turn");
     setText("turn-status", "waiting");
@@ -581,8 +821,21 @@ function renderTurnMeta() {
   }
 }
 
+setInterval(() => {
+  if (!state.turn) {
+    return;
+  }
+  const hasWaitingTool = (state.publicConversation || []).some(
+    (item) => item.kind === "ToolSummary" && item.status === "waiting",
+  );
+  if (hasWaitingTool) {
+    renderMessages();
+  }
+}, 1000);
+
 function renderAll() {
   setText("workspace-status", state.adpStatus);
+  renderSessions();
   renderTurnMeta();
   renderMessages();
   renderDebug();
@@ -594,6 +847,29 @@ async function refreshTurn() {
   const result = await adpQuery("QueryLatestActiveTurn");
   applyAdpQueryResult(result);
   await refreshCheckpoints();
+}
+
+async function refreshSessions() {
+  const result = await adpQuery("QuerySessionList");
+  applyAdpQueryResult(result);
+}
+
+async function refreshSelectedSession() {
+  if (!state.selectedSessionId) {
+    state.sessionTurns = [];
+    setTurnProjection(null, { preserveSessionTurns: true });
+    renderAll();
+    return;
+  }
+  const result = await adpQuery({
+    QuerySessionTurns: { session_id: state.selectedSessionId },
+  });
+  applyAdpQueryResult(result);
+  if (state.turn) {
+    refreshDebug().catch((error) => {
+      setCommandStatus(`debug ADP query failed: ${error.message}`);
+    });
+  }
 }
 
 async function refreshDebug() {
@@ -612,6 +888,13 @@ async function refreshCheckpoints() {
   renderAll();
 }
 
+async function refreshAllProtocolState() {
+  await refreshSessions();
+  await refreshSelectedSession();
+  await refreshTurn();
+  await refreshCheckpoints();
+}
+
 function ensureTurnSubscription() {
   if (state.adpSubscriptions.has("latest-turn")) {
     return;
@@ -621,8 +904,7 @@ function ensureTurnSubscription() {
     { SubscribeLatestActiveTurn: { client: adpClientKind() } },
     "sub-turn",
   ).catch((error) => {
-    state.commandStatusMessage = `ADP turn subscribe failed: ${error.message}`;
-    renderCommandStatus();
+    setCommandStatus(`ADP turn subscribe failed: ${error.message}`);
   });
 }
 
@@ -656,7 +938,7 @@ function ensureDebugSubscription() {
 
 async function submitUserInput(text) {
   const payload = await adpCommand({ SubmitUserInput: { text } });
-  state.commandStatusMessage = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
+  setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id}`);
   return payload;
 }
 
@@ -669,89 +951,127 @@ async function cancelActiveTurn() {
   if (!turnId && !state.submitInFlight && !state.pendingUserInput) {
     composerInput.value = "";
     state.pendingUserInput = null;
-    state.commandStatusMessage = "no active turn; input cleared";
+    setCommandStatus("no active turn; input cleared", { stickyMs: 3000 });
     renderMessages();
-    renderCommandStatus();
     return;
   }
   const command = turnId
     ? { CancelTurn: { turn_id: turnId } }
     : { CancelLatestActiveTurn: {} };
-  state.commandStatusMessage = `cancelling ${turnId || "latest active turn"}...`;
-  renderCommandStatus();
+  setCommandStatus(`cancelling ${turnId || "latest active turn"}...`);
   let payload;
   try {
     payload = await adpCommand(command);
   } catch (error) {
-    state.commandStatusMessage = `cancel failed: ${error.message}`;
-    renderCommandStatus();
+    setCommandStatus(`cancel failed: ${error.message}`);
     return;
   }
   state.pendingUserInput = null;
   composerInput.value = "";
-  state.commandStatusMessage = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
+  setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id}`);
   await refreshTurn().catch((error) => {
-    state.commandStatusMessage =
-      `${payload.dispatch_status} -> ${payload.target_feature_id} (turn refresh failed: ${error.message})`;
-    renderCommandStatus();
+    setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id} (turn refresh failed: ${error.message})`);
   });
 }
 
 async function rewindCheckpoint(checkpointId) {
-  state.commandStatusMessage = `rewinding ${checkpointId}...`;
-  renderCommandStatus();
+  setCommandStatus(`rewinding ${checkpointId}...`);
   let payload;
   try {
     payload = await adpCommand({ RewindCheckpoint: { checkpoint_id: checkpointId } });
   } catch (error) {
-    state.commandStatusMessage = `rewind failed: ${error.message}`;
-    renderCommandStatus();
+    setCommandStatus(`rewind failed: ${error.message}`);
     return;
   }
-  state.commandStatusMessage = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
+  setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id}`);
   await refreshCheckpoints();
-  renderCommandStatus();
+}
+
+async function runSlashCommand(rawText) {
+  const command = rawText.trim();
+  if (command.startsWith("/")) {
+    composerInput.value = "";
+    state.pendingUserInput = null;
+  }
+  switch (command) {
+    case "/help":
+      setCommandStatus(shortcutHelp, { stickyMs: 10000 });
+      return true;
+    case "/sessions":
+      setCommandStatus("refreshing sessions...", { stickyMs: 3000 });
+      await refreshSessions();
+      await refreshSelectedSession();
+      setCommandStatus("sessions refreshed", { stickyMs: 5000 });
+      return true;
+    case "/reload":
+      setCommandStatus("refreshing protocol state...", { stickyMs: 3000 });
+      await refreshAllProtocolState();
+      setCommandStatus("protocol state refreshed", { stickyMs: 5000 });
+      return true;
+    case "/success":
+      loadSamplePrompt("success");
+      return true;
+    case "/failure":
+      loadSamplePrompt("failure");
+      return true;
+    case "/cancel":
+      await cancelActiveTurn();
+      return true;
+    case "/clear":
+      composerInput.value = "";
+      state.pendingUserInput = null;
+      setCommandStatus("local composer cleared", { stickyMs: 3000 });
+      renderMessages();
+      return true;
+    default:
+      if (command.startsWith("/")) {
+        setCommandStatus(`unknown slash command: ${command}. ${shortcutHelp}`, { stickyMs: 8000 });
+        return true;
+      }
+      return false;
+  }
 }
 
 composerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = composerInput.value.trim();
   if (!text) {
-    state.commandStatusMessage = "empty input rejected";
-    renderCommandStatus();
+    setCommandStatus("empty input rejected", { stickyMs: 3000 });
     return;
   }
-  state.commandStatusMessage = "dispatching...";
+  try {
+    if (await runSlashCommand(text)) {
+      return;
+    }
+  } catch (error) {
+    setCommandStatus(`slash command failed: ${error.message}`, { stickyMs: 8000 });
+    return;
+  }
+  setCommandStatus("dispatching...");
   state.pendingUserInput = text;
   state.submitInFlight = true;
   composerInput.value = "";
   renderMessages();
-  renderCommandStatus();
   try {
     const receipt = await submitUserInput(text);
     state.submitInFlight = false;
     try {
-      await refreshTurn();
-      await refreshCheckpoints();
+      await refreshAllProtocolState();
       renderCommandStatus();
     } catch (error) {
-      state.commandStatusMessage =
-        `${receipt.dispatch_status} -> ${receipt.target_feature_id} (turn refresh failed: ${error.message})`;
-      renderCommandStatus();
+      setCommandStatus(`${receipt.dispatch_status} -> ${receipt.target_feature_id} (turn refresh failed: ${error.message})`);
     }
   } catch (error) {
     state.submitInFlight = false;
     state.pendingUserInput = null;
     renderMessages();
-    state.commandStatusMessage = `dispatch failed: ${error.message}`;
-    renderCommandStatus();
+    setCommandStatus(`dispatch failed: ${error.message}`);
   }
 });
 
 cancelButton.addEventListener("click", () => {
   cancelActiveTurn().catch((error) => {
-    state.commandStatusMessage = `cancel failed: ${error.message}`;
-    renderCommandStatus();
+    setCommandStatus(`cancel failed: ${error.message}`);
   });
 });
 
@@ -762,8 +1082,7 @@ function loadSamplePrompt(kind) {
   }
   composerInput.value = prompt;
   composerInput.focus();
-  state.commandStatusMessage = `${kind} sample loaded; press Send to run through ADP`;
-  renderCommandStatus();
+  setCommandStatus(`${kind} sample loaded; press Send to run through ADP`, { stickyMs: 5000 });
 }
 
 successSampleButton.addEventListener("click", () => loadSamplePrompt("success"));
@@ -771,22 +1090,54 @@ failureSampleButton.addEventListener("click", () => loadSamplePrompt("failure"))
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {
+    const usesModifier = event.metaKey || event.ctrlKey;
+    if (usesModifier && event.key === "Enter") {
+      event.preventDefault();
+      composerForm.requestSubmit();
+      return;
+    }
+    if (usesModifier && event.key.toLowerCase() === "r") {
+      event.preventDefault();
+      setCommandStatus("refreshing protocol state...", { stickyMs: 3000 });
+      refreshAllProtocolState()
+        .then(() => {
+          setCommandStatus("protocol state refreshed", { stickyMs: 5000 });
+        })
+        .catch((error) => {
+          setCommandStatus(`refresh failed: ${error.message}`, { stickyMs: 8000 });
+        });
+      return;
+    }
+    if (usesModifier && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      composerInput.focus();
+      setCommandStatus("composer focused", { stickyMs: 3000 });
+      return;
+    }
+    if (usesModifier && event.key === "1") {
+      event.preventDefault();
+      loadSamplePrompt("success");
+      return;
+    }
+    if (usesModifier && event.key === "2") {
+      event.preventDefault();
+      loadSamplePrompt("failure");
+      return;
+    }
     return;
   }
   event.preventDefault();
   cancelActiveTurn().catch((error) => {
-    state.commandStatusMessage = `cancel failed: ${error.message}`;
-    renderCommandStatus();
+    setCommandStatus(`cancel failed: ${error.message}`);
   });
 });
 
 ensureAdpSocket()
   .then(async () => {
     ensureTurnSubscription();
-    await refreshTurn();
-    await refreshCheckpoints();
+    await refreshAllProtocolState();
   })
   .catch((error) => {
-    state.commandStatusMessage = `ADP bootstrap failed: ${error.message}`;
+    setCommandStatus(`ADP bootstrap failed: ${error.message}`);
     renderAll();
   });

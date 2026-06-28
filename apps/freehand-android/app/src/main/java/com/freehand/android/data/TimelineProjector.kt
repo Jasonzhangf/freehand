@@ -254,13 +254,7 @@ class TimelineProjector {
             val tool = element.asJsonObject
             val status = tool.get("status").asStringSafe()?.lowercase() ?: "waiting"
             val toolName = tool.get("tool_name").asStringSafe() ?: "tool"
-            val detail = tool.get("detail").asStringSafe()
-            val body = when (status) {
-                "completed" -> "Tool result returned for $toolName"
-                "failed" -> "Tool execution failed for $toolName${detail?.let { ": $it" } ?: ""}"
-                else -> "Tool call requested: $toolName (waiting for execution)"
-            }
-            publicConversation.add(conversationItem("ToolSummary", "Tool", body, status).apply {
+            publicConversation.add(conversationItem("ToolSummary", toolName, status, status).apply {
                 tool.get("tool_call_id").asStringSafe()?.let { addProperty("tool_call_id", it) }
             })
         }

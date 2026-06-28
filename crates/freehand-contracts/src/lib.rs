@@ -148,7 +148,19 @@ pub struct ReasonReq04ToolCall {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolResultContract {
     pub tool_call_id: ToolCallId,
+    #[serde(default = "default_tool_result_status")]
+    pub status: ToolResultStatus,
     pub output: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolResultStatus {
+    Success,
+    Failed,
+}
+
+fn default_tool_result_status() -> ToolResultStatus {
+    ToolResultStatus::Success
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

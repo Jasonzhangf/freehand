@@ -11,7 +11,7 @@
   - first tool-capable request advertises implemented schemas from the Reasonix-aligned tool registry
   - anthropic executor runs single-shot or SSE request
   - provider-neutral outputs are written back into the active round and broadcast
-  - completed implemented registry tool calls are executed, written as tool-result re-entry, persisted, and passed to the next provider request
+  - completed implemented registry tool calls are executed, written as success or failed tool-result re-entry, persisted, and passed to the next provider request
   - completion schema is parsed from tagged text and either accepted, rejected, or continued
   - terminal live turns are materialized through `ReasonPersistence`
   - runtime dispatch projects the final turn into shared `UiProtocolState`
@@ -38,8 +38,9 @@
   - registry-backed tool schema export path
   - registry-backed tool schema fingerprint reaches planner diagnostics
   - implemented registry read-only tool execution path
-  - unknown tool-name execution path fails explicitly, materializes failed terminal/error truth, and does not materialize tool-result truth
-  - registered but unimplemented tool-name execution path fails explicitly, materializes failed terminal/error truth, and does not materialize tool-result truth
+  - implemented registry read-only tool execution failure path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and lets the model continue to a later terminal schema
+  - unknown tool-name execution path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and does not materialize failed terminal/error truth by itself
+  - registered but unimplemented tool-name execution path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and does not materialize failed terminal/error truth by itself
   - writable tool checkpoint creation and rewind-safe manifest/ledger path
   - previewless writable-tool rejection path
   - tool-result re-entry passed to Anthropic as `tool_result`
@@ -52,6 +53,7 @@
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
   - invalid completion schema retries exactly 3 times and closes failed terminal without early success
   - provider HTTP failure returns explicit dispatch failure and does not project a successful terminal
+  - tool execution result failure returns a paired failed tool result to the model and can still end with a successful terminal schema
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
   - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation
 - project black-box impact:
@@ -74,6 +76,6 @@
   - runtime live bridge now writes restore/request/tool/terminal lifecycle metadata through `metadata.core` and fails explicitly on metadata write errors
   - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
   - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
-  - runtime white-box coverage now explicitly locks both unknown-tool and registered-but-unimplemented-tool failures, proving they stop with explicit `RuntimeLiveBridgeError::ToolExecutionFailed(...)`, materialize failed terminal/error truth, and do not materialize tool-result or terminal-success truth
+  - runtime white-box coverage now explicitly locks failed tool-result multi-round continuation, proving execution failures become paired `ToolResultStatus::Failed` re-entry truth and provider/system errors remain explicit bridge failures
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates

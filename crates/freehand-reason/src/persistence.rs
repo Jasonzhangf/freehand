@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use freehand_blocks::CompletionSchemaRejection;
 use freehand_contracts::{AgentId, SessionId, TraceId, TurnId};
 use freehand_provider_core::{ProviderFamily, ProviderSemanticOutput};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -332,6 +333,12 @@ impl ReasonPersistence {
         }
     }
 
+    pub fn list_persisted_sessions(
+        &self,
+    ) -> Result<Vec<PersistedSessionIndexEntry>, ReasonPersistenceError> {
+        self.load_session_index()
+    }
+
     fn persist_row(
         &self,
         history: &SessionHistory,
@@ -385,17 +392,26 @@ impl ReasonPersistence {
         session_id: &SessionId,
         row: &ReasonLedgerRow,
     ) -> Result<(), ReasonPersistenceError> {
-        ensure_parent_dir(&self.reason_ledger_path(session_id))?;
+        let ledger_path = self.reason_ledger_path(session_id);
+        ensure_parent_dir(&ledger_path)?;
         let payload = serde_json::to_string(row)
             .map_err(|err| ReasonPersistenceError::JsonRenderFailed(err.to_string()))?;
         let mut file = fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(self.reason_ledger_path(session_id))
+            .read(true)
+            .open(&ledger_path)
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
+        file.lock_exclusive()
             .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
         use std::io::Write;
-        writeln!(file, "{payload}")
-            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))
+        let result = writeln!(file, "{payload}")
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()));
+        let unlock_result = file
+            .unlock()
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()));
+        result?;
+        unlock_result
     }
 
     fn persist_restored_state(
@@ -519,8 +535,7 @@ impl ReasonPersistence {
                 .map_err(|err| ReasonPersistenceError::JsonParseFailed(err.to_string()))?;
             rows.push(row);
         }
-        validate_ledger_rows(session_id, &rows)?;
-        Ok(rows)
+        normalize_ledger_rows(session_id, rows)
     }
 
     fn load_closed_turns(
@@ -694,12 +709,13 @@ fn validate_cursor(
     Ok(())
 }
 
-fn validate_ledger_rows(
+fn normalize_ledger_rows(
     session_id: &SessionId,
-    rows: &[ReasonLedgerRow],
-) -> Result<(), ReasonPersistenceError> {
+    rows: Vec<ReasonLedgerRow>,
+) -> Result<Vec<ReasonLedgerRow>, ReasonPersistenceError> {
     let mut expected_seq = 1_u64;
-    for row in rows {
+    let mut normalized = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().cloned().enumerate() {
         if row.schema_version != PERSISTENCE_SCHEMA_VERSION {
             return Err(ReasonPersistenceError::InvalidLedgerCoherence(
                 "unsupported ledger schema version".to_owned(),
@@ -711,6 +727,11 @@ fn validate_ledger_rows(
             ));
         }
         if row.seq != expected_seq {
+            if row.seq.saturating_add(1) == expected_seq
+                && remaining_rows_contain_seq(&rows, index + 1, expected_seq, session_id)?
+            {
+                continue;
+            }
             return Err(ReasonPersistenceError::LedgerSequenceGap {
                 expected: expected_seq,
                 actual: row.seq,
@@ -721,9 +742,34 @@ fn validate_ledger_rows(
                 "ledger row cursor does not match row sequence".to_owned(),
             ));
         }
+        normalized.push(row);
         expected_seq = expected_seq.saturating_add(1);
     }
-    Ok(())
+    Ok(normalized)
+}
+
+fn remaining_rows_contain_seq(
+    rows: &[ReasonLedgerRow],
+    start_index: usize,
+    expected_seq: u64,
+    session_id: &SessionId,
+) -> Result<bool, ReasonPersistenceError> {
+    for row in rows.iter().skip(start_index) {
+        if row.schema_version != PERSISTENCE_SCHEMA_VERSION {
+            return Err(ReasonPersistenceError::InvalidLedgerCoherence(
+                "unsupported ledger schema version".to_owned(),
+            ));
+        }
+        if row.session_id != *session_id {
+            return Err(ReasonPersistenceError::InvalidLedgerCoherence(
+                "ledger row session id does not match requested session".to_owned(),
+            ));
+        }
+        if row.seq == expected_seq {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn rebuild_from_ledger_rows(
@@ -1050,6 +1096,57 @@ mod tests {
     }
 
     #[test]
+    fn restore_accepts_legacy_closed_turn_without_tool_result_status() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+        let mut turn = started_turn(&mut history);
+        turn.tool_results
+            .push(freehand_contracts::ReasonReq05ToolResultReentry {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("reason.persistence"),
+                agent_id: AgentId::new("agent-1"),
+                tool_result: freehand_contracts::ToolResultContract {
+                    tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                    status: freehand_contracts::ToolResultStatus::Success,
+                    output: "legacy output".to_owned(),
+                },
+            });
+        turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::Success,
+            summary: "done".to_owned(),
+        });
+
+        coordinator
+            .record_turn_closed(&history, &turn, 0)
+            .expect("close persist");
+
+        let closed_turn_path =
+            coordinator.closed_turn_path(history.session_id(), &TurnId::new("turn-1"));
+        let legacy_payload = fs::read_to_string(&closed_turn_path).expect("read closed turn");
+        let legacy_payload = legacy_payload.replace("\"status\":\"Success\",", "");
+        fs::write(&closed_turn_path, legacy_payload).expect("write legacy closed turn");
+
+        let restored = coordinator
+            .restore(history.session_id())
+            .expect("restore legacy turn");
+        assert_eq!(restored.closed_turns.len(), 1);
+        assert_eq!(
+            restored.closed_turns[0].tool_results[0].tool_result.status,
+            freehand_contracts::ToolResultStatus::Success
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
     fn restore_rejects_invalid_snapshot_coherence_explicitly() {
         let runtime_home = temp_runtime_home();
         let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
@@ -1182,6 +1279,97 @@ mod tests {
                 expected: 2,
                 actual: 1,
             }
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn restore_skips_stale_duplicate_row_when_later_expected_seq_exists() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+        let turn = started_turn(&mut history);
+        let turn_id = turn.request.turn_id.clone();
+        let snapshot = ActiveTurnSnapshot {
+            turn,
+            schema_rejections: 0,
+        };
+        let row_1 = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 1,
+            session_id: history.session_id().clone(),
+            turn_id: Some(turn_id.clone()),
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 1,
+                latest_turn_id: Some(turn_id.clone()),
+                active_turn_id: Some(turn_id.clone()),
+            },
+            session_history: history.clone(),
+            payload: ReasonLedgerPayload::TurnStarted {
+                snapshot: snapshot.clone(),
+            },
+        };
+        let stale_duplicate = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 1,
+            session_id: history.session_id().clone(),
+            turn_id: Some(TurnId::new("stale-turn")),
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 1,
+                latest_turn_id: Some(TurnId::new("stale-turn")),
+                active_turn_id: Some(TurnId::new("stale-turn")),
+            },
+            session_history: history.clone(),
+            payload: ReasonLedgerPayload::TurnStarted {
+                snapshot: snapshot.clone(),
+            },
+        };
+        let row_2 = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 2,
+            session_id: history.session_id().clone(),
+            turn_id: Some(turn_id.clone()),
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 2,
+                latest_turn_id: Some(turn_id.clone()),
+                active_turn_id: Some(turn_id),
+            },
+            session_history: history,
+            payload: ReasonLedgerPayload::ProviderOutputApplied {
+                output: ProviderSemanticOutput::SemanticEvent(ReasonResp01SemanticEvent {
+                    session_id: SessionId::new("session-1"),
+                    turn_id: TurnId::new("turn-1"),
+                    trace_id: TraceId::new("trace-1"),
+                    feature_id: FeatureId::new("reason.persistence"),
+                    agent_id: AgentId::new("agent-1"),
+                    kind: SemanticEventKind::Text,
+                    content: "continued".to_owned(),
+                }),
+                snapshot,
+            },
+        };
+
+        coordinator
+            .append_row_only(&row_1.session_id, &row_1)
+            .expect("append first row");
+        coordinator
+            .append_row_only(&stale_duplicate.session_id, &stale_duplicate)
+            .expect("append stale duplicate row");
+        coordinator
+            .append_row_only(&row_2.session_id, &row_2)
+            .expect("append next authoritative row");
+
+        let restored = coordinator
+            .restore(&row_1.session_id)
+            .expect("stale duplicate should be skipped when authoritative next seq exists");
+        assert_eq!(restored.cursor.last_applied_reason_seq, 2);
+        assert_eq!(
+            restored.active_turn.expect("active").turn.request.turn_id,
+            TurnId::new("turn-1")
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");

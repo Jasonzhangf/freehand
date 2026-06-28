@@ -1,5 +1,51 @@
 # note.md
 
+# 2026-06-28 Minimax config and WebUI alignment goal
+  - config check:
+    - requested source config `/Volumes/extension/.rcc/provider/minimax/config.v2.toml` contains provider id `minimax`, type `anthropic`, base URL `https://api.minimaxi.com/anthropic`, default model `MiniMax-M3`, and a present API key
+    - current runtime config `~/.freehand/config.toml` still uses provider id `minimonth`, base URL `https://api.53hk.cn`, default model `MiniMax-M2.7`, and a different API key; active `master` and `worker` agents both point to `minimonth`
+    - Freehand config schema requires explicit `protocol`; RCC `transportBackend` is not a Freehand runtime config field
+  - goal doc:
+    - added `docs/goals/webui-session-transcript-alignment-plan.md`
+    - goal locks WebUI rendering to persisted session truth plus latest ADP overlay, Codex-style low-noise conversation/tool display, and Reasonix-style session restore/history rebuild
+  - 2026-06-28 progress:
+    - `~/.freehand/config.toml` updated to runtime provider `minimax` with base URL `https://api.minimaxi.com/anthropic` and model `MiniMax-M3`; secret copied from RCC source without printing it
+    - `freehand-cli --agent master` verified active provider `minimax`, protocol `messages`, model `MiniMax-M3`, and Minimax base URL
+    - fixed session transcript ordering in `ui.protocol` and WebUI local overlay path so numeric turn ids such as `runtime-turn-10` do not sort before `runtime-turn-2`
+    - added `freehand-cli adp-session-query --url ... [--session <id>]` for no-UI session list/transcript validation over ADP
+    - WebUI input layer now has shortcut and slash-command affordances routed through existing ADP/query/cancel/sample helpers: `/help`, `/sessions`, `/reload`, `/success`, `/failure`, `/cancel`, `/clear`; shortcuts include Cmd/Ctrl+Enter, Esc, Cmd/Ctrl+R, Cmd/Ctrl+K, Cmd/Ctrl+1, Cmd/Ctrl+2
+    - targeted verification passed: `node --check apps/freehand-server/assets/webui.js`, `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-cli`, `cargo test -p freehand-server`, `cargo test -p freehand-runtime`
+
+# 2026-06-28 WebUI conversation/session product repair
+  - user correction:
+    - current WebUI is not acceptable as a chat product because it behaves like a dashboard/slide surface
+    - primary missing product contract: persistent session concept, session management, and refresh recovery
+    - status/permission/tool failures must be rendered inside the conversation lifecycle, not as disconnected panels or silent failures
+  - implementation direction:
+    - add protocol-owned session list and session-turn query truth
+    - WebUI restores selected session from localStorage and queries persisted/protocol state after refresh
+    - page shell becomes normal chat layout: session list + conversation transcript + composer
+    - permissions preflight/failure state will be attached to the same visible turn/status chain after session UI is stabilized
+  - DeepSeek-Reasonix reference findings:
+    - actual relevant implementation is `/Volumes/extension/code/DeepSeek-Reasonix/desktop`, not `~/code/reasonix`
+    - Reasonix restores tabs/session paths on startup, persists session files only on turn completion, and front-end event subscription is live-only
+    - front-end rebuilds visible transcript from session history first (`historyMessagesToItems`), then applies live events as updates (`turn_started`, `text`, `tool_dispatch`, `tool_result`, `turn_done`)
+    - blocking prompts are explicitly replayed after subscription reconnect (`ReplayPendingPrompts`) so UI never waits silently without a visible pending action
+    - Freehand equivalent must be: session/index/transcript is restart truth; ADP is latest live signal; WebUI/Android/CLI render session truth plus ADP deltas, never ADP-only history
+
+
+# 2026-06-28 live tool failure UI projection repair
+  - new real-session failure found after fixed-port/sample validation:
+    - WebUI screenshot error was `dispatch port failure: failed to project live error turn from persistence: reason ledger sequence is invalid: expected 380, got 379`
+    - real broken path is historical session `~/.freehand/ledgers/reason/master/runtime-session-master.jsonl`, not fresh ADP sample turns
+    - current file inspection shows no internal blank lines and no extra trailing bytes beyond newline; `wc -l` > final `seq` came from counting the terminal newline, not an extra JSON row
+    - likely real failure mode is restore racing a partially appended final ledger row during live error projection; current `load_reason_ledger` has no explicit "last line incomplete" recovery rule and parses whole file snapshot at once
+    - WebUI also renders `adpFailure` before persisted conversation, so transport failure can visually preempt the user message / turn history
+  - deeper runtime evidence after launchd restart:
+    - historical `runtime-session-master` reason ledger contains old pre-`ToolResultContract.status` rows such as line 6 `tool_result={tool_call_id, output}` with no outer status field
+    - historical metadata ledger `~/.freehand/ledgers/metadata/master/runtime-session-master.jsonl` line 495 contains two JSON objects concatenated on one physical line
+    - metadata loader assumed one JSON object per line and metadata append had no file lock, so launchd bootstrap could fail on `trailing characters`
+
 # 2026-06-28 live tool failure UI projection repair
   - root cause:
     - live bridge tool execution failure used to return `RuntimeLiveBridgeError::ToolExecutionFailed` before materializing failed turn truth, so protocol truth stayed active/non-terminal and WebUI could only show waiting
@@ -23,6 +69,23 @@
     - real command ingress with `ls path=~/code/codex` -> HTTP 500 explicit `command_dispatch_port_failure`
     - latest-turn query for `runtime-turn-17` -> `terminal_status=Failed`, one current `tool_activities[0].status=Failed`, terminal/error public cards failed
     - latest-turn SSE emitted same failed turn projection
+
+# 2026-06-28 low-noise tool card rendering
+  - UI truth gap:
+    - protocol projected tool cards still carried verbose generic wording like `Tool call requested` / `Tool result returned`
+    - user only needs core tool semantics, blocking state, elapsed waiting time, and success/failure outcome
+  - direction:
+    - keep semantic tool identity in the shared protocol projection
+    - render tool cards as a single updating card per `tool_call_id`
+    - let WebUI add local elapsed-time animation for waiting cards instead of exposing raw term/detail in the main stream
+
+# 2026-06-28 launchd fixed-port daemon bootstrap root cause
+  - root cause:
+    - `freehand-daemon serve --agent master` uses `RuntimeCommandDispatcher::from_default_config()`
+    - that path requires `HOME` to resolve `~/.freehand/config.toml`
+    - launchd environment did not provide `HOME`, so daemon bootstrap failed before bind even though the process itself remained alive briefly
+  - fix direction:
+    - launchd install must inject explicit `HOME` into both `daemon.env` and plist environment
 
 # 2026-06-28 launchd restart readiness closeout
   - observed failure mode:
@@ -380,3 +443,14 @@ Current real root cause split:
 2026-06-28: Android default ADP slice landed locally. `MainActivity` now wires `AdpEventStream` as the default live shell transport; `HostConfig.adpUrl` / `ClientConfig.adpPath` make `/adp` explicit; `TimelineProjector.applyAdp` consumes ADP query/subscription/failure frames and projects failure visibly to `bridge.html`. `ProtocolClient` and `SseEventStream` remain compatibility classes, not default shell path. Verified Android JVM tests, `xtask mainlines generate/check`, `xtask gates check`, and `cargo test -p freehand-server android_mock_route_returns_design_preview`.
 
 2026-06-28: CLI/headless ADP smoke landed locally. `freehand-cli adp-smoke --url ws://.../adp` uses typed `UiAdpRequest/UiAdpResponse`, sends subscribe/query/query-as-command frames, and requires accepted/event/query plus explicit `ingress_command_kind_mismatch`. Verified `cargo test -p freehand-cli` with local mock WebSocket server and a real local `freehand-server webui-serve-smoke` `/adp` smoke.
+
+## 2026-06-28 WebUI shortcuts slash closeout
+
+- Live failure ADP sample re-run passed on fixed daemon: runtime-turn-32-r2, rounds=2, tool_executions=1, terminal_status=Success, read_file tool_activity status=Failed; proves tool execution failure is model-visible result, not system dispatch failure.
+- WebUI JS contains shortcutHelp, keydown handlers for Cmd/Ctrl+Enter, Esc, Cmd/Ctrl+R, Cmd/Ctrl+K, Cmd/Ctrl+1, Cmd/Ctrl+2; slash commands /help /sessions /reload /success /failure /cancel /clear are present and server asset smoke locks them.
+
+- After reinstall/restart, fixed-port served JS hash matched workspace hash 8b8df0fa84b37ec7c7802ca8ce5d7c88a2859ab2c7370e3655f68230f5195379.
+- Full install-global passed, launchd pid 27507 healthy on 127.0.0.1:4041.
+- Live ADP smoke passed. Sequential failure sample passed as runtime-turn-33-r2 with rounds=2/tool_executions=1. Sequential success sample passed as runtime-turn-35 with terminal_status=Success.
+- Verification caution: running success/failure samples concurrently can produce command_dispatch_port_failure because runtime dispatch has a single active turn boundary; do not treat parallel sample verification as valid positive evidence.
+- Found and fixed WebUI slash UX bug: liveTurnStatus always overrode local commandStatus, so /help and /sessions looked inert on completed turns; slash inputs also remained in composer. Added sticky command status and slash input consumption.

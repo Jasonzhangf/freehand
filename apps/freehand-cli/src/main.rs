@@ -41,9 +41,12 @@ fn run() -> Result<String, String> {
     if flag == "adp-turn-sample" {
         return run_adp_turn_sample(args.collect());
     }
+    if flag == "adp-session-query" {
+        return run_adp_session_query(args.collect());
+    }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]"
                 .to_owned(),
         );
     }
@@ -101,10 +104,7 @@ impl AdpTurnSample {
     }
 
     fn expected_status(self) -> TerminalStatus {
-        match self {
-            Self::Success => TerminalStatus::Success,
-            Self::Failure => TerminalStatus::Failed,
-        }
+        TerminalStatus::Success
     }
 
     fn prompt(self) -> &'static str {
@@ -113,7 +113,7 @@ impl AdpTurnSample {
                 "ADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools."
             }
             Self::Failure => {
-                "ADP failure sample: call the ls tool exactly once with path ~/code/codex, then report through the required Freehand completion schema."
+                "ADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema."
             }
         }
     }
@@ -134,6 +134,171 @@ fn run_adp_turn_sample(args: Vec<String>) -> Result<String, String> {
         .build()
         .map_err(|err| err.to_string())?;
     runtime.block_on(run_adp_turn_sample_async(url, sample))
+}
+
+fn run_adp_session_query(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]"
+            .to_owned();
+    if args.len() != 2 && args.len() != 4 {
+        return Err(usage);
+    }
+    if args[0] != "--url" {
+        return Err(usage);
+    }
+    let session_id = if args.len() == 4 {
+        if args[2] != "--session" {
+            return Err(usage);
+        }
+        Some(SessionId::new(args[3].clone()))
+    } else {
+        None
+    };
+    let url = args[1].clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_adp_session_query_async(url, session_id))
+}
+
+async fn run_adp_session_query_async(
+    url: String,
+    session_id: Option<SessionId>,
+) -> Result<String, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
+        .await
+        .map_err(|_| format!("ADP connect timeout: {url}"))?
+        .map_err(|err| format!("ADP connect failed: {err}"))?;
+
+    let list_request_id = "cli-session-list-1".to_owned();
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Query {
+            request_id: list_request_id.clone(),
+            query: UiCommand::QuerySessionList,
+        },
+    )
+    .await?;
+
+    let mut list_summary = None::<String>;
+    let mut selected_session = session_id;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while list_summary.is_none() {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err("ADP session list timeout".to_owned());
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| "ADP session list timeout".to_owned())??;
+        match response {
+            UiAdpResponse::QueryResult { request_id, result } if request_id == list_request_id => {
+                let freehand_ui_protocol::UiQueryResult::SessionList(list) = result else {
+                    return Err("ADP session list returned non-session result".to_owned());
+                };
+                if selected_session.is_none() {
+                    selected_session = list
+                        .sessions
+                        .last()
+                        .map(|session| session.session_id.clone());
+                }
+                list_summary = Some(format!(
+                    "sessions={} ids={}",
+                    list.sessions.len(),
+                    list.sessions
+                        .iter()
+                        .map(|session| format!(
+                            "{}:{}:{}",
+                            session.session_id.as_str(),
+                            session.turn_count,
+                            session.latest_status
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
+            }
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } if request_id == list_request_id => {
+                return Err(format!(
+                    "ADP session list failure {}: {}",
+                    failure.code, failure.message
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    let Some(session_id) = selected_session else {
+        let _ = socket.close(None).await;
+        return Ok(format!(
+            "adp_session_query_ok url={} {} selected_session=none turns=0",
+            url,
+            list_summary.expect("list summary")
+        ));
+    };
+
+    let turns_request_id = "cli-session-turns-1".to_owned();
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Query {
+            request_id: turns_request_id.clone(),
+            query: UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            },
+        },
+    )
+    .await?;
+
+    let mut transcript_summary = None::<String>;
+    while transcript_summary.is_none() {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err("ADP session turns timeout".to_owned());
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| "ADP session turns timeout".to_owned())??;
+        match response {
+            UiAdpResponse::QueryResult { request_id, result } if request_id == turns_request_id => {
+                let freehand_ui_protocol::UiQueryResult::SessionTurns(transcript) = result else {
+                    return Err("ADP session turns returned non-transcript result".to_owned());
+                };
+                transcript_summary = Some(format!(
+                    "selected_session={} turns={} turn_ids={}",
+                    transcript.session_id.as_str(),
+                    transcript.turns.len(),
+                    transcript
+                        .turns
+                        .iter()
+                        .map(|turn| turn.turn_id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
+            }
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } if request_id == turns_request_id => {
+                return Err(format!(
+                    "ADP session turns failure {}: {}",
+                    failure.code, failure.message
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    let _ = socket.close(None).await;
+    Ok(format!(
+        "adp_session_query_ok url={} {} {}",
+        url,
+        list_summary.expect("list summary"),
+        transcript_summary.expect("transcript summary")
+    ))
 }
 
 async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result<String, String> {
@@ -300,6 +465,14 @@ fn matching_sample_turn_id(
         return None;
     }
     if turn.terminal_status.as_ref() != Some(&expected_status) {
+        return None;
+    }
+    if sample == AdpTurnSample::Failure
+        && !(turn
+            .tool_activities
+            .iter()
+            .any(|tool| tool.status.as_str() == "failed"))
+    {
         return None;
     }
     Some(turn.turn_id.as_str().to_owned())

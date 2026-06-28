@@ -783,6 +783,7 @@ mod tests {
             agent_id: turn.request.agent_id.clone(),
             tool_result: freehand_contracts::ToolResultContract {
                 tool_call_id: ToolCallId::new("tool-1"),
+                status: freehand_contracts::ToolResultStatus::Success,
                 output: "done".to_owned(),
             },
         };

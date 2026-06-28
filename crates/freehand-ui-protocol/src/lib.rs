@@ -7,7 +7,7 @@ use freehand_blocks::strip_completion_submission_block;
 use freehand_contracts::{
     AgentId, ErrorErr01RuntimeClassified, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
     ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent,
-    SemanticEventKind, SessionId, TerminalStatus, TurnId,
+    SemanticEventKind, SessionId, TerminalStatus, ToolResultStatus, TurnId,
 };
 pub use freehand_debug::{
     DebugEvent, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot, DebugTraceEnvelope,
@@ -60,6 +60,10 @@ pub enum UiCommand {
     QueryLatestActiveTurn,
     QueryTurn {
         turn_id: TurnId,
+    },
+    QuerySessionList,
+    QuerySessionTurns {
+        session_id: SessionId,
     },
     QueryNodeStatus {
         node_id: String,
@@ -155,6 +159,27 @@ pub struct UiPublicTurnProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionSummary {
+    pub session_id: SessionId,
+    pub latest_turn_id: Option<TurnId>,
+    pub active_turn_id: Option<TurnId>,
+    pub turn_count: usize,
+    pub latest_status: String,
+    pub latest_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionListProjection {
+    pub sessions: Vec<UiSessionSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionTranscriptProjection {
+    pub session_id: SessionId,
+    pub turns: Vec<UiTurnProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeStatusSnapshot {
     pub source: UiSource,
     pub node_id: String,
@@ -222,6 +247,8 @@ pub struct TurnProjectionInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiQueryResult {
     Turn(Option<UiTurnProjection>),
+    SessionList(UiSessionListProjection),
+    SessionTurns(UiSessionTranscriptProjection),
     NodeStatus(Option<NodeStatusSnapshot>),
     Progress(Option<TaskProgressSnapshot>),
     Debug(Option<DebugStateSnapshot>),
@@ -534,8 +561,8 @@ impl UiProtocolState {
                 &mut projection.tool_activities,
                 tool_call_id,
                 tool_name,
-                UiToolActivityStatus::Completed,
-                Some("tool result returned".to_owned()),
+                tool_activity_status_from_result(event.tool_result.status),
+                Some(tool_activity_detail_from_result(event.tool_result.status)),
             );
             projection.clone()
         };
@@ -662,6 +689,13 @@ impl UiProtocolState {
             UiCommand::QueryTurn { turn_id } => {
                 Ok(UiQueryResult::Turn(self.turns.get(turn_id).cloned()))
             }
+            UiCommand::QuerySessionList => Ok(UiQueryResult::SessionList(session_list_projection(
+                &self.turns,
+                self.latest_active_turn_id.as_ref(),
+            ))),
+            UiCommand::QuerySessionTurns { session_id } => Ok(UiQueryResult::SessionTurns(
+                session_transcript_projection(session_id, &self.turns),
+            )),
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
                 self.node_status.get(node_id).cloned(),
             )),
@@ -883,30 +917,13 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
     }
     for activity in &projection.tool_activities {
         let body = match activity.status {
-            UiToolActivityStatus::Waiting => {
-                format!(
-                    "Tool call requested: {} (waiting for execution)",
-                    activity.tool_name
-                )
-            }
-            UiToolActivityStatus::Completed => {
-                format!("Tool result returned for {}", activity.tool_name)
-            }
-            UiToolActivityStatus::Failed => {
-                format!(
-                    "Tool execution failed for {}{}",
-                    activity.tool_name,
-                    activity
-                        .detail
-                        .as_ref()
-                        .map(|detail| format!(": {detail}"))
-                        .unwrap_or_default()
-                )
-            }
+            UiToolActivityStatus::Waiting => "waiting".to_owned(),
+            UiToolActivityStatus::Completed => "completed".to_owned(),
+            UiToolActivityStatus::Failed => "failed".to_owned(),
         };
         items.push(UiConversationItem {
             kind: UiConversationItemKind::ToolSummary,
-            title: "Tool".to_owned(),
+            title: activity.tool_name.clone(),
             body,
             status: activity.status.as_str().to_owned(),
             tool_call_id: Some(activity.tool_call_id.clone()),
@@ -984,6 +1001,117 @@ fn empty_checkpoint_snapshot() -> UiCheckpointSnapshot {
     }
 }
 
+fn session_list_projection(
+    turns: &BTreeMap<TurnId, UiTurnProjection>,
+    latest_active_turn_id: Option<&TurnId>,
+) -> UiSessionListProjection {
+    let mut grouped: Vec<(SessionId, Vec<&UiTurnProjection>)> = Vec::new();
+    for turn in turns.values() {
+        match grouped
+            .iter_mut()
+            .find(|(session_id, _)| session_id == &turn.session_id)
+        {
+            Some((_, session_turns)) => session_turns.push(turn),
+            None => grouped.push((turn.session_id.clone(), vec![turn])),
+        }
+    }
+
+    let mut sessions = grouped
+        .into_iter()
+        .map(|(session_id, mut session_turns)| {
+            session_turns.sort_by(|left, right| {
+                turn_order_key(&left.turn_id).cmp(&turn_order_key(&right.turn_id))
+            });
+            let latest = session_turns.last().copied();
+            let active_turn_id = latest_active_turn_id.and_then(|turn_id| {
+                session_turns
+                    .iter()
+                    .any(|turn| &turn.turn_id == turn_id)
+                    .then(|| turn_id.clone())
+            });
+            UiSessionSummary {
+                session_id,
+                latest_turn_id: latest.map(|turn| turn.turn_id.clone()),
+                active_turn_id,
+                turn_count: session_turns.len(),
+                latest_status: latest
+                    .map(session_latest_status)
+                    .unwrap_or_else(|| "empty".to_owned()),
+                latest_summary: latest.and_then(session_latest_summary),
+            }
+        })
+        .collect::<Vec<_>>();
+    sessions.sort_by(|left, right| left.session_id.as_str().cmp(right.session_id.as_str()));
+    UiSessionListProjection { sessions }
+}
+
+fn session_transcript_projection(
+    session_id: &SessionId,
+    turns: &BTreeMap<TurnId, UiTurnProjection>,
+) -> UiSessionTranscriptProjection {
+    let mut session_turns = turns
+        .values()
+        .filter(|turn| &turn.session_id == session_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    session_turns
+        .sort_by(|left, right| turn_order_key(&left.turn_id).cmp(&turn_order_key(&right.turn_id)));
+    UiSessionTranscriptProjection {
+        session_id: session_id.clone(),
+        turns: session_turns,
+    }
+}
+
+fn session_latest_status(turn: &UiTurnProjection) -> String {
+    if let Some(status) = &turn.terminal_status {
+        return format!("{status:?}").to_lowercase();
+    }
+    if turn
+        .tool_activities
+        .iter()
+        .any(|activity| activity.status == UiToolActivityStatus::Waiting)
+    {
+        return "tool_running".to_owned();
+    }
+    if !turn.text.is_empty() || !turn.reasoning.is_empty() {
+        return "streaming".to_owned();
+    }
+    "submitted".to_owned()
+}
+
+fn session_latest_summary(turn: &UiTurnProjection) -> Option<String> {
+    turn.terminal_text
+        .clone()
+        .or_else(|| turn.text.last().cloned())
+        .or_else(|| turn.user_text.clone())
+}
+
+fn turn_order_key(turn_id: &TurnId) -> (String, u64, u64, String) {
+    let raw = turn_id.as_str();
+    if let Some(rest) = raw.strip_prefix("runtime-turn-") {
+        let (ordinal_part, round_part) = match rest.split_once("-r") {
+            Some((ordinal, round)) => (ordinal, round),
+            None => (rest, "1"),
+        };
+        let ordinal = ordinal_part.parse::<u64>().unwrap_or(u64::MAX);
+        let round = round_part.parse::<u64>().unwrap_or(1);
+        return ("runtime-turn-".to_owned(), ordinal, round, raw.to_owned());
+    }
+    let split_at = raw
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| !ch.is_ascii_digit())
+        .map(|(index, ch)| index + ch.len_utf8())
+        .unwrap_or(0);
+    let (prefix, digits) = raw.split_at(split_at);
+    let ordinal = if digits.is_empty() {
+        0
+    } else {
+        digits.parse::<u64>().unwrap_or(u64::MAX)
+    };
+    (prefix.to_owned(), ordinal, 1, raw.to_owned())
+}
+
 fn tool_activities_from_input(
     tool_calls: &[ReasonReq04ToolCall],
     tool_results: &[ReasonReq05ToolResultReentry],
@@ -1009,8 +1137,8 @@ fn tool_activities_from_input(
             &mut activities,
             tool_call_id,
             tool_name,
-            UiToolActivityStatus::Completed,
-            Some("tool result returned".to_owned()),
+            tool_activity_status_from_result(result.tool_result.status),
+            Some(tool_activity_detail_from_result(result.tool_result.status)),
         );
     }
     activities
@@ -1049,6 +1177,20 @@ fn upsert_tool_activity(
     });
 }
 
+fn tool_activity_status_from_result(status: ToolResultStatus) -> UiToolActivityStatus {
+    match status {
+        ToolResultStatus::Success => UiToolActivityStatus::Completed,
+        ToolResultStatus::Failed => UiToolActivityStatus::Failed,
+    }
+}
+
+fn tool_activity_detail_from_result(status: ToolResultStatus) -> String {
+    match status {
+        ToolResultStatus::Success => "tool result returned".to_owned(),
+        ToolResultStatus::Failed => "tool execution returned failure result".to_owned(),
+    }
+}
+
 fn fail_waiting_tool_activities(activities: &mut [UiToolActivity], detail: Option<String>) {
     for activity in activities {
         if activity.status == UiToolActivityStatus::Waiting {
@@ -1068,6 +1210,8 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::SubscribeDebugState { .. } => "subscribe_debug_state",
         UiCommand::QueryLatestActiveTurn => "query_latest_active_turn",
         UiCommand::QueryTurn { .. } => "query_turn",
+        UiCommand::QuerySessionList => "query_session_list",
+        UiCommand::QuerySessionTurns { .. } => "query_session_turns",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",
@@ -1343,6 +1487,8 @@ mod tests {
             .find(|item| item.kind == UiConversationItemKind::ToolSummary)
             .expect("tool item");
         assert_eq!(tool.status, "waiting");
+        assert_eq!(tool.title, "search");
+        assert_eq!(tool.body, "waiting");
 
         let completed = turn_projection_from_events(TurnProjectionInput {
             source_agent_id: AgentId::new("agent-1"),
@@ -1372,6 +1518,7 @@ mod tests {
                 agent_id: AgentId::new("agent-1"),
                 tool_result: freehand_contracts::ToolResultContract {
                     tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                    status: freehand_contracts::ToolResultStatus::Success,
                     output: "result body is not rendered in public summary".to_owned(),
                 },
             }],
@@ -1385,8 +1532,71 @@ mod tests {
             .find(|item| item.kind == UiConversationItemKind::ToolSummary)
             .expect("completed tool item");
         assert_eq!(completed_tool.status, "completed");
-        assert!(completed_tool.body.contains("search"));
-        assert!(!completed_tool.body.contains("result body"));
+        assert_eq!(completed_tool.title, "search");
+        assert_eq!(completed_tool.body, "completed");
+    }
+
+    #[test]
+    fn failed_tool_result_updates_same_activity_without_error_projection() {
+        let projection = turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            user_text: Some("run the task".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: vec![ReasonReq04ToolCall {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                tool_call: freehand_contracts::ToolCallContract {
+                    tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                    tool_name: "read_file".to_owned(),
+                    arguments: vec![],
+                    arguments_complete: true,
+                },
+            }],
+            tool_results: vec![ReasonReq05ToolResultReentry {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                tool_result: freehand_contracts::ToolResultContract {
+                    tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                    status: freehand_contracts::ToolResultStatus::Failed,
+                    output: "private failure body is model-visible only".to_owned(),
+                },
+            }],
+            usage_events: Vec::new(),
+            terminal_event: None,
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        });
+
+        assert_eq!(projection.tool_activities.len(), 1);
+        assert_eq!(
+            projection.tool_activities[0].status,
+            UiToolActivityStatus::Failed
+        );
+        assert_eq!(projection.terminal_status, None);
+        assert!(projection.errors.is_empty());
+        let cards = public_conversation_items(&projection);
+        let tool_cards = cards
+            .iter()
+            .filter(|item| item.kind == UiConversationItemKind::ToolSummary)
+            .collect::<Vec<_>>();
+        assert_eq!(tool_cards.len(), 1);
+        assert_eq!(tool_cards[0].status, "failed");
+        assert_eq!(tool_cards[0].title, "read_file");
+        assert_eq!(tool_cards[0].body, "failed");
+        assert!(
+            cards
+                .iter()
+                .all(|item| item.kind != UiConversationItemKind::Error)
+        );
     }
 
     #[test]
@@ -1435,7 +1645,9 @@ mod tests {
             .find(|item| item.kind == UiConversationItemKind::ToolSummary)
             .expect("tool item");
         assert_eq!(tool.status, "failed");
-        assert!(tool.body.contains("tool failed explicitly"));
+        assert_eq!(tool.title, "ls");
+        assert_eq!(tool.body, "failed");
+        assert!(!tool.body.contains("tool failed explicitly"));
     }
 
     #[test]
@@ -1469,6 +1681,7 @@ mod tests {
                 agent_id: AgentId::new("agent-1"),
                 tool_result: freehand_contracts::ToolResultContract {
                     tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                    status: freehand_contracts::ToolResultStatus::Success,
                     output: "private output".to_owned(),
                 },
             }],
@@ -1528,6 +1741,93 @@ mod tests {
             UiQueryResult::NodeStatus(Some(snapshot)) => {
                 assert!(snapshot.healthy);
                 assert_eq!(snapshot.pairing_state, "paired");
+            }
+            other => panic!("unexpected query result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_queries_return_ordered_transcript_without_cross_session_leakage() {
+        let mut state = UiProtocolState::default();
+        let mut first = sample_turn_projection(false);
+        first.session_id = SessionId::new("session-a");
+        first.turn_id = TurnId::new("runtime-turn-1-r2");
+        first.source.source_turn_id = Some(first.turn_id.clone());
+        first.user_text = Some("first prompt".to_owned());
+        first.terminal_text = Some("first answer".to_owned());
+
+        let mut second = sample_turn_projection(false);
+        second.session_id = SessionId::new("session-a");
+        second.turn_id = TurnId::new("runtime-turn-2-r2");
+        second.source.source_turn_id = Some(second.turn_id.clone());
+        second.user_text = Some("second prompt".to_owned());
+        second.terminal_text = Some("second answer".to_owned());
+
+        let mut tenth = sample_turn_projection(false);
+        tenth.session_id = SessionId::new("session-a");
+        tenth.turn_id = TurnId::new("runtime-turn-10-r2");
+        tenth.source.source_turn_id = Some(tenth.turn_id.clone());
+        tenth.user_text = Some("tenth prompt".to_owned());
+        tenth.terminal_text = Some("tenth answer".to_owned());
+
+        let mut other = sample_turn_projection(false);
+        other.session_id = SessionId::new("session-b");
+        other.turn_id = TurnId::new("runtime-turn-3");
+        other.source.source_turn_id = Some(other.turn_id.clone());
+        other.user_text = Some("other prompt".to_owned());
+
+        state.apply_turn_projection(second.clone());
+        state.apply_turn_projection(other);
+        state.apply_turn_projection(tenth.clone());
+        state.apply_turn_projection(first.clone());
+
+        let list = state
+            .query(&UiCommand::QuerySessionList)
+            .expect("session list query");
+        match list {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions.len(), 2);
+                let session_a = list
+                    .sessions
+                    .iter()
+                    .find(|session| session.session_id.as_str() == "session-a")
+                    .expect("session-a summary");
+                assert_eq!(session_a.turn_count, 3);
+                assert_eq!(
+                    session_a.latest_turn_id.as_ref(),
+                    Some(&TurnId::new("runtime-turn-10-r2"))
+                );
+            }
+            other => panic!("unexpected query result: {other:?}"),
+        }
+
+        let transcript = state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: SessionId::new("session-a"),
+            })
+            .expect("session turns query");
+        match transcript {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.session_id, SessionId::new("session-a"));
+                assert_eq!(transcript.turns.len(), 3);
+                assert_eq!(
+                    transcript.turns[0].turn_id,
+                    TurnId::new("runtime-turn-1-r2")
+                );
+                assert_eq!(
+                    transcript.turns[1].turn_id,
+                    TurnId::new("runtime-turn-2-r2")
+                );
+                assert_eq!(
+                    transcript.turns[2].turn_id,
+                    TurnId::new("runtime-turn-10-r2")
+                );
+                assert!(
+                    transcript
+                        .turns
+                        .iter()
+                        .all(|turn| turn.session_id.as_str() == "session-a")
+                );
             }
             other => panic!("unexpected query result: {other:?}"),
         }

@@ -22,7 +22,7 @@
   - source identity and stream kind stay explicit
   - slave turn presentation divergence remains protocol-safe
   - client-specific projection gating keeps slave card visible only for WebUI
-  - public conversation projection preserves the user prompt while hiding reasoning, usage, debug details, and raw completion schema blocks from the main user-visible stream
+  - public conversation projection preserves the user prompt while hiding reasoning, usage, debug details, raw completion schema blocks, and verbose tool term text from the main user-visible stream
   - cancelled terminal status remains visible to public conversation status mapping and is not projected as completed
   - public tool summaries carry `tool_call_id` so same-tool waiting/completed updates remain one UI activity
 - white-box plan:
@@ -51,7 +51,7 @@
   - checkpoint summary query smoke
   - CLI hides slave card while WebUI may render it
   - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries plus user input
-  - tool activity projection smoke covers waiting-before-result, completed-after-result, and failed-terminal-without-result, without rendering tool result bodies into public summary
+  - tool activity projection smoke covers waiting-before-result, completed-after-result, and failed-terminal-without-result, without rendering tool result bodies or detailed tool terms into the public summary
   - duplicate tool-call projection smoke covers one public card per `tool_call_id`
   - cancelled/failed terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
@@ -88,5 +88,5 @@
   - public turn projection is protocol-owned
   - terminal status is now preserved in `UiTurnProjection` and public conversation status mapping
   - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries, including failed status for still-waiting tools when terminal truth is failed
-  - tool summaries now expose `tool_call_id`, and duplicate same-id tool calls are regression-locked to one public card
+  - tool summaries now expose `tool_call_id`, duplicate same-id tool calls are regression-locked to one public card, and public tool bodies are status-only by default
   - ADP request/response frames are landed and regression-locked by JSON roundtrip coverage

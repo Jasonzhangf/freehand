@@ -11,8 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use freehand_contracts::{AgentId, SessionId, TerminalStatus, TurnId};
 use freehand_ui_protocol::{
     SubscriptionSelector, UiAdpFailure, UiAdpRequest, UiAdpResponse, UiClientKind, UiCommand,
-    UiCommandDispatchReceipt, UiProjection, UiQueryResult, UiSource, UiStreamKind,
-    UiSubscriptionEvent, UiTurnProjection, build_command_dispatch_envelope,
+    UiCommandDispatchReceipt, UiProjection, UiQueryResult, UiSessionListProjection,
+    UiSessionSummary, UiSessionTranscriptProjection, UiSource, UiStreamKind, UiSubscriptionEvent,
+    UiToolActivity, UiToolActivityStatus, UiTurnProjection, build_command_dispatch_envelope,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
@@ -241,39 +242,28 @@ fn spawn_adp_sample_mock_server(status: TerminalStatus) -> (String, thread::Join
                     } => {
                         let turn = test_sample_turn_projection(&text, status.clone());
                         sample_turn = Some(turn.clone());
-                        if status == TerminalStatus::Success {
-                            let envelope =
-                                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
-                                    text: text.clone(),
-                                })
-                                .expect("sample envelope");
-                            send_adp_response(
-                                &mut socket,
-                                UiAdpResponse::CommandReceipt {
-                                    request_id,
-                                    receipt: UiCommandDispatchReceipt {
-                                        ingress: envelope.ingress,
-                                        target_feature_id: envelope.target_feature_id,
-                                        target_owner_module: envelope.target_owner_module,
-                                        dispatch_status: "sample_success".to_owned(),
+                        let envelope =
+                            build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                                text: text.clone(),
+                            })
+                            .expect("sample envelope");
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::CommandReceipt {
+                                request_id,
+                                receipt: UiCommandDispatchReceipt {
+                                    ingress: envelope.ingress,
+                                    target_feature_id: envelope.target_feature_id,
+                                    target_owner_module: envelope.target_owner_module,
+                                    dispatch_status: if status == TerminalStatus::Success {
+                                        "sample_success".to_owned()
+                                    } else {
+                                        "sample_tool_failure_recovered".to_owned()
                                     },
                                 },
-                            )
-                            .await;
-                        } else {
-                            send_adp_response(
-                                &mut socket,
-                                UiAdpResponse::Failure {
-                                    request_id,
-                                    failure: UiAdpFailure {
-                                        code: "sample_failure".to_owned(),
-                                        message: "sample failed turn materialized".to_owned(),
-                                        retryable: false,
-                                    },
-                                },
-                            )
-                            .await;
-                        }
+                            },
+                        )
+                        .await;
                         if let Some(sub_id) = subscription_id.clone() {
                             send_adp_response(
                                 &mut socket,
@@ -321,6 +311,107 @@ fn spawn_adp_sample_mock_server(status: TerminalStatus) -> (String, thread::Join
     (url, handle)
 }
 
+fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind adp session mock");
+    let url = format!("ws://{}/adp", listener.local_addr().expect("addr"));
+    listener
+        .set_nonblocking(true)
+        .expect("set adp session mock nonblocking");
+    let handle = thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("tokio runtime");
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+            let (stream, _) = listener.accept().await.expect("accept adp");
+            let mut socket = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("accept websocket");
+            while let Some(message) = socket.next().await {
+                let text = match message {
+                    Ok(Message::Text(text)) => text,
+                    Ok(_) => continue,
+                    Err(_) => break,
+                };
+                let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
+                match request {
+                    UiAdpRequest::Query {
+                        request_id,
+                        query: UiCommand::QuerySessionList,
+                    } => {
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::QueryResult {
+                                request_id,
+                                result: UiQueryResult::SessionList(UiSessionListProjection {
+                                    sessions: vec![UiSessionSummary {
+                                        session_id: SessionId::new("cli-session"),
+                                        latest_turn_id: Some(TurnId::new("runtime-turn-10")),
+                                        active_turn_id: None,
+                                        turn_count: 2,
+                                        latest_status: "success".to_owned(),
+                                        latest_summary: Some("second answer".to_owned()),
+                                    }],
+                                }),
+                            },
+                        )
+                        .await;
+                    }
+                    UiAdpRequest::Query {
+                        request_id,
+                        query: UiCommand::QuerySessionTurns { session_id },
+                    } => {
+                        let mut first = test_turn_projection();
+                        first.session_id = session_id.clone();
+                        first.turn_id = TurnId::new("runtime-turn-2");
+                        first.user_text = Some("first prompt".to_owned());
+                        first.terminal_text = Some("first answer".to_owned());
+                        first.terminal_status = Some(TerminalStatus::Success);
+                        let mut second = test_turn_projection();
+                        second.session_id = session_id.clone();
+                        second.turn_id = TurnId::new("runtime-turn-10");
+                        second.user_text = Some("second prompt".to_owned());
+                        second.terminal_text = Some("second answer".to_owned());
+                        second.terminal_status = Some(TerminalStatus::Success);
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::QueryResult {
+                                request_id,
+                                result: UiQueryResult::SessionTurns(
+                                    UiSessionTranscriptProjection {
+                                        session_id,
+                                        turns: vec![first, second],
+                                    },
+                                ),
+                            },
+                        )
+                        .await;
+                    }
+                    UiAdpRequest::Query { request_id, .. }
+                    | UiAdpRequest::Command { request_id, .. }
+                    | UiAdpRequest::Subscribe { request_id, .. } => {
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::Failure {
+                                request_id,
+                                failure: UiAdpFailure {
+                                    code: "unexpected_session_query_frame".to_owned(),
+                                    message: "unexpected session query frame".to_owned(),
+                                    retryable: false,
+                                },
+                            },
+                        )
+                        .await;
+                    }
+                }
+            }
+        });
+    });
+    (url, handle)
+}
+
 async fn send_adp_response(
     socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     response: UiAdpResponse,
@@ -354,6 +445,7 @@ fn test_turn_projection() -> UiTurnProjection {
 
 fn test_sample_turn_projection(prompt: &str, status: TerminalStatus) -> UiTurnProjection {
     let failed = status == TerminalStatus::Failed;
+    let terminal_status = TerminalStatus::Success;
     UiTurnProjection {
         source: UiSource {
             source_agent_id: AgentId::new("cli-agent"),
@@ -375,19 +467,24 @@ fn test_sample_turn_projection(prompt: &str, status: TerminalStatus) -> UiTurnPr
         } else {
             Vec::new()
         },
-        tool_activities: Vec::new(),
-        usage: Vec::new(),
-        terminal_status: Some(status),
-        terminal_text: Some(if failed {
-            "sample failed terminal".to_owned()
-        } else {
-            "sample success terminal".to_owned()
-        }),
-        errors: if failed {
-            vec!["sample failed terminal".to_owned()]
+        tool_activities: if failed {
+            vec![UiToolActivity {
+                tool_call_id: "toolu_missing_read_1".to_owned(),
+                tool_name: "read_file".to_owned(),
+                status: UiToolActivityStatus::Failed,
+                detail: Some("tool execution returned failure result".to_owned()),
+            }]
         } else {
             Vec::new()
         },
+        usage: Vec::new(),
+        terminal_status: Some(terminal_status),
+        terminal_text: Some(if failed {
+            "sample recovered after tool failure".to_owned()
+        } else {
+            "sample success terminal".to_owned()
+        }),
+        errors: Vec::new(),
         slave_substream_card: false,
     }
 }
@@ -600,10 +697,41 @@ fn cli_runs_adp_failure_turn_sample_against_mock_websocket() {
     assert!(stdout.contains("adp_turn_sample_ok"));
     assert!(stdout.contains("sample=failure"));
     assert!(stdout.contains("subscription_accepted:cli-sample-failure-sub"));
-    assert!(stdout.contains("failure:cli-sample-failure-cmd:sample_failure"));
+    assert!(
+        stdout.contains("command_receipt:cli-sample-failure-cmd:sample_tool_failure_recovered")
+    );
     assert!(stdout.contains("subscription_event:cli-sample-failure-sub"));
 
     handle.join().expect("adp failure sample mock join");
+}
+
+#[test]
+fn cli_runs_adp_session_query_against_mock_websocket() {
+    let (url, handle) = spawn_adp_session_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("adp-session-query")
+        .arg("--url")
+        .arg(&url)
+        .arg("--session")
+        .arg("cli-session")
+        .output()
+        .expect("run adp session query");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("adp_session_query_ok"));
+    assert!(stdout.contains("sessions=1"));
+    assert!(stdout.contains("ids=cli-session:2:success"));
+    assert!(stdout.contains("selected_session=cli-session"));
+    assert!(stdout.contains("turns=2"));
+    assert!(stdout.contains("turn_ids=runtime-turn-2,runtime-turn-10"));
+
+    handle.join().expect("adp session query mock join");
 }
 
 #[test]

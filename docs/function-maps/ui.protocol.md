@@ -56,15 +56,15 @@
 - projections are read-only views over owner-written truth
 - terminal completion shows only final projected text
 - turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
-- public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, and debug details from the main user-visible stream
-- public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, and debug details from the main user-visible stream
-- public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards
+- public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
+- public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
+- public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and the default public body stays status-only
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
 - `bridge.html` in the Android APK renders the same public conversation projection as WebUI, so the live shell and browser shell share one projection truth
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
 - `ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state
 - `ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`
-- tool-call lifecycle is projected as `UiToolActivity` inside `UiTurnProjection`: `ReasonReq04ToolCall` upserts a `waiting` activity, matching `ReasonReq05ToolResultReentry` marks the same activity `completed`, and failed terminal truth marks still-waiting tool activities `failed`
+- tool-call lifecycle is projected as `UiToolActivity` inside `UiTurnProjection`: `ReasonReq04ToolCall` upserts a `waiting` activity, matching `ReasonReq05ToolResultReentry` marks the same activity `completed` or `failed`, and failed terminal truth only marks still-waiting tool activities `failed`
 - slave turn may surface as WebUI-only separate card while staying in one protocol truth
 - client-specific projection gating stays inside the protocol owner, not in apps
 - UI must be able to consume reason-turn state and debug-state projections without owning either truth source
@@ -92,7 +92,7 @@
   - why shared: ensures CLI and WebUI project the same terminal text truth
 - `public_conversation_items`
   - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: derive user-visible conversation items from a full turn projection without exposing internal reasoning/debug/raw schema data while retaining the user prompt
+  - purpose: derive user-visible conversation items from a full turn projection without exposing internal reasoning/debug/raw schema data while retaining the user prompt, tool_call_id identity, and only status-level tool summaries
   - allowed callers: CLI/WebUI renderers and transport adapters
   - related tests: public conversation projection smoke
   - why shared: all UI clients need one public projection rule instead of per-client filtering
@@ -164,7 +164,7 @@
 - debug-state projection consumes `freehand-debug::DebugStateSnapshot` instead of a UI-owned duplicate DTO
 - UI ingress versus truth-writer separation is now locked in the function map
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in `UiProtocolState`
-- tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation status mapping, including failed terminal projection for still-waiting tool calls
+- tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation status mapping, including failed tool-result projection and failed terminal projection for still-waiting tool calls
 - public tool summaries now preserve `tool_call_id`, and duplicate tool-call projections upsert into one activity before public rendering
 - ADP request/response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

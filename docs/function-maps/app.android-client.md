@@ -33,7 +33,7 @@
 
 - Android client renders the latest active turn projection as turn cards via `bridge.html` JS bridge
 - Android client renders terminal text as the final projected message and never as raw provider payload or raw completion schema
-- Android client renders tool calls and tool results as protocol-projected tool blocks with status-driven color
+- Android client renders tool calls and tool results as protocol-projected low-noise tool blocks with status-driven color, preserving `tool_call_id` while keeping verbose tool term text out of the main timeline
 - Android client renders the top status strip from protocol-projected current-agent and slave summary
 - Android client renders the right-slide drawer from local UI selection without altering truth
 - Android client surfaces the connection state (connecting / connected / offline) as a local banner

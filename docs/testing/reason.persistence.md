@@ -17,6 +17,7 @@
   - reason-ledger sequence monotonicity tests
   - reason-ledger sequence gap rejection tests
   - duplicate reason-ledger sequence rejection tests
+  - stale duplicate reason-ledger row skip test gated by presence of a later authoritative expected-sequence row
   - snapshot-plus-tail replay tests
   - ledger-only rebuild tests
   - atomic snapshot replace tests

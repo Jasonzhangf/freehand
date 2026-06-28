@@ -25,18 +25,18 @@
     "ADP subscribe returns an explicit SubscriptionAccepted frame before later SubscriptionEvent frames so UI-less clients can distinguish waiting from transport failure",
     "projections are read-only views over owner-written truth",
     "terminal completion shows only final projected text",
-    "public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, and debug details from the main user-visible stream",
+    "public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream",
     "debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines",
     "`ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state",
     "`ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`",
-    "tool-call lifecycle is projected as UiToolActivity inside UiTurnProjection: ReasonReq04ToolCall upserts a waiting activity, matching ReasonReq05ToolResultReentry marks the same activity completed, and failed terminal truth marks still-waiting activities failed",
+    "tool-call lifecycle is projected as UiToolActivity inside UiTurnProjection: ReasonReq04ToolCall upserts a waiting activity, matching ReasonReq05ToolResultReentry marks the same activity completed or failed, and failed terminal truth marks still-waiting activities failed",
     "slave turn may surface as WebUI-only separate card while staying in one protocol truth",
     "client-specific projection gating stays inside the protocol owner, not in apps",
     "UI must be able to consume reason-turn state and debug-state projections without owning either truth source",
     "transport adapters may drain debug receivers and query protocol snapshots, but projection ownership stays in `freehand-ui-protocol`",
     "turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states",
     "public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed",
-    "public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards",
+    "public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and public tool bodies are status-only by default",
     "cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn"
   ],
   "error_mainline": [
@@ -404,7 +404,7 @@
     "public turn projection is protocol-owned",
     "terminal status is now preserved in UiTurnProjection and public conversation status mapping",
     "tool activity status is now preserved in UiTurnProjection.tool_activities and public conversation status mapping",
-    "public tool summaries preserve tool_call_id, and duplicate same-id tool calls upsert into one public card",
+    "public tool summaries preserve tool_call_id, duplicate same-id tool calls upsert into one public card, and the default public tool body stays status-only",
     "CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn",
     "ADP request and response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients"
   ]

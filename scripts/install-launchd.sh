@@ -28,6 +28,7 @@ write_launchd_env() {
 
   if [[ ! -f "$env_file" ]]; then
     cat >"$env_file" <<EOF
+HOME="$HOME"
 FREEHAND_DAEMON_AGENT="$agent"
 FREEHAND_DAEMON_BIND="$bind_addr"
 FREEHAND_DAEMON_WORKDIR="$workdir"
@@ -46,6 +47,11 @@ EOF
     fi
     if [[ -z "${FREEHAND_DAEMON_BIN:-}" ]]; then
       printf '\nFREEHAND_DAEMON_BIN="%s"\n' "$daemon_bin" >>"$env_file"
+    fi
+    if [[ -z "${HOME:-}" ]]; then
+      printf '\nHOME="%s"\n' "$HOME" >>"$env_file"
+    elif ! rg -q '^HOME=' "$env_file"; then
+      printf '\nHOME="%s"\n' "$HOME" >>"$env_file"
     fi
     echo "[freehand-launchd] keeping existing env file: $env_file"
   fi
@@ -80,6 +86,8 @@ write_launchd_plist() {
   <dict>
     <key>FREEHAND_DAEMON_ENV_FILE</key>
     <string>$env_file</string>
+    <key>HOME</key>
+    <string>$HOME</string>
     <key>PATH</key>
     <string>$bin_dir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>

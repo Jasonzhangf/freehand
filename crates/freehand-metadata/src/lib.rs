@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use freehand_contracts::{AgentId, FeatureId, SessionId, TraceId, TurnId};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -160,9 +161,18 @@ impl MetadataLedger {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
+            .read(true)
             .open(&self.path)
             .map_err(|err| MetadataError::LedgerIoFailed(err.to_string()))?;
-        writeln!(file, "{payload}").map_err(|err| MetadataError::LedgerIoFailed(err.to_string()))
+        file.lock_exclusive()
+            .map_err(|err| MetadataError::LedgerIoFailed(err.to_string()))?;
+        let result = writeln!(file, "{payload}")
+            .map_err(|err| MetadataError::LedgerIoFailed(err.to_string()));
+        let unlock_result = file
+            .unlock()
+            .map_err(|err| MetadataError::LedgerIoFailed(err.to_string()));
+        result?;
+        unlock_result
     }
 
     fn load_records(&self) -> Result<Vec<MetadataEnvelope>, MetadataError> {
@@ -176,18 +186,21 @@ impl MetadataLedger {
             if line.trim().is_empty() {
                 continue;
             }
-            let envelope: MetadataEnvelope =
-                serde_json::from_str(line).map_err(|err| MetadataError::LedgerParseFailed {
+            let deserializer =
+                serde_json::Deserializer::from_str(line).into_iter::<MetadataEnvelope>();
+            for envelope in deserializer {
+                let envelope = envelope.map_err(|err| MetadataError::LedgerParseFailed {
                     line: index + 1,
                     message: err.to_string(),
                 })?;
-            validate_metadata_envelope(&envelope).map_err(|err| {
-                MetadataError::LedgerValidationFailed {
-                    line: index + 1,
-                    message: err.to_string(),
-                }
-            })?;
-            records.push(envelope);
+                validate_metadata_envelope(&envelope).map_err(|err| {
+                    MetadataError::LedgerValidationFailed {
+                        line: index + 1,
+                        message: err.to_string(),
+                    }
+                })?;
+                records.push(envelope);
+            }
         }
         Ok(records)
     }
@@ -401,6 +414,22 @@ mod tests {
             err,
             MetadataError::LedgerValidationFailed { line: 1, .. }
         ));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn metadata_center_restores_two_json_objects_written_on_one_line() {
+        let path = temp_ledger_path("metadata-concatenated-line");
+        let first = serde_json::to_string(&sample_envelope()).expect("encode first");
+        let mut second = sample_envelope();
+        second.metadata_id = MetadataId::new("meta-2");
+        second.subject.trace_id = TraceId::new("trace-2");
+        let second = serde_json::to_string(&second).expect("encode second");
+        fs::write(&path, format!("{first}{second}\n")).expect("write concatenated ledger line");
+
+        let restored = MetadataCenter::with_ledger_path(&path).expect("restore concatenated line");
+        assert_eq!(restored.records().len(), 2);
+
         let _ = fs::remove_file(&path);
     }
 

@@ -7,7 +7,9 @@ use freehand_blocks::{
     parse_tool_arguments_json, parse_tool_arguments_value, render_context_segments_as_text,
     render_tool_arguments_json,
 };
-use freehand_contracts::{ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId};
+use freehand_contracts::{
+    ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId, ToolResultStatus,
+};
 use freehand_provider_core::{
     ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderProtocol,
     ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange,
@@ -623,6 +625,7 @@ fn render_messages(
                         "type": "tool_result",
                         "tool_use_id": exchange.tool_result.tool_result.tool_call_id.as_str(),
                         "content": exchange.tool_result.tool_result.output,
+                        "is_error": exchange.tool_result.tool_result.status == ToolResultStatus::Failed,
                     })
                 })
                 .collect::<Vec<_>>(),
@@ -980,6 +983,7 @@ mod tests {
                 agent_id: AgentId::new("agent-1"),
                 tool_result: ToolResultContract {
                     tool_call_id: ToolCallId::new("toolu_1"),
+                    status: freehand_contracts::ToolResultStatus::Success,
                     output: r#"{"status":"ok"}"#.to_owned(),
                 },
             },

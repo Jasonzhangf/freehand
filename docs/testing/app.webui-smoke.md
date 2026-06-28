@@ -30,7 +30,10 @@
   - WebUI JS asset smoke locks default ADP WebSocket usage and rejects `fetch` / `EventSource` as the default live path
   - WebUI ADP subscription accepted/waiting status rendering smoke
   - WebUI ADP failure frame visible-card/status smoke
+  - WebUI ADP failure card ordering smoke: failure card must not render ahead of the current conversation items
   - WebUI success/failure sample prompt button asset smoke
+  - WebUI keyboard shortcut smoke for submit, cancel, refresh, focus composer, and sample loading
+  - WebUI slash command smoke for `/help`, `/sessions`, `/reload`, `/success`, `/failure`, `/cancel`, and `/clear`
   - WebUI submit-success path refresh smoke
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
@@ -46,10 +49,10 @@
   - WebUI debug SSE initial snapshot plus later update smoke
   - WebUI debug SSE waits when turn projection arrives before debug snapshot instead of surfacing transient 404 as command failure
   - WebUI debug SSE error rendering distinguishes reconnecting transport state from missing-snapshot pending state
-  - WebUI latest-turn query/SSE public projection excludes raw completion schema and internal reasoning from public conversation while preserving user input
+  - WebUI latest-turn query/SSE public projection excludes raw completion schema, internal reasoning, and detailed tool terms from public conversation while preserving user input
   - WebUI latest-turn SSE renders tool lifecycle status updates (`waiting` then `completed`) from protocol truth
   - WebUI ADP turn updates render tool lifecycle status updates (`waiting`, `completed`, and `failed`) from protocol truth
-  - WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, and waiting animation assets
+  - WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, waiting animation assets, and low-noise tool summary rendering with elapsed waiting timers
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
@@ -73,6 +76,7 @@
   - HTTP command ingress dispatch-receipt/failure smoke is landed
   - WebUI root shell now exposes `/adp`, and WebUI JS defaults to ADP WebSocket instead of `fetch` / `EventSource`
   - WebUI root shell now exposes success/failure sample buttons, and WebUI JS carries the paired sample prompts
+  - WebUI JS must keep shortcuts and slash commands as input-layer affordances that call existing ADP query/command helpers instead of mutating protocol truth directly
   - command-ingress dispatch-port failure and join-failure projection coverage is landed
   - submit-success path now refreshes latest turn truth after command receipt
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input

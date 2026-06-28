@@ -39,6 +39,7 @@
 - invalid persisted snapshot JSON is rejected explicitly
 - invalid persisted snapshot coherence is rejected explicitly
 - reason-ledger sequence gaps or duplicate sequence numbers must block recovery
+- stale duplicate ledger rows are recoverable only when a later authoritative row with the expected next sequence exists; otherwise duplicate or regressed sequence numbers still fail explicitly
 - provider raw payload availability alone must not mask missing authoritative reason truth
 - UI sidecar presence alone must not be treated as session-truth recovery evidence
 

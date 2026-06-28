@@ -895,6 +895,7 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/webui.js"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
+        assert!(html.contains("id=\"session-list\""));
         assert!(html.contains("id=\"success-sample-button\""));
         assert!(html.contains("id=\"failure-sample-button\""));
     }
@@ -1003,6 +1004,7 @@ mod tests {
         assert!(root_body.contains("data-webui-shell=\"true\""));
         assert!(root_body.contains("/assets/theme.css"));
         assert!(root_body.contains("data-adp-endpoint=\"/adp\""));
+        assert!(root_body.contains("id=\"session-list\""));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
         assert!(root_body.contains("Success sample"));
         assert!(root_body.contains("Failure sample"));
@@ -1060,16 +1062,54 @@ mod tests {
         assert!(!js_body.contains("new EventSource"));
         assert!(!js_body.contains("fetch("));
         assert!(js_body.contains("refreshCheckpoints"));
+        assert!(js_body.contains("freehand-webui-selected-session"));
+        assert!(js_body.contains("window.localStorage.getItem"));
+        assert!(js_body.contains("QuerySessionList"));
+        assert!(js_body.contains("QuerySessionTurns"));
+        assert!(js_body.contains("refreshSelectedSession"));
         assert!(js_body.contains("CancelTurn"));
         assert!(js_body.contains("CancelLatestActiveTurn"));
         assert!(js_body.contains("event.key !== \"Escape\""));
         assert!(js_body.contains("cancelActiveTurn"));
         assert!(js_body.contains("normalizePublicConversation"));
+        assert!(js_body.contains("toolSummaryBody"));
+        assert!(js_body.contains("formatDuration"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("tool_call_id"));
         assert!(js_body.contains("ADP success sample"));
         assert!(js_body.contains("ADP failure sample"));
         assert!(js_body.contains("loadSamplePrompt"));
+        assert!(js_body.contains("shortcutHelp"));
+        assert!(js_body.contains("runSlashCommand"));
+        assert!(js_body.contains("setCommandStatus"));
+        assert!(js_body.contains("setBackgroundCommandStatus"));
+        assert!(js_body.contains("commandStatusStickyUntil"));
+        assert!(js_body.contains("stickyMs"));
+        assert!(js_body.contains("Cmd/Ctrl+Enter"));
+        assert!(js_body.contains("requestSubmit()"));
+        assert!(js_body.contains("refreshAllProtocolState"));
+        assert!(js_body.contains("if (command.startsWith(\"/\"))"));
+        assert!(js_body.contains("composerInput.value = \"\";"));
+        assert!(js_body.contains("case \"/help\""));
+        assert!(js_body.contains("case \"/sessions\""));
+        assert!(js_body.contains("case \"/reload\""));
+        assert!(js_body.contains("case \"/success\""));
+        assert!(js_body.contains("case \"/failure\""));
+        assert!(js_body.contains("case \"/cancel\""));
+        assert!(js_body.contains("case \"/clear\""));
+        assert!(!js_body.contains("Tool call requested"));
+        assert!(!js_body.contains("Tool result returned for"));
+        assert!(!js_body.contains("Tool execution failed for"));
+        let turn_render_pos = js_body
+            .find("state.sessionTurns.length === 0")
+            .expect("turn render branch present");
+        let adp_failure_pos = js_body
+            .rfind("if (state.adpFailure)")
+            .expect("adp failure branch present");
+        assert!(
+            adp_failure_pos > turn_render_pos,
+            "ADP failure card must render after conversation timeline branch"
+        );
 
         server.stop().await;
     }
@@ -1373,6 +1413,7 @@ mod tests {
                     agent_id: AgentId::new("slave-agent"),
                     tool_result: ToolResultContract {
                         tool_call_id: ToolCallId::new("tool-sse-1"),
+                        status: freehand_contracts::ToolResultStatus::Success,
                         output: "private result body".to_owned(),
                     },
                 },
@@ -1381,7 +1422,8 @@ mod tests {
 
         let completed_body = read_next_sse_event(&mut turn_sse, &mut turn_buffer).await;
         assert!(completed_body.contains("\"status\":\"completed\""));
-        assert!(completed_body.contains("Tool result returned for read_file"));
+        assert!(completed_body.contains("\"title\":\"read_file\""));
+        assert!(completed_body.contains("\"body\":\"completed\""));
         assert!(!completed_body.contains("private result body"));
 
         drop(turn_sse);
