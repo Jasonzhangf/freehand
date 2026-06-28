@@ -24,6 +24,20 @@
     - latest-turn query for `runtime-turn-17` -> `terminal_status=Failed`, one current `tool_activities[0].status=Failed`, terminal/error public cards failed
     - latest-turn SSE emitted same failed turn projection
 
+# 2026-06-28 launchd restart readiness closeout
+  - observed failure mode:
+    - `scripts/install-launchd.sh restart` returned before the daemon was actually ready for `GET /health`
+    - immediate curl after restart could fail even though launchd had already kicked the service
+  - root cause:
+    - startup window race, not a fixed-port or ADP protocol regression
+  - fix:
+    - `scripts/install-launchd.sh install` and `scripts/install-launchd.sh restart` now wait for `/health` readiness before reporting success
+  - validation:
+    - `scripts/install-launchd.sh restart`
+    - bounded poll reached `health_ready_after=2`
+    - `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
+    - `freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` -> `adp_smoke_ok ... subscription_accepted ... query_result ... ingress_command_kind_mismatch`
+
 # 2026-06-28 WebUI tool card/status repair
   - root cause: whole-turn projection could duplicate same `tool_call_id` as separate waiting activities, and WebUI rendered tool summaries as static cards without stable tool identity
   - fix:

@@ -59,6 +59,7 @@
     - `POST /ui/command` asking `ls path=~/code/codex` returned HTTP 500 explicit dispatch failure
     - `GET /ui/query/latest-active-turn` returned `runtime-turn-17` with `terminal_status=Failed`, one current failed `ls` tool activity, and failed terminal/error public cards
     - `GET /ui/subscribe/turn/latest` emitted the same failed projection over SSE
+  - launchd restart now waits for `/health` readiness before returning success; the earlier immediate `restart && curl` failure was a startup-window race, not a fixed-port or ADP regression
 - Current branch: `main`.
 - Current verified UI repair slice:
   - `ui.protocol` upserts duplicate same-`tool_call_id` tool calls into one activity

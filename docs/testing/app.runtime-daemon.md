@@ -35,7 +35,7 @@
   - daemon corrupt-checkpoint-bootstrap startup rejection smoke
   - daemon ADP WebSocket command/query/subscribe smoke
   - daemon ADP query-as-command rejection smoke
-  - launchd service smoke: `launchctl print`, `/health`, `/`, and log file creation
+  - launchd service smoke: `launchctl print`, `/health`, `/`, log file creation, and restart wait-until-healthy behavior
 - project black-box impact:
   - closes the first real runtime host gap without polluting the protocol-only app boundary
   - machine-readable mainline truth remains the only source for generated wiki artifacts

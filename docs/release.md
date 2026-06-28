@@ -63,7 +63,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 `scripts/install-launchd.sh install` performs first-time launchd setup: it installs the host binaries, writes a user LaunchAgent, and starts the daemon in the background.
 
-`scripts/install-launchd.sh restart` only restarts the existing LaunchAgent with `launchctl kickstart -k` and does not rewrite the install state.
+`scripts/install-launchd.sh restart` restarts the existing LaunchAgent with `launchctl kickstart -k`, then waits for `/health` on the fixed bind to become ready before reporting success. It does not rewrite the install state.
 
 Default service truth:
 
@@ -86,6 +86,8 @@ Restart without reinstall:
 ```bash
 scripts/install-launchd.sh restart
 ```
+
+Both `install` and `restart` wait for the daemon to answer `GET /health` on the configured fixed bind before they exit successfully.
 
 Status:
 

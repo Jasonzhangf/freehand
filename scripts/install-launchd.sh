@@ -92,6 +92,7 @@ run_install_launchd() {
   launchctl bootout "gui/$(id -u)" "$plist_path" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$plist_path"
   launchctl enable "gui/$(id -u)/$label"
+  wait_for_health
 
   echo "[freehand-launchd] installed:"
   echo "  label: $label"
@@ -106,7 +107,25 @@ run_install_launchd() {
 
 restart_launchd() {
   launchctl kickstart -k "gui/$(id -u)/$label"
+  wait_for_health
   echo "[freehand-launchd] restarted $label"
+}
+
+wait_for_health() {
+  local health_url="http://$bind_addr/health"
+  local attempt=1
+  local max_attempts=30
+
+  while [[ $attempt -le $max_attempts ]]; do
+    if curl -4fsS "$health_url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+
+  echo "daemon did not become healthy at $health_url within ${max_attempts}s" >&2
+  exit 1
 }
 
 case "${1:-install}" in

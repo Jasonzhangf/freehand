@@ -4,6 +4,10 @@
 
 完成 Freehand 收口剩余项：让 WebUI、Android、CLI/headless 统一通过 daemon 的 ADP WebSocket `/adp` 做状态查询、订阅和命令交互，HTTP/SSE 仅保留兼容路径，同时补齐自动化验证、固定端口启动、后台守护和文档真源同步。
 
+## Current Closeout Focus
+
+当前只剩最后一段收口验证：全局安装后，launchd 后台 daemon 必须稳定绑定固定端口 `127.0.0.1:4041`，重启后可恢复监听，`/health` 与 `/adp` 都能真实连通，并且 CLI/headless 的 ADP smoke 必须直接打到这个安装后的真实地址，而不是仅靠本地测试端口或代码级 smoke 通过。
+
 ## Acceptance
 
 目标仅在以下条件全部满足时视为完成：
