@@ -1,5 +1,18 @@
 # CACHE
 
+- Current working ADP WebUI slice:
+  - WebUI shell now advertises `data-adp-endpoint="/adp"`
+  - `apps/freehand-server/assets/webui.js` defaults to one ADP WebSocket for query/subscribe/command frames and no longer uses `fetch` or `EventSource` as the live path
+  - WebUI renders ADP failure frames as visible failure cards/status, and ADP subscription accepted/waiting state is explicit
+  - HTTP query/SSE/POST routes remain server compatibility routes
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server` -> 11 passed
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - local `freehand-server webui-serve-smoke --bind 127.0.0.1:4073` page/JS smoke proved `/adp`, `new WebSocket(adpUrl())`, `subscription_accepted`, and no `new EventSource` / `fetch(`
+    - local WebSocket smoke against `ws://127.0.0.1:4074/adp` observed `subscription_accepted`, `subscription_event`, `query_result`, and explicit `failure: ingress_command_kind_mismatch`
 - Current verified live failure projection slice:
   - daemon now exposes protocol-owned ADP WebSocket at fixed service port `/adp`
   - ADP supports command/query/subscribe frames over one connection and emits explicit `subscription_accepted`, `subscription_event`, `query_result`, `command_receipt`, and `failure` frames

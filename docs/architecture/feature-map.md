@@ -264,6 +264,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - WebUI command ingress dispatch failure projection smoke
   - WebUI command ingress dispatch join-failure projection smoke
   - WebUI command ingress query-route-misuse rejection smoke
+  - WebUI default ADP query/subscribe/command asset smoke
+  - WebUI ADP failure frame visible-state smoke
   - WebUI query projection smoke
   - WebUI debug query projection smoke
   - WebUI latest-turn SSE subscribe smoke
@@ -319,7 +321,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon direct-message dispatch smoke
   - daemon slave-mode startup rejection smoke
 - required_project_black_box_tests:
-- real runtime owner injection over shared HTTP/SSE/command and ADP WebSocket transport without app-owned business logic
+  - real runtime owner injection over shared HTTP/SSE/command and ADP WebSocket transport without app-owned business logic
 - test_design_doc: `docs/testing/app.runtime-daemon.md`
 - function_map_doc: `docs/function-maps/app.runtime-daemon.md`
 - mainline_call_doc: `docs/mainline-calls/app.runtime-daemon.json`

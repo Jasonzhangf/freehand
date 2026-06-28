@@ -15,12 +15,19 @@ const state = {
   checkpoints: [],
   pendingUserInput: null,
   submitInFlight: false,
-  commandStatusMessage: "ready",
-  debugEventSource: null,
+  commandStatusMessage: "connecting to ADP...",
+  adpFailure: null,
+  adpStatus: "connecting",
+  adpSocket: null,
+  adpOpened: null,
+  adpRequests: new Map(),
+  adpSubscriptions: new Set(),
+  requestSequence: 0,
 };
 
 function shellConfig() {
   return {
+    adpEndpoint: shell.dataset.adpEndpoint,
     turnQuery: shell.dataset.turnQuery,
     turnSubscribe: shell.dataset.turnSubscribe,
     debugQueryBase: shell.dataset.debugQueryBase,
@@ -28,6 +35,156 @@ function shellConfig() {
     checkpointQuery: shell.dataset.checkpointQuery,
     commandEndpoint: shell.dataset.commandEndpoint,
   };
+}
+
+function adpUrl() {
+  const endpoint = shellConfig().adpEndpoint || "/adp";
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}${endpoint}`;
+}
+
+function nextRequestId(prefix) {
+  state.requestSequence += 1;
+  return `webui-${prefix}-${state.requestSequence}`;
+}
+
+function adpClientKind() {
+  return "WebUi";
+}
+
+function ensureAdpSocket() {
+  if (state.adpSocket && state.adpSocket.readyState === WebSocket.OPEN) {
+    return Promise.resolve(state.adpSocket);
+  }
+  if (state.adpOpened) {
+    return state.adpOpened;
+  }
+
+  const socket = new WebSocket(adpUrl());
+  state.adpSocket = socket;
+  state.adpStatus = "connecting";
+  state.commandStatusMessage = "ADP connecting...";
+  renderCommandStatus();
+
+  state.adpOpened = new Promise((resolve, reject) => {
+    socket.addEventListener("open", () => {
+      state.adpStatus = "connected";
+      state.commandStatusMessage = "ADP connected; waiting for subscription...";
+      renderAll();
+      resolve(socket);
+    });
+    socket.addEventListener("message", (event) => {
+      try {
+        handleAdpFrame(JSON.parse(event.data));
+      } catch (error) {
+        state.adpFailure = `ADP decode failed: ${error.message}`;
+        state.commandStatusMessage = state.adpFailure;
+        renderAll();
+      }
+    });
+    socket.addEventListener("error", () => {
+      state.adpStatus = "error";
+      state.commandStatusMessage = "ADP transport error";
+      renderAll();
+      reject(new Error("ADP transport error"));
+    });
+    socket.addEventListener("close", () => {
+      state.adpStatus = "closed";
+      state.commandStatusMessage = "ADP closed";
+      state.adpSocket = null;
+      state.adpOpened = null;
+      state.adpSubscriptions.clear();
+      for (const { reject: rejectRequest } of state.adpRequests.values()) {
+        rejectRequest(new Error("ADP closed"));
+      }
+      state.adpRequests.clear();
+      renderAll();
+    });
+  });
+
+  return state.adpOpened;
+}
+
+async function sendAdpFrame(frame) {
+  const socket = await ensureAdpSocket();
+  socket.send(JSON.stringify(frame));
+}
+
+function requestAdp(kind, payloadKey, payload, prefix) {
+  const requestId = nextRequestId(prefix);
+  const frame = { kind, request_id: requestId };
+  frame[payloadKey] = payload;
+  const promise = new Promise((resolve, reject) => {
+    state.adpRequests.set(requestId, { resolve, reject, kind });
+  });
+  sendAdpFrame(frame).catch((error) => {
+    const request = state.adpRequests.get(requestId);
+    state.adpRequests.delete(requestId);
+    if (request) {
+      request.reject(error);
+    }
+  });
+  return promise;
+}
+
+function adpQuery(query) {
+  return requestAdp("query", "query", query, "query");
+}
+
+function adpCommand(command) {
+  return requestAdp("command", "command", command, "cmd");
+}
+
+function adpSubscribe(subscription, prefix) {
+  return requestAdp("subscribe", "subscription", subscription, prefix);
+}
+
+function handleAdpFrame(frame) {
+  const request = state.adpRequests.get(frame.request_id);
+  switch (frame.kind) {
+    case "query_result":
+      state.adpFailure = null;
+      if (request) {
+        state.adpRequests.delete(frame.request_id);
+        request.resolve(frame.result);
+      }
+      return;
+    case "command_receipt":
+      state.adpFailure = null;
+      if (request) {
+        state.adpRequests.delete(frame.request_id);
+        request.resolve(frame.receipt);
+      }
+      state.commandStatusMessage = `${frame.receipt.dispatch_status} -> ${frame.receipt.target_feature_id}`;
+      renderCommandStatus();
+      return;
+    case "subscription_accepted":
+      state.adpFailure = null;
+      if (request) {
+        state.adpRequests.delete(frame.request_id);
+        request.resolve(frame.selector);
+      }
+      state.adpSubscriptions.add(frame.request_id);
+      state.commandStatusMessage = `ADP subscription accepted: ${frame.selector.stream_kind}`;
+      renderCommandStatus();
+      return;
+    case "subscription_event":
+      state.adpFailure = null;
+      applyAdpSubscriptionEvent(frame.event);
+      return;
+    case "failure":
+      state.adpFailure = frame.failure.message || frame.failure.code;
+      if (request) {
+        state.adpRequests.delete(frame.request_id);
+        request.reject(new Error(frame.failure.message || frame.failure.code));
+      }
+      state.commandStatusMessage = `ADP failure: ${frame.failure.code}`;
+      renderCommandStatus();
+      return;
+    default:
+      state.commandStatusMessage = `unknown ADP frame: ${frame.kind}`;
+      renderCommandStatus();
+  }
 }
 
 function setText(id, value) {
@@ -96,6 +253,143 @@ function normalizePublicConversation(items) {
   return normalized;
 }
 
+function variantPayload(value, variant) {
+  if (!value || typeof value !== "object" || !(variant in value)) {
+    return undefined;
+  }
+  return value[variant];
+}
+
+function derivePublicConversation(turn) {
+  if (!turn) {
+    return [];
+  }
+  const items = [];
+  if (turn.user_text) {
+    items.push({
+      kind: "UserText",
+      title: "User",
+      body: turn.user_text,
+      status: "submitted",
+    });
+  }
+  (turn.text || []).forEach((text) => {
+    if (text && text.trim()) {
+      items.push({
+        kind: "AssistantText",
+        title: "Assistant",
+        body: text,
+        status: "streaming",
+      });
+    }
+  });
+  (turn.tool_activities || []).forEach((tool) => {
+    const status = `${tool.status || "waiting"}`.toLowerCase();
+    const failedDetail = tool.detail ? `: ${tool.detail}` : "";
+    const body =
+      status === "completed"
+        ? `Tool result returned for ${tool.tool_name}`
+        : status === "failed"
+          ? `Tool execution failed for ${tool.tool_name}${failedDetail}`
+          : `Tool call requested: ${tool.tool_name} (waiting for execution)`;
+    items.push({
+      kind: "ToolSummary",
+      title: "Tool",
+      body,
+      status,
+      tool_call_id: tool.tool_call_id,
+    });
+  });
+  if (turn.terminal_text) {
+    const terminalStatus = `${turn.terminal_status || "Success"}`.toLowerCase();
+    const status =
+      terminalStatus === "failed"
+        ? "failed"
+        : terminalStatus === "cancelled"
+          ? "cancelled"
+          : terminalStatus === "blocked"
+            ? "blocked"
+            : terminalStatus === "interrupted"
+              ? "interrupted"
+              : "completed";
+    items.push({
+      kind: "Terminal",
+      title: "Final",
+      body: turn.terminal_text,
+      status,
+    });
+  }
+  (turn.errors || []).forEach((error) => {
+    items.push({
+      kind: "Error",
+      title: "Error",
+      body: error,
+      status: "failed",
+    });
+  });
+  return items;
+}
+
+function setTurnProjection(turn) {
+  state.turn = turn || null;
+  state.publicConversation = derivePublicConversation(state.turn);
+  if (state.turn && state.pendingUserInput) {
+    state.pendingUserInput = null;
+  }
+}
+
+function applyAdpQueryResult(result) {
+  const turn = variantPayload(result, "Turn");
+  if (turn !== undefined) {
+    setTurnProjection(turn);
+    renderAll();
+    if (state.turn) {
+      refreshDebug().catch((error) => {
+        state.commandStatusMessage = `debug ADP query failed: ${error.message}`;
+        renderCommandStatus();
+      });
+    }
+    return;
+  }
+  const debug = variantPayload(result, "Debug");
+  if (debug !== undefined) {
+    state.debug = debug || {
+      status_text: "debug pending",
+      detail_lines: ["waiting for debug snapshot"],
+    };
+    renderDebug();
+    return;
+  }
+  const checkpoints = variantPayload(result, "Checkpoints");
+  if (checkpoints !== undefined) {
+    state.checkpoints = checkpoints.checkpoints || [];
+    renderCheckpoints();
+  }
+}
+
+function applyAdpSubscriptionEvent(event) {
+  const projection = event.projection || {};
+  const turn = variantPayload(projection, "Turn");
+  if (turn !== undefined) {
+    setTurnProjection(turn);
+    state.commandStatusMessage = "ADP turn update received";
+    renderAll();
+    ensureDebugSubscription();
+    return;
+  }
+  const debug = variantPayload(projection, "Debug");
+  if (debug !== undefined) {
+    state.debug = debug;
+    renderDebug();
+    return;
+  }
+  const checkpoints = variantPayload(projection, "Checkpoints");
+  if (checkpoints !== undefined) {
+    state.checkpoints = checkpoints.checkpoints || [];
+    renderCheckpoints();
+  }
+}
+
 function liveTurnStatus() {
   if (!state.turn) {
     return null;
@@ -136,6 +430,18 @@ function renderMessages() {
         "待写入输入",
         state.pendingUserInput,
         "user",
+      ),
+    );
+  }
+
+  if (state.adpFailure) {
+    fragments.push(
+      card(
+        "ADP",
+        { className: "failed", label: "failed" },
+        "ADP failure",
+        state.adpFailure,
+        "failure",
       ),
     );
   }
@@ -267,7 +573,7 @@ function renderTurnMeta() {
 }
 
 function renderAll() {
-  setText("workspace-status", state.turn ? "connected" : "booting");
+  setText("workspace-status", state.adpStatus);
   renderTurnMeta();
   renderMessages();
   renderDebug();
@@ -275,40 +581,10 @@ function renderAll() {
   renderCommandStatus();
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    const error = new Error(`${url} -> ${response.status}`);
-    error.status = response.status;
-    throw error;
-  }
-  return response.json();
-}
-
 async function refreshTurn() {
-  const config = shellConfig();
-  let payload;
-  try {
-    payload = await fetchJson(config.turnQuery);
-  } catch (error) {
-    if (error.status === 404) {
-      state.turn = null;
-      state.publicConversation = [];
-      renderAll();
-      await refreshCheckpoints();
-      return;
-    }
-    throw error;
-  }
-  state.turn = payload.turn;
-  state.publicConversation = payload.public_conversation || [];
-  if (state.pendingUserInput) {
-    state.pendingUserInput = null;
-  }
-  renderAll();
-  await refreshDebug();
+  const result = await adpQuery("QueryLatestActiveTurn");
+  applyAdpQueryResult(result);
   await refreshCheckpoints();
-  ensureDebugSubscription();
 }
 
 async function refreshDebug() {
@@ -317,43 +593,27 @@ async function refreshDebug() {
     renderDebug();
     return;
   }
-  const config = shellConfig();
-  try {
-    state.debug = await fetchJson(`${config.debugQueryBase}${state.turn.turn_id}`);
-  } catch (error) {
-    if (error.status === 404) {
-      state.debug = {
-        status_text: "debug pending",
-        detail_lines: ["waiting for debug snapshot"],
-      };
-      renderDebug();
-      return;
-    }
-    throw error;
-  }
-  renderDebug();
+  const result = await adpQuery({ QueryDebugState: { turn_id: state.turn.turn_id } });
+  applyAdpQueryResult(result);
 }
 
 async function refreshCheckpoints() {
-  const payload = await fetchJson(shellConfig().checkpointQuery);
-  state.checkpoints = payload.checkpoints || [];
-  renderCheckpoints();
+  const result = await adpQuery("QueryCheckpoints");
+  applyAdpQueryResult(result);
+  renderAll();
 }
 
 function ensureTurnSubscription() {
-  const source = new EventSource(shellConfig().turnSubscribe);
-  source.addEventListener("turn", (event) => {
-    const payload = JSON.parse(event.data);
-    state.turn = payload.turn;
-    state.publicConversation = payload.public_conversation || [];
-    state.pendingUserInput = null;
-    state.commandStatusMessage = "reasoning stream active...";
-    renderAll();
-    refreshDebug().catch((error) => {
-      state.commandStatusMessage = `debug refresh failed: ${error.message}`;
-      renderCommandStatus();
-    });
-    ensureDebugSubscription();
+  if (state.adpSubscriptions.has("latest-turn")) {
+    return;
+  }
+  state.adpSubscriptions.add("latest-turn");
+  adpSubscribe(
+    { SubscribeLatestActiveTurn: { client: adpClientKind() } },
+    "sub-turn",
+  ).catch((error) => {
+    state.commandStatusMessage = `ADP turn subscribe failed: ${error.message}`;
+    renderCommandStatus();
   });
 }
 
@@ -361,37 +621,32 @@ function ensureDebugSubscription() {
   if (!state.turn) {
     return;
   }
-  if (state.debugEventSource) {
-    state.debugEventSource.close();
+  const key = `debug:${state.turn.turn_id}`;
+  if (state.adpSubscriptions.has(key)) {
+    return;
   }
-  const source = new EventSource(`${shellConfig().debugSubscribeBase}${state.turn.turn_id}`);
-  source.addEventListener("debug", (event) => {
-    state.debug = JSON.parse(event.data);
-    renderDebug();
-  });
-  source.onerror = () => {
-    const status = state.debug?.status_text || "";
-    if (!state.debug || status === "debug pending" || status === "debug stream waiting") {
+  state.adpSubscriptions.add(key);
+  if (!state.debug) {
       state.debug = {
-        status_text: "debug stream reconnecting",
-        detail_lines: ["waiting for debug SSE reconnect"],
+        status_text: "debug stream waiting",
+        detail_lines: ["waiting for ADP debug subscription"],
       };
       renderDebug();
-    }
-  };
-  state.debugEventSource = source;
+  }
+  adpSubscribe(
+    { SubscribeDebugState: { client: adpClientKind(), turn_id: state.turn.turn_id } },
+    "sub-debug",
+  ).catch((error) => {
+    state.debug = {
+      status_text: "debug stream failed",
+      detail_lines: [error.message],
+    };
+    renderDebug();
+  });
 }
 
 async function submitUserInput(text) {
-  const response = await fetch(shellConfig().commandEndpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ SubmitUserInput: { text } }),
-  });
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload.message || payload.code || "command failed");
-  }
+  const payload = await adpCommand({ SubmitUserInput: { text } });
   state.commandStatusMessage = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
   return payload;
 }
@@ -415,14 +670,11 @@ async function cancelActiveTurn() {
     : { CancelLatestActiveTurn: {} };
   state.commandStatusMessage = `cancelling ${turnId || "latest active turn"}...`;
   renderCommandStatus();
-  const response = await fetch(shellConfig().commandEndpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(command),
-  });
-  const payload = await response.json();
-  if (!response.ok) {
-    state.commandStatusMessage = `cancel failed: ${payload.message || payload.code || "command failed"}`;
+  let payload;
+  try {
+    payload = await adpCommand(command);
+  } catch (error) {
+    state.commandStatusMessage = `cancel failed: ${error.message}`;
     renderCommandStatus();
     return;
   }
@@ -439,14 +691,11 @@ async function cancelActiveTurn() {
 async function rewindCheckpoint(checkpointId) {
   state.commandStatusMessage = `rewinding ${checkpointId}...`;
   renderCommandStatus();
-  const response = await fetch(shellConfig().commandEndpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ RewindCheckpoint: { checkpoint_id: checkpointId } }),
-  });
-  const payload = await response.json();
-  if (!response.ok) {
-    state.commandStatusMessage = `rewind failed: ${payload.message || payload.code || "command failed"}`;
+  let payload;
+  try {
+    payload = await adpCommand({ RewindCheckpoint: { checkpoint_id: checkpointId } });
+  } catch (error) {
+    state.commandStatusMessage = `rewind failed: ${error.message}`;
     renderCommandStatus();
     return;
   }
@@ -508,12 +757,13 @@ document.addEventListener("keydown", (event) => {
   });
 });
 
-refreshTurn().catch((error) => {
-  state.commandStatusMessage = `bootstrap failed: ${error.message}`;
-  renderAll();
-});
-refreshCheckpoints().catch(() => {
-  state.checkpoints = [];
-  renderCheckpoints();
-});
-ensureTurnSubscription();
+ensureAdpSocket()
+  .then(async () => {
+    ensureTurnSubscription();
+    await refreshTurn();
+    await refreshCheckpoints();
+  })
+  .catch((error) => {
+    state.commandStatusMessage = `ADP bootstrap failed: ${error.message}`;
+    renderAll();
+  });

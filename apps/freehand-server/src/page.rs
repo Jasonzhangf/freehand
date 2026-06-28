@@ -11,6 +11,7 @@ pub fn render_webui_smoke() -> String {
         "</head>",
         "<body class=\"theme-light\">",
         "<main class=\"app-shell\" data-webui-shell=\"true\" ",
+        "data-adp-endpoint=\"/adp\" ",
         "data-turn-query=\"/ui/query/latest-active-turn\" ",
         "data-turn-subscribe=\"/ui/subscribe/turn/latest\" ",
         "data-debug-query-base=\"/ui/query/debug/\" ",

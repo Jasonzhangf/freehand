@@ -10,6 +10,8 @@
   - `serve_webui_listener`
   - `handle_command_ingress`
   - `handle_query_checkpoints`
+  - `handle_adp_socket`
+  - `handle_adp_connection`
 
 ## Request Mainline
 
@@ -19,9 +21,11 @@
 - app boundary may render query snapshot, debug snapshot, and separate slave-card projection without owning protocol semantics
 - app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets
 - app boundary keeps theme assets separate from WebUI layout assets
+- front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
+- HTTP query, SSE subscribe, and POST command ingress remain compatibility routes, not the WebUI default control/status path
 - per-turn debug SSE is a live subscription and waits for late debug snapshots when turn projection arrives before debug projection
 - transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing
 - front-end cancel button and Escape key send protocol-owned `CancelTurn` commands through command ingress
@@ -31,19 +35,20 @@
 
 ## Response Mainline
 
-- app boundary renders a protocol-driven WebUI page shell; live content is populated from existing query/SSE endpoints
+- app boundary renders a protocol-driven WebUI page shell; live content is populated from ADP query/subscribe/command frames by default
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason/debug truth writer
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
 - app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
+- ADP subscribe returns an explicit accepted/waiting state before later turn/debug events, so the WebUI can render waiting instead of appearing frozen
 - SSE subscribe routes now emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe must stay open on blank state until a turn exists
 - debug SSE subscribe stays open when a debug snapshot is not available yet, while debug HTTP query remains snapshot-only and returns explicit 404
 - front-end debug state distinguishes missing snapshot (`debug pending`) from debug SSE transport errors (`debug stream reconnecting`)
-- WebUI submit success path still actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing
+- WebUI submit success path still actively re-queries latest turn truth over ADP after command receipt to cover command-complete-before-browser-subscriber timing
 - WebUI checkpoint panel renders protocol checkpoint summaries from query state and keeps checkpoint files out of app-boundary truth
 - WebUI cancel path sends `CancelTurn` for the current active turn, clears pending local input only after dispatch, and refreshes protocol truth
 - WebUI cancel path uses `CancelTurn` when `turn_id` is known and `CancelLatestActiveTurn` during the submit-in-flight pre-SSE window
-- front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes, including the user prompt in the public conversation stream
-- front-end script renders protocol-projected tool lifecycle status from `public_conversation` so tool calls can show waiting and completed states over SSE
+- front-end script projects protocol-owned ADP `UiQueryResult`, `UiSubscriptionEvent`, and `DebugStateSnapshot` frames into semantic message cards and detail panes, including the user prompt
+- front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket
 - front-end script normalizes tool cards by `tool_call_id`, renders waiting cards with animation, and clears the composer input immediately after submit while keeping the pending user card visible
 - terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
@@ -55,6 +60,7 @@
 
 - invalid smoke input or missing projection returns explicit app error
 - transport/render wiring failures are surfaced explicitly
+- ADP transport failures, decode failures, and protocol failure frames are rendered as visible failure cards and status text
 - unknown static assets return explicit 404
 - cancel without an active turn clears only local input and does not invent a runtime mutation
 - transient missing debug snapshots are rendered as pending debug state, not command failure
@@ -83,36 +89,40 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `render_webui_smoke` | `apps/freehand-server/src/page.rs` | render protocol-driven WebUI shell and endpoint bindings | static page request | HTML shell | app entrypoint/root route | page module | bound |
 | 02 | `assets::asset_response` | `apps/freehand-server/src/assets.rs` | serve split CSS/JS assets with explicit content type | asset path | CSS/JS response or 404 | app asset route | embedded assets | bound |
-| 03 | `build_webui_router` | `apps/freehand-server/src/lib.rs` | define shared protocol-only HTTP/SSE/static asset surface | protocol state + dispatch port | router with root/assets/query/subscribe/command routes | app entrypoint/tests/runtime host | app router | bound |
+| 03 | `build_webui_router` | `apps/freehand-server/src/lib.rs` | define shared protocol-only HTTP/SSE/ADP/static asset surface | protocol state + dispatch port | router with root/assets/query/subscribe/command/ADP routes | app entrypoint/tests/runtime host | app router | bound |
 | 04 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | expose protocol-owned command-ingress transport endpoint backed by an injected dispatch port | HTTP JSON command | HTTP dispatch receipt/failure payload | WebUI transport | protocol owner | bound |
 | 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve shared protocol-only router on a listener | TCP listener + protocol state + dispatch port + shutdown future | live HTTP/SSE transport boundary | app entrypoint/tests/runtime host | app server | bound |
 | 06 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate slave-card visibility by client kind | turn projection + client kind | client-specific projection | app boundary | protocol owner | bound |
 | 07 | `initializeThemeToggle` | `apps/freehand-server/assets/theme.js` | switch white/black visual theme only | UI theme choice | body theme class + persisted localStorage setting | WebUI shell | theme module | bound |
 | 08 | `subscription_event_stream` / `projection_to_sse_event` | `apps/freehand-server/src/lib.rs` | convert protocol-owned subscription updates into continuous HTTP SSE delivery, including waiting subscriptions for late debug snapshots | `UiSubscriptionEvent` receiver + selector | streamed SSE events | subscribe routes | protocol state | bound |
-| 09 | `refreshTurn` / `renderMessages` / `normalizePublicConversation` / `renderCommandStatus` / `refreshDebug` / `submitUserInput` | `apps/freehand-server/assets/webui.js` | consume protocol query/SSE public turn payloads, render semantic/tool/debug cards without owning filtering semantics, keep same-tool updates in one card, and keep missing debug snapshots pending instead of failed | `UiPublicTurnProjection` JSON + debug snapshot/pending state + command dispatch receipt | DOM message blocks + command status | WebUI shell | existing protocol endpoints | bound |
-| 10 | `handle_query_checkpoints` / `refreshCheckpoints` | `apps/freehand-server/src/lib.rs` / `apps/freehand-server/assets/webui.js` | serve and render read-only checkpoint summaries from protocol state | protocol checkpoint snapshot | HTTP JSON checkpoint snapshot + secondary inspector cards | WebUI shell | ui.protocol state | bound |
-| 11 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` for the active protocol turn from button or Escape key | latest protocol turn id | command dispatch receipt + refreshed projection | WebUI shell | `/ui/command` | bound |
-| 12 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
+| 09 | `handle_adp_socket` / `handle_adp_connection` | `apps/freehand-server/src/lib.rs` | expose protocol-owned ADP WebSocket frames for WebUI default query/subscribe/command control | ADP WebSocket frames + protocol state + dispatch port | ADP response frames and subscription events | WebUI shell | shared protocol transport | bound |
+| 10 | `ensureAdpSocket` / `requestAdp` / `handleAdpFrame` | `apps/freehand-server/assets/webui.js` | maintain the default WebUI ADP connection and route query_result, subscription_accepted, subscription_event, command_receipt, and failure frames | `UiAdpResponse` JSON frames | visible WebUI state updates or failure cards | WebUI shell | daemon `/adp` | bound |
+| 11 | `refreshTurn` / `renderMessages` / `normalizePublicConversation` / `renderCommandStatus` / `refreshDebug` / `submitUserInput` | `apps/freehand-server/assets/webui.js` | consume ADP query/subscription turn payloads, render semantic/tool/debug cards, keep same-tool updates in one card, and keep missing debug snapshots pending instead of failed | `UiAdpResponse` frames + debug snapshot/pending state + command dispatch receipt | DOM message blocks + command status | WebUI shell | ADP protocol frames | bound |
+| 12 | `handle_query_checkpoints` / `refreshCheckpoints` | `apps/freehand-server/src/lib.rs` / `apps/freehand-server/assets/webui.js` | serve compatibility checkpoint query and render read-only checkpoint summaries from ADP protocol state by default | protocol checkpoint snapshot | checkpoint snapshot + secondary inspector cards | WebUI shell | ui.protocol state | bound |
+| 13 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` or `CancelLatestActiveTurn` over ADP for the active protocol turn from button or Escape key | latest protocol turn id | ADP command receipt + refreshed projection | WebUI shell | daemon `/adp` | bound |
+| 14 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP compatibility transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
 
 ## Sync Status Against Code
 
 - app boundary now renders a usable WebUI shell instead of a minimal text-only smoke
 - theme code is split into `assets/theme.css` and `assets/theme.js`
 - WebUI layout/protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`
+- WebUI shell now advertises `data-adp-endpoint="/adp"` and the front-end opens a WebSocket to that endpoint by default
 - app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface
 - app boundary now serves protocol-only POST command ingress dispatch-receipt/failure smoke route from that shared transport surface
+- HTTP/SSE/POST routes remain compatibility transport surfaces; WebUI JS no longer uses `fetch` or `EventSource` as its default live path
 - app boundary now surfaces explicit command-ingress dispatch-port failures and dispatch-task join failures instead of collapsing them into success
 - app boundary now serves static embedded assets through an explicit 404ing route
 - runtime host reuse now happens through injected state and dispatch port, not by duplicating transport behavior
 - protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
 - debug subscribe route now also keeps one SSE connection open when the first debug snapshot is not available yet
-- WebUI submit path still explicitly refreshes latest turn truth after a successful command receipt
+- WebUI submit path still explicitly refreshes latest turn truth over ADP after a successful command receipt
 - WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files
 - WebUI Cancel button and Escape key now send `CancelTurn` through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`
-- WebUI tool cards now render protocol-projected waiting/completed lifecycle states from SSE/query public conversation truth
+- WebUI tool cards now render protocol-projected waiting/completed/failed lifecycle states from ADP turn projection truth
 - WebUI same-tool lifecycle updates now normalize by `tool_call_id`, waiting cards animate, and submit clears the input field immediately while retaining pending state in the conversation stream
-- WebUI missing-debug race is locked by pending-state rendering plus late-debug SSE subscription coverage; debug SSE transport errors render as reconnecting instead of stale pending
+- WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics
 - generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes

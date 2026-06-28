@@ -12,6 +12,8 @@
   - CLI and WebUI divergences stay protocol-safe
   - app boundary remains decoupled from reason/provider/node/config semantics
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
+  - WebUI default status/control path uses ADP WebSocket `/adp` for query, subscribe, command, and visible failure frames
+  - HTTP query, SSE subscribe, and POST command ingress remain compatibility transport routes rather than WebUI default truth
   - WebUI Cancel button and Escape key send `CancelTurn` through command ingress when a turn is active
   - WebUI Escape sends latest-active cancellation during submit-in-flight before a concrete `turn_id` is known
   - latest-turn subscribe should wait for the first turn instead of failing on blank state
@@ -24,6 +26,9 @@
   - WebUI root shell smoke
   - WebUI theme asset smoke
   - WebUI JS asset smoke
+  - WebUI JS asset smoke locks default ADP WebSocket usage and rejects `fetch` / `EventSource` as the default live path
+  - WebUI ADP subscription accepted/waiting status rendering smoke
+  - WebUI ADP failure frame visible-card/status smoke
   - WebUI submit-success path refresh smoke
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
@@ -31,6 +36,7 @@
   - WebUI command ingress dispatch failure projection smoke
   - WebUI command ingress dispatch join-failure projection smoke
   - WebUI command ingress query-route-misuse rejection smoke
+  - WebUI ADP query-as-command failure does not mutate state and renders failure
   - WebUI query projection smoke
   - WebUI debug query projection smoke
   - WebUI latest-turn SSE initial snapshot plus later update smoke
@@ -40,6 +46,7 @@
   - WebUI debug SSE error rendering distinguishes reconnecting transport state from missing-snapshot pending state
   - WebUI latest-turn query/SSE public projection excludes raw completion schema and internal reasoning from public conversation while preserving user input
   - WebUI latest-turn SSE renders tool lifecycle status updates (`waiting` then `completed`) from protocol truth
+  - WebUI ADP turn updates render tool lifecycle status updates (`waiting`, `completed`, and `failed`) from protocol truth
   - WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, and waiting animation assets
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI slave-card render smoke
@@ -55,19 +62,20 @@
   - WebUI smoke stdout fixture
 - known gaps:
   - command ingress currently dispatches through a static protocol-owned smoke port, not real runtime owner adapters yet
-- WebUI still re-queries latest turn truth after submit receipt because a command may complete before the browser consumes the next streamed event
+- WebUI still re-queries latest turn truth over ADP after submit receipt because a command may complete before the browser consumes the next streamed event
 - sync status between design and implementation:
   - WebUI shell rendering is landed
   - split theme/WebUI static assets are landed
   - HTTP query and continuous SSE subscribe transport smoke is landed
   - HTTP command ingress dispatch-receipt/failure smoke is landed
+  - WebUI root shell now exposes `/adp`, and WebUI JS defaults to ADP WebSocket instead of `fetch` / `EventSource`
   - command-ingress dispatch-port failure and join-failure projection coverage is landed
   - submit-success path now refreshes latest turn truth after command receipt
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input
   - submit-in-flight cancel path uses `CancelLatestActiveTurn` before a concrete `turn_id` arrives
-  - query/SSE now return a public turn payload with `public_conversation` for main cards
-  - debug query remains snapshot-only, while debug SSE waits for late debug snapshots so turn/debug timing races are not user-visible failures; debug SSE errors render reconnecting state instead of stale pending
-  - latest-turn SSE now has regression coverage for tool waiting/completed status updates
+  - ADP query/subscription now drive the default WebUI cards, while HTTP query/SSE compatibility routes still expose public projection smoke coverage
+  - debug query remains snapshot-only, while ADP debug subscriptions wait for late debug snapshots so turn/debug timing races are not user-visible failures; ADP failure frames render visible status/cards instead of stale pending
+  - latest-turn SSE compatibility and WebUI ADP asset checks now have regression coverage for tool waiting/completed status updates and default ADP routing
   - WebUI tool cards now normalize by `tool_call_id`, waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
   - protocol-only transport library reuse is landed
   - app remains protocol-only by dependency gate

@@ -894,7 +894,7 @@ mod tests {
         assert!(html.contains("/assets/theme.css"));
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/webui.js"));
-        assert!(html.contains("data-turn-query=\"/ui/query/latest-active-turn\""));
+        assert!(html.contains("data-adp-endpoint=\"/adp\""));
     }
 
     #[tokio::test]
@@ -1000,6 +1000,7 @@ mod tests {
         let root_body = root.text().await.expect("root body");
         assert!(root_body.contains("data-webui-shell=\"true\""));
         assert!(root_body.contains("/assets/theme.css"));
+        assert!(root_body.contains("data-adp-endpoint=\"/adp\""));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
 
         let theme = client
@@ -1049,7 +1050,11 @@ mod tests {
             .text()
             .await
             .expect("js body 2");
-        assert!(js_body.contains("await refreshTurn();"));
+        assert!(js_body.contains("new WebSocket(adpUrl())"));
+        assert!(js_body.contains("adpSubscribe"));
+        assert!(js_body.contains("subscription_accepted"));
+        assert!(!js_body.contains("new EventSource"));
+        assert!(!js_body.contains("fetch("));
         assert!(js_body.contains("refreshCheckpoints"));
         assert!(js_body.contains("CancelTurn"));
         assert!(js_body.contains("CancelLatestActiveTurn"));
