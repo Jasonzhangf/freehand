@@ -1,6 +1,16 @@
 # CACHE
 
 - Current verified live failure projection slice:
+  - daemon now exposes protocol-owned ADP WebSocket at fixed service port `/adp`
+  - ADP supports command/query/subscribe frames over one connection and emits explicit `subscription_accepted`, `subscription_event`, `query_result`, `command_receipt`, and `failure` frames
+  - WebUI/Android/CLI automation direction is one shared ADP control/status path; HTTP/SSE remains existing transport compatibility, not the preferred automation truth
+  - regression locks:
+    - `adp_request_and_response_frames_roundtrip`
+    - `daemon_adp_websocket_controls_command_query_and_subscription`
+    - `daemon_adp_rejects_query_sent_as_command_frame`
+  - live fixed-port validation:
+    - `curl -4 http://127.0.0.1:4041/health` -> `ok`
+    - Node WebSocket smoke to `ws://127.0.0.1:4041/adp` observed `subscription_accepted`, `subscription_event`, `query_result`, and explicit `failure` with `ingress_command_kind_mismatch`
   - `provider.reason-live-bridge` now materializes failed terminal/error truth before returning tool execution failure for unknown or unimplemented tools
   - `runtime.ui-command-dispatch` refreshes `UiProtocolState` from authoritative persistence before returning dispatch failure, so WebUI query/SSE do not stay waiting
   - `ui.protocol` marks still-waiting tool activities as `Failed` when terminal truth is failed

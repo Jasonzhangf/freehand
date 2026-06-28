@@ -7,10 +7,12 @@
   - launchd wrapper loads `~/.freehand/daemon.env` and starts one configured daemon agent through explicit `FREEHAND_DAEMON_BIN` on a fixed bind address
   - runtime dispatcher exposes one shared UI state handle
   - daemon injects runtime dispatch into shared HTTP/SSE transport
+  - daemon exposes the same shared state and runtime dispatch through ADP WebSocket at `/adp`
   - daemon restart restores persisted latest-turn projection before new command ingress
   - provider-backed submit and direct-message commands return runtime-backed receipts
   - latest-turn query reflects runtime-owned terminal projection changes after provider completion
   - latest-turn SSE reflects restored projections and continues streaming later runtime updates on the same connection
+  - ADP WebSocket query/command/subscribe uses the same protocol truth without browser UI
   - provider execution failures surface through protocol-mapped HTTP failure payloads
   - slave-mode agent selection fails explicitly
 - white-box plan:
@@ -31,6 +33,8 @@
   - daemon missing-checkpoint rewind HTTP failure smoke
   - daemon slave-mode startup rejection smoke
   - daemon corrupt-checkpoint-bootstrap startup rejection smoke
+  - daemon ADP WebSocket command/query/subscribe smoke
+  - daemon ADP query-as-command rejection smoke
   - launchd service smoke: `launchctl print`, `/health`, `/`, and log file creation
 - project black-box impact:
   - closes the first real runtime host gap without polluting the protocol-only app boundary
@@ -42,11 +46,12 @@
   - `~/.freehand/logs/daemon.stdout.log`
   - `~/.freehand/logs/daemon.stderr.log`
 - known gaps:
-  - real websocket pairing transport is not wired yet; current daemon uses runtime-owned local node semantics
+  - real node-pairing websocket transport is not wired yet; daemon ADP WebSocket is a UI/control/status transport over existing runtime-owned local node semantics, not the node pairing transport
 - sync status between design and implementation:
   - daemon bootstrap helper is landed
   - runtime-backed submit/query/restart-restore/continuous-SSE/provider-failure/direct-message/checkpoint-rewind HTTP smoke is landed
   - daemon HTTP rewind now also has explicit missing-manifest failure coverage through the same command ingress
   - daemon startup now also has explicit corrupt checkpoint-projection bootstrap failure coverage
+  - daemon ADP WebSocket command/query/subscribe and query-as-command rejection coverage is landed
   - config-selected bootstrap smoke is landed and uses configured peer topology
   - migrated mainline-call source and generated wiki are kept in sync with this test design

@@ -70,9 +70,10 @@ mod tests {
     use super::*;
     use freehand_contracts::TurnId;
     use freehand_ui_protocol::{
-        UiCheckpointSnapshot, UiCommand, UiCommandDispatchFailure, UiCommandDispatchReceipt,
-        UiPublicTurnProjection,
+        UiAdpRequest, UiAdpResponse, UiCheckpointSnapshot, UiClientKind, UiCommand,
+        UiCommandDispatchFailure, UiCommandDispatchReceipt, UiPublicTurnProjection, UiQueryResult,
     };
+    use futures_util::{SinkExt, StreamExt};
     use reqwest::Client;
     use serde_json::Value;
     use serial_test::serial;
@@ -88,6 +89,8 @@ mod tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tokio::sync::oneshot;
     use tokio::time::timeout;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
 
     static HOME_LOCK: Mutex<()> = Mutex::new(());
 
@@ -243,6 +246,91 @@ mod tests {
             .expect("checkpoint id")
     }
 
+    async fn next_adp_response(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        label: &str,
+    ) -> UiAdpResponse {
+        let message = timeout(Duration::from_secs(10), socket.next())
+            .await
+            .unwrap_or_else(|_| panic!("adp response timeout while waiting for {label}"))
+            .expect("adp response")
+            .expect("adp websocket message");
+        match message {
+            Message::Text(text) => serde_json::from_str(&text).expect("adp response json"),
+            other => panic!("unexpected ADP websocket message: {other:?}"),
+        }
+    }
+
+    async fn next_adp_response_matching(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        label: &str,
+        matches: impl Fn(&UiAdpResponse) -> bool,
+    ) -> UiAdpResponse {
+        loop {
+            let response = next_adp_response(socket, label).await;
+            if matches(&response) {
+                return response;
+            }
+        }
+    }
+
+    async fn collect_adp_receipt_and_turn_event(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        receipt_request_id: &str,
+        subscription_request_id: &str,
+        event_needle: &str,
+    ) -> (
+        UiCommandDispatchReceipt,
+        freehand_ui_protocol::UiSubscriptionEvent,
+    ) {
+        let mut receipt = None;
+        let mut event = None;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while receipt.is_none() || event.is_none() {
+            let now = tokio::time::Instant::now();
+            assert!(now < deadline, "ADP receipt/event collection timeout");
+            let response = timeout(deadline - now, socket.next())
+                .await
+                .expect("ADP response timeout")
+                .expect("ADP response")
+                .expect("ADP websocket message");
+            let Message::Text(text) = response else {
+                panic!("unexpected ADP websocket message: {response:?}");
+            };
+            let response: UiAdpResponse = serde_json::from_str(&text).expect("adp response json");
+            match response {
+                UiAdpResponse::CommandReceipt {
+                    request_id,
+                    receipt: got_receipt,
+                } if request_id == receipt_request_id => {
+                    receipt = Some(got_receipt);
+                }
+                UiAdpResponse::SubscriptionEvent {
+                    request_id,
+                    event: got_event,
+                } if request_id == subscription_request_id
+                    && serde_json::to_string(&got_event)
+                        .expect("event json")
+                        .contains(event_needle) =>
+                {
+                    event = Some(got_event);
+                }
+                UiAdpResponse::Failure {
+                    request_id,
+                    failure,
+                } => panic!("unexpected ADP failure {request_id}: {failure:?}"),
+                _ => {}
+            }
+        }
+        (receipt.expect("receipt"), event.expect("event"))
+    }
+
     #[tokio::test]
     #[serial]
     async fn daemon_submit_input_updates_runtime_backed_latest_turn_query() {
@@ -303,6 +391,174 @@ mod tests {
         );
 
         server.stop().await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn daemon_adp_websocket_controls_command_query_and_subscription() {
+        let (provider_url, request_rx, provider_handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_single_response(),
+                complete_single_response("adp done"),
+            ],
+        );
+        let server = TestServer::spawn(master_config_text(&provider_url)).await;
+        let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
+        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Subscribe {
+                    request_id: "sub-1".to_owned(),
+                    subscription: UiCommand::SubscribeLatestActiveTurn {
+                        client: UiClientKind::WebUi,
+                    },
+                })
+                .expect("subscribe json")
+                .into(),
+            ))
+            .await
+            .expect("send subscribe");
+        match next_adp_response(&mut socket, "subscription accepted").await {
+            UiAdpResponse::SubscriptionAccepted {
+                request_id,
+                selector,
+            } => {
+                assert_eq!(request_id, "sub-1");
+                assert_eq!(
+                    selector.stream_kind,
+                    freehand_ui_protocol::UiStreamKind::Turn
+                );
+            }
+            other => panic!("unexpected ADP subscription ack: {other:?}"),
+        }
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Query {
+                    request_id: "pre-query-1".to_owned(),
+                    query: UiCommand::QueryLatestActiveTurn,
+                })
+                .expect("pre query json")
+                .into(),
+            ))
+            .await
+            .expect("send pre query");
+        match next_adp_response(&mut socket, "pre-query result").await {
+            UiAdpResponse::QueryResult {
+                request_id,
+                result: UiQueryResult::Turn(None),
+            } => assert_eq!(request_id, "pre-query-1"),
+            other => panic!("unexpected ADP pre-query response: {other:?}"),
+        }
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Command {
+                    request_id: "cmd-1".to_owned(),
+                    command: UiCommand::SubmitUserInput {
+                        text: "daemon adp turn".to_owned(),
+                    },
+                })
+                .expect("command json")
+                .into(),
+            ))
+            .await
+            .expect("send command");
+        let (receipt, event) =
+            collect_adp_receipt_and_turn_event(&mut socket, "cmd-1", "sub-1", "daemon adp turn")
+                .await;
+        let _ = request_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first provider request");
+        let _ = request_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("second provider request");
+        provider_handle.join().expect("join provider");
+        assert_eq!(
+            receipt.dispatch_status,
+            "reason_live_turn_completed rounds=2 schema_rejections=0 tool_executions=1 restored_closed_turns=0"
+        );
+        assert!(
+            serde_json::to_string(&event)
+                .expect("event json")
+                .contains("daemon adp turn")
+        );
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Query {
+                    request_id: "query-1".to_owned(),
+                    query: UiCommand::QueryLatestActiveTurn,
+                })
+                .expect("query json")
+                .into(),
+            ))
+            .await
+            .expect("send query");
+        let queried = next_adp_response_matching(&mut socket, "query result", |response| {
+            matches!(
+                response,
+                UiAdpResponse::QueryResult { request_id, .. } if request_id == "query-1"
+            )
+        })
+        .await;
+        match queried {
+            UiAdpResponse::QueryResult {
+                request_id,
+                result: UiQueryResult::Turn(Some(turn)),
+            } => {
+                assert_eq!(request_id, "query-1");
+                assert_eq!(turn.user_text.as_deref(), Some("daemon adp turn"));
+                assert!(
+                    turn.terminal_text
+                        .as_deref()
+                        .is_some_and(|text| text.contains("Summary: adp done"))
+                );
+            }
+            other => panic!("unexpected ADP query response: {other:?}"),
+        }
+
+        let _ = socket.close(None).await;
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn daemon_adp_rejects_query_sent_as_command_frame() {
+        let (provider_url, _request_rx, provider_handle) =
+            spawn_sequence_server("application/json", Vec::new());
+        let server = TestServer::spawn(master_config_text(&provider_url)).await;
+        let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
+        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Command {
+                    request_id: "bad-cmd-1".to_owned(),
+                    command: UiCommand::QueryLatestActiveTurn,
+                })
+                .expect("bad command json")
+                .into(),
+            ))
+            .await
+            .expect("send bad command");
+
+        match next_adp_response(&mut socket, "query-as-command failure").await {
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                assert_eq!(request_id, "bad-cmd-1");
+                assert_eq!(failure.code, "ingress_command_kind_mismatch");
+                assert!(!failure.retryable);
+            }
+            other => panic!("unexpected ADP failure response: {other:?}"),
+        }
+
+        let _ = socket.close(None).await;
+        server.stop().await;
+        provider_handle.join().expect("join provider");
     }
 
     #[tokio::test]

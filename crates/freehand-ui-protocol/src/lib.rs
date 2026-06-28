@@ -265,6 +265,55 @@ pub struct UiCommandDispatchFailure {
     pub retryable: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAdpFailure {
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UiAdpRequest {
+    Command {
+        request_id: String,
+        command: UiCommand,
+    },
+    Query {
+        request_id: String,
+        query: UiCommand,
+    },
+    Subscribe {
+        request_id: String,
+        subscription: UiCommand,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UiAdpResponse {
+    CommandReceipt {
+        request_id: String,
+        receipt: UiCommandDispatchReceipt,
+    },
+    QueryResult {
+        request_id: String,
+        result: UiQueryResult,
+    },
+    SubscriptionEvent {
+        request_id: String,
+        event: UiSubscriptionEvent,
+    },
+    SubscriptionAccepted {
+        request_id: String,
+        selector: SubscriptionSelector,
+    },
+    Failure {
+        request_id: String,
+        failure: UiAdpFailure,
+    },
+}
+
 pub trait UiCommandDispatchPort: Send + Sync {
     fn dispatch(
         &self,
@@ -1912,5 +1961,32 @@ mod tests {
             }
             other => panic!("unexpected projection: {other:?}"),
         }
+    }
+
+    #[test]
+    fn adp_request_and_response_frames_roundtrip() {
+        let request = UiAdpRequest::Query {
+            request_id: "req-1".to_owned(),
+            query: UiCommand::QueryLatestActiveTurn,
+        };
+        let request_json = serde_json::to_string(&request).expect("request json");
+        assert!(request_json.contains("\"kind\":\"query\""));
+        let decoded_request: UiAdpRequest =
+            serde_json::from_str(&request_json).expect("decoded request");
+        assert_eq!(decoded_request, request);
+
+        let response = UiAdpResponse::Failure {
+            request_id: "req-1".to_owned(),
+            failure: UiAdpFailure {
+                code: "protocol_mismatch".to_owned(),
+                message: "query frame rejected".to_owned(),
+                retryable: false,
+            },
+        };
+        let response_json = serde_json::to_string(&response).expect("response json");
+        assert!(response_json.contains("\"kind\":\"failure\""));
+        let decoded_response: UiAdpResponse =
+            serde_json::from_str(&response_json).expect("decoded response");
+        assert_eq!(decoded_response, response);
     }
 }

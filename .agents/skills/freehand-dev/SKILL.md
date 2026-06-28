@@ -135,6 +135,8 @@ Use this skill for any non-trivial work in this repo.
 - Any UI is an input ingress plus a read-only consumer of turn/debug state. UI may submit commands, but UI must not directly mutate reason truth, debug truth, or session truth.
 - First version UI scope is CLI plus WebUI.
 - First WebUI transport baseline is HTTP query plus SSE subscribe. Do not mix this UI transport with node WebSocket pairing semantics.
+- Daemon control/status automation is ADP WebSocket at `/adp`; WebUI, Android, CLI, and headless tests should converge on ADP command/query/subscribe frames for unified state inspection before relying on DOM-specific diagnosis.
+- ADP WebSocket is UI/control/status transport, not node master/slave pairing transport; keep node pairing WebSocket semantics separate.
 - Command ingress must stay split from query/subscribe routes. Query/subscribe commands are not valid command-ingress payloads and must be rejected explicitly.
 - Before a UI command leaves `freehand-ui-protocol`, it must be wrapped in a protocol-owned owner-routing envelope; app boundaries must not invent their own command-to-owner routing.
 - Runtime-backed command execution belongs in `freehand-runtime` or another explicit runtime owner crate, not in UI app crates.

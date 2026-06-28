@@ -11,6 +11,8 @@
   - `protocol_rejection`
   - `build_command_dispatch_envelope`
   - `dispatch_port_failure`
+  - `UiAdpRequest`
+  - `UiAdpResponse`
   - `subscription_selector`
   - `subscription_matches`
   - `debug_projection_from_event`
@@ -40,6 +42,7 @@
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - `CancelLatestActiveTurn` is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete `turn_id`
 - query and subscribe stay separate
+- ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 
 ## Response Mainline
@@ -49,6 +52,7 @@
 - command ingress returns explicit dispatch receipt without claiming truth mutation success
 - cancel commands route to `reason.turn` whether they target an explicit `turn_id` or the latest active turn
 - subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel
+- ADP subscribe returns an explicit `SubscriptionAccepted` frame before later `SubscriptionEvent` frames so UI-less clients can distinguish waiting from transport failure
 - projections are read-only views over owner-written truth
 - terminal completion shows only final projected text
 - turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
@@ -70,6 +74,7 @@
 
 - invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors
 - query/subscribe commands sent to command-ingress route are explicit protocol misuse errors
+- query commands sent as ADP command frames are explicit protocol misuse errors, not mutation attempts
 - `CancelLatestActiveTurn` without any active or persisted turn returns explicit target-not-found from the owner module
 - empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
@@ -146,6 +151,7 @@
 | 15 | `UiProtocolState::drain_debug_receiver` | `crates/freehand-ui-protocol/src/lib.rs` | drain a `debug.core` receiver without making UI a truth writer | debug receiver | applied snapshot count | protocol transport/app adapters | protocol state | bound |
 | 16 | `debug_projection_from_event` | `crates/freehand-ui-protocol/src/lib.rs` | map one debug event to read-only UI debug projection when snapshot exists | `freehand-debug` event | `UiProjection::Debug` | protocol tests/transport adapters | projector | bound |
 | 17 | `UiProtocolState::set_checkpoint_snapshot` / `checkpoint_projection_from_runtime_summary` | `crates/freehand-ui-protocol/src/lib.rs` | store and query read-only checkpoint summaries supplied by runtime owner | runtime checkpoint summary DTO | checkpoint query result | runtime dispatcher / app query handlers | protocol state | bound |
+| 18 | `UiAdpRequest` / `UiAdpResponse` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP frames for command/query/subscribe automation | ADP JSON frame | typed command/query/subscription response or failure | WebUI/Android/CLI automation transports | protocol owner | bound |
 
 ## Sync Status Against Code
 
@@ -160,4 +166,5 @@
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in `UiProtocolState`
 - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation status mapping, including failed terminal projection for still-waiting tool calls
 - public tool summaries now preserve `tool_call_id`, and duplicate tool-call projections upsert into one activity before public rendering
+- ADP request/response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

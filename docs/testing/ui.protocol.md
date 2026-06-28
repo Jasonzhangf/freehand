@@ -9,9 +9,11 @@
   - accepted command ingress is routed to declared owner feature/module before transport dispatch
   - latest-active cancellation is accepted as mutation intent and routes to `reason.turn`
   - query returns snapshot truth
+  - ADP query frames return the same snapshot truth without requiring WebUI DOM
   - debug query returns per-turn read-only debug snapshot truth
   - checkpoint query returns read-only runtime-owned checkpoint summary projections
   - subscribe returns an initial snapshot plus continuous incremental truth, or waits for the first matching turn when subscribing before any turn exists
+  - ADP subscribe frames return an explicit accepted/waiting frame and then stream matching subscription events
   - debug subscribe returns per-turn read-only debug projections
   - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
   - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`, or failed terminal truth marks still-waiting activities `failed`
@@ -37,6 +39,7 @@
   - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
   - duplicate same-`tool_call_id` tool-call projection upserts one activity and one public tool card
   - debug-event ingestion and receiver-drain behavior
+  - ADP frame serialization and failure-frame shape
 - module black-box plan:
   - command ingress accept/reject smoke
   - command dispatch envelope owner-routing smoke
@@ -52,12 +55,15 @@
   - duplicate tool-call projection smoke covers one public card per `tool_call_id`
   - cancelled/failed terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
+  - ADP command/query/subscribe frame roundtrip smoke
+  - ADP query-as-command negative smoke
 - project black-box impact:
   - CLI and WebUI consume one protocol truth while rendering different views
   - protocol truth can back a minimal service boundary without duplicating projection logic in apps
   - any UI remains decoupled from reason/debug truth ownership while still acting as the user input port
   - protocol state can back HTTP query and SSE subscribe adapters without app-owned projection duplication
   - protocol state can expose runtime checkpoint summaries without becoming checkpoint recovery truth
+  - ADP gives WebUI, Android, CLI, and headless smoke tests one shared control/status protocol
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with protocol owner code and function map updates
 - fixtures / replay inputs / runtime evidence paths:
@@ -83,3 +89,4 @@
   - terminal status is now preserved in `UiTurnProjection` and public conversation status mapping
   - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries, including failed status for still-waiting tools when terminal truth is failed
   - tool summaries now expose `tool_call_id`, and duplicate same-id tool calls are regression-locked to one public card
+  - ADP request/response frames are landed and regression-locked by JSON roundtrip coverage

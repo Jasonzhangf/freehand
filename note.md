@@ -334,3 +334,10 @@ Current real root cause split:
 - Fix path: `app.webui-smoke` keeps debug HTTP query snapshot-only but makes debug SSE wait for late snapshots; WebUI renders missing debug as pending instead of command failure.
 - Tool lifecycle gap: `UiTurnProjection.tool_calls` only carried names, so WebUI could only guess running. Added `UiToolActivity` plus `apply_tool_result`; `reason.turn` broadcasts `ReasonBroadcastEvent::ToolResult`; runtime maps it into UI state so latest-turn SSE carries waiting -> completed updates.
 - Locked by tests: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo test -p freehand-reason`, `cargo test -p freehand-runtime`; mainline docs regenerated.
+
+## 2026-06-28 ADP daemon control/status
+
+- User direction: WebUI, Android, CLI, and headless automation should share ADP for status/query/control, so failures can be inspected through ADP instead of UI-specific guessing.
+- Implemented `UiAdpRequest`/`UiAdpResponse` in `ui.protocol` and `/adp` WebSocket in shared server transport; daemon exposes it on fixed launchd port through the existing injected runtime dispatcher and shared `UiProtocolState`.
+- Debug finding: ADP subscription must return explicit `SubscriptionAccepted`, otherwise clients cannot distinguish waiting from a dead connection; command dispatch also must not block the connection loop, or subscription status events can starve behind long provider work.
+- Verified: `daemon_adp_websocket_controls_command_query_and_subscription`, `daemon_adp_rejects_query_sent_as_command_frame`, full `make ci`, global install, launchd restart, and real Node WebSocket smoke against `ws://127.0.0.1:4041/adp`.

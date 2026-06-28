@@ -5,6 +5,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Html;
@@ -18,16 +19,19 @@ use freehand_contracts::{
 };
 use freehand_ui_protocol::{
     DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot, SubscriptionSelector,
-    TurnProjectionInput, UiCheckpointSnapshot, UiClientKind, UiCommand, UiCommandDispatchFailure,
-    UiCommandDispatchPort, UiCommandDispatchReceipt, UiProjection, UiProtocolState,
-    UiPublicTurnProjection, UiQueryResult, UiSubscriptionEvent, UiTurnProjection,
-    build_command_dispatch_envelope, checkpoint_projection_from_runtime_summary,
-    dispatch_port_failure, protocol_rejection, public_turn_projection, subscription_matches,
-    subscription_selector, turn_projection_for_client, turn_projection_from_events,
+    TurnProjectionInput, UiAdpFailure, UiAdpRequest, UiAdpResponse, UiCheckpointSnapshot,
+    UiClientKind, UiCommand, UiCommandDispatchFailure, UiCommandDispatchPort,
+    UiCommandDispatchReceipt, UiProjection, UiProtocolState, UiPublicTurnProjection, UiQueryResult,
+    UiSubscriptionEvent, UiTurnProjection, build_command_dispatch_envelope,
+    checkpoint_projection_from_runtime_summary, dispatch_port_failure, protocol_rejection,
+    public_turn_projection, subscription_matches, subscription_selector,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use futures_util::stream;
+use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 #[derive(Clone)]
 struct WebUiState {
@@ -83,6 +87,7 @@ pub fn build_webui_router(
             "/ui/subscribe/debug/{turn_id}",
             get(handle_subscribe_debug_state),
         )
+        .route("/adp", get(handle_adp_socket))
         .with_state(WebUiState {
             protocol_state,
             command_dispatch_port,
@@ -277,6 +282,331 @@ async fn handle_subscribe_debug_state(
         receiver,
         selector,
     )))
+}
+
+async fn handle_adp_socket(
+    ws: WebSocketUpgrade,
+    State(state): State<WebUiState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_adp_connection(socket, state))
+}
+
+async fn handle_adp_connection(socket: WebSocket, state: WebUiState) {
+    let (mut sender, mut receiver) = socket.split();
+    let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<UiAdpResponse>();
+    let writer = tokio::spawn(async move {
+        while let Some(message) = outbound_rx.recv().await {
+            let Ok(body) = serde_json::to_string(&message) else {
+                continue;
+            };
+            if sender.send(Message::Text(body.into())).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut subscriptions: Vec<(String, SubscriptionSelector)> = Vec::new();
+    let mut protocol_receiver = state
+        .protocol_state
+        .lock()
+        .expect("lock protocol state")
+        .subscribe();
+    loop {
+        tokio::select! {
+            message = receiver.next() => {
+                let Some(message) = message else {
+                    break;
+                };
+                let Ok(message) = message else {
+                    break;
+                };
+                match message {
+                    Message::Text(text) => {
+                        if let Err(err) = handle_adp_text_message(
+                            &state,
+                            &outbound_tx,
+                            &mut subscriptions,
+                            text.to_string(),
+                        )
+                        .await
+                        {
+                            let _ = outbound_tx.send(UiAdpResponse::Failure {
+                                request_id: "transport".to_owned(),
+                                failure: UiAdpFailure {
+                                    code: "invalid_adp_message".to_owned(),
+                                    message: err,
+                                    retryable: false,
+                                },
+                            });
+                        }
+                    }
+                    Message::Close(_) => break,
+                    Message::Ping(_) | Message::Pong(_) => {}
+                    Message::Binary(_) => {
+                        let _ = outbound_tx.send(UiAdpResponse::Failure {
+                            request_id: "transport".to_owned(),
+                            failure: UiAdpFailure {
+                                code: "binary_frame_unsupported".to_owned(),
+                                message: "binary frames are not supported by the ADP transport".to_owned(),
+                                retryable: false,
+                            },
+                        });
+                    }
+                }
+            }
+            update = protocol_receiver.recv() => {
+                match update {
+                    Ok(update) => {
+                        for (request_id, selector) in &subscriptions {
+                            if subscription_matches(
+                                selector,
+                                &update.projection,
+                                update.latest_active_turn_id.as_ref(),
+                            ) {
+                                let _ = outbound_tx.send(UiAdpResponse::SubscriptionEvent {
+                                    request_id: request_id.clone(),
+                                    event: update.clone(),
+                                });
+                            }
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    }
+    drop(outbound_tx);
+    let _ = writer.await;
+}
+
+async fn handle_adp_text_message(
+    state: &WebUiState,
+    outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
+    subscriptions: &mut Vec<(String, SubscriptionSelector)>,
+    text: String,
+) -> Result<(), String> {
+    let request: UiAdpRequest =
+        serde_json::from_str(&text).map_err(|err| format!("invalid ADP JSON: {err}"))?;
+    match request {
+        UiAdpRequest::Command {
+            request_id,
+            command,
+        } => {
+            handle_adp_command(state, outbound_tx, request_id, command).await;
+            Ok(())
+        }
+        UiAdpRequest::Query { request_id, query } => {
+            let _ = handle_adp_query(state, outbound_tx, request_id, query).await;
+            Ok(())
+        }
+        UiAdpRequest::Subscribe {
+            request_id,
+            subscription,
+        } => {
+            let _ =
+                handle_adp_subscribe(state, outbound_tx, subscriptions, request_id, subscription)
+                    .await;
+            Ok(())
+        }
+    }
+}
+
+async fn handle_adp_command(
+    state: &WebUiState,
+    outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
+    request_id: String,
+    command: UiCommand,
+) {
+    let envelope = match build_command_dispatch_envelope(&command) {
+        Ok(envelope) => envelope,
+        Err(err) => {
+            let rejection = protocol_rejection(err);
+            let _ = outbound_tx.send(UiAdpResponse::Failure {
+                request_id,
+                failure: UiAdpFailure {
+                    code: rejection.code,
+                    message: rejection.message,
+                    retryable: false,
+                },
+            });
+            return;
+        }
+    };
+    let dispatch_port = Arc::clone(&state.command_dispatch_port);
+    let tx = outbound_tx.clone();
+    tokio::spawn(async move {
+        let receipt =
+            match tokio::task::spawn_blocking(move || dispatch_port.dispatch(envelope)).await {
+                Ok(receipt) => receipt,
+                Err(err) => {
+                    let _ = tx.send(UiAdpResponse::Failure {
+                        request_id,
+                        failure: UiAdpFailure {
+                            code: "dispatch_join_failed".to_owned(),
+                            message: format!("command dispatch task failed: {err}"),
+                            retryable: false,
+                        },
+                    });
+                    return;
+                }
+            };
+        match receipt {
+            Ok(receipt) => {
+                let _ = tx.send(UiAdpResponse::CommandReceipt {
+                    request_id,
+                    receipt,
+                });
+            }
+            Err(err) => {
+                let failure = dispatch_port_failure(err);
+                let _ = tx.send(UiAdpResponse::Failure {
+                    request_id,
+                    failure: UiAdpFailure {
+                        code: failure.code,
+                        message: failure.message,
+                        retryable: failure.retryable,
+                    },
+                });
+            }
+        }
+    });
+}
+
+async fn handle_adp_query(
+    state: &WebUiState,
+    outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
+    request_id: String,
+    query: UiCommand,
+) -> Result<(), String> {
+    let result = {
+        let state = state.protocol_state.lock().expect("lock protocol state");
+        state.query(&query)
+    };
+    match result {
+        Ok(result) => {
+            let _ = outbound_tx.send(UiAdpResponse::QueryResult { request_id, result });
+        }
+        Err(err) => {
+            let rejection = protocol_rejection(err);
+            let _ = outbound_tx.send(UiAdpResponse::Failure {
+                request_id,
+                failure: UiAdpFailure {
+                    code: rejection.code,
+                    message: rejection.message,
+                    retryable: false,
+                },
+            });
+        }
+    }
+    Ok(())
+}
+
+async fn handle_adp_subscribe(
+    state: &WebUiState,
+    outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
+    subscriptions: &mut Vec<(String, SubscriptionSelector)>,
+    request_id: String,
+    subscription: UiCommand,
+) -> Result<(), String> {
+    let selector = match subscription_selector(&subscription) {
+        Some(selector) => selector,
+        None => {
+            let _ = outbound_tx.send(UiAdpResponse::Failure {
+                request_id,
+                failure: UiAdpFailure {
+                    code: "subscription_kind_mismatch".to_owned(),
+                    message: "subscription frame rejected by protocol boundary".to_owned(),
+                    retryable: false,
+                },
+            });
+            return Ok(());
+        }
+    };
+    let initial_projection = {
+        let state = state.protocol_state.lock().expect("lock protocol state");
+        match initial_adp_subscription_projection(&state, &subscription) {
+            Ok(initial) => initial,
+            Err(status) => {
+                let _ = outbound_tx.send(UiAdpResponse::Failure {
+                    request_id,
+                    failure: UiAdpFailure {
+                        code: "subscription_initial_query_failed".to_owned(),
+                        message: format!("subscription initial query failed with {status}"),
+                        retryable: false,
+                    },
+                });
+                return Ok(());
+            }
+        }
+    };
+    let _ = outbound_tx.send(UiAdpResponse::SubscriptionAccepted {
+        request_id: request_id.clone(),
+        selector: selector.clone(),
+    });
+    subscriptions.push((request_id.clone(), selector));
+    if let Some(projection) = initial_projection {
+        let event = UiSubscriptionEvent {
+            latest_active_turn_id: projection_latest_active_turn_id(&projection),
+            projection,
+        };
+        let _ = outbound_tx.send(UiAdpResponse::SubscriptionEvent {
+            request_id: request_id.clone(),
+            event,
+        });
+    }
+    Ok(())
+}
+
+fn initial_adp_subscription_projection(
+    state: &UiProtocolState,
+    subscription: &UiCommand,
+) -> Result<Option<UiProjection>, StatusCode> {
+    match subscription {
+        UiCommand::SubscribeLatestActiveTurn { client } => match state
+            .query(&UiCommand::QueryLatestActiveTurn)
+            .map_err(|_| StatusCode::BAD_REQUEST)?
+        {
+            UiQueryResult::Turn(Some(turn)) => Ok(Some(UiProjection::Turn(
+                turn_projection_for_client(turn, *client),
+            ))),
+            UiQueryResult::Turn(None) => Ok(None),
+            _ => Err(StatusCode::BAD_REQUEST),
+        },
+        UiCommand::SubscribeTurn { client, turn_id } => match state
+            .query(&UiCommand::QueryTurn {
+                turn_id: turn_id.clone(),
+            })
+            .map_err(|_| StatusCode::BAD_REQUEST)?
+        {
+            UiQueryResult::Turn(Some(turn)) => Ok(Some(UiProjection::Turn(
+                turn_projection_for_client(turn, *client),
+            ))),
+            UiQueryResult::Turn(None) => Ok(None),
+            _ => Err(StatusCode::BAD_REQUEST),
+        },
+        UiCommand::SubscribeDebugState { turn_id, .. } => match state
+            .query(&UiCommand::QueryDebugState {
+                turn_id: turn_id.clone(),
+            })
+            .map_err(|_| StatusCode::BAD_REQUEST)?
+        {
+            UiQueryResult::Debug(Some(snapshot)) => Ok(Some(UiProjection::Debug(snapshot))),
+            UiQueryResult::Debug(None) => Ok(None),
+            _ => Err(StatusCode::BAD_REQUEST),
+        },
+        UiCommand::SubscribeNodeStatus | UiCommand::SubscribeProgress => Ok(None),
+        _ => Err(StatusCode::BAD_REQUEST),
+    }
+}
+
+fn projection_latest_active_turn_id(projection: &UiProjection) -> Option<TurnId> {
+    match projection {
+        UiProjection::Turn(turn) => Some(turn.turn_id.clone()),
+        UiProjection::Debug(snapshot) => Some(snapshot.semantic.turn_id.clone()),
+        UiProjection::Progress(snapshot) => Some(snapshot.turn_id.clone()),
+        UiProjection::NodeStatus(_) | UiProjection::Checkpoints(_) => None,
+    }
 }
 
 fn subscription_event_stream(

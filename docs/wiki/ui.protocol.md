@@ -16,6 +16,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - query and subscribe stay separate
+- ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 - CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id
 
@@ -25,6 +26,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - checkpoint query returns read-only checkpoint summary projections supplied by runtime owner code
 - command ingress returns explicit dispatch receipt without claiming truth mutation success
 - subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel, or waits for the first turn when the latest-turn stream is subscribed before any turn exists
+- ADP subscribe returns an explicit SubscriptionAccepted frame before later SubscriptionEvent frames so UI-less clients can distinguish waiting from transport failure
 - projections are read-only views over owner-written truth
 - terminal completion shows only final projected text
 - public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, and debug details from the main user-visible stream
@@ -45,6 +47,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 
 - invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors
 - query/subscribe commands sent to command-ingress route are explicit protocol misuse errors
+- query commands sent as ADP command frames are explicit protocol misuse errors, not mutation attempts
 - empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
 - blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn
@@ -97,6 +100,12 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
   - allowed callers: runtime dispatcher bridge, app query handlers through protocol state
   - related tests: checkpoint summary query smoke
   - why shared: keeps checkpoint UI projection single-sourced without letting UI parse runtime manifests
+- `UiAdpRequest`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: define protocol-owned WebSocket ADP frames for command, query, subscribe, event, and failure automation
+  - allowed callers: WebUI transport adapters, Android transport adapters, CLI automation transports
+  - related tests: ADP frame roundtrip smoke, daemon ADP command/query/subscribe smoke
+  - why shared: all UI and headless clients need one typed control/status frame shape instead of per-client transport envelopes
 
 ## Function Call Table
 
@@ -120,6 +129,8 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 15 | `UiProtocolState::drain_debug_receiver` | `crates/freehand-ui-protocol/src/lib.rs` | drain a debug.core receiver without making UI a truth writer | debug receiver | applied snapshot count | protocol transport/app adapters | protocol state | bound |
 | 16 | `debug_projection_from_event` | `crates/freehand-ui-protocol/src/lib.rs` | map one debug event to read-only UI debug projection when snapshot exists | freehand-debug event | UiProjection::Debug | protocol tests/transport adapters | projector | bound |
 | 17 | `UiProtocolState::set_checkpoint_snapshot / checkpoint_projection_from_runtime_summary` | `crates/freehand-ui-protocol/src/lib.rs` | store and query read-only checkpoint summaries supplied by runtime owner | runtime checkpoint summary DTO | checkpoint query result | runtime dispatcher / app query handlers | protocol state | bound |
+| 18 | `UiAdpRequest` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP request frames for command/query/subscribe automation | ADP JSON frame | typed command/query/subscription request | WebUI/Android/CLI automation transports | protocol owner | bound |
+| 19 | `UiAdpResponse` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP response frames for command/query/subscribe/event/failure automation | protocol command/query/subscription result | ADP JSON response frame | protocol owner | WebUI/Android/CLI automation transports | bound |
 | 10b | `UiProtocolState::apply_terminal_event / turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text plus terminal status projection | runtime/app protocol consumers | protocol projector | bound |
 
 ## Sync Status Against Mainline Call
@@ -138,3 +149,4 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - tool activity status is now preserved in UiTurnProjection.tool_activities and public conversation status mapping
 - public tool summaries preserve tool_call_id, and duplicate same-id tool calls upsert into one public card
 - CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn
+- ADP request and response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients

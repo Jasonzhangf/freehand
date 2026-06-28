@@ -314,10 +314,12 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon restart next-turn-id continuation smoke
   - daemon provider failure HTTP smoke
   - daemon checkpoint rewind HTTP smoke
+  - daemon ADP WebSocket command/query/subscribe smoke
+  - daemon ADP query-as-command rejection smoke
   - daemon direct-message dispatch smoke
   - daemon slave-mode startup rejection smoke
 - required_project_black_box_tests:
-  - real runtime owner injection over shared HTTP/SSE/command transport without app-owned business logic
+- real runtime owner injection over shared HTTP/SSE/command and ADP WebSocket transport without app-owned business logic
 - test_design_doc: `docs/testing/app.runtime-daemon.md`
 - function_map_doc: `docs/function-maps/app.runtime-daemon.md`
 - mainline_call_doc: `docs/mainline-calls/app.runtime-daemon.json`
