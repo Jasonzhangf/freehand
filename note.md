@@ -454,3 +454,28 @@ Current real root cause split:
 - Live ADP smoke passed. Sequential failure sample passed as runtime-turn-33-r2 with rounds=2/tool_executions=1. Sequential success sample passed as runtime-turn-35 with terminal_status=Success.
 - Verification caution: running success/failure samples concurrently can produce command_dispatch_port_failure because runtime dispatch has a single active turn boundary; do not treat parallel sample verification as valid positive evidence.
 - Found and fixed WebUI slash UX bug: liveTurnStatus always overrode local commandStatus, so /help and /sessions looked inert on completed turns; slash inputs also remained in composer. Added sticky command status and slash input consumption.
+
+## 2026-06-28 goal completion audit continuation
+
+- Objective file re-read: `/Users/fanzhang/.codex/attachments/098e982a-74ac-494e-8e66-6ebb387506f0/pasted-text-1.txt`.
+- Minimax config current evidence:
+  - RCC source `/Volumes/extension/.rcc/provider/minimax/config.v2.toml` declares providerId/id `minimax`, `type=anthropic`, `baseURL=https://api.minimaxi.com/anthropic`, `defaultModel=MiniMax-M3`.
+  - Runtime truth `~/.freehand/config.toml` matches `provider=minimax`, `protocol=messages`, `defaultModel=MiniMax-M3`, and master/worker agents use `provider = "minimax"`.
+  - `FREEHAND_PAIR_TOKEN_SHARED=test-pair-token ~/.local/bin/freehand-cli --agent master` and source `cargo run -p freehand-cli -- --agent master` both printed `provider=minimax provider_protocol=messages default_model=MiniMax-M3 base_url=https://api.minimaxi.com/anthropic`.
+- Fixed daemon evidence:
+  - `launchctl print gui/$(id -u)/com.freehand.daemon` showed `state = running`, pid `27507`, `keepalive | runatload`.
+  - `curl -4fsS http://127.0.0.1:4041/health` returned `ok`.
+- Missing screenshot evidence added under `artifacts/webui-session-alignment/20260628-continued/`:
+  - `12-before-daemon-restart-history.png`: pre-restart selected session/history state.
+  - `13-after-daemon-restart-session-restored.png`: service-scoped launchd restart + reload restored `runtime-session-master` and prior latest turn `runtime-turn-36-r2`.
+  - `14-webui-bash-submit-cleared-pending.png`: WebUI submit cleared composer and showed pending/dispatching state.
+  - `15-webui-tool-waiting-animation.png`: WebUI showed tool waiting/running state during `bash sleep 8`.
+  - `16-webui-tool-completed-after-wait.png`: WebUI showed completed tool turn after wait sample.
+- Explicit gate evidence:
+  - `make ci` rerun with log `/tmp/freehand-make-ci.log`, tail showed `xtask mainlines check: ok`, `xtask gates check: ok`, and `MAKE_CI_EXIT=0`.
+- Current post-restart headless ADP evidence:
+  - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` passed with `subscription_accepted`, `subscription_event`, `query_result`, and `ingress_command_kind_mismatch`.
+  - Sequential success sample passed: `runtime-turn-38`, `rounds=1`, `tool_executions=0`.
+  - Sequential failure sample passed: `runtime-turn-39-r2`, `rounds=2`, `tool_executions=1`.
+  - `adp-session-query --session runtime-session-master` returned 36 ordered turns through `runtime-turn-39-r2`.
+  - Latest projection for `runtime-turn-39-r2` has `terminal_status=Success` and one `read_file` tool activity with `status=Failed`.
