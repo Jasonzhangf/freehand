@@ -8,6 +8,14 @@ use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use freehand_contracts::{AgentId, SessionId, TurnId};
+use freehand_ui_protocol::{
+    SubscriptionSelector, UiAdpRequest, UiAdpResponse, UiClientKind, UiProjection, UiQueryResult,
+    UiSource, UiStreamKind, UiSubscriptionEvent, UiTurnProjection,
+};
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::Message;
+
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn unique_home_dir() -> std::path::PathBuf {
@@ -90,6 +98,126 @@ fn spawn_sequence_server(
         }
     });
     (base_url, rx, handle)
+}
+
+fn spawn_adp_mock_server() -> (String, thread::JoinHandle<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind adp mock");
+    let url = format!("ws://{}/adp", listener.local_addr().expect("addr"));
+    listener
+        .set_nonblocking(true)
+        .expect("set adp mock nonblocking");
+    let handle = thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("tokio runtime");
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+            let (stream, _) = listener.accept().await.expect("accept adp");
+            let mut socket = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("accept websocket");
+            while let Some(message) = socket.next().await {
+                let Message::Text(text) = message.expect("message") else {
+                    continue;
+                };
+                let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
+                match request {
+                    UiAdpRequest::Subscribe { request_id, .. } => {
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::SubscriptionAccepted {
+                                request_id: request_id.clone(),
+                                selector: SubscriptionSelector {
+                                    client: UiClientKind::Cli,
+                                    stream_kind: UiStreamKind::Turn,
+                                    target_turn_id: None,
+                                },
+                            },
+                        )
+                        .await;
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::SubscriptionEvent {
+                                request_id,
+                                event: UiSubscriptionEvent {
+                                    projection: UiProjection::Turn(test_turn_projection()),
+                                    latest_active_turn_id: Some(TurnId::new("cli-adp-turn")),
+                                },
+                            },
+                        )
+                        .await;
+                    }
+                    UiAdpRequest::Query { request_id, .. } => {
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::QueryResult {
+                                request_id,
+                                result: UiQueryResult::Turn(Some(test_turn_projection())),
+                            },
+                        )
+                        .await;
+                    }
+                    UiAdpRequest::Command {
+                        request_id,
+                        command,
+                    } => {
+                        let code = match command {
+                            freehand_ui_protocol::UiCommand::QueryLatestActiveTurn => {
+                                "ingress_command_kind_mismatch"
+                            }
+                            _ => "unexpected_command",
+                        };
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::Failure {
+                                request_id,
+                                failure: freehand_ui_protocol::UiAdpFailure {
+                                    code: code.to_owned(),
+                                    message: "command frame rejected".to_owned(),
+                                    retryable: false,
+                                },
+                            },
+                        )
+                        .await;
+                    }
+                }
+            }
+        });
+    });
+    (url, handle)
+}
+
+async fn send_adp_response(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    response: UiAdpResponse,
+) {
+    let body = serde_json::to_string(&response).expect("response json");
+    socket.send(Message::Text(body.into())).await.expect("send");
+}
+
+fn test_turn_projection() -> UiTurnProjection {
+    UiTurnProjection {
+        source: UiSource {
+            source_agent_id: AgentId::new("cli-agent"),
+            source_node_id: "cli-node".to_owned(),
+            source_turn_id: Some(TurnId::new("cli-adp-turn")),
+            stream_kind: UiStreamKind::Turn,
+        },
+        session_id: SessionId::new("cli-session"),
+        turn_id: TurnId::new("cli-adp-turn"),
+        user_text: Some("cli adp smoke".to_owned()),
+        reasoning: Vec::new(),
+        text: Vec::new(),
+        tool_calls: Vec::new(),
+        tool_activities: Vec::new(),
+        usage: Vec::new(),
+        terminal_status: None,
+        terminal_text: None,
+        errors: Vec::new(),
+        slave_substream_card: false,
+    }
 }
 
 fn tagged_completion_json(body: &str) -> String {
@@ -222,6 +350,32 @@ provider = "mini27"
     assert!(!stdout.contains("sk-inline"));
 
     fs::remove_dir_all(home).expect("cleanup");
+}
+
+#[test]
+fn cli_runs_adp_smoke_against_mock_websocket() {
+    let (url, handle) = spawn_adp_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("adp-smoke")
+        .arg("--url")
+        .arg(&url)
+        .output()
+        .expect("run adp smoke");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("adp_smoke_ok"));
+    assert!(stdout.contains("subscription_accepted:cli-sub-1"));
+    assert!(stdout.contains("subscription_event:cli-sub-1"));
+    assert!(stdout.contains("query_result:cli-query-1"));
+    assert!(stdout.contains("failure:cli-bad-command-1:ingress_command_kind_mismatch"));
+
+    handle.join().expect("adp mock join");
 }
 
 #[test]

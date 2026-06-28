@@ -9,23 +9,31 @@
   - CLI runs scripted reason E2E smoke from app boundary
   - provider semantic outputs reach reason turn truth and rewrite runtime through the shared harness
   - CLI prints explicit rewrite outcome or explicit blocked recovery outcome
+  - CLI runs no-UI ADP smoke against a daemon `/adp` WebSocket URL
+  - CLI ADP smoke verifies subscribe accepted, subscription event, query result, and query-as-command explicit failure
 - white-box plan:
   - none in app crate beyond argument dispatch helpers
 - module black-box plan:
   - CLI startup config smoke
   - CLI reason compaction smoke
   - CLI recovery block smoke
+  - CLI ADP mock WebSocket smoke
+  - CLI ADP local `freehand-server webui-serve-smoke` smoke
 - project black-box impact:
   - one app entrypoint can now drive config + provider selection plus reason runtime E2E smoke
   - provider usage and recovery policy remain wired through the shared harness path
+  - no-UI ADP smoke can diagnose status/control failures without WebUI or Android
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - temp `HOME` with `~/.freehand/config.toml`
   - scripted provider semantic outputs in CLI tests
+  - local ADP WebSocket mock in CLI tests
+  - local `freehand-server webui-serve-smoke` for manual/agent positive ADP smoke
   - `~/.freehand/state/config`
   - `~/.freehand/state/turns`
 - known gaps:
   - production non-smoke CLI/server runtime loop is still pending
 - sync status between design and implementation:
   - CLI smoke baseline is implemented in integration tests
+  - CLI ADP smoke baseline is implemented in integration tests and verified against a real local `/adp` server
   - migrated mainline-call source and generated wiki are kept in sync with this test design

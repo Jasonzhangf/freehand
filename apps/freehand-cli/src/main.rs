@@ -5,7 +5,11 @@ use freehand_runtime::{LiveReasonRestoreStatus, LiveReasonTurnRequest, run_live_
 use freehand_testkit::{
     ReasonRuntimeSmokeScenario, run_reason_persistence_smoke, run_reason_runtime_smoke,
 };
+use freehand_ui_protocol::{UiAdpRequest, UiAdpResponse, UiClientKind, UiCommand};
+use futures_util::{SinkExt, StreamExt};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::time::{Duration, timeout};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 fn main() {
     match run() {
@@ -31,9 +35,12 @@ fn run() -> Result<String, String> {
     if flag == "reason-live" {
         return run_reason_live(args.collect());
     }
+    if flag == "adp-smoke" {
+        return run_adp_smoke(args.collect());
+    }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp"
                 .to_owned(),
         );
     }
@@ -66,6 +73,141 @@ fn run() -> Result<String, String> {
         provider_auth_label(selected.provider.auth_type),
         selected.restart_required_on_change
     ))
+}
+
+fn run_adp_smoke(args: Vec<String>) -> Result<String, String> {
+    if args.len() != 2 || args[0] != "--url" {
+        return Err("usage: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp".to_owned());
+    }
+    let url = args[1].clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_adp_smoke_async(url))
+}
+
+async fn run_adp_smoke_async(url: String) -> Result<String, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
+        .await
+        .map_err(|_| format!("ADP connect timeout: {url}"))?
+        .map_err(|err| format!("ADP connect failed: {err}"))?;
+
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Subscribe {
+            request_id: "cli-sub-1".to_owned(),
+            subscription: UiCommand::SubscribeLatestActiveTurn {
+                client: UiClientKind::Cli,
+            },
+        },
+    )
+    .await?;
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Query {
+            request_id: "cli-query-1".to_owned(),
+            query: UiCommand::QueryLatestActiveTurn,
+        },
+    )
+    .await?;
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Command {
+            request_id: "cli-bad-command-1".to_owned(),
+            command: UiCommand::QueryLatestActiveTurn,
+        },
+    )
+    .await?;
+
+    let mut accepted = false;
+    let mut event = false;
+    let mut query = false;
+    let mut mismatch_failure = false;
+    let mut seen = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !(accepted && event && query && mismatch_failure) {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err(format!("ADP smoke timeout seen={}", seen.join(",")));
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| format!("ADP smoke timeout seen={}", seen.join(",")))??;
+        match response {
+            UiAdpResponse::SubscriptionAccepted { request_id, .. } => {
+                seen.push(format!("subscription_accepted:{request_id}"));
+                if request_id == "cli-sub-1" {
+                    accepted = true;
+                }
+            }
+            UiAdpResponse::SubscriptionEvent { request_id, .. } => {
+                seen.push(format!("subscription_event:{request_id}"));
+                if request_id == "cli-sub-1" {
+                    event = true;
+                }
+            }
+            UiAdpResponse::QueryResult { request_id, .. } => {
+                seen.push(format!("query_result:{request_id}"));
+                if request_id == "cli-query-1" {
+                    query = true;
+                }
+            }
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                seen.push(format!("failure:{request_id}:{}", failure.code));
+                if request_id == "cli-bad-command-1"
+                    && failure.code == "ingress_command_kind_mismatch"
+                {
+                    mismatch_failure = true;
+                }
+            }
+            UiAdpResponse::CommandReceipt {
+                request_id,
+                receipt,
+            } => {
+                seen.push(format!(
+                    "command_receipt:{request_id}:{}",
+                    receipt.dispatch_status
+                ));
+            }
+        }
+    }
+    let _ = socket.close(None).await;
+    Ok(format!("adp_smoke_ok url={} seen={}", url, seen.join(",")))
+}
+
+async fn send_adp(
+    socket: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    request: UiAdpRequest,
+) -> Result<(), String> {
+    let body = serde_json::to_string(&request).map_err(|err| err.to_string())?;
+    socket
+        .send(Message::Text(body.into()))
+        .await
+        .map_err(|err| format!("ADP send failed: {err}"))
+}
+
+async fn next_adp(
+    socket: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> Result<UiAdpResponse, String> {
+    let Some(message) = socket.next().await else {
+        return Err("ADP socket closed".to_owned());
+    };
+    let message = message.map_err(|err| format!("ADP receive failed: {err}"))?;
+    match message {
+        Message::Text(text) => {
+            serde_json::from_str(&text).map_err(|err| format!("ADP response decode failed: {err}"))
+        }
+        other => Err(format!("unexpected ADP websocket message: {other:?}")),
+    }
 }
 
 fn run_reason_live(args: Vec<String>) -> Result<String, String> {

@@ -14,19 +14,23 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - CLI parses the command shape and selects one agent plus its bound provider from `~/.freehand/config.toml`
 - for reason E2E smoke, CLI builds one scripted runtime harness request
 - provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting
+- for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe, query, and query-as-command frames
 
 ## Response Mainline
 
 - config startup path prints selected-agent summary plus selected-provider metadata without exposing provider secret values
 - reason E2E smoke prints scenario name, selected agent, rewrite outcome, rewrite version, and latest usage summary
 - CLI output remains a terminal-facing projection, not debug ledger raw payload
+- ADP smoke prints the observed subscription_accepted, subscription_event, query_result, and explicit failure frame sequence for no-UI diagnosis
 
 ## Error Mainline
 
 - invalid command shape returns explicit usage
 - missing config or missing agent selection returns explicit config errors
 - smoke runtime failures return explicit reason or runtime errors
+- ADP connect, send, receive, and decode timeouts return explicit terminal errors
 - rewrite recovery block is reported as explicit blocked outcome, not disguised as success
+- ADP query-as-command must return ingress_command_kind_mismatch, proving command/query separation without mutation
 
 ## Shared Multi-Reference Functions
 
@@ -52,11 +56,14 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 | 03 | `run_reason_e2e_smoke` | `apps/freehand-cli/src/main.rs` | build scripted E2E runtime harness request from selected agent | selected agent plus scenario | terminal-facing smoke summary | CLI dispatcher | app smoke runner | bound |
 | 04 | `ReasonRuntimeHarness::run_provider_turn` | `crates/freehand-testkit/src/lib.rs` | route provider usage into turn truth and rewrite policy | scripted provider outputs plus compaction scenario | turn truth plus optional compaction outcome | app smoke runner | testkit harness | bound |
 | 05 | `ReasonRuntimeHarness::apply_resume_rebuild` | `crates/freehand-testkit/src/lib.rs` | route restore state into recovery policy | restore status plus optional rebuild payload | recovery outcome | app smoke runner | testkit harness | bound |
+| 06 | `run_adp_smoke` | `apps/freehand-cli/src/main.rs` | parse ADP smoke URL and run a bounded no-UI WebSocket smoke | --url ws://.../adp | terminal-facing ADP smoke summary | CLI dispatcher | ADP smoke runner | bound |
+| 07 | `run_adp_smoke_async` | `apps/freehand-cli/src/main.rs` | connect to daemon ADP, send subscribe/query/query-as-command frames, and collect required responses | ADP WebSocket URL | observed frame sequence or explicit error | ADP smoke runner | daemon /adp | bound |
 
 ## Sync Status Against Mainline Call
 
 - CLI config startup path is implemented
 - CLI reason E2E smoke path is implemented
+- CLI ADP no-UI smoke path is implemented
 - harness-backed app E2E smoke now exists before production CLI or server runtime loop
 - remaining gap: production non-smoke command loop is still pending
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes

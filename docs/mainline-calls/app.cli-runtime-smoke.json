@@ -10,18 +10,22 @@
     "operator invokes `freehand-cli`",
     "CLI parses the command shape and selects one agent plus its bound provider from `~/.freehand/config.toml`",
     "for reason E2E smoke, CLI builds one scripted runtime harness request",
-    "provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting"
+    "provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting",
+    "for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe, query, and query-as-command frames"
   ],
   "response_mainline": [
     "config startup path prints selected-agent summary plus selected-provider metadata without exposing provider secret values",
     "reason E2E smoke prints scenario name, selected agent, rewrite outcome, rewrite version, and latest usage summary",
-    "CLI output remains a terminal-facing projection, not debug ledger raw payload"
+    "CLI output remains a terminal-facing projection, not debug ledger raw payload",
+    "ADP smoke prints the observed subscription_accepted, subscription_event, query_result, and explicit failure frame sequence for no-UI diagnosis"
   ],
   "error_mainline": [
     "invalid command shape returns explicit usage",
     "missing config or missing agent selection returns explicit config errors",
     "smoke runtime failures return explicit reason or runtime errors",
-    "rewrite recovery block is reported as explicit blocked outcome, not disguised as success"
+    "ADP connect, send, receive, and decode timeouts return explicit terminal errors",
+    "rewrite recovery block is reported as explicit blocked outcome, not disguised as success",
+    "ADP query-as-command must return ingress_command_kind_mismatch, proving command/query separation without mutation"
   ],
   "shared_functions": [
     {
@@ -106,11 +110,34 @@
       "caller": "app smoke runner",
       "callee": "testkit harness",
       "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "run_adp_smoke",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "parse ADP smoke URL and run a bounded no-UI WebSocket smoke",
+      "input_semantic": "--url ws://.../adp",
+      "output_semantic": "terminal-facing ADP smoke summary",
+      "caller": "CLI dispatcher",
+      "callee": "ADP smoke runner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "run_adp_smoke_async",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "connect to daemon ADP, send subscribe/query/query-as-command frames, and collect required responses",
+      "input_semantic": "ADP WebSocket URL",
+      "output_semantic": "observed frame sequence or explicit error",
+      "caller": "ADP smoke runner",
+      "callee": "daemon /adp",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
     "CLI config startup path is implemented",
     "CLI reason E2E smoke path is implemented",
+    "CLI ADP no-UI smoke path is implemented",
     "harness-backed app E2E smoke now exists before production CLI or server runtime loop",
     "remaining gap: production non-smoke command loop is still pending",
     "generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes"
