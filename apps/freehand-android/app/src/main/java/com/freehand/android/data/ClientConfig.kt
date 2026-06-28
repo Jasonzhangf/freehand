@@ -19,6 +19,7 @@ data class ClientConfig(
     val daemonPort: Int,
     val daemonProfile: String,
     val healthPath: String,
+    val adpPath: String,
     val subscribePath: String,
     val commandPath: String,
     val queryPath: String,
@@ -32,6 +33,7 @@ data class ClientConfig(
     val scanThreads: Int,
 ) {
     val daemonBaseUrl: String get() = "http://$daemonHost:$daemonPort"
+    val daemonAdpUrl: String get() = "ws://$daemonHost:$daemonPort$adpPath"
     val fullSubscribeUrl: String get() = "$daemonBaseUrl$subscribePath"
     val fullCommandUrl: String get() = "$daemonBaseUrl$commandPath"
     val fullQueryUrl: String get() = "$daemonBaseUrl$queryPath"
@@ -81,6 +83,7 @@ data class ClientConfig(
                     daemonPort = daemon.get("port")?.asInt ?: 4041,
                     daemonProfile = daemon.get("profile")?.asString ?: "tailscale-main",
                     healthPath = daemon.get("healthPath")?.asString ?: "/health",
+                    adpPath = daemon.get("adpPath")?.asString ?: "/adp",
                     subscribePath = daemon.get("subscribePath")?.asString ?: "/ui/subscribe/turn/latest",
                     commandPath = daemon.get("commandPath")?.asString ?: "/ui/command",
                     queryPath = daemon.get("queryPath")?.asString ?: "/ui/query/latest-active-turn",
@@ -99,6 +102,7 @@ data class ClientConfig(
                     daemonPort = 4041,
                     daemonProfile = "tailscale-main",
                     healthPath = "/health",
+                    adpPath = "/adp",
                     subscribePath = "/ui/subscribe/turn/latest",
                     commandPath = "/ui/command",
                     queryPath = "/ui/query/latest-active-turn",

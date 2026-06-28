@@ -359,15 +359,17 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `TimelineProjectorTest`
   - `HostConfigTest`
   - `CommandIngressProtocolTest`
+  - `AdpEventStream` frame-shape coverage through `CommandIngressProtocolTest`
 - required_module_black_box_tests:
   - `cd apps/freehand-android && ./gradlew testDebugUnitTest`
+  - Android ADP URL/frame/projector smoke
   - self-contained `mobile-mock.html` opens via `file://` and renders the locked multi-platform layout
   - `mobile-mock.html` remains inlined-CSS (no external `/assets/...` dependency) for design-review previews
   - `mobile-mock.html` route at `/mock/android` returns HTTP 200 and contains `mock-mobile`
   - reverse gate: Android client does not import `freehand-reason`, `freehand-provider-*`, `freehand-node`, `freehand-config`, or `freehand-runtime` as a direct dep (only via `freehand-ui-protocol` projection)
   - reverse gate: Android client does not own session truth, debug ledger, provider payload, or turn-status truth (validated by doc + future code review)
 - required_project_black_box_tests:
-  - Android app boundary consumes `freehand-ui-protocol` projection truth without reason/provider imports
+  - Android app boundary consumes `freehand-ui-protocol` ADP projection truth without reason/provider imports
   - Android live shell renders `bridge.html` snapshots through `TimelineProjector::latestTurnProjectionJson`
   - Android mock render matches the locked multi-platform screen grammar
 - test_design_doc: `docs/testing/app.android-client.md`

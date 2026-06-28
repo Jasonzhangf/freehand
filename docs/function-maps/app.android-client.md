@@ -7,10 +7,11 @@
 - reference execution plan: `docs/design/android-client-v1-execution.md`
 - owner entry symbols:
   - `com.freehand.android.ui.MainActivity` — app shell entrypoint, WebView host, controller composition
-  - `com.freehand.android.data.SseEventStream` — OkHttp SSE event stream consumer
+  - `com.freehand.android.data.AdpEventStream` — OkHttp ADP WebSocket query/subscribe/command consumer
+  - `com.freehand.android.data.SseEventStream` — compatibility OkHttp SSE event stream consumer
   - `com.freehand.android.data.TimelineProjector` — ui.protocol event → UI state projection
   - `com.freehand.android.data.CommandIngress` — submit / cancel via protocol-owned HTTP command ingress
-  - `com.freehand.android.data.ProtocolClient` — HTTP query + command POST against `freehand-ui-protocol`
+  - `com.freehand.android.data.ProtocolClient` — compatibility HTTP query + command POST against `freehand-ui-protocol`
   - `com.freehand.android.data.ClientConfig` — bundled config loading from `assets/config/client.json`
   - `com.freehand.android.data.HostStore` — host:port persistence in SharedPreferences
   - `com.freehand.android.data.HostConfig` — endpoint URL construction
@@ -19,11 +20,12 @@
 
 ## Request Mainline
 
-- Android client shell receives user input and forwards it as command ingress through the protocol-owned HTTP command ingress route
+- Android client shell receives user input and forwards it as a protocol-owned ADP command frame
 - Android client shell never mutates session, reason, debug, metadata, or provider truth locally
-- Android client subscribes to `ui.protocol` turn / debug / status projections through HTTP query + SSE subscribe
-- Android client submits user actions (submit / cancel) only through protocol-owned command ingress
-- Android client reads the latest snapshot via `ui.protocol` HTTP query before any incremental SSE subscribe update is shown
+- Android client subscribes to `ui.protocol` turn / debug / status projections through daemon ADP WebSocket `/adp`
+- Android client submits user actions (submit / cancel) only through protocol-owned ADP command frames
+- Android client reads the latest snapshot via ADP query before any incremental ADP subscribe update is shown
+- HTTP query, SSE subscribe, and POST command ingress remain compatibility paths, not the default Android live shell path
 - Android client does not import or directly call `freehand-reason`, `freehand-provider-*`, `freehand-node`, `freehand-config`, or `freehand-runtime`; it only consumes `freehand-ui-protocol` projections via HTTP
 - Android client does not define a second dispatch port, a second session store, or a second completion-schema validator
 
@@ -40,8 +42,8 @@
 
 ## Error Mainline
 
-- invalid command ingress returns explicit HTTP error to the user; the Android client does not invent success
-- network or SSE drop returns explicit client-visible connection state; no silent re-render and no fallback projection
+- invalid command ingress returns explicit ADP failure to the user; the Android client does not invent success
+- network or ADP drop returns explicit client-visible connection state; no silent re-render and no fallback projection
 - provider / reason / debug error from `ui.protocol` is rendered as a red status pill; never re-projected as success
 - cancel-without-active-turn clears only local input draft; does not invent a runtime mutation
 
@@ -52,9 +54,9 @@
   - purpose: serve self-contained `mobile-mock.html` for design review
   - allowed callers: design-review operator
   - why shared: single preview route for all surfaces
-- `crates/freehand-ui-protocol` SSE projection
-  - purpose: daemon emits `UiSubscriptionEvent` with `UiProjection::Turn` for any subscribing UI consumer
-  - why shared: Android and WebUI consume the same SSE event shape
+- `crates/freehand-ui-protocol` ADP projection
+  - purpose: daemon emits `UiAdpResponse::SubscriptionEvent` with `UiSubscriptionEvent` / `UiProjection::Turn` for any subscribing UI consumer
+  - why shared: Android and WebUI consume the same ADP event shape
 - `crates/freehand-ui-protocol` `UiCommand` enum
   - purpose: protocol-owned command ingress shape shared by all UI consumers
   - why shared: prevents a second command shape from being invented per UI surface
@@ -66,13 +68,13 @@
 | 01 | `MainActivity::onCreate` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | app shell entrypoint: load config, create controllers, start discovery | activity intent | app process | Android framework | `ClientConfig::load`, `HostStore::load`, controller ctors | bound |
 | 02 | `ClientConfig::load` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/ClientConfig.kt` | load bundled daemon config from `assets/config/client.json` with SharedPreferences overrides | Android Context | `ClientConfig` | `MainActivity::onCreate` | Gson asset parser | bound |
 | 03 | `HostStore::load` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/HostStore.kt` | load persisted host:port from SharedPreferences | Android Context | `HostConfig` | `MainActivity::onCreate` | SharedPreferences | bound |
-| 04 | `ProtocolClient::getLatestTurn` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/ProtocolClient.kt` | HTTP GET to `ui/query/latest-active-turn` | no | `JsonObject?` | Android app shell | HTTP GET `HostConfig::latestTurnUrl` | bound |
-| 05 | `ProtocolClient::postCommand` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/ProtocolClient.kt` | HTTP POST to `ui/command` with UiCommand external-tag JSON | UiCommand JSON | `CommandResponse` | `CommandIngress` | HTTP POST `HostConfig::commandUrl` | bound |
-| 06 | `CommandIngress::submit` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt` | wrap user text in `{"SubmitUserInput":{"text":"..."}}` and dispatch | user text | `CommandResponse` | `InputBarController` | `ProtocolClient::postCommand` | bound |
-| 07 | `CommandIngress::cancelLatest` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt` | wrap `{"CancelLatestActiveTurn":{}}` and dispatch | no | fire-and-forget | `MainActivity::onKeyDown` Escape | `ProtocolClient::postCommand` | bound |
-| 08 | `SseEventStream::start` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/SseEventStream.kt` | OkHttp SSE subscribe to `ui/subscribe/turn/latest` | no | `Event` stream | `MainActivity::connectToDaemon` | OkHttp `EventSources.createFactory` | bound |
-| 09 | `SseEventStream::stop` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/SseEventStream.kt` | cancel active SSE EventSource | no | no | `MainActivity::onPause`, `connectToDaemon` | OkHttp `EventSource::cancel` | bound |
-| 10 | `TimelineProjector::apply` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt` | apply SSE event to internal turn/slave state; update `latestRawTurnProjection` | `SseEventStream.Event` | updated projector state | `SseEventStream` onEvent callback | `applyTurnEnvelope`, `applyNodeStatus`, `applyError`, `applyTerminal`, `applyProgress` | bound |
+| 04 | `HostConfig::adpUrl` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt` | construct daemon ADP WebSocket URL | host + port | `ws://<host>:<port>/adp` | Android app shell | host config | bound |
+| 05 | `AdpEventStream::start` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | open OkHttp WebSocket to `/adp`, subscribe latest turn, and query latest turn | no | ADP WebSocket session | `MainActivity::connectToDaemon` | OkHttp `newWebSocket` | bound |
+| 06 | `AdpEventStream::sendCommand` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | wrap UiCommand JSON in an ADP command frame and send it over the active socket | UiCommand JSON | immediate send result + later command receipt/failure callback | `CommandIngress` | ADP WebSocket | bound |
+| 07 | `CommandIngress::submit` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt` | wrap user text in `{"SubmitUserInput":{"text":"..."}}` and dispatch through injected ADP sender | user text | `CommandResponse` | `InputBarController` | `AdpEventStream::sendCommand` | bound |
+| 08 | `CommandIngress::cancelLatest` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt` | wrap `{"CancelLatestActiveTurn":{}}` and dispatch through injected ADP sender | no | fire-and-forget | `MainActivity::onKeyDown` Escape | `AdpEventStream::sendCommand` | bound |
+| 09 | `TimelineProjector::applyAdp` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt` | apply ADP query/subscription/failure frames to internal turn/slave/error state; update `latestRawTurnProjection` | `AdpEventStream.Event` | updated projector state | `AdpEventStream` onEvent callback | `applyAdpQueryResult`, `applyAdpProjection`, `applyTurnProjection` | bound |
+| 10 | `AdpEventStream::stop` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | close active ADP WebSocket | no | no | `MainActivity::onPause`, `connectToDaemon` | OkHttp `WebSocket::close` | bound |
 | 11 | `TimelineProjector::snapshot` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt` | emit full UI state map including `latest_turn` for native controllers | no | `Map<String, Any?>` | `MainActivity::pushSnapshotToWebView` | internal state | bound |
 | 12 | `TimelineProjector::latestTurnProjectionJson` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt` | emit canonical `UiPublicTurnProjection` JSON for JS bridge | no | `String?` | `MainActivity::pushSnapshotToWebView` | `latestRawTurnProjection` | bound |
 | 13 | `MainActivity::pushSnapshotToWebView` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | call `window.__freehand.applySnapshot(json)` on WebView via `evaluateJavascript` | projector snapshot | JS bridge invocation | SSE event callback, `onPageFinished` | `TimelineProjector::latestTurnProjectionJson` | bound |
@@ -84,7 +86,7 @@
 ## Sync Status Against Code
 
 - all 17 call table rows are bound to real file paths and symbol names
-- steps 01-16 are code-bound to actual Kotlin classes in `apps/freehand-android/app/src/main/java/com/freehand/android/`
+- Android live shell now defaults to `AdpEventStream` for status/control; `ProtocolClient` and `SseEventStream` remain compatibility transport classes but are not the default `MainActivity` live path
 - step 17 is code-bound to `apps/freehand-server/src/lib.rs::handle_android_mock`
 - mainline call JSON and generated wiki must be regenerated from this function map
 - mainline call source: `docs/mainline-calls/app.android-client.json`

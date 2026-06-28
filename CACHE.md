@@ -1,5 +1,17 @@
 # CACHE
 
+- Current verified Android ADP slice:
+  - Android live shell now defaults to `AdpEventStream` instead of `SseEventStream` from `MainActivity`
+  - `HostConfig.adpUrl` and `ClientConfig.adpPath` make `/adp` an explicit Android endpoint truth
+  - `AdpEventStream` opens OkHttp WebSocket `/adp`, sends subscribe/query frames on open, and sends command frames through the same socket
+  - `TimelineProjector.applyAdp` consumes ADP `query_result`, `subscription_event`, `subscription_accepted`, and `failure` frames; ADP failure becomes a visible bridge projection
+  - `ProtocolClient` and `SseEventStream` remain compatibility transport classes but are not the default Android live shell path
+  - verification:
+    - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `cargo test -p freehand-server android_mock_route_returns_design_preview`
 - Current working ADP WebUI slice:
   - WebUI shell now advertises `data-adp-endpoint="/adp"`
   - `apps/freehand-server/assets/webui.js` defaults to one ADP WebSocket for query/subscribe/command frames and no longer uses `fetch` or `EventSource` as the live path

@@ -77,6 +77,66 @@ class CommandIngressProtocolTest {
     }
 
     @Test
+    fun `ADP command frame wraps UiCommand without type field`() {
+        val command = JsonObject().apply {
+            add("SubmitUserInput", JsonObject().apply { addProperty("text", "hello adp") })
+        }
+        val frame = AdpEventStream.buildFrame(
+            kind = "command",
+            requestId = "android-cmd-1",
+            payloadName = "command",
+            payload = command,
+        )
+        val parsed = JsonParser.parseString(frame).asJsonObject
+
+        assertEquals("command", parsed.get("kind").asString)
+        assertEquals("android-cmd-1", parsed.get("request_id").asString)
+        assertTrue(parsed.getAsJsonObject("command").has("SubmitUserInput"))
+        assertFalse(parsed.has("type"))
+        assertFalse(parsed.getAsJsonObject("command").has("type"))
+    }
+
+    @Test
+    fun `ADP query-as-command negative frame is visibly command misuse`() {
+        val frame = AdpEventStream.buildFrame(
+            kind = "command",
+            requestId = "android-bad-1",
+            payloadName = "command",
+            payload = gson.toJsonTree("QueryLatestActiveTurn"),
+        )
+        val parsed = JsonParser.parseString(frame).asJsonObject
+
+        assertEquals("command", parsed.get("kind").asString)
+        assertEquals("QueryLatestActiveTurn", parsed.get("command").asString)
+        assertFalse(parsed.has("query"))
+    }
+
+    @Test
+    fun `ADP subscribe latest turn frame uses protocol client kind`() {
+        val subscription = JsonObject().apply {
+            add(
+                "SubscribeLatestActiveTurn",
+                JsonObject().apply { addProperty("client", "WebUi") },
+            )
+        }
+        val frame = AdpEventStream.buildFrame(
+            kind = "subscribe",
+            requestId = "android-sub-1",
+            payloadName = "subscription",
+            payload = subscription,
+        )
+        val parsed = JsonParser.parseString(frame).asJsonObject
+
+        assertEquals("subscribe", parsed.get("kind").asString)
+        assertEquals(
+            "WebUi",
+            parsed.getAsJsonObject("subscription")
+                .getAsJsonObject("SubscribeLatestActiveTurn")
+                .get("client").asString,
+        )
+    }
+
+    @Test
     fun `special characters in text are escaped`() {
         val text = "line1\nline2\ttab\"quote"
         val payload = JsonObject().apply {

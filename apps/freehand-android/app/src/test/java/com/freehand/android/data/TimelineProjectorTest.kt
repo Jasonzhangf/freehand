@@ -76,6 +76,44 @@ class TimelineProjectorTest {
         assertTrue(json.contains("public_conversation"))
     }
 
+    @Test
+    fun `ADP subscription_event turn updates latest projection for bridge`() {
+        val event = adpEvent("subscription_event", """
+            {"kind":"subscription_event","request_id":"sub-1",
+             "event":{"projection":{"Turn":{"source":{"source_agent_id":"master","source_node_id":"master-node","source_turn_id":"t-adp","stream_kind":"Turn"},
+             "session_id":"s1","turn_id":"t-adp","user_text":"hello adp",
+             "reasoning":[],"text":[],"tool_calls":[],"tool_activities":[{"tool_call_id":"tool-1","tool_name":"read_file","status":"Waiting","detail":"waiting for tool execution"}],"usage":[],
+             "terminal_status":null,"terminal_text":null,
+             "errors":[],"slave_substream_card":false}},
+             "latest_active_turn_id":"t-adp"}}
+        """.trimIndent())
+
+        projector.applyAdp(event)
+
+        assertEquals("running", projector.snapshot()["turn_state"])
+        assertEquals("master", projector.snapshot()["agent_id"])
+        val json = projector.latestTurnProjectionJson()
+        assertNotNull(json)
+        assertTrue(json!!.contains("hello adp"))
+        assertTrue(json.contains("Tool call requested: read_file"))
+    }
+
+    @Test
+    fun `ADP failure marks visible error projection`() {
+        val event = adpEvent("failure", """
+            {"kind":"failure","request_id":"bad-1",
+             "failure":{"code":"ingress_command_kind_mismatch","message":"query frame rejected","retryable":false}}
+        """.trimIndent())
+
+        projector.applyAdp(event)
+
+        assertEquals("error", projector.snapshot()["turn_state"])
+        assertEquals("error", projector.snapshot()["connection"])
+        val json = projector.latestTurnProjectionJson()
+        assertNotNull(json)
+        assertTrue(json!!.contains("query frame rejected"))
+    }
+
     // ── apply() progress event ──────────────────────────────────────────
 
     @Test
@@ -184,6 +222,13 @@ class TimelineProjectorTest {
         return SseEventStream.Event(
             eventName = eventName,
             data = JsonParser.parseString(data).asJsonObject,
+        )
+    }
+
+    private fun adpEvent(frameKind: String, data: String): AdpEventStream.Event {
+        return AdpEventStream.Event(
+            frameKind = frameKind,
+            frame = JsonParser.parseString(data).asJsonObject,
         )
     }
 }

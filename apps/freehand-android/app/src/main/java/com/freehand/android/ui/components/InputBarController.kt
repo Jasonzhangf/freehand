@@ -14,7 +14,7 @@ import com.freehand.android.R
 
 /**
  * Native input bar at the bottom. User text is sent via the protocol-owned
- * command ingress (HTTP POST /ui/command). Local state stays in the bar only.
+ * ADP command frame. Local state stays in the bar only.
  */
 class InputBarController(
     context: Context,

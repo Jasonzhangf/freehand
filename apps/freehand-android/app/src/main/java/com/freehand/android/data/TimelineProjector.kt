@@ -7,7 +7,7 @@ import com.google.gson.JsonObject
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * Transforms `ui.protocol` SSE events into a UI-safe turn timeline.
+ * Transforms `ui.protocol` ADP/SSE events into a UI-safe turn timeline.
  * This is the ONLY truth source for Android UI state.
  *
  * Android does NOT own session truth; it only renders what ui.protocol projects.
@@ -60,7 +60,7 @@ class TimelineProjector {
     val activeAgentName: String get() = currentAgentName
 
     /**
-     * Apply a JSON object from the SSE event stream.
+     * Apply a JSON object from the SSE compatibility stream.
      * The event name from SSE is the `event` field of [SseEventStream.Event];
      * the data is a JSON object matching `UiSubscriptionEvent` shape.
      */
@@ -73,6 +73,74 @@ class TimelineProjector {
             "terminal" -> applyTerminal(event.data)
             "checkpoints" -> /* observation only on Android */ Unit
             "debug" -> /* observation only on Android */ Unit
+        }
+    }
+
+    /**
+     * Apply a UiAdpResponse frame from the daemon `/adp` WebSocket.
+     */
+    fun applyAdp(event: AdpEventStream.Event) {
+        when (event.frameKind) {
+            "subscription_accepted" -> {
+                connectionState = "open"
+                turnState = "waiting"
+            }
+            "query_result" -> applyAdpQueryResult(event.frame.getAsJsonObject("result"))
+            "subscription_event" -> {
+                val subscriptionEvent = event.frame.objectField("event") ?: return
+                applyAdpProjection(subscriptionEvent.objectField("projection"))
+            }
+            "failure" -> {
+                val failure = event.frame.getAsJsonObject("failure")
+                turnState = "error"
+                connectionState = "error"
+                latestRawTurnProjection = JsonObject().apply {
+                    add("turn", JsonObject())
+                    add("public_conversation", JsonArray().apply {
+                        add(JsonObject().apply {
+                            addProperty("kind", "Error")
+                            addProperty("title", "ADP")
+                            addProperty("body", failure?.get("message").asStringSafe() ?: "ADP failure")
+                            addProperty("status", "failed")
+                        })
+                    })
+                }
+            }
+        }
+    }
+
+    private fun applyAdpQueryResult(result: JsonObject?) {
+        val turn = result?.objectField("Turn")
+        if (turn != null) {
+            if (turn.entrySet().isEmpty()) return
+            applyTurnProjection(turn)
+            return
+        }
+        val debug = result?.objectField("Debug")
+        if (debug != null) {
+            turnState = debug.get("status_text").asStringSafe() ?: turnState
+        }
+    }
+
+    private fun applyAdpProjection(projection: JsonObject?) {
+        val turn = projection?.objectField("Turn")
+        if (turn != null) {
+            applyTurnProjection(turn)
+            return
+        }
+        val progress = projection?.objectField("Progress")
+        if (progress != null) {
+            applyProgress(progress)
+            return
+        }
+        val nodeStatus = projection?.objectField("NodeStatus")
+        if (nodeStatus != null) {
+            applyNodeStatus(nodeStatus)
+            return
+        }
+        val debug = projection?.objectField("Debug")
+        if (debug != null) {
+            turnState = debug.get("status_text").asStringSafe() ?: turnState
         }
     }
 
@@ -91,7 +159,12 @@ class TimelineProjector {
         } else {
             data
         }
+        applyTurnProjection(turnJson, data.takeIf { it.has("turn") && it.has("public_conversation") })
+    }
+
+    private fun applyTurnProjection(turnJson: JsonObject, canonicalPublicProjection: JsonObject? = null) {
         val turn = parseTurnProjection(turnJson) ?: return
+        latestRawTurnProjection = canonicalPublicProjection?.deepCopy() ?: publicProjectionFromTurn(turnJson)
         turns[turn.turnId] = turn
         if (!turnOrder.contains(turn.turnId)) turnOrder.add(turn.turnId)
         currentAgentId = turn.sourceAgentId
@@ -148,10 +221,13 @@ class TimelineProjector {
     }
 
     private fun parseTurnProjection(json: JsonObject): TurnCard? {
+        val source = json.getAsJsonObject("source")
         val turnId = json.get("turn_id").asStringSafe() ?: return null
         return TurnCard(
-            sourceAgentId = json.get("source_agent_id").asStringSafe().orEmpty(),
-            sourceNodeId = json.get("source_node_id").asStringSafe().orEmpty(),
+            sourceAgentId = source?.get("source_agent_id").asStringSafe()
+                ?: json.get("source_agent_id").asStringSafe().orEmpty(),
+            sourceNodeId = source?.get("source_node_id").asStringSafe()
+                ?: json.get("source_node_id").asStringSafe().orEmpty(),
             sessionId = json.get("session_id").asStringSafe().orEmpty(),
             turnId = turnId,
             userText = json.get("user_text").asStringSafe().orEmpty(),
@@ -164,8 +240,71 @@ class TimelineProjector {
         )
     }
 
+    private fun publicProjectionFromTurn(turnJson: JsonObject): JsonObject {
+        val publicConversation = JsonArray()
+        turnJson.get("user_text").asStringSafe()?.takeIf { it.isNotBlank() }?.let { text ->
+            publicConversation.add(conversationItem("UserText", "User", text, "submitted"))
+        }
+        turnJson.getAsJsonArrayOrEmpty("text").mapNotNull { it.asStringSafe() }.forEach { text ->
+            if (text.isNotBlank()) {
+                publicConversation.add(conversationItem("AssistantText", "Assistant", text, "streaming"))
+            }
+        }
+        turnJson.getAsJsonArrayOrEmpty("tool_activities").forEach { element ->
+            val tool = element.asJsonObject
+            val status = tool.get("status").asStringSafe()?.lowercase() ?: "waiting"
+            val toolName = tool.get("tool_name").asStringSafe() ?: "tool"
+            val detail = tool.get("detail").asStringSafe()
+            val body = when (status) {
+                "completed" -> "Tool result returned for $toolName"
+                "failed" -> "Tool execution failed for $toolName${detail?.let { ": $it" } ?: ""}"
+                else -> "Tool call requested: $toolName (waiting for execution)"
+            }
+            publicConversation.add(conversationItem("ToolSummary", "Tool", body, status).apply {
+                tool.get("tool_call_id").asStringSafe()?.let { addProperty("tool_call_id", it) }
+            })
+        }
+        turnJson.get("terminal_text").asStringSafe()?.takeIf { it.isNotBlank() }?.let { text ->
+            publicConversation.add(
+                conversationItem(
+                    "Terminal",
+                    "Final",
+                    text,
+                    when (turnJson.get("terminal_status").asStringSafe()?.lowercase()) {
+                        "failed" -> "failed"
+                        "cancelled" -> "cancelled"
+                        "blocked" -> "blocked"
+                        "interrupted" -> "interrupted"
+                        else -> "completed"
+                    },
+                ),
+            )
+        }
+        turnJson.getAsJsonArrayOrEmpty("errors").mapNotNull { it.asStringSafe() }.forEach { error ->
+            publicConversation.add(conversationItem("Error", "Error", error, "failed"))
+        }
+        return JsonObject().apply {
+            add("turn", turnJson.deepCopy())
+            add("public_conversation", publicConversation)
+        }
+    }
+
+    private fun conversationItem(kind: String, title: String, body: String, status: String): JsonObject =
+        JsonObject().apply {
+            addProperty("kind", kind)
+            addProperty("title", title)
+            addProperty("body", body)
+            addProperty("status", status)
+        }
+
     private fun JsonObject.getAsJsonArrayOrEmpty(name: String): JsonArray =
         this.getAsJsonArray(name) ?: JsonArray()
+
+    private fun JsonObject.objectField(name: String): JsonObject? {
+        val value = get(name) ?: return null
+        if (value.isJsonNull || !value.isJsonObject) return null
+        return value.asJsonObject
+    }
 
     fun snapshot(): Map<String, Any?> {
         val orderedTurnsMap: List<Map<String, Any?>> = orderedTurns.map { card ->

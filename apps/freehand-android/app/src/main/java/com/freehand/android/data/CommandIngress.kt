@@ -5,9 +5,10 @@ import com.google.gson.JsonObject
 import java.util.concurrent.Executors
 
 class CommandIngress(
-    client: ProtocolClient,
+    client: ProtocolClient?,
     private val onResult: (ok: Boolean, reason: String) -> Unit,
-    private val sendCommand: (String) -> CommandResponse = client::postCommand,
+    private val sendCommand: (String) -> CommandResponse = client?.let { it::postCommand }
+        ?: { CommandResponse(false, "command_sender_missing", "command sender missing") },
 ) {
 
     private val gson = Gson()

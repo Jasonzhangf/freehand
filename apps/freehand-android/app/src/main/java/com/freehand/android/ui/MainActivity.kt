@@ -12,13 +12,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.freehand.android.R
+import com.freehand.android.data.AdpEventStream
 import com.freehand.android.data.ClientConfig
 import com.freehand.android.data.CommandIngress
 import com.freehand.android.data.HostConfig
 import com.freehand.android.data.HostStore
-import com.freehand.android.data.ProtocolClient
 import com.freehand.android.data.SlaveState
-import com.freehand.android.data.SseEventStream
 import com.freehand.android.data.TimelineProjector
 import com.freehand.android.ui.components.DrawerController
 import com.freehand.android.ui.components.InputBarController
@@ -41,7 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var httpClient: OkHttpClient
     private lateinit var clientConfig: ClientConfig
     private lateinit var ingress: CommandIngress
-    private var sse: SseEventStream? = null
+    private var adp: AdpEventStream? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,7 +75,7 @@ class MainActivity : AppCompatActivity() {
             }
             // bridge.html is the live WebView host page; it consumes
             // `window.__freehand.applySnapshot(...)` pushed from native
-            // with UiSubscriptionEvent-shaped JSON. The server-side
+            // with ADP UiSubscriptionEvent-shaped JSON. The server-side
             // mobile-mock.html is a static design preview served at
             // /mock/android and is NOT loaded here.
             loadUrl("file:///android_asset/bridge.html")
@@ -91,7 +90,7 @@ class MainActivity : AppCompatActivity() {
         topBar = TopBarController(this, root) { drawer.toggle() }
         // ingress placeholder, rebuilt on connect
         ingress = CommandIngress(
-            ProtocolClient(httpClient, HostConfig(HostStore.DEFAULT_HOST, HostStore.DEFAULT_PORT)),
+            client = null,
             { ok, reason ->
                 runOnUiThread {
                     if (ok) inputBar.clear() else inputBar.markSendError(reason)
@@ -113,20 +112,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        sse?.start()
+        adp?.start()
     }
 
     override fun onPause() {
         super.onPause()
-        sse?.stop()
+        adp?.stop()
     }
 
     private fun discoverDaemon(saved: HostConfig?) {
-        // Connection state machine: connecting -> connected (SSE onOpen only)
-        // -> error/closed (SSE onError/onClosed only).
-        // discoverDaemon only decides whether to start SSE; it never sets
+        // Connection state machine: connecting -> connected (ADP onOpen only)
+        // -> error/closed (ADP onError/onClosed only).
+        // discoverDaemon only decides whether to start ADP; it never sets
         // "connected" directly, eliminating the race where health-check pass
-        // sets connected while SSE immediately fails and sets unreachable.
+        // sets connected while ADP immediately fails and sets unreachable.
         val configHost = clientConfig.toHostConfig()
         val target = selectPreferredHost(saved, configHost)
         topBar.setAgent("freehand", "connecting")
@@ -136,21 +135,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun connectToDaemon(host: HostConfig) {
-        sse?.stop()
+        adp?.stop()
+        var newAdp: AdpEventStream? = null
         ingress = CommandIngress(
-            ProtocolClient(httpClient, host),
-            { ok, reason ->
+            client = null,
+            onResult = { ok, reason ->
                 runOnUiThread {
                     if (ok) inputBar.clear() else inputBar.markSendError(reason)
                 }
             },
+            sendCommand = { command ->
+                newAdp?.sendCommand(command)
+                    ?: com.freehand.android.data.CommandResponse(false, "adp_not_ready", "ADP not ready")
+            },
         )
         topBar.setAgent("${host.host}:${host.port}", "connecting")
-        val newSse = SseEventStream(httpClient, host,
+        newAdp = AdpEventStream(httpClient, host,
             onEvent = { event ->
                 runOnUiThread {
-                    projector.apply(event)
+                    projector.applyAdp(event)
                     pushSnapshotToWebView()
+                }
+            },
+            onCommandResult = { result ->
+                runOnUiThread {
+                    if (result.ok) inputBar.clear() else inputBar.markSendError(result.message.ifBlank { result.code })
                 }
             },
             onError = { _ ->
@@ -174,8 +183,8 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
-        sse = newSse
-        newSse.start()
+        adp = newAdp
+        newAdp.start()
     }
 
     private fun pushSnapshotToWebView() {
@@ -193,7 +202,7 @@ class MainActivity : AppCompatActivity() {
         slaveStrip.render(slaves.map { it.first to it.second.pairingState })
         // The bridge expects the canonical UiPublicTurnProjection shape
         // { turn: UiTurnProjection, public_conversation: [...] } emitted by
-        // the daemon SSE `turn` event. Projector.snapshot() exposes it under
+        // the daemon ADP turn projection. Projector.snapshot() exposes it under
         // `latest_turn`; fall back to the legacy flat `turns` list so the
         // bridge still has something to render before the first `turn` event
         // arrives.

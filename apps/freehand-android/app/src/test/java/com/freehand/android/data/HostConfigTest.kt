@@ -18,6 +18,12 @@ class HostConfigTest {
     }
 
     @Test
+    fun `adpUrl points to daemon ADP websocket`() {
+        val config = HostConfig("100.66.1.82", 4041)
+        assertEquals("ws://100.66.1.82:4041/adp", config.adpUrl)
+    }
+
+    @Test
     fun `latestTurnUrl points to query endpoint`() {
         val config = HostConfig("100.66.1.82", 4041)
         assertEquals("http://100.66.1.82:4041/ui/query/latest-active-turn", config.latestTurnUrl)
@@ -34,6 +40,7 @@ class HostConfigTest {
         val config = HostConfig("127.0.0.1", 8080)
         assertEquals("http://127.0.0.1:8080", config.baseUrl)
         assertEquals("http://127.0.0.1:8080/ui/command", config.commandUrl)
+        assertEquals("ws://127.0.0.1:8080/adp", config.adpUrl)
     }
 
     @Test

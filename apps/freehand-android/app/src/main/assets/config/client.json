@@ -4,6 +4,7 @@
     "port": 4041,
     "profile": "tailscale-main",
     "healthPath": "/health",
+    "adpPath": "/adp",
     "subscribePath": "/ui/subscribe/turn/latest",
     "commandPath": "/ui/command",
     "queryPath": "/ui/query/latest-active-turn"
