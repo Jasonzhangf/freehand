@@ -895,6 +895,8 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/webui.js"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
+        assert!(html.contains("id=\"success-sample-button\""));
+        assert!(html.contains("id=\"failure-sample-button\""));
     }
 
     #[tokio::test]
@@ -1002,6 +1004,8 @@ mod tests {
         assert!(root_body.contains("/assets/theme.css"));
         assert!(root_body.contains("data-adp-endpoint=\"/adp\""));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
+        assert!(root_body.contains("Success sample"));
+        assert!(root_body.contains("Failure sample"));
 
         let theme = client
             .get(format!("{}/assets/theme.css", server.base_url))
@@ -1063,6 +1067,9 @@ mod tests {
         assert!(js_body.contains("normalizePublicConversation"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("tool_call_id"));
+        assert!(js_body.contains("ADP success sample"));
+        assert!(js_body.contains("ADP failure sample"));
+        assert!(js_body.contains("loadSamplePrompt"));
 
         server.stop().await;
     }

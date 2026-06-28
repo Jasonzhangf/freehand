@@ -14,6 +14,7 @@
     "app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets",
     "app boundary keeps theme assets separate from WebUI layout assets",
     "front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames",
+    "front-end exposes success and failure sample prompt buttons that load reproducible ADP sample prompts into the composer without bypassing normal Send/ADP command flow",
     "transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot",
     "transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection",
     "transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot",
@@ -33,6 +34,7 @@
     "ADP subscribe returns an explicit accepted/waiting state before later turn/debug events, so the WebUI can render waiting instead of appearing frozen",
     "SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection, latest-turn subscribe keeps waiting when no turn exists yet, and debug subscribe keeps waiting when no debug snapshot exists yet",
     "WebUI submit success path actively re-queries latest turn truth over ADP after command receipt to cover command-complete-before-browser-subscriber timing",
+    "WebUI success/failure sample buttons populate the composer with the same sample prompts used by CLI/headless ADP sample automation, then the operator can send them through the normal ADP submit path",
     "front-end script projects protocol-owned ADP `UiQueryResult`, `UiSubscriptionEvent`, and `DebugStateSnapshot` frames into semantic message cards and detail panes, including the user prompt",
     "front-end debug state distinguishes missing snapshot (debug pending) from debug SSE transport errors (debug stream reconnecting)",
     "front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket",
@@ -242,6 +244,17 @@
       "caller": "command ingress",
       "callee": "protocol failure mapper",
       "binding_status": "bound"
+    },
+    {
+      "step": "15",
+      "symbol_path": "loadSamplePrompt",
+      "file_path": "apps/freehand-server/assets/webui.js",
+      "responsibility": "load success/failure ADP sample prompts into the composer without inventing a second command path",
+      "input_semantic": "sample kind",
+      "output_semantic": "composer text plus visible command status",
+      "caller": "WebUI shell",
+      "callee": "normal ADP submit path",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -249,6 +262,7 @@
     "theme code is split into `assets/theme.css` and `assets/theme.js`",
     "WebUI layout and protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`",
     "WebUI shell now advertises `data-adp-endpoint=\"/adp\"` and the front-end opens a WebSocket to that endpoint by default",
+    "WebUI shell now exposes success/failure sample buttons and WebUI JS carries the paired sample prompts",
     "app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface",
     "app boundary now serves protocol-only POST command ingress dispatch-receipt or failure smoke route from that shared transport surface",
     "HTTP/SSE/POST routes remain compatibility transport surfaces; WebUI JS no longer uses `fetch` or `EventSource` as its default live path",

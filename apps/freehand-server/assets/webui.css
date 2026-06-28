@@ -650,9 +650,32 @@ body.theme-dark .composer-input {
   color: #45564e;
 }
 
+.button.sample {
+  margin-top: 8px;
+  padding: 10px 11px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.button.success-sample {
+  border-color: rgba(31, 108, 88, 0.34);
+  color: var(--master);
+}
+
+.button.failure-sample {
+  border-color: rgba(165, 65, 72, 0.34);
+  color: var(--danger);
+}
+
 body.theme-dark .button.secondary {
   background: rgba(255, 255, 255, 0.08);
   color: #d8e3dd;
+}
+
+body.theme-dark .button.sample {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .command-status {

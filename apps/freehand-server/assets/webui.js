@@ -7,6 +7,15 @@ const messageList = document.getElementById("message-list");
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
+const successSampleButton = document.getElementById("success-sample-button");
+const failureSampleButton = document.getElementById("failure-sample-button");
+
+const samplePrompts = {
+  success:
+    "ADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.",
+  failure:
+    "ADP failure sample: call the ls tool exactly once with path ~/code/codex, then report through the required Freehand completion schema.",
+};
 
 const state = {
   turn: null,
@@ -745,6 +754,20 @@ cancelButton.addEventListener("click", () => {
     renderCommandStatus();
   });
 });
+
+function loadSamplePrompt(kind) {
+  const prompt = samplePrompts[kind];
+  if (!prompt) {
+    return;
+  }
+  composerInput.value = prompt;
+  composerInput.focus();
+  state.commandStatusMessage = `${kind} sample loaded; press Send to run through ADP`;
+  renderCommandStatus();
+}
+
+successSampleButton.addEventListener("click", () => loadSamplePrompt("success"));
+failureSampleButton.addEventListener("click", () => loadSamplePrompt("failure"));
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {

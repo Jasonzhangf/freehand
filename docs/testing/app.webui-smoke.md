@@ -13,6 +13,7 @@
   - app boundary remains decoupled from reason/provider/node/config semantics
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
   - WebUI default status/control path uses ADP WebSocket `/adp` for query, subscribe, command, and visible failure frames
+  - WebUI exposes success/failure sample prompt buttons that fill the composer while preserving the normal ADP submit path
   - HTTP query, SSE subscribe, and POST command ingress remain compatibility transport routes rather than WebUI default truth
   - WebUI Cancel button and Escape key send `CancelTurn` through command ingress when a turn is active
   - WebUI Escape sends latest-active cancellation during submit-in-flight before a concrete `turn_id` is known
@@ -29,6 +30,7 @@
   - WebUI JS asset smoke locks default ADP WebSocket usage and rejects `fetch` / `EventSource` as the default live path
   - WebUI ADP subscription accepted/waiting status rendering smoke
   - WebUI ADP failure frame visible-card/status smoke
+  - WebUI success/failure sample prompt button asset smoke
   - WebUI submit-success path refresh smoke
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
@@ -54,6 +56,7 @@
   - app dependency boundary smoke
 - project black-box impact:
   - app boundary proves WebUI can consume `freehand-ui-protocol` without owning reason/provider semantics
+  - app boundary gives users a repeatable way to generate success/failure ADP samples from WebUI without a second transport path
   - app boundary proves it does not need direct reason/provider/node/config imports
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
@@ -69,6 +72,7 @@
   - HTTP query and continuous SSE subscribe transport smoke is landed
   - HTTP command ingress dispatch-receipt/failure smoke is landed
   - WebUI root shell now exposes `/adp`, and WebUI JS defaults to ADP WebSocket instead of `fetch` / `EventSource`
+  - WebUI root shell now exposes success/failure sample buttons, and WebUI JS carries the paired sample prompts
   - command-ingress dispatch-port failure and join-failure projection coverage is landed
   - submit-success path now refreshes latest turn truth after command receipt
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input

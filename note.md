@@ -38,6 +38,24 @@
     - `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
     - `freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` -> `adp_smoke_ok ... subscription_accepted ... query_result ... ingress_command_kind_mismatch`
 
+# 2026-06-28 ADP success/failure sample closeout
+  - added CLI/headless sample command:
+    - `freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample success`
+    - `freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample failure`
+  - WebUI composer now has `Success sample` and `Failure sample` buttons that load the same prompts; actual submit still uses normal ADP command path
+  - verification:
+    - `cargo test -p freehand-cli` -> 11 passed
+    - `cargo test -p freehand-server` -> 11 passed
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci` -> EXIT 0
+    - `scripts/install-global.sh` -> EXIT 0
+    - `scripts/install-launchd.sh restart`
+    - installed fixed-port success sample -> `runtime-turn-21`, `terminal_status=Success`
+    - installed fixed-port failure sample -> `runtime-turn-22`, `terminal_status=Failed`
+
 # 2026-06-28 WebUI tool card/status repair
   - root cause: whole-turn projection could duplicate same `tool_call_id` as separate waiting activities, and WebUI rendered tool summaries as static cards without stable tool identity
   - fix:

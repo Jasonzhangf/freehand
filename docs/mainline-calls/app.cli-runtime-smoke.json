@@ -11,19 +11,22 @@
     "CLI parses the command shape and selects one agent plus its bound provider from `~/.freehand/config.toml`",
     "for reason E2E smoke, CLI builds one scripted runtime harness request",
     "provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting",
-    "for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe, query, and query-as-command frames"
+    "for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe, query, and query-as-command frames",
+    "for ADP turn samples, CLI connects to the same daemon `/adp`, subscribes to latest-turn updates, submits a success or failure sample prompt, and verifies the matching terminal projection"
   ],
   "response_mainline": [
     "config startup path prints selected-agent summary plus selected-provider metadata without exposing provider secret values",
     "reason E2E smoke prints scenario name, selected agent, rewrite outcome, rewrite version, and latest usage summary",
     "CLI output remains a terminal-facing projection, not debug ledger raw payload",
-    "ADP smoke prints the observed subscription_accepted, subscription_event, query_result, and explicit failure frame sequence for no-UI diagnosis"
+    "ADP smoke prints the observed subscription_accepted, subscription_event, query_result, and explicit failure frame sequence for no-UI diagnosis",
+    "ADP turn samples print the observed command outcome plus the matching Success or Failed latest-turn projection, giving WebUI and automation a reproducible positive and negative sample"
   ],
   "error_mainline": [
     "invalid command shape returns explicit usage",
     "missing config or missing agent selection returns explicit config errors",
     "smoke runtime failures return explicit reason or runtime errors",
     "ADP connect, send, receive, and decode timeouts return explicit terminal errors",
+    "ADP turn sample timeout or wrong terminal status returns explicit terminal errors",
     "rewrite recovery block is reported as explicit blocked outcome, not disguised as success",
     "ADP query-as-command must return ingress_command_kind_mismatch, proving command/query separation without mutation"
   ],
@@ -132,12 +135,35 @@
       "caller": "ADP smoke runner",
       "callee": "daemon /adp",
       "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "run_adp_turn_sample",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "parse ADP sample URL and sample kind",
+      "input_semantic": "--url ws://.../adp --sample success|failure",
+      "output_semantic": "terminal-facing sample result",
+      "caller": "CLI dispatcher",
+      "callee": "ADP sample runner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "run_adp_turn_sample_async",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "submit success/failure sample prompts over ADP and verify matching terminal projection",
+      "input_semantic": "ADP WebSocket URL plus sample kind",
+      "output_semantic": "observed success or failed turn projection",
+      "caller": "ADP sample runner",
+      "callee": "daemon /adp",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
     "CLI config startup path is implemented",
     "CLI reason E2E smoke path is implemented",
     "CLI ADP no-UI smoke path is implemented",
+    "CLI ADP success/failure turn sample path is implemented",
     "harness-backed app E2E smoke now exists before production CLI or server runtime loop",
     "remaining gap: production non-smoke command loop is still pending",
     "generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes"

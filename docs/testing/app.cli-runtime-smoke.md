@@ -11,6 +11,8 @@
   - CLI prints explicit rewrite outcome or explicit blocked recovery outcome
   - CLI runs no-UI ADP smoke against a daemon `/adp` WebSocket URL
   - CLI ADP smoke verifies subscribe accepted, subscription event, query result, and query-as-command explicit failure
+  - CLI runs no-UI ADP success/failure turn samples against a daemon `/adp` WebSocket URL
+  - CLI ADP turn samples verify command outcome plus matching `Success` or `Failed` latest-turn terminal projection
 - white-box plan:
   - none in app crate beyond argument dispatch helpers
 - module black-box plan:
@@ -18,16 +20,20 @@
   - CLI reason compaction smoke
   - CLI recovery block smoke
   - CLI ADP mock WebSocket smoke
+  - CLI ADP success turn sample mock WebSocket smoke
+  - CLI ADP failure turn sample mock WebSocket smoke
   - CLI ADP local `freehand-server webui-serve-smoke` smoke
 - project black-box impact:
   - one app entrypoint can now drive config + provider selection plus reason runtime E2E smoke
   - provider usage and recovery policy remain wired through the shared harness path
   - no-UI ADP smoke can diagnose status/control failures without WebUI or Android
+  - no-UI ADP turn samples can populate and verify WebUI-visible success/failure projections without relying on manual DOM inspection
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - temp `HOME` with `~/.freehand/config.toml`
   - scripted provider semantic outputs in CLI tests
   - local ADP WebSocket mock in CLI tests
+  - local ADP success/failure sample WebSocket mock in CLI tests
   - local `freehand-server webui-serve-smoke` for manual/agent positive ADP smoke
   - `~/.freehand/state/config`
   - `~/.freehand/state/turns`
@@ -36,4 +42,5 @@
 - sync status between design and implementation:
   - CLI smoke baseline is implemented in integration tests
   - CLI ADP smoke baseline is implemented in integration tests and verified against a real local `/adp` server
+  - CLI ADP success/failure sample baseline is implemented in integration tests
   - migrated mainline-call source and generated wiki are kept in sync with this test design

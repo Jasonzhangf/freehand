@@ -2,6 +2,7 @@
 
 - Current verified CLI/headless ADP slice:
   - `freehand-cli adp-smoke --url ws://.../adp` connects without UI, sends ADP subscribe/query/query-as-command frames, and requires `subscription_accepted`, `subscription_event`, `query_result`, plus explicit `ingress_command_kind_mismatch`
+  - `freehand-cli adp-turn-sample --url ws://.../adp --sample success|failure` generates reproducible success/failure latest-turn samples over the same ADP path and verifies terminal projection
   - CLI smoke uses `freehand-ui-protocol::UiAdpRequest/UiAdpResponse` typed frames, not an app-local envelope
   - verification:
     - `cargo test -p freehand-cli` -> 9 passed, including local mock WebSocket ADP smoke
@@ -9,6 +10,7 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - local `freehand-server webui-serve-smoke --bind 127.0.0.1:4076` + `cargo run -p freehand-cli -- adp-smoke --url ws://127.0.0.1:4076/adp` observed accepted/event/query/failure frames
+    - installed fixed-port `freehand-cli adp-turn-sample` passed for success (`runtime-turn-21`, `Success`) and failure (`runtime-turn-22`, `Failed`)
 - Current verified Android ADP slice:
   - Android live shell now defaults to `AdpEventStream` instead of `SseEventStream` from `MainActivity`
   - `HostConfig.adpUrl` and `ClientConfig.adpPath` make `/adp` an explicit Android endpoint truth

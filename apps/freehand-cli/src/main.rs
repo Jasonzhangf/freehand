@@ -1,6 +1,6 @@
 use freehand_blocks::strip_completion_submission_block;
 use freehand_config::{AgentMode, default_config_path, load_default_config};
-use freehand_contracts::{SemanticEventKind, SessionId, TraceId, TurnId};
+use freehand_contracts::{SemanticEventKind, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_runtime::{LiveReasonRestoreStatus, LiveReasonTurnRequest, run_live_reason_turn};
 use freehand_testkit::{
     ReasonRuntimeSmokeScenario, run_reason_persistence_smoke, run_reason_runtime_smoke,
@@ -38,9 +38,12 @@ fn run() -> Result<String, String> {
     if flag == "adp-smoke" {
         return run_adp_smoke(args.collect());
     }
+    if flag == "adp-turn-sample" {
+        return run_adp_turn_sample(args.collect());
+    }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>"
                 .to_owned(),
         );
     }
@@ -73,6 +76,243 @@ fn run() -> Result<String, String> {
         provider_auth_label(selected.provider.auth_type),
         selected.restart_required_on_change
     ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdpTurnSample {
+    Success,
+    Failure,
+}
+
+impl AdpTurnSample {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "success" => Ok(Self::Success),
+            "failure" => Ok(Self::Failure),
+            _ => Err("sample must be one of: success, failure".to_owned()),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Failure => "failure",
+        }
+    }
+
+    fn expected_status(self) -> TerminalStatus {
+        match self {
+            Self::Success => TerminalStatus::Success,
+            Self::Failure => TerminalStatus::Failed,
+        }
+    }
+
+    fn prompt(self) -> &'static str {
+        match self {
+            Self::Success => {
+                "ADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools."
+            }
+            Self::Failure => {
+                "ADP failure sample: call the ls tool exactly once with path ~/code/codex, then report through the required Freehand completion schema."
+            }
+        }
+    }
+}
+
+fn run_adp_turn_sample(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>"
+            .to_owned();
+    if args.len() != 4 || args[0] != "--url" || args[2] != "--sample" {
+        return Err(usage);
+    }
+    let url = args[1].clone();
+    let sample = AdpTurnSample::parse(&args[3])?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_adp_turn_sample_async(url, sample))
+}
+
+async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result<String, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
+        .await
+        .map_err(|_| format!("ADP connect timeout: {url}"))?
+        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let sub_id = format!("cli-sample-{}-sub", sample.label());
+    let cmd_id = format!("cli-sample-{}-cmd", sample.label());
+    let query_id = format!("cli-sample-{}-query", sample.label());
+
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Subscribe {
+            request_id: sub_id.clone(),
+            subscription: UiCommand::SubscribeLatestActiveTurn {
+                client: UiClientKind::Cli,
+            },
+        },
+    )
+    .await?;
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Command {
+            request_id: cmd_id.clone(),
+            command: UiCommand::SubmitUserInput {
+                text: sample.prompt().to_owned(),
+            },
+        },
+    )
+    .await?;
+
+    let mut accepted = false;
+    let mut command_observed = false;
+    let mut matching_turn = None::<String>;
+    let mut query_sent = false;
+    let mut seen = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+
+    while matching_turn.is_none() || !command_observed {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err(format!(
+                "ADP {} sample timeout seen={}",
+                sample.label(),
+                seen.join(",")
+            ));
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| {
+                format!(
+                    "ADP {} sample timeout seen={}",
+                    sample.label(),
+                    seen.join(",")
+                )
+            })??;
+        match response {
+            UiAdpResponse::SubscriptionAccepted { request_id, .. } => {
+                seen.push(format!("subscription_accepted:{request_id}"));
+                if request_id == sub_id {
+                    accepted = true;
+                }
+            }
+            UiAdpResponse::CommandReceipt {
+                request_id,
+                receipt,
+            } => {
+                seen.push(format!(
+                    "command_receipt:{request_id}:{}",
+                    receipt.dispatch_status
+                ));
+                if request_id == cmd_id {
+                    command_observed = true;
+                }
+                if !query_sent {
+                    send_adp(
+                        &mut socket,
+                        UiAdpRequest::Query {
+                            request_id: query_id.clone(),
+                            query: UiCommand::QueryLatestActiveTurn,
+                        },
+                    )
+                    .await?;
+                    query_sent = true;
+                }
+            }
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                seen.push(format!("failure:{request_id}:{}", failure.code));
+                if request_id == cmd_id {
+                    command_observed = true;
+                }
+                if !query_sent {
+                    send_adp(
+                        &mut socket,
+                        UiAdpRequest::Query {
+                            request_id: query_id.clone(),
+                            query: UiCommand::QueryLatestActiveTurn,
+                        },
+                    )
+                    .await?;
+                    query_sent = true;
+                }
+            }
+            UiAdpResponse::SubscriptionEvent { request_id, event } => {
+                seen.push(format!("subscription_event:{request_id}"));
+                if let Some(turn_id) = matching_sample_projection_turn_id(sample, &event.projection)
+                {
+                    matching_turn = Some(turn_id);
+                }
+            }
+            UiAdpResponse::QueryResult { request_id, result } => {
+                seen.push(format!("query_result:{request_id}"));
+                if let Some(turn_id) = matching_sample_query_turn_id(sample, &result) {
+                    matching_turn = Some(turn_id);
+                }
+            }
+        }
+    }
+
+    if !accepted {
+        return Err(format!(
+            "ADP {} sample missed subscription ack",
+            sample.label()
+        ));
+    }
+    if !command_observed {
+        return Err(format!(
+            "ADP {} sample missed command outcome",
+            sample.label()
+        ));
+    }
+    let _ = socket.close(None).await;
+    Ok(format!(
+        "adp_turn_sample_ok sample={} url={} turn={} seen={}",
+        sample.label(),
+        url,
+        matching_turn.expect("matching turn"),
+        seen.join(",")
+    ))
+}
+
+fn matching_sample_query_turn_id(
+    sample: AdpTurnSample,
+    result: &freehand_ui_protocol::UiQueryResult,
+) -> Option<String> {
+    match result {
+        freehand_ui_protocol::UiQueryResult::Turn(Some(turn)) => {
+            matching_sample_turn_id(sample, turn)
+        }
+        _ => None,
+    }
+}
+
+fn matching_sample_turn_id(
+    sample: AdpTurnSample,
+    turn: &freehand_ui_protocol::UiTurnProjection,
+) -> Option<String> {
+    let expected_status = sample.expected_status();
+    if turn.user_text.as_deref() != Some(sample.prompt()) {
+        return None;
+    }
+    if turn.terminal_status.as_ref() != Some(&expected_status) {
+        return None;
+    }
+    Some(turn.turn_id.as_str().to_owned())
+}
+
+fn matching_sample_projection_turn_id(
+    sample: AdpTurnSample,
+    projection: &freehand_ui_protocol::UiProjection,
+) -> Option<String> {
+    match projection {
+        freehand_ui_protocol::UiProjection::Turn(turn) => matching_sample_turn_id(sample, turn),
+        _ => None,
+    }
 }
 
 fn run_adp_smoke(args: Vec<String>) -> Result<String, String> {

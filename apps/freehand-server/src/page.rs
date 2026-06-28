@@ -103,6 +103,8 @@ pub fn render_webui_smoke() -> String {
         "<div class=\"composer-actions\">",
         "<button class=\"button\" id=\"send-button\" type=\"submit\">Send</button>",
         "<button class=\"button secondary\" id=\"cancel-button\" type=\"button\">Cancel</button>",
+        "<button class=\"button sample success-sample\" id=\"success-sample-button\" type=\"button\">Success sample</button>",
+        "<button class=\"button sample failure-sample\" id=\"failure-sample-button\" type=\"button\">Failure sample</button>",
         "</div>",
         "</form>",
         "<div class=\"command-status\" id=\"command-status\">command idle</div>",

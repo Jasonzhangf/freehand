@@ -186,9 +186,11 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - CLI reason compaction smoke
   - CLI recovery block smoke
   - CLI ADP mock WebSocket smoke
+  - CLI ADP success/failure turn sample mock WebSocket smoke
 - required_project_black_box_tests:
   - app boundary config -> harness-backed reason E2E smoke
   - no-UI ADP smoke against local daemon/server `/adp`
+  - no-UI ADP success/failure turn samples against daemon/server `/adp`
 - test_design_doc: `docs/testing/app.cli-runtime-smoke.md`
 - function_map_doc: `docs/function-maps/app.cli-runtime-smoke.md`
 - mainline_call_doc: `docs/mainline-calls/app.cli-runtime-smoke.json`
