@@ -27,13 +27,14 @@
     "debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines",
     "`ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state",
     "`ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`",
-    "tool-call lifecycle is projected as UiToolActivity inside UiTurnProjection: ReasonReq04ToolCall creates a waiting activity and matching ReasonReq05ToolResultReentry marks it completed",
+    "tool-call lifecycle is projected as UiToolActivity inside UiTurnProjection: ReasonReq04ToolCall upserts a waiting activity and matching ReasonReq05ToolResultReentry marks the same activity completed",
     "slave turn may surface as WebUI-only separate card while staying in one protocol truth",
     "client-specific projection gating stays inside the protocol owner, not in apps",
     "UI must be able to consume reason-turn state and debug-state projections without owning either truth source",
     "transport adapters may drain debug receivers and query protocol snapshots, but projection ownership stays in `freehand-ui-protocol`",
     "turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states",
     "public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed",
+    "public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards",
     "cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn"
   ],
   "error_mainline": [
@@ -65,7 +66,7 @@
     {
       "symbol": "public_conversation_items",
       "owner": "crates/freehand-ui-protocol/src/lib.rs",
-      "purpose": "derive user-visible conversation items from a full turn projection without exposing internal reasoning/debug/raw schema data while retaining the user prompt",
+      "purpose": "derive user-visible conversation items from a full turn projection without exposing internal reasoning/debug/raw schema data while retaining the user prompt and tool_call_id identity",
       "allowed_callers": [
         "CLI/WebUI renderers",
         "transport adapters"
@@ -363,6 +364,7 @@
     "public turn projection is protocol-owned",
     "terminal status is now preserved in UiTurnProjection and public conversation status mapping",
     "tool activity status is now preserved in UiTurnProjection.tool_activities and public conversation status mapping",
+    "public tool summaries preserve tool_call_id, and duplicate same-id tool calls upsert into one public card",
     "CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn"
   ]
 }

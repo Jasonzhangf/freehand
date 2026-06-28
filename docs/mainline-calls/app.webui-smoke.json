@@ -33,6 +33,7 @@
     "front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes, and preserves the user prompt in the public conversation stream",
     "front-end debug state distinguishes missing snapshot (debug pending) from debug SSE transport errors (debug stream reconnecting)",
     "front-end script renders protocol-projected tool lifecycle status from public_conversation so tool calls can show waiting and completed states over SSE",
+    "front-end script normalizes tool cards by tool_call_id, renders waiting cards with animation, and clears the composer input immediately after submit while keeping the pending user card visible",
     "front-end script projects checkpoint summaries into a secondary inspector card and sends explicit rewind commands through command ingress",
     "main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible",
     "theme module owns white and black theme switching and is separated from WebUI layout/runtime scripts",
@@ -174,9 +175,9 @@
     },
     {
       "step": "09",
-      "symbol_path": "refreshTurn / renderMessages / refreshDebug / submitUserInput",
+      "symbol_path": "refreshTurn / renderMessages / normalizePublicConversation / renderCommandStatus / refreshDebug / submitUserInput",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "consume protocol query and SSE public turn payloads, render semantic/tool/debug cards without owning filtering semantics, and keep missing debug snapshots pending instead of failed",
+      "responsibility": "consume protocol query and SSE public turn payloads, render semantic/tool/debug cards without owning filtering semantics, keep same-tool updates in one card, and keep missing debug snapshots pending instead of failed",
       "input_semantic": "`UiPublicTurnProjection` JSON plus debug snapshot/pending state plus command dispatch receipt",
       "output_semantic": "DOM message blocks plus command status",
       "caller": "WebUI shell",
@@ -236,6 +237,7 @@
     "WebUI Cancel button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input",
     "WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn",
     "WebUI tool cards now render protocol-projected waiting/completed lifecycle states from SSE/query public conversation truth",
+    "WebUI same-tool lifecycle updates normalize by tool_call_id, waiting cards animate, and submit clears the composer immediately while retaining pending state in the conversation stream",
     "WebUI missing-debug race is locked by pending-state rendering plus late-debug SSE subscription coverage; debug SSE transport errors render as reconnecting instead of stale pending"
   ]
 }

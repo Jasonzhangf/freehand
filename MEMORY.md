@@ -1,5 +1,6 @@
 # MEMORY
 
+- 2026-06-28: WebUI tool lifecycle rendering is keyed by `tool_call_id`: `ui.protocol` upserts duplicate same-id tool calls into one activity, public tool summaries carry `tool_call_id`, and WebUI normalizes same-tool cards before rendering. Waiting tool cards animate, composer input clears immediately on submit, and command status is routed through one renderer. Verified by `node --check apps/freehand-server/assets/webui.js`, `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `make ci`, and local WebUI smoke curl.
 - 2026-06-28: runtime final multi-round UI projection only aggregates cross-round tool lifecycle (`tool_calls` / `tool_results`); final visible text, usage, errors, and terminal state come from the final round. Verified by `cargo test -p freehand-runtime` and `make ci`.
 - 2026-06-28: WebUI debug SSE now distinguishes missing snapshot (`debug pending`) from transport failure (`debug stream reconnecting`). Verified by `cargo test -p freehand-server` and `make ci`.
 - 2026-06-28: launchd wrapper now requires explicit `FREEHAND_DAEMON_BIN` in `~/.freehand/daemon.env` and refuses prefix mismatch instead of silently running an old prefix binary. Verified by `cargo test -p xtask` and `make ci`.

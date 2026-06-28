@@ -689,6 +689,15 @@ mod tests {
                 .expect("theme body")
                 .contains("body.theme-dark")
         );
+        let webui_css = client
+            .get(format!("{}/assets/webui.css", server.base_url))
+            .send()
+            .await
+            .expect("webui css response");
+        assert_eq!(webui_css.status(), StatusCode::OK);
+        let webui_css_body = webui_css.text().await.expect("webui css body");
+        assert!(webui_css_body.contains("@keyframes waitingDot"));
+        assert!(webui_css_body.contains("@keyframes toolPulse"));
 
         let js = client
             .get(format!("{}/assets/webui.js", server.base_url))
@@ -716,6 +725,9 @@ mod tests {
         assert!(js_body.contains("CancelLatestActiveTurn"));
         assert!(js_body.contains("event.key !== \"Escape\""));
         assert!(js_body.contains("cancelActiveTurn"));
+        assert!(js_body.contains("normalizePublicConversation"));
+        assert!(js_body.contains("composerInput.value = \"\";"));
+        assert!(js_body.contains("tool_call_id"));
 
         server.stop().await;
     }

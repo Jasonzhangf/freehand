@@ -1,6 +1,11 @@
 # CACHE
 
 - Current branch: `main`.
+- Current verified UI repair slice:
+  - `ui.protocol` upserts duplicate same-`tool_call_id` tool calls into one activity
+  - `UiConversationItem` tool summaries carry `tool_call_id`
+  - WebUI normalizes same-tool cards, animates waiting state, clears composer immediately on submit, and uses unified command status rendering
+  - verification: `node --check apps/freehand-server/assets/webui.js`, `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `make ci`
 - Current verified review/install slice:
   - `cargo test -p freehand-runtime` -> 42 passed, including `live_bridge_final_projection_keeps_final_round_text_and_aggregates_tool_activity_only`
   - `cargo test -p freehand-server` -> 11 passed, including debug SSE wait and tool activity status SSE coverage

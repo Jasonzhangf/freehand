@@ -22,6 +22,7 @@
   - client-specific projection gating keeps slave card visible only for WebUI
   - public conversation projection preserves the user prompt while hiding reasoning, usage, debug details, and raw completion schema blocks from the main user-visible stream
   - cancelled terminal status remains visible to public conversation status mapping and is not projected as completed
+  - public tool summaries carry `tool_call_id` so same-tool waiting/completed updates remain one UI activity
 - white-box plan:
   - command/projection mapping, status query, terminal projection, slave subscription semantics
   - command ingress acceptance and rejection mapping
@@ -34,6 +35,7 @@
   - protocol-owned subscription channel fanout
   - incremental turn projection updates from shared contracts
   - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
+  - duplicate same-`tool_call_id` tool-call projection upserts one activity and one public tool card
   - debug-event ingestion and receiver-drain behavior
 - module black-box plan:
   - command ingress accept/reject smoke
@@ -47,6 +49,7 @@
   - CLI hides slave card while WebUI may render it
   - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries plus user input
   - tool activity projection smoke covers waiting-before-result and completed-after-result, without rendering tool result bodies into public summary
+  - duplicate tool-call projection smoke covers one public card per `tool_call_id`
   - cancelled/failed terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
 - project black-box impact:
@@ -79,3 +82,4 @@
   - public turn projection is protocol-owned
   - terminal status is now preserved in `UiTurnProjection` and public conversation status mapping
   - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries
+  - tool summaries now expose `tool_call_id`, and duplicate same-id tool calls are regression-locked to one public card

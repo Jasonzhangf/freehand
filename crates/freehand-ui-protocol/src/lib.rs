@@ -142,6 +142,8 @@ pub struct UiConversationItem {
     pub title: String,
     pub body: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -807,6 +809,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
             title: "User".to_owned(),
             body: user_text.clone(),
             status: "submitted".to_owned(),
+            tool_call_id: None,
         });
     }
     for text in &projection.text {
@@ -817,6 +820,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
                 title: "Assistant".to_owned(),
                 body: public_text,
                 status: "streaming".to_owned(),
+                tool_call_id: None,
             });
         }
     }
@@ -837,6 +841,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
             title: "Tool".to_owned(),
             body,
             status: activity.status.as_str().to_owned(),
+            tool_call_id: Some(activity.tool_call_id.clone()),
         });
     }
     if let Some(terminal_text) = &projection.terminal_text {
@@ -855,6 +860,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
                 title: "Final".to_owned(),
                 body: public_text,
                 status: status.to_owned(),
+                tool_call_id: None,
             });
         }
     }
@@ -864,6 +870,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
             title: "Error".to_owned(),
             body: error.clone(),
             status: "failed".to_owned(),
+            tool_call_id: None,
         });
     }
     items
@@ -915,12 +922,13 @@ fn tool_activities_from_input(
 ) -> Vec<UiToolActivity> {
     let mut activities = Vec::new();
     for call in tool_calls {
-        activities.push(UiToolActivity {
-            tool_call_id: call.tool_call.tool_call_id.as_str().to_owned(),
-            tool_name: call.tool_call.tool_name.clone(),
-            status: UiToolActivityStatus::Waiting,
-            detail: Some("waiting for tool execution".to_owned()),
-        });
+        upsert_tool_activity(
+            &mut activities,
+            call.tool_call.tool_call_id.as_str().to_owned(),
+            call.tool_call.tool_name.clone(),
+            UiToolActivityStatus::Waiting,
+            Some("waiting for tool execution".to_owned()),
+        );
     }
     for result in tool_results {
         let tool_call_id = result.tool_result.tool_call_id.as_str().to_owned();
@@ -1285,6 +1293,60 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_tool_call_projection_updates_one_activity_card() {
+        let tool_call = ReasonReq04ToolCall {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("ui.protocol"),
+            agent_id: AgentId::new("agent-1"),
+            tool_call: freehand_contracts::ToolCallContract {
+                tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                tool_name: "ls".to_owned(),
+                arguments: vec![],
+                arguments_complete: true,
+            },
+        };
+        let projection = turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            user_text: Some("run the task".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: vec![tool_call.clone(), tool_call],
+            tool_results: vec![ReasonReq05ToolResultReentry {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                tool_result: freehand_contracts::ToolResultContract {
+                    tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                    output: "private output".to_owned(),
+                },
+            }],
+            usage_events: Vec::new(),
+            terminal_event: None,
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        });
+
+        assert_eq!(projection.tool_activities.len(), 1);
+        assert_eq!(
+            projection.tool_activities[0].status,
+            UiToolActivityStatus::Completed
+        );
+        let tool_cards = public_conversation_items(&projection)
+            .into_iter()
+            .filter(|item| item.kind == UiConversationItemKind::ToolSummary)
+            .collect::<Vec<_>>();
+        assert_eq!(tool_cards.len(), 1);
+        assert_eq!(tool_cards[0].status, "completed");
+        assert_eq!(tool_cards[0].tool_call_id.as_deref(), Some("tool-1"));
+    }
+
+    #[test]
     fn slave_turn_subscription_smoke() {
         let projection = sample_turn_projection(true);
         let selector = subscription_selector(&UiCommand::SubscribeTurn {
@@ -1385,6 +1447,16 @@ mod tests {
 
         let public_turn = public_turn_projection(projection);
         assert_eq!(public_turn.public_conversation, items);
+    }
+
+    #[test]
+    fn tool_summary_carries_tool_call_identity() {
+        let projection = sample_turn_projection(false);
+        let tool = public_conversation_items(&projection)
+            .into_iter()
+            .find(|item| item.kind == UiConversationItemKind::ToolSummary)
+            .expect("tool item");
+        assert_eq!(tool.tool_call_id.as_deref(), Some("tool-1"));
     }
 
     #[test]

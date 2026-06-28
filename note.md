@@ -1,5 +1,21 @@
 # note.md
 
+# 2026-06-28 WebUI tool card/status repair
+  - root cause: whole-turn projection could duplicate same `tool_call_id` as separate waiting activities, and WebUI rendered tool summaries as static cards without stable tool identity
+  - fix:
+    - `ui.protocol` now upserts duplicate tool calls by `tool_call_id`
+    - public tool summaries carry `tool_call_id`
+    - WebUI normalizes same-tool cards by `tool_call_id`, adds waiting animation, clears composer immediately on submit, and routes command status through one renderer
+  - validation passed:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-ui-protocol`
+    - `cargo test -p freehand-server`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`
+    - live local smoke: `freehand-server webui-serve-smoke --bind 127.0.0.1:4062`, `curl /` returned WebUI shell containing composer/status elements
+
 # 2026-06-28 review/launchd/ui projection closeout
   - verified after fixes:
     - runtime final multi-round projection now aggregates only cross-round `tool_calls` and `tool_results`

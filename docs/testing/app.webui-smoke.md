@@ -40,6 +40,7 @@
   - WebUI debug SSE error rendering distinguishes reconnecting transport state from missing-snapshot pending state
   - WebUI latest-turn query/SSE public projection excludes raw completion schema and internal reasoning from public conversation while preserving user input
   - WebUI latest-turn SSE renders tool lifecycle status updates (`waiting` then `completed`) from protocol truth
+  - WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, and waiting animation assets
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
@@ -67,6 +68,7 @@
   - query/SSE now return a public turn payload with `public_conversation` for main cards
   - debug query remains snapshot-only, while debug SSE waits for late debug snapshots so turn/debug timing races are not user-visible failures; debug SSE errors render reconnecting state instead of stale pending
   - latest-turn SSE now has regression coverage for tool waiting/completed status updates
+  - WebUI tool cards now normalize by `tool_call_id`, waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
   - protocol-only transport library reuse is landed
   - app remains protocol-only by dependency gate
   - migrated mainline-call source and generated wiki are kept in sync with this test design

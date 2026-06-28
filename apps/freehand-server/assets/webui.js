@@ -4,7 +4,6 @@ initializeThemeToggle(document);
 
 const shell = document.querySelector("[data-webui-shell]");
 const messageList = document.getElementById("message-list");
-const commandStatus = document.getElementById("command-status");
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
@@ -16,6 +15,7 @@ const state = {
   checkpoints: [],
   pendingUserInput: null,
   submitInFlight: false,
+  commandStatusMessage: "ready",
   debugEventSource: null,
 };
 
@@ -37,9 +37,12 @@ function setText(id, value) {
   }
 }
 
-function card(role, status, title, body, variant = "assistant") {
+function card(role, status, title, body, variant = "assistant", identity = null) {
   const article = document.createElement("article");
-  article.className = `dialog-block ${variant}-block`;
+  article.className = `dialog-block ${variant}-block ${status.className}-state`;
+  if (identity) {
+    article.dataset.identity = identity;
+  }
 
   const head = document.createElement("div");
   head.className = "block-head";
@@ -70,6 +73,57 @@ function card(role, status, title, body, variant = "assistant") {
   return article;
 }
 
+function normalizePublicConversation(items) {
+  const normalized = [];
+  const toolIndex = new Map();
+
+  items.forEach((item) => {
+    if (item.kind !== "ToolSummary" || !item.tool_call_id) {
+      normalized.push(item);
+      return;
+    }
+
+    const existingIndex = toolIndex.get(item.tool_call_id);
+    if (existingIndex === undefined) {
+      toolIndex.set(item.tool_call_id, normalized.length);
+      normalized.push(item);
+      return;
+    }
+
+    normalized[existingIndex] = item;
+  });
+
+  return normalized;
+}
+
+function liveTurnStatus() {
+  if (!state.turn) {
+    return null;
+  }
+
+  if (state.submitInFlight) {
+    return "dispatching...";
+  }
+
+  const waitingTools = (state.turn.tool_activities || []).filter(
+    (tool) => tool.status === "Waiting" || tool.status === "waiting",
+  );
+  if (waitingTools.length > 0) {
+    return `tool executing: ${waitingTools.map((tool) => tool.tool_name).join(", ")}`;
+  }
+
+  if (state.turn.terminal_text) {
+    return "turn completed";
+  }
+
+  return null;
+}
+
+function renderCommandStatus() {
+  const liveStatus = liveTurnStatus();
+  setText("command-status", liveStatus || state.commandStatusMessage);
+}
+
 function renderMessages() {
   messageList.replaceChildren();
   const fragments = [];
@@ -97,7 +151,7 @@ function renderMessages() {
       ),
     );
   } else {
-    state.publicConversation.forEach((item) => {
+    normalizePublicConversation(state.publicConversation).forEach((item) => {
       const variant =
         item.kind === "UserText"
           ? "user"
@@ -116,7 +170,8 @@ function renderMessages() {
           : item.kind === "ToolSummary"
               ? "running"
               : "success";
-      fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, item.body, variant));
+      const identity = item.tool_call_id ? `tool:${item.tool_call_id}` : null;
+      fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, item.body, variant, identity));
     });
   }
 
@@ -188,7 +243,15 @@ function renderTurnMeta() {
   setText("strip-session", state.turn.session_id);
   setText("strip-turn", state.turn.turn_id);
   setText("conversation-turn", state.turn.turn_id);
-  setText("turn-status", state.turn.terminal_text ? "completed" : "streaming");
+  const runningTools = (state.turn.tool_activities || []).filter((tool) => tool.status === "Waiting" || tool.status === "waiting");
+  const turnStatus = state.turn.terminal_text
+    ? "completed"
+    : runningTools.length > 0
+      ? `tool running: ${runningTools.map((tool) => tool.tool_name).join(", ")}`
+      : state.submitInFlight
+        ? "dispatching"
+        : "streaming";
+  setText("turn-status", turnStatus);
 
   if (state.turn.slave_substream_card) {
     setText("strip-slave", "substream active");
@@ -209,6 +272,7 @@ function renderAll() {
   renderMessages();
   renderDebug();
   renderCheckpoints();
+  renderCommandStatus();
 }
 
 async function fetchJson(url) {
@@ -283,9 +347,11 @@ function ensureTurnSubscription() {
     state.turn = payload.turn;
     state.publicConversation = payload.public_conversation || [];
     state.pendingUserInput = null;
+    state.commandStatusMessage = "reasoning stream active...";
     renderAll();
     refreshDebug().catch((error) => {
-      commandStatus.textContent = `debug refresh failed: ${error.message}`;
+      state.commandStatusMessage = `debug refresh failed: ${error.message}`;
+      renderCommandStatus();
     });
     ensureDebugSubscription();
   });
@@ -326,6 +392,7 @@ async function submitUserInput(text) {
   if (!response.ok) {
     throw new Error(payload.message || payload.code || "command failed");
   }
+  state.commandStatusMessage = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
   return payload;
 }
 
@@ -338,14 +405,16 @@ async function cancelActiveTurn() {
   if (!turnId && !state.submitInFlight && !state.pendingUserInput) {
     composerInput.value = "";
     state.pendingUserInput = null;
-    commandStatus.textContent = "no active turn; input cleared";
+    state.commandStatusMessage = "no active turn; input cleared";
     renderMessages();
+    renderCommandStatus();
     return;
   }
   const command = turnId
     ? { CancelTurn: { turn_id: turnId } }
     : { CancelLatestActiveTurn: {} };
-  commandStatus.textContent = `cancelling ${turnId || "latest active turn"}...`;
+  state.commandStatusMessage = `cancelling ${turnId || "latest active turn"}...`;
+  renderCommandStatus();
   const response = await fetch(shellConfig().commandEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -353,20 +422,23 @@ async function cancelActiveTurn() {
   });
   const payload = await response.json();
   if (!response.ok) {
-    commandStatus.textContent = `cancel failed: ${payload.message || payload.code || "command failed"}`;
+    state.commandStatusMessage = `cancel failed: ${payload.message || payload.code || "command failed"}`;
+    renderCommandStatus();
     return;
   }
   state.pendingUserInput = null;
   composerInput.value = "";
-  commandStatus.textContent = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
+  state.commandStatusMessage = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
   await refreshTurn().catch((error) => {
-    commandStatus.textContent =
+    state.commandStatusMessage =
       `${payload.dispatch_status} -> ${payload.target_feature_id} (turn refresh failed: ${error.message})`;
+    renderCommandStatus();
   });
 }
 
 async function rewindCheckpoint(checkpointId) {
-  commandStatus.textContent = `rewinding ${checkpointId}...`;
+  state.commandStatusMessage = `rewinding ${checkpointId}...`;
+  renderCommandStatus();
   const response = await fetch(shellConfig().commandEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -374,48 +446,54 @@ async function rewindCheckpoint(checkpointId) {
   });
   const payload = await response.json();
   if (!response.ok) {
-    commandStatus.textContent = `rewind failed: ${payload.message || payload.code || "command failed"}`;
+    state.commandStatusMessage = `rewind failed: ${payload.message || payload.code || "command failed"}`;
+    renderCommandStatus();
     return;
   }
-  commandStatus.textContent = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
+  state.commandStatusMessage = `${payload.dispatch_status} -> ${payload.target_feature_id}`;
   await refreshCheckpoints();
+  renderCommandStatus();
 }
 
 composerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = composerInput.value.trim();
   if (!text) {
-    commandStatus.textContent = "empty input rejected";
+    state.commandStatusMessage = "empty input rejected";
+    renderCommandStatus();
     return;
   }
-  commandStatus.textContent = "dispatching...";
+  state.commandStatusMessage = "dispatching...";
   state.pendingUserInput = text;
   state.submitInFlight = true;
+  composerInput.value = "";
   renderMessages();
+  renderCommandStatus();
   try {
     const receipt = await submitUserInput(text);
-    composerInput.value = "";
     state.submitInFlight = false;
-    commandStatus.textContent = `${receipt.dispatch_status} -> ${receipt.target_feature_id}`;
     try {
       await refreshTurn();
       await refreshCheckpoints();
-      commandStatus.textContent = `${receipt.dispatch_status} -> ${receipt.target_feature_id}`;
+      renderCommandStatus();
     } catch (error) {
-      commandStatus.textContent =
+      state.commandStatusMessage =
         `${receipt.dispatch_status} -> ${receipt.target_feature_id} (turn refresh failed: ${error.message})`;
+      renderCommandStatus();
     }
   } catch (error) {
     state.submitInFlight = false;
     state.pendingUserInput = null;
     renderMessages();
-    commandStatus.textContent = `dispatch failed: ${error.message}`;
+    state.commandStatusMessage = `dispatch failed: ${error.message}`;
+    renderCommandStatus();
   }
 });
 
 cancelButton.addEventListener("click", () => {
   cancelActiveTurn().catch((error) => {
-    commandStatus.textContent = `cancel failed: ${error.message}`;
+    state.commandStatusMessage = `cancel failed: ${error.message}`;
+    renderCommandStatus();
   });
 });
 
@@ -425,12 +503,13 @@ document.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   cancelActiveTurn().catch((error) => {
-    commandStatus.textContent = `cancel failed: ${error.message}`;
+    state.commandStatusMessage = `cancel failed: ${error.message}`;
+    renderCommandStatus();
   });
 });
 
 refreshTurn().catch((error) => {
-  commandStatus.textContent = `bootstrap failed: ${error.message}`;
+  state.commandStatusMessage = `bootstrap failed: ${error.message}`;
   renderAll();
 });
 refreshCheckpoints().catch(() => {
