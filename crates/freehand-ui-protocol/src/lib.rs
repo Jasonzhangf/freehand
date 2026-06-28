@@ -5,9 +5,9 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 
 use freehand_blocks::strip_completion_submission_block;
 use freehand_contracts::{
-    AgentId, ErrorErr01RuntimeClassified, ReasonReq04ToolCall, ReasonResp01SemanticEvent,
-    ReasonResp02UsageEvent, ReasonResp03TerminalEvent, SemanticEventKind, SessionId,
-    TerminalStatus, TurnId,
+    AgentId, ErrorErr01RuntimeClassified, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
+    ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent,
+    SemanticEventKind, SessionId, TerminalStatus, TurnId,
 };
 pub use freehand_debug::{
     DebugEvent, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot, DebugTraceEnvelope,
@@ -96,11 +96,35 @@ pub struct UiTurnProjection {
     pub reasoning: Vec<String>,
     pub text: Vec<String>,
     pub tool_calls: Vec<String>,
+    pub tool_activities: Vec<UiToolActivity>,
     pub usage: Vec<String>,
     pub terminal_status: Option<TerminalStatus>,
     pub terminal_text: Option<String>,
     pub errors: Vec<String>,
     pub slave_substream_card: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UiToolActivityStatus {
+    Waiting,
+    Completed,
+}
+
+impl UiToolActivityStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UiToolActivityStatus::Waiting => "waiting",
+            UiToolActivityStatus::Completed => "completed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiToolActivity {
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub status: UiToolActivityStatus,
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +208,7 @@ pub struct TurnProjectionInput {
     pub user_text: Option<String>,
     pub semantic_events: Vec<ReasonResp01SemanticEvent>,
     pub tool_calls: Vec<ReasonReq04ToolCall>,
+    pub tool_results: Vec<ReasonReq05ToolResultReentry>,
     pub usage_events: Vec<ReasonResp02UsageEvent>,
     pub terminal_event: Option<ReasonResp03TerminalEvent>,
     pub error_events: Vec<ErrorErr01RuntimeClassified>,
@@ -390,6 +415,13 @@ impl UiProtocolState {
             projection
                 .tool_calls
                 .push(event.tool_call.tool_name.clone());
+            upsert_tool_activity(
+                &mut projection.tool_activities,
+                event.tool_call.tool_call_id.as_str().to_owned(),
+                event.tool_call.tool_name.clone(),
+                UiToolActivityStatus::Waiting,
+                Some("waiting for tool execution".to_owned()),
+            );
             projection.clone()
         };
         self.latest_active_turn_id = Some(event.turn_id.clone());
@@ -416,6 +448,42 @@ impl UiProtocolState {
                 "input={} output={}",
                 event.usage.input_tokens, event.usage.output_tokens
             ));
+            projection.clone()
+        };
+        self.latest_active_turn_id = Some(event.turn_id.clone());
+        self.publish_projection(UiProjection::Turn(projection.clone()));
+        projection
+    }
+
+    pub fn apply_tool_result(
+        &mut self,
+        source_agent_id: AgentId,
+        source_node_id: String,
+        event: &ReasonReq05ToolResultReentry,
+        slave_substream_card: bool,
+    ) -> UiTurnProjection {
+        let projection = {
+            let projection = self.ensure_turn_projection(
+                source_agent_id,
+                source_node_id,
+                &event.session_id,
+                &event.turn_id,
+                slave_substream_card,
+            );
+            let tool_call_id = event.tool_result.tool_call_id.as_str().to_owned();
+            let tool_name = projection
+                .tool_activities
+                .iter()
+                .find(|activity| activity.tool_call_id == tool_call_id)
+                .map(|activity| activity.tool_name.clone())
+                .unwrap_or_else(|| "tool".to_owned());
+            upsert_tool_activity(
+                &mut projection.tool_activities,
+                tool_call_id,
+                tool_name,
+                UiToolActivityStatus::Completed,
+                Some("tool result returned".to_owned()),
+            );
             projection.clone()
         };
         self.latest_active_turn_id = Some(event.turn_id.clone());
@@ -576,6 +644,7 @@ impl UiProtocolState {
                 reasoning: Vec::new(),
                 text: Vec::new(),
                 tool_calls: Vec::new(),
+                tool_activities: Vec::new(),
                 usage: Vec::new(),
                 terminal_status: None,
                 terminal_text: None,
@@ -751,12 +820,23 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
             });
         }
     }
-    for tool_name in &projection.tool_calls {
+    for activity in &projection.tool_activities {
+        let body = match activity.status {
+            UiToolActivityStatus::Waiting => {
+                format!(
+                    "Tool call requested: {} (waiting for execution)",
+                    activity.tool_name
+                )
+            }
+            UiToolActivityStatus::Completed => {
+                format!("Tool result returned for {}", activity.tool_name)
+            }
+        };
         items.push(UiConversationItem {
             kind: UiConversationItemKind::ToolSummary,
             title: "Tool".to_owned(),
-            body: format!("Tool call requested: {tool_name}"),
-            status: "running".to_owned(),
+            body,
+            status: activity.status.as_str().to_owned(),
         });
     }
     if let Some(terminal_text) = &projection.terminal_text {
@@ -827,6 +907,67 @@ fn empty_checkpoint_snapshot() -> UiCheckpointSnapshot {
         },
         checkpoints: Vec::new(),
     }
+}
+
+fn tool_activities_from_input(
+    tool_calls: &[ReasonReq04ToolCall],
+    tool_results: &[ReasonReq05ToolResultReentry],
+) -> Vec<UiToolActivity> {
+    let mut activities = Vec::new();
+    for call in tool_calls {
+        activities.push(UiToolActivity {
+            tool_call_id: call.tool_call.tool_call_id.as_str().to_owned(),
+            tool_name: call.tool_call.tool_name.clone(),
+            status: UiToolActivityStatus::Waiting,
+            detail: Some("waiting for tool execution".to_owned()),
+        });
+    }
+    for result in tool_results {
+        let tool_call_id = result.tool_result.tool_call_id.as_str().to_owned();
+        let tool_name = tool_calls
+            .iter()
+            .find(|call| call.tool_call.tool_call_id.as_str() == tool_call_id)
+            .map(|call| call.tool_call.tool_name.clone())
+            .unwrap_or_else(|| "tool".to_owned());
+        upsert_tool_activity(
+            &mut activities,
+            tool_call_id,
+            tool_name,
+            UiToolActivityStatus::Completed,
+            Some("tool result returned".to_owned()),
+        );
+    }
+    activities
+}
+
+fn upsert_tool_activity(
+    activities: &mut Vec<UiToolActivity>,
+    tool_call_id: String,
+    tool_name: String,
+    status: UiToolActivityStatus,
+    detail: Option<String>,
+) {
+    if let Some(activity) = activities
+        .iter_mut()
+        .find(|activity| activity.tool_call_id == tool_call_id)
+    {
+        activity.tool_name = tool_name;
+        activity.status = match (activity.status, status) {
+            (UiToolActivityStatus::Completed, UiToolActivityStatus::Waiting) => {
+                UiToolActivityStatus::Completed
+            }
+            _ => status,
+        };
+        activity.detail = detail;
+        return;
+    }
+
+    activities.push(UiToolActivity {
+        tool_call_id,
+        tool_name,
+        status,
+        detail,
+    });
 }
 
 fn command_kind(command: &UiCommand) -> &'static str {
@@ -904,6 +1045,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             .iter()
             .map(|call| call.tool_call.tool_name.clone())
             .collect(),
+        tool_activities: tool_activities_from_input(&input.tool_calls, &input.tool_results),
         usage: input
             .usage_events
             .iter()
@@ -999,6 +1141,7 @@ mod tests {
                     arguments_complete: true,
                 },
             }],
+            tool_results: Vec::new(),
             usage_events: vec![ReasonResp02UsageEvent {
                 session_id: SessionId::new("session-1"),
                 turn_id: TurnId::new("turn-1"),
@@ -1077,6 +1220,68 @@ mod tests {
         let projection = sample_turn_projection(false);
         assert_eq!(projection.reasoning, vec!["thinking"]);
         assert_eq!(projection.text, vec!["answer"]);
+        assert_eq!(projection.tool_activities.len(), 1);
+        assert_eq!(
+            projection.tool_activities[0].status,
+            UiToolActivityStatus::Waiting
+        );
+    }
+
+    #[test]
+    fn tool_activity_waits_until_matching_result_reentry() {
+        let mut projection = sample_turn_projection(false);
+        projection.terminal_text = None;
+        projection.terminal_status = None;
+        let items = public_conversation_items(&projection);
+        let tool = items
+            .iter()
+            .find(|item| item.kind == UiConversationItemKind::ToolSummary)
+            .expect("tool item");
+        assert_eq!(tool.status, "waiting");
+
+        let completed = turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            user_text: Some("run the task".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: vec![ReasonReq04ToolCall {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                tool_call: freehand_contracts::ToolCallContract {
+                    tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                    tool_name: "search".to_owned(),
+                    arguments: vec![],
+                    arguments_complete: true,
+                },
+            }],
+            tool_results: vec![ReasonReq05ToolResultReentry {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                tool_result: freehand_contracts::ToolResultContract {
+                    tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                    output: "result body is not rendered in public summary".to_owned(),
+                },
+            }],
+            usage_events: Vec::new(),
+            terminal_event: None,
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        });
+        let completed_tool = public_conversation_items(&completed)
+            .into_iter()
+            .find(|item| item.kind == UiConversationItemKind::ToolSummary)
+            .expect("completed tool item");
+        assert_eq!(completed_tool.status, "completed");
+        assert!(completed_tool.body.contains("search"));
+        assert!(!completed_tool.body.contains("result body"));
     }
 
     #[test]

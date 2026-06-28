@@ -11,6 +11,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 ## Request Mainline
 
 - daemon process accepts a host command to start the UI transport
+- daemon process may be started by macOS launchd through the installed freehand-daemon-launchd wrapper
 - daemon bootstrap selects one agent from default config and creates one runtime dispatcher
 - runtime bootstrap consumes configured local and paired node topology before daemon transport starts
 - if persisted runtime turn truth exists, daemon bootstrap restores it through the injected runtime owner before serving query and SSE routes
@@ -22,6 +23,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 ## Response Mainline
 
 - daemon serves runtime-backed dispatch receipts over HTTP command ingress
+- daemon can run as a launchd user service with fixed WebUI bind, RunAtLoad, KeepAlive, explicit FREEHAND_DAEMON_BIN, and stdout/stderr logs under ~/.freehand/logs
 - daemon serves query and continuous SSE projections from the runtime-owned shared UI state
 - daemon restart can serve restored terminal projection before any new submit arrives
 - daemon SSE subscriptions stay open across later runtime turn updates and observe the same protocol-owned projections as query consumers
@@ -32,6 +34,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 ## Error Mainline
 
 - invalid daemon CLI input returns explicit startup error
+- missing daemon env file, missing launchd wrapper env values, or missing executable daemon binary returns explicit wrapper startup error
 - runtime dispatcher bootstrap failure returns explicit daemon startup error
 - runtime checkpoint projection bootstrap failure returns explicit daemon startup error
 - corrupt checkpoint projection bootstrap truth returns explicit daemon startup error before transport serve
@@ -77,6 +80,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 | 04 | `build_runtime_dispatcher_from_default_config` | `apps/freehand-daemon/src/main.rs` | select one agent from default config and create the daemon-owned runtime host dependency set | daemon agent name | runtime dispatcher | daemon startup or tests | `freehand-runtime` | bound |
 | 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve protocol-only routes while using injected runtime dispatch and shared state | listener plus shared state plus dispatch port | live HTTP and SSE boundary | daemon host | shared transport owner | bound |
 | 06 | `handle_query_checkpoints` | `apps/freehand-server/src/lib.rs` | serve checkpoint summaries from injected protocol state | HTTP checkpoint query | UI checkpoint snapshot JSON | daemon-hosted WebUI transport | protocol state | bound |
+| 07 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | ~/.freehand/daemon.env | daemon process exec | macOS launchd | FREEHAND_DAEMON_BIN serve | bound |
 
 ## Sync Status Against Mainline Call
 

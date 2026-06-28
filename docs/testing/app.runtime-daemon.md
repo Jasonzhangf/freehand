@@ -4,6 +4,7 @@
 - owner: `apps/freehand-daemon`
 - lifecycle path under test:
   - daemon bootstrap selects one agent from config and creates a runtime dispatcher
+  - launchd wrapper loads `~/.freehand/daemon.env` and starts one configured daemon agent through explicit `FREEHAND_DAEMON_BIN` on a fixed bind address
   - runtime dispatcher exposes one shared UI state handle
   - daemon injects runtime dispatch into shared HTTP/SSE transport
   - daemon restart restores persisted latest-turn projection before new command ingress
@@ -15,6 +16,7 @@
 - white-box plan:
   - daemon bootstrap helper coverage
   - config-selected bootstrap coverage
+  - launchd wrapper env validation coverage through shell syntax, explicit daemon binary validation, and runtime smoke
   - bind-arg parsing coverage
   - dependency boundary scan
 - module black-box plan:
@@ -29,6 +31,7 @@
   - daemon missing-checkpoint rewind HTTP failure smoke
   - daemon slave-mode startup rejection smoke
   - daemon corrupt-checkpoint-bootstrap startup rejection smoke
+  - launchd service smoke: `launchctl print`, `/health`, `/`, and log file creation
 - project black-box impact:
   - closes the first real runtime host gap without polluting the protocol-only app boundary
   - machine-readable mainline truth remains the only source for generated wiki artifacts
@@ -36,6 +39,8 @@
   - `~/.freehand/state/ui`
   - `~/.freehand/state/turns`
   - `~/.freehand/ledgers/reason`
+  - `~/.freehand/logs/daemon.stdout.log`
+  - `~/.freehand/logs/daemon.stderr.log`
 - known gaps:
   - real websocket pairing transport is not wired yet; current daemon uses runtime-owned local node semantics
 - sync status between design and implementation:

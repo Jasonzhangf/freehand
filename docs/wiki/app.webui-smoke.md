@@ -19,6 +19,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
+- per-turn debug SSE is a live subscription and waits for late debug snapshots when turn projection arrives before debug projection
 - transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing
 - the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only
 - front-end cancel button and Escape key send protocol-owned CancelTurn commands through command ingress
@@ -31,9 +32,11 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason or debug truth writer
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
 - app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
-- SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe keeps waiting when no turn exists yet
+- SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection, latest-turn subscribe keeps waiting when no turn exists yet, and debug subscribe keeps waiting when no debug snapshot exists yet
 - WebUI submit success path actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing
 - front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes, and preserves the user prompt in the public conversation stream
+- front-end debug state distinguishes missing snapshot (debug pending) from debug SSE transport errors (debug stream reconnecting)
+- front-end script renders protocol-projected tool lifecycle status from public_conversation so tool calls can show waiting and completed states over SSE
 - front-end script projects checkpoint summaries into a secondary inspector card and sends explicit rewind commands through command ingress
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
 - theme module owns white and black theme switching and is separated from WebUI layout/runtime scripts
@@ -53,6 +56,8 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
 - direct reason, provider, node, or config coupling is a policy violation, not a fallback path
 - cancel without an active turn clears only local input and does not invent a runtime mutation
+- transient missing debug snapshots are rendered as pending debug state, not command failure
+- debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state
 
 ## Shared Multi-Reference Functions
 
@@ -80,8 +85,8 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve shared protocol-only router on a listener | TCP listener plus protocol state plus dispatch port plus shutdown future | live HTTP and SSE transport boundary | app entrypoint, tests, or runtime host | app server | bound |
 | 06 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate slave-card visibility by client kind | turn projection plus client kind | client-specific projection | app boundary | protocol owner | bound |
 | 07 | `initializeThemeToggle` | `apps/freehand-server/assets/theme.js` | switch white and black visual theme only | UI theme choice | body theme class plus persisted localStorage setting | WebUI shell | theme module | bound |
-| 08 | `subscription_event_stream / projection_to_sse_event` | `apps/freehand-server/src/lib.rs` | convert protocol-owned subscription updates into continuous HTTP SSE delivery | `UiSubscriptionEvent` receiver plus selector | streamed SSE events | subscribe routes | protocol state | bound |
-| 09 | `refreshTurn / renderMessages / submitUserInput` | `apps/freehand-server/assets/webui.js` | consume protocol query and SSE public turn payloads, re-query latest turn after command receipt, and render semantic cards without owning filtering semantics | `UiPublicTurnProjection` JSON plus command dispatch receipt | DOM message blocks plus command status | WebUI shell | existing protocol endpoints | bound |
+| 08 | `subscription_event_stream / projection_to_sse_event` | `apps/freehand-server/src/lib.rs` | convert protocol-owned subscription updates into continuous HTTP SSE delivery, including waiting subscriptions for late debug snapshots | `UiSubscriptionEvent` receiver plus selector | streamed SSE events | subscribe routes | protocol state | bound |
+| 09 | `refreshTurn / renderMessages / refreshDebug / submitUserInput` | `apps/freehand-server/assets/webui.js` | consume protocol query and SSE public turn payloads, render semantic/tool/debug cards without owning filtering semantics, and keep missing debug snapshots pending instead of failed | `UiPublicTurnProjection` JSON plus debug snapshot/pending state plus command dispatch receipt | DOM message blocks plus command status | WebUI shell | existing protocol endpoints | bound |
 | 10 | `handle_query_checkpoints / refreshCheckpoints` | `apps/freehand-server/src/lib.rs / apps/freehand-server/assets/webui.js` | serve and render read-only checkpoint summaries from protocol state | protocol checkpoint snapshot | HTTP JSON checkpoint snapshot plus secondary inspector cards | WebUI shell | ui.protocol state | bound |
 | 11 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send CancelTurn for the active protocol turn from button or Escape key | latest protocol turn id | command dispatch receipt plus refreshed projection | WebUI shell | POST /ui/command | bound |
 | 12 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
@@ -98,9 +103,12 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - runtime host reuse now happens through injected state and dispatch port, not by duplicating transport behavior
 - protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
+- debug subscribe route now also keeps one SSE connection open when the first debug snapshot is not available yet
 - WebUI submit path still explicitly refreshes latest turn truth after a successful command receipt
 - WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files
 - app dependency boundary is intended to remain protocol-only and must not import reason, provider, node, or config semantics
 - generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes
 - WebUI Cancel button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn
+- WebUI tool cards now render protocol-projected waiting/completed lifecycle states from SSE/query public conversation truth
+- WebUI missing-debug race is locked by pending-state rendering plus late-debug SSE subscription coverage; debug SSE transport errors render as reconnecting instead of stale pending

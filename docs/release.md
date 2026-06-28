@@ -51,12 +51,79 @@ Installed commands:
 - `freehand-cli`
 - `freehand-server`
 - `freehand-daemon`
+- `freehand-daemon-launchd`
 
 Ensure the install bin dir is on `PATH`:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+## macOS Background Service
+
+`scripts/install-launchd.sh install` performs first-time launchd setup: it installs the host binaries, writes a user LaunchAgent, and starts the daemon in the background.
+
+`scripts/install-launchd.sh restart` only restarts the existing LaunchAgent with `launchctl kickstart -k` and does not rewrite the install state.
+
+Default service truth:
+
+- label: `com.freehand.daemon`
+- fixed WebUI URL: `http://127.0.0.1:4041/`
+- plist: `~/Library/LaunchAgents/com.freehand.daemon.plist`
+- daemon env: `~/.freehand/daemon.env`
+- stdout log: `~/.freehand/logs/daemon.stdout.log`
+- stderr log: `~/.freehand/logs/daemon.stderr.log`
+- launchd policy: `RunAtLoad=true`, `KeepAlive=true`
+
+First-time install and start:
+
+```bash
+scripts/install-launchd.sh install
+```
+
+Restart without reinstall:
+
+```bash
+scripts/install-launchd.sh restart
+```
+
+Status:
+
+```bash
+make launchd-status
+```
+
+Logs:
+
+```bash
+make launchd-logs
+```
+
+Uninstall:
+
+```bash
+scripts/uninstall-launchd.sh
+```
+
+The LaunchAgent runs `freehand-daemon-launchd`, which loads `~/.freehand/daemon.env` before execing:
+
+```bash
+freehand-daemon serve --agent "$FREEHAND_DAEMON_AGENT" --bind "$FREEHAND_DAEMON_BIND"
+```
+
+Default `~/.freehand/daemon.env` values created on first install:
+
+```bash
+FREEHAND_DAEMON_AGENT="master"
+FREEHAND_DAEMON_BIND="127.0.0.1:4041"
+FREEHAND_DAEMON_WORKDIR="<repo root at install time>"
+FREEHAND_DAEMON_BIN="$HOME/.local/bin/freehand-daemon"
+FREEHAND_PAIR_TOKEN_SHARED="<generated or existing value>"
+```
+
+macOS does not require extra accessibility or full-disk permissions for the localhost WebUI service. If the bind address is later changed to `0.0.0.0:4041` or a LAN/Tailscale address, macOS firewall may ask for inbound-network approval once for the daemon binary.
+
+If an existing `daemon.env` points `FREEHAND_DAEMON_BIN` at a different install prefix, `scripts/install-launchd.sh install` fails explicitly instead of silently running an old daemon binary.
 
 ## Daemon Startup
 

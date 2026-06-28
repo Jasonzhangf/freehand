@@ -14,6 +14,7 @@
   - subscribe returns an initial snapshot plus continuous incremental truth, or waits for the first matching turn when subscribing before any turn exists
   - debug subscribe returns per-turn read-only debug projections
   - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
+  - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`
   - terminal events preserve both terminal text and terminal status in UI projection
   - debug receiver drain ingests observation-only debug events into protocol state
   - source identity and stream kind stay explicit
@@ -32,6 +33,7 @@
   - debug-state query and subscription routing
   - protocol-owned subscription channel fanout
   - incremental turn projection updates from shared contracts
+  - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
   - debug-event ingestion and receiver-drain behavior
 - module black-box plan:
   - command ingress accept/reject smoke
@@ -44,6 +46,7 @@
   - checkpoint summary query smoke
   - CLI hides slave card while WebUI may render it
   - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries plus user input
+  - tool activity projection smoke covers waiting-before-result and completed-after-result, without rendering tool result bodies into public summary
   - cancelled/failed terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
 - project black-box impact:
@@ -75,3 +78,4 @@
   - client-specific projection gating remains protocol-owned
   - public turn projection is protocol-owned
   - terminal status is now preserved in `UiTurnProjection` and public conversation status mapping
+  - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries

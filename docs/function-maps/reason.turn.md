@@ -29,7 +29,7 @@
 - provider semantic events become turn truth updates
 - provider semantic outputs write owner/node-provenance metadata before mutating turn truth
 - metadata producer writes may persist durably when the injected metadata center is ledger-backed
-- turn truth broadcasts semantic events for reasoning, text, tool, usage, terminal, and error
+- turn truth broadcasts semantic events for reasoning, text, tool, tool-result, usage, terminal, and error
 - turn lifecycle and provider-output milestones may emit debug events into `debug.core`
 - terminal result is projected from validated completion schema, not raw provider finish reason
 - cancel requests become explicit cancelled terminal events through the reason owner rather than failed terminal events
@@ -88,7 +88,7 @@
 | 01 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create per-turn truth container and provider payload from session-owned rewrite state | session history + user input + turn-scoped additions | initialized turn record | CLI/server/node | reason orchestrator | bound |
 | 01 note | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | current startup path reads rewrite mode/version and base context from `SessionHistory`, invokes planner-owned segment admission, and stores planner diagnostics while keeping them off request content | request-chain content + session metadata inputs | provider-ready typed request content + metadata-side cache diagnostics | reason orchestrator | `plan_context` | bound |
 | 01 metadata | `ReasonTurnEngine::write_metadata` | `crates/freehand-reason/src/lib.rs` | write start-turn control metadata with owner/node provenance after payload construction and before history commit | turn record + rewrite/model diagnostics | validated metadata envelope in metadata center or explicit metadata error | `ReasonTurnEngine::start_turn` | `MetadataCenter::write` | bound |
-| 02 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | materialize provider semantic output into turn truth | provider semantic output | updated turn state | provider boundary | turn state writer | bound |
+| 02 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | materialize provider semantic output into turn truth and broadcast tool-result re-entry for UI lifecycle projection | provider semantic output | updated turn state plus matching broadcast event | provider boundary | turn state writer | bound |
 | 02 metadata | `ReasonTurnEngine::write_provider_output_metadata` | `crates/freehand-reason/src/lib.rs` | classify provider output control metadata before turn mutation | provider semantic output + turn identity | metadata entries for output kind, tool/usage/error/provider terminal control facts | `ReasonTurnEngine::apply_provider_output` | `ReasonTurnEngine::write_metadata` | bound |
 | 03 | `parse_completion_submission_block` | `crates/freehand-blocks/src/lib.rs` | parse tagged completion schema from model text | model text with tagged JSON | typed completion submission or itemized parse errors | turn/live runtime | completion parser | bound |
 | 04 | `validate_completion_submission` | `crates/freehand-blocks/src/lib.rs` | validate completion schema | completion submission | completion decision or rejection | turn state writer | terminal validator | bound |
@@ -108,6 +108,7 @@
 - `ReasonRewriteRuntime` now provides the baseline consumer path for calling `reason.rewrite-policy` and then triggering compaction/rollback/resume gates
 - provider usage conversion into rewrite policy is bound
 - debug emission into `debug.core` is bound for start-turn, provider-output application, completion acceptance/rejection, and explicit failed terminal write
+- tool result re-entry now emits `ReasonBroadcastEvent::ToolResult` in addition to updating owning turn truth
 - current debug emission remains observation-only; sink-dispatch failures surface through `DebugHub::subscribe_failures` and are not promoted into turn truth or reason error events
 - metadata emission into `metadata.core` is bound for start-turn and provider-output application
 - reason metadata producers can now persist durably through a ledger-backed `MetadataCenter` without request-text leakage

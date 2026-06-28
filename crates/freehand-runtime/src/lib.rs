@@ -1142,6 +1142,7 @@ where
                     .map_err(|err| {
                         RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                     })?;
+                drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                 drain_debug_events(&debug_receiver, &mut on_debug);
                 executed_tool_call_ids.push(tool_call.tool_call.tool_call_id.as_str().to_owned());
                 tool_exchanges.push(ProviderToolExchange {
@@ -1707,10 +1708,10 @@ impl RuntimeCommandDispatcher {
             )
             .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
 
-        let projection = project_runtime_turn(
+        let projection = project_runtime_turn_history(
             &state.config.reason_agent_id,
             &state.config.master_node_id,
-            &turn,
+            std::slice::from_ref(&turn),
         );
         state.turns.push(turn);
         self.ui_state
@@ -1836,10 +1837,10 @@ impl RuntimeCommandDispatcher {
         }
         let outcome =
             outcome.map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-        let projection = project_runtime_turn(
+        let projection = project_runtime_turn_history(
             &state.config.reason_agent_id,
             &state.config.master_node_id,
-            &outcome.turn,
+            &outcome.turns,
         );
         state.turns.extend(outcome.turns.clone());
         self.ui_state
@@ -2675,6 +2676,14 @@ fn apply_runtime_reason_broadcast(
                 false,
             );
         }
+        ReasonBroadcastEvent::ToolResult(event) => {
+            ui.apply_tool_result(
+                reason_agent_id.clone(),
+                master_node_id.to_owned(),
+                event,
+                false,
+            );
+        }
         ReasonBroadcastEvent::Usage(event) => {
             ui.apply_usage_event(
                 reason_agent_id.clone(),
@@ -2729,6 +2738,7 @@ fn publish_live_pending_user_projection(
                 user_text: Some(user_text.to_owned()),
                 semantic_events: Vec::new(),
                 tool_calls: Vec::new(),
+                tool_results: Vec::new(),
                 usage_events: Vec::new(),
                 terminal_event: None,
                 error_events: Vec::new(),
@@ -2759,6 +2769,7 @@ fn publish_live_cancelled_projection(
                 user_text: Some(user_text.to_owned()),
                 semantic_events: Vec::new(),
                 tool_calls: Vec::new(),
+                tool_results: Vec::new(),
                 usage_events: Vec::new(),
                 terminal_event: Some(freehand_contracts::ReasonResp03TerminalEvent {
                     session_id: session_id.clone(),
@@ -2776,11 +2787,20 @@ fn publish_live_cancelled_projection(
         ));
 }
 
-fn project_runtime_turn(
+fn project_runtime_turn_history(
     reason_agent_id: &AgentId,
     master_node_id: &str,
-    turn: &TurnRecord,
+    turns: &[TurnRecord],
 ) -> UiTurnProjection {
+    let turn = turns
+        .last()
+        .expect("runtime turn history projection requires at least one turn");
+    let mut tool_calls = Vec::new();
+    let mut tool_results = Vec::new();
+    for turn in turns {
+        tool_calls.extend(turn.tool_calls.clone());
+        tool_results.extend(turn.tool_results.clone());
+    }
     turn_projection_for_client(
         turn_projection_from_events(TurnProjectionInput {
             source_agent_id: reason_agent_id.clone(),
@@ -2789,7 +2809,8 @@ fn project_runtime_turn(
             turn_id: turn.request.turn_id.clone(),
             user_text: Some(ui_user_text_for_turn(turn)),
             semantic_events: turn.semantic_events.clone(),
-            tool_calls: turn.tool_calls.clone(),
+            tool_calls,
+            tool_results,
             usage_events: turn.usage_events.clone(),
             terminal_event: turn.terminal_event.clone(),
             error_events: turn.error_events.clone(),
@@ -2797,6 +2818,14 @@ fn project_runtime_turn(
         }),
         UiClientKind::WebUi,
     )
+}
+
+fn project_runtime_turn(
+    reason_agent_id: &AgentId,
+    master_node_id: &str,
+    turn: &TurnRecord,
+) -> UiTurnProjection {
+    project_runtime_turn_history(reason_agent_id, master_node_id, std::slice::from_ref(turn))
 }
 
 fn ui_user_text_for_turn(turn: &TurnRecord) -> String {
@@ -2863,6 +2892,61 @@ mod tests {
             live: None,
         })
         .expect("runtime")
+    }
+
+    #[test]
+    fn live_bridge_final_projection_keeps_final_round_text_and_aggregates_tool_activity_only() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                continue_single_response("first round continue"),
+                tool_use_single_response(),
+                complete_single_response("final round done"),
+            ],
+        );
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            live_request(false),
+        )
+        .expect("live bridge");
+        let first_request = rx.recv().expect("first request");
+        let second_request = rx.recv().expect("second request");
+        let third_request = rx.recv().expect("third request");
+        handle.join().expect("join");
+
+        assert!(first_request.contains("reply exactly pong"));
+        assert!(second_request.contains("first round continue"));
+        assert!(second_request.contains("\"tools\""));
+        assert!(third_request.contains("\"type\":\"tool_result\""));
+        assert_eq!(outcome.rounds, 3);
+        assert_eq!(outcome.tool_executions, 1);
+
+        let projection = project_runtime_turn_history(
+            &AgentId::new("agent-live"),
+            "agent-live-node",
+            &outcome.turns,
+        );
+        let public = freehand_ui_protocol::public_turn_projection(projection);
+        assert_eq!(public.public_conversation[0].body, "reply exactly pong");
+        assert!(public.public_conversation.iter().any(|item| item.kind
+            == freehand_ui_protocol::UiConversationItemKind::ToolSummary
+            && item.status == "completed"));
+        assert!(
+            public
+                .public_conversation
+                .iter()
+                .all(|item| !item.body.contains("first round continue"))
+        );
+        assert!(
+            public
+                .public_conversation
+                .iter()
+                .any(|item| item.body.contains("final round done"))
+        );
     }
 
     fn selected_master_agent() -> SelectedAgentConfig {

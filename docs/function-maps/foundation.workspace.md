@@ -30,6 +30,7 @@
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
 - release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
 - global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
+- launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 - generated wiki writer materializes `docs/wiki/*.md` and `docs/wiki/README.md` from the JSON truth
@@ -43,6 +44,7 @@
 - gate returns success when local and remote automation routes through the same full gate stack
 - release artifacts include `freehand-cli`, `freehand-server`, `freehand-daemon`, and the Android release APK under `dist/`
 - global install exposes `freehand-cli`, `freehand-server`, and `freehand-daemon` on the chosen install prefix
+- launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
 - gate returns explicit failure with missing path or missing policy snippet
 - mainline generation returns fresh wiki artifacts derived from machine-readable source
@@ -56,6 +58,8 @@
 - duplicate feature-map seed entries for one `feature_id` surface as gate failure
 - missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
 - missing release prerequisites such as Java or Cargo surface as script failure before artifacts are claimed
+- launchd bootstrap or kickstart failure surfaces as script failure before background service success is claimed
+- mismatched launchd daemon binary prefix surfaces as install script failure before service success is claimed
 - request-node structs that introduce metadata/debug/cache/control payload fields or types surface as gate failure
 - ad hoc metadata owner types outside `freehand-metadata` or metadata owner structs that introduce request or control payload fields surface as gate failure
 - invalid JSON mainline source surfaces as generation/check failure
@@ -89,6 +93,8 @@
 | 17 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that `docs/architecture/feature-map.md` keeps one seed entry per `feature_id` | feature-map markdown | pass/fail | `run_gates_check` | feature-map scanner | bound |
 | 18 | `run_release` | `scripts/release.sh` | run release regressions and build/stage host + Android artifacts | repo root state | `dist/` artifacts | operator / GitHub release workflow | `make ci`, Cargo, Gradle | bound |
 | 19 | `run_install_global` | `scripts/install-global.sh` | run release script and install host binaries to a global prefix | release artifacts | installed commands | operator | `scripts/release.sh`, install tool | bound |
+| 20 | `run_install_launchd` | `scripts/install-launchd.sh` | install global binaries and bootstrap the macOS user LaunchAgent | repo root + runtime env | running launchd service | operator | `scripts/install-global.sh`, launchctl | bound |
+| 21 | `run_uninstall_launchd` | `scripts/uninstall-launchd.sh` | stop and remove the macOS user LaunchAgent plist | launchd label | service removed | operator | launchctl | bound |
 
 ## Sync Status Against Code
 

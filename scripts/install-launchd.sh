@@ -13,6 +13,7 @@ agent="${FREEHAND_DAEMON_AGENT:-master}"
 bind_addr="${FREEHAND_DAEMON_BIND:-127.0.0.1:4041}"
 workdir="${FREEHAND_DAEMON_WORKDIR:-"$repo_root"}"
 pair_token="${FREEHAND_PAIR_TOKEN_SHARED:-}"
+daemon_bin="$bin_dir/freehand-daemon"
 
 cd "$repo_root"
 
@@ -30,11 +31,22 @@ write_launchd_env() {
 FREEHAND_DAEMON_AGENT="$agent"
 FREEHAND_DAEMON_BIND="$bind_addr"
 FREEHAND_DAEMON_WORKDIR="$workdir"
+FREEHAND_DAEMON_BIN="$daemon_bin"
 FREEHAND_PAIR_TOKEN_SHARED="$pair_token"
 PATH="$bin_dir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 EOF
     chmod 0600 "$env_file"
   else
+    # shellcheck disable=SC1090
+    . "$env_file"
+    if [[ -n "${FREEHAND_DAEMON_BIN:-}" && "$FREEHAND_DAEMON_BIN" != "$daemon_bin" ]]; then
+      echo "daemon env uses a different binary path: $FREEHAND_DAEMON_BIN" >&2
+      echo "expected: $daemon_bin" >&2
+      exit 2
+    fi
+    if [[ -z "${FREEHAND_DAEMON_BIN:-}" ]]; then
+      printf '\nFREEHAND_DAEMON_BIN="%s"\n' "$daemon_bin" >>"$env_file"
+    fi
     echo "[freehand-launchd] keeping existing env file: $env_file"
   fi
 }

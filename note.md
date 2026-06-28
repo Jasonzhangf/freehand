@@ -1,5 +1,20 @@
 # note.md
 
+# 2026-06-28 review/launchd/ui projection closeout
+  - verified after fixes:
+    - runtime final multi-round projection now aggregates only cross-round `tool_calls` and `tool_results`
+    - final visible text / usage / errors / terminal status come from the final round
+    - WebUI debug 404 now renders as `debug pending`; SSE transport errors now render as `debug stream reconnecting`
+    - launchd wrapper requires explicit `FREEHAND_DAEMON_BIN` and fails on prefix mismatch instead of silently running an old binary
+  - validation passed:
+    - `cargo test -p freehand-runtime`
+    - `cargo test -p freehand-server`
+    - `cargo test -p xtask`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`
+
 - 2026-06-27 launchd global daemon install closeout
   - added service scripts:
     - `scripts/freehand-daemon-launchd.sh`

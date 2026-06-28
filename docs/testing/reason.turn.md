@@ -9,6 +9,7 @@
   - semantic events broadcast
   - debug events emit to `debug.core` without mutating turn truth
   - tool result re-entry returns to the owning turn
+  - tool result re-entry broadcasts `ReasonBroadcastEvent::ToolResult` so UI/runtime bridges can update tool lifecycle state
   - completion schema controls terminal acceptance
   - cancellation writes an explicit cancelled terminal event rather than failed/success terminal truth
   - cancel_turn on an already-terminal turn returns existing terminal without overwriting
@@ -40,7 +41,7 @@
   - production CLI/server persistence of schema retry ledger remains outside this module baseline
   - metadata producer coverage currently starts with `reason.turn`; broader runtime/provider/debug producers remain out of scope
 - sync status between design and implementation:
-  - turn truth, typed request payload baseline, completion parsing/validation, tool-result re-entry, non-blocking broadcast baseline, and session-history rewrite-state sourcing landed
+  - turn truth, typed request payload baseline, completion parsing/validation, tool-result re-entry plus broadcast, non-blocking broadcast baseline, and session-history rewrite-state sourcing landed
   - turn startup now forwards optional tool-schema fingerprint input into planner diagnostics while keeping request content and tool registry ownership separate
   - rewrite trigger policy exists in `freehand-blocks`, and `ReasonRewriteRuntime` now wires policy-approved rewrite gates into session history
   - provider usage can feed rewrite policy through shared prompt-token conversion

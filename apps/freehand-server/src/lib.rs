@@ -266,14 +266,14 @@ async fn handle_subscribe_debug_state(
             })
             .map_err(|_| StatusCode::BAD_REQUEST)?
         {
-            UiQueryResult::Debug(Some(snapshot)) => snapshot,
-            UiQueryResult::Debug(None) => return Err(StatusCode::NOT_FOUND),
+            UiQueryResult::Debug(Some(snapshot)) => Some(UiProjection::Debug(snapshot)),
+            UiQueryResult::Debug(None) => None,
             _ => return Err(StatusCode::BAD_REQUEST),
         };
-        (UiProjection::Debug(snapshot), state.subscribe())
+        (snapshot, state.subscribe())
     };
     Ok(Sse::new(subscription_event_stream(
-        Some(initial_projection),
+        initial_projection,
         receiver,
         selector,
     )))
@@ -377,6 +377,7 @@ fn sample_slave_turn_projection() -> UiTurnProjection {
             },
         ],
         tool_calls: Vec::new(),
+        tool_results: Vec::new(),
         usage_events: Vec::new(),
         terminal_event: Some(ReasonResp03TerminalEvent {
             session_id: SessionId::new("session-webui-smoke"),
@@ -439,6 +440,10 @@ fn sample_checkpoint_snapshot() -> UiCheckpointSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use freehand_contracts::{
+        ReasonReq04ToolCall, ReasonReq05ToolResultReentry, ToolCallContract, ToolCallId,
+        ToolResultContract,
+    };
     use freehand_ui_protocol::{
         StaticUiCommandDispatchPort, UiCommand, UiCommandDispatchEnvelope,
         UiCommandDispatchPortError,
@@ -753,6 +758,7 @@ mod tests {
                     content: "second answer".to_owned(),
                 }],
                 tool_calls: Vec::new(),
+                tool_results: Vec::new(),
                 usage_events: Vec::new(),
                 terminal_event: None,
                 error_events: Vec::new(),
@@ -849,6 +855,7 @@ mod tests {
                     content: "first answer".to_owned(),
                 }],
                 tool_calls: Vec::new(),
+                tool_results: Vec::new(),
                 usage_events: Vec::new(),
                 terminal_event: None,
                 error_events: Vec::new(),
@@ -861,6 +868,167 @@ mod tests {
         assert!(turn_body.contains("\"turn_id\":\"turn-webui-first\""));
         assert!(turn_body.contains("first prompt"));
         assert!(turn_body.contains("first answer"));
+
+        drop(turn_sse);
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn debug_subscribe_waits_when_turn_arrives_before_debug_snapshot() {
+        let server = TestServer::spawn_empty().await;
+        let client = Client::builder().build().expect("client");
+
+        server
+            .protocol_state
+            .lock()
+            .expect("lock protocol")
+            .apply_turn_projection(turn_projection_from_events(TurnProjectionInput {
+                source_agent_id: AgentId::new("slave-agent"),
+                source_node_id: "slave-node".to_owned(),
+                session_id: SessionId::new("session-webui-smoke"),
+                turn_id: TurnId::new("turn-debug-late"),
+                user_text: Some("debug should arrive later".to_owned()),
+                semantic_events: vec![ReasonResp01SemanticEvent {
+                    session_id: SessionId::new("session-webui-smoke"),
+                    turn_id: TurnId::new("turn-debug-late"),
+                    trace_id: TraceId::new("trace-debug-late"),
+                    feature_id: FeatureId::new("app.webui-smoke"),
+                    agent_id: AgentId::new("slave-agent"),
+                    kind: SemanticEventKind::Text,
+                    content: "answer before debug".to_owned(),
+                }],
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+                usage_events: Vec::new(),
+                terminal_event: None,
+                error_events: Vec::new(),
+                slave_substream_card: false,
+            }));
+
+        let debug_query = client
+            .get(format!(
+                "{}/ui/query/debug/turn-debug-late",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("debug query");
+        assert_eq!(debug_query.status(), StatusCode::NOT_FOUND);
+
+        let mut debug_sse = client
+            .get(format!(
+                "{}/ui/subscribe/debug/turn-debug-late",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("debug sse");
+        assert_eq!(debug_sse.status(), StatusCode::OK);
+
+        server
+            .protocol_state
+            .lock()
+            .expect("lock protocol")
+            .set_debug_state(DebugStateSnapshot::new(
+                DebugSemanticPosition {
+                    feature_id: FeatureId::new("app.webui-smoke"),
+                    session_id: SessionId::new("session-webui-smoke"),
+                    turn_id: TurnId::new("turn-debug-late"),
+                    trace_id: TraceId::new("trace-debug-late"),
+                    agent_id: Some(AgentId::new("slave-agent")),
+                    pipeline_node: Some("UiDebugState".to_owned()),
+                },
+                DebugScenePosition {
+                    crate_name: "freehand-server".to_owned(),
+                    file: "src/lib.rs".to_owned(),
+                    function: "debug_subscribe_waits_when_turn_arrives_before_debug_snapshot"
+                        .to_owned(),
+                    line: None,
+                    artifact_path: None,
+                    raw_exchange_id: None,
+                },
+                "debug arrived after turn",
+                vec!["detail=late-debug".to_owned()],
+            ));
+
+        let mut debug_buffer = String::new();
+        let debug_body = read_next_sse_event(&mut debug_sse, &mut debug_buffer).await;
+        assert!(debug_body.contains("event: debug"));
+        assert!(debug_body.contains("\"status_text\":\"debug arrived after turn\""));
+
+        drop(debug_sse);
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn latest_turn_sse_streams_tool_waiting_and_completed_status() {
+        let server = TestServer::spawn_empty().await;
+        let client = Client::builder().build().expect("client");
+
+        let mut turn_sse = client
+            .get(format!("{}/ui/subscribe/turn/latest", server.base_url))
+            .send()
+            .await
+            .expect("turn sse");
+        assert_eq!(turn_sse.status(), StatusCode::OK);
+
+        let tool_call = ReasonReq04ToolCall {
+            session_id: SessionId::new("session-webui-smoke"),
+            turn_id: TurnId::new("turn-tool-sse"),
+            trace_id: TraceId::new("trace-tool-sse"),
+            feature_id: FeatureId::new("app.webui-smoke"),
+            agent_id: AgentId::new("slave-agent"),
+            tool_call: ToolCallContract {
+                tool_call_id: ToolCallId::new("tool-sse-1"),
+                tool_name: "read_file".to_owned(),
+                arguments: Vec::new(),
+                arguments_complete: true,
+            },
+        };
+
+        server
+            .protocol_state
+            .lock()
+            .expect("lock protocol")
+            .apply_tool_call(
+                AgentId::new("slave-agent"),
+                "slave-node".to_owned(),
+                &tool_call,
+                false,
+            );
+
+        let mut turn_buffer = String::new();
+        let waiting_body = read_next_sse_event(&mut turn_sse, &mut turn_buffer).await;
+        assert!(waiting_body.contains("event: turn"));
+        assert!(waiting_body.contains("\"turn_id\":\"turn-tool-sse\""));
+        assert!(waiting_body.contains("\"status\":\"waiting\""));
+        assert!(waiting_body.contains("read_file"));
+
+        server
+            .protocol_state
+            .lock()
+            .expect("lock protocol")
+            .apply_tool_result(
+                AgentId::new("slave-agent"),
+                "slave-node".to_owned(),
+                &ReasonReq05ToolResultReentry {
+                    session_id: SessionId::new("session-webui-smoke"),
+                    turn_id: TurnId::new("turn-tool-sse"),
+                    trace_id: TraceId::new("trace-tool-sse"),
+                    feature_id: FeatureId::new("app.webui-smoke"),
+                    agent_id: AgentId::new("slave-agent"),
+                    tool_result: ToolResultContract {
+                        tool_call_id: ToolCallId::new("tool-sse-1"),
+                        output: "private result body".to_owned(),
+                    },
+                },
+                false,
+            );
+
+        let completed_body = read_next_sse_event(&mut turn_sse, &mut turn_buffer).await;
+        assert!(completed_body.contains("\"status\":\"completed\""));
+        assert!(completed_body.contains("Tool result returned for read_file"));
+        assert!(!completed_body.contains("private result body"));
 
         drop(turn_sse);
         server.stop().await;

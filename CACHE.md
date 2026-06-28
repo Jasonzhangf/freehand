@@ -1,6 +1,15 @@
 # CACHE
 
 - Current branch: `main`.
+- Current verified review/install slice:
+  - `cargo test -p freehand-runtime` -> 42 passed, including `live_bridge_final_projection_keeps_final_round_text_and_aggregates_tool_activity_only`
+  - `cargo test -p freehand-server` -> 11 passed, including debug SSE wait and tool activity status SSE coverage
+  - `cargo test -p xtask` -> 18 passed
+  - `cargo run -p xtask -- mainlines generate` -> ok
+  - `cargo run -p xtask -- mainlines check` -> ok
+  - `cargo run -p xtask -- gates check` -> ok
+  - `make ci` -> ok
+  - launchd wrapper now requires explicit `FREEHAND_DAEMON_BIN` and refuses prefix mismatch
 - Current verified release/install slice:
   - `scripts/release.sh` -> exit 0 with `make ci`, Android JVM test, Rust release build, Android release APK, and staged artifacts
   - `scripts/install-global.sh` with temp `FREEHAND_PREFIX` -> exit 0, installed `freehand-cli`, `freehand-server`, `freehand-daemon`

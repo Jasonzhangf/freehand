@@ -5,4 +5,4 @@
 /.beads/*.lock
 /.beads/sync-state*
 /tmp
-
+/dist

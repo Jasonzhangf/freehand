@@ -828,7 +828,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: build fmt clippy test mainlines gates ci release install-global hooks",
+        ".PHONY: build fmt clippy test mainlines gates ci release install-global install-launchd restart-launchd uninstall-launchd launchd-status launchd-logs hooks",
         "Makefile",
     )?;
     require_contains(
@@ -845,6 +845,21 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     require_contains(
         &makefile,
         "install-global:\n\tscripts/install-global.sh",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "install-launchd:\n\tscripts/install-launchd.sh",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "restart-launchd:\n\tscripts/install-launchd.sh restart",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "uninstall-launchd:\n\tscripts/uninstall-launchd.sh",
         "Makefile",
     )?;
 
@@ -1719,7 +1734,7 @@ mod tests {
         }
         let makefile = match mode {
             CiFixtureMode::Aligned | CiFixtureMode::CiWorkflowPartialGate => {
-                ".PHONY: build fmt clippy test mainlines gates ci release install-global hooks\n\
+                ".PHONY: build fmt clippy test mainlines gates ci release install-global install-launchd restart-launchd uninstall-launchd launchd-status launchd-logs hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
@@ -1728,10 +1743,13 @@ mainlines:\n\tcargo run -p xtask -- mainlines check\n\
 gates:\n\tcargo run -p xtask -- gates check\n\
 ci: build fmt clippy test mainlines gates\n\
 release:\n\tscripts/release.sh\n\
-install-global:\n\tscripts/install-global.sh\n"
+install-global:\n\tscripts/install-global.sh\n\
+install-launchd:\n\tscripts/install-launchd.sh\n\
+restart-launchd:\n\tscripts/install-launchd.sh restart\n\
+uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n"
             }
             CiFixtureMode::MakeCiMissingMainlines => {
-                ".PHONY: build fmt clippy test gates ci release install-global hooks\n\
+                ".PHONY: build fmt clippy test gates ci release install-global install-launchd restart-launchd uninstall-launchd launchd-status launchd-logs hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
@@ -1739,7 +1757,10 @@ test:\n\tcargo test --workspace\n\
 gates:\n\tcargo run -p xtask -- gates check\n\
 ci: build fmt clippy test gates\n\
 release:\n\tscripts/release.sh\n\
-install-global:\n\tscripts/install-global.sh\n"
+install-global:\n\tscripts/install-global.sh\n\
+install-launchd:\n\tscripts/install-launchd.sh\n\
+restart-launchd:\n\tscripts/install-launchd.sh restart\n\
+uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n"
             }
         };
         fs::write(root.join("Makefile"), makefile).expect("write Makefile fixture");

@@ -31,6 +31,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
 - `ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state
 - `ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`
+- tool-call lifecycle is projected as UiToolActivity inside UiTurnProjection: ReasonReq04ToolCall creates a waiting activity and matching ReasonReq05ToolResultReentry marks it completed
 - slave turn may surface as WebUI-only separate card while staying in one protocol truth
 - client-specific projection gating stays inside the protocol owner, not in apps
 - UI must be able to consume reason-turn state and debug-state projections without owning either truth source
@@ -108,10 +109,10 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 06 | `UiProtocolState::subscribe` | `crates/freehand-ui-protocol/src/lib.rs` | expose the protocol-owned continuous subscription channel for app transports | none | UiSubscriptionEvent receiver | app/transport adapters | protocol state | bound |
 | 07 | `subscription_selector` | `crates/freehand-ui-protocol/src/lib.rs` | build read-only subscribe selector | subscribe command | subscription selector | protocol boundary | stream handler | bound |
 | 08 | `subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route incremental projection to matching subscription | subscription selector plus projection | delivery decision | stream handler | selector matcher | bound |
-| 09 | `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | project whole-turn state into UI snapshot | semantic/tool/usage/terminal/error/user inputs | UI turn projection | query/stream handler | projector | bound |
+| 09 | `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | project whole-turn state into UI snapshot, including tool lifecycle activities | semantic/tool/tool-result/usage/terminal/error/user inputs | UI turn projection | query/stream handler | projector | bound |
 | 10 | `terminal_text_projection` | `crates/freehand-ui-protocol/src/lib.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector | bound |
 | 10a | `public_conversation_items / public_turn_projection` | `crates/freehand-ui-protocol/src/lib.rs` | derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema | full turn projection | public turn projection | app transports/renderers | projector | bound |
-| 11 | `UiProtocolState::apply_semantic_event / apply_tool_call / apply_usage_event / apply_terminal_event / apply_error_event` | `crates/freehand-ui-protocol/src/lib.rs` | incrementally update one turn projection from shared contract events and publish subscription updates | shared reason/error contracts | updated queryable/subscribable turn projection | runtime/debug bridges | protocol state | bound |
+| 11 | `UiProtocolState::apply_semantic_event / apply_tool_call / apply_tool_result / apply_usage_event / apply_terminal_event / apply_error_event` | `crates/freehand-ui-protocol/src/lib.rs` | incrementally update one turn projection from shared contract events and publish subscription updates | shared reason/error contracts | updated queryable/subscribable turn projection | runtime/debug bridges | protocol state | bound |
 | 12 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate client-specific slave substream visibility | turn projection plus client kind | client-specific turn projection | CLI/WebUI adapter | projector | bound |
 | 13 | `UiProtocolState::set_debug_state` | `crates/freehand-ui-protocol/src/lib.rs` | store per-turn read-only debug projection for UI consumption and publish subscription updates | freehand-debug snapshot | queryable/subscribable debug state | reason/node/debug bridge | protocol state | bound |
 | 14 | `UiProtocolState::apply_debug_event` | `crates/freehand-ui-protocol/src/lib.rs` | ingest one observation-only debug event into UI protocol state when a snapshot is present | freehand-debug event | updated per-turn debug state or ignored event | reason/node/debug bridge | protocol state | bound |
@@ -133,4 +134,5 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in UiProtocolState
 - public turn projection is protocol-owned
 - terminal status is now preserved in UiTurnProjection and public conversation status mapping
+- tool activity status is now preserved in UiTurnProjection.tool_activities and public conversation status mapping
 - CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn

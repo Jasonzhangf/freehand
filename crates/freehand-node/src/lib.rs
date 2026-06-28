@@ -971,6 +971,7 @@ mod tests {
                     arguments_complete: true,
                 },
             }],
+            tool_results: Vec::new(),
             usage_events: vec![ReasonResp02UsageEvent {
                 session_id: SessionId::new("session-1"),
                 turn_id: TurnId::new("turn-1"),

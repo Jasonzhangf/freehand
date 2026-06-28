@@ -36,7 +36,10 @@
   - WebUI latest-turn SSE initial snapshot plus later update smoke
   - WebUI blank-state latest-turn SSE wait smoke
   - WebUI debug SSE initial snapshot plus later update smoke
+  - WebUI debug SSE waits when turn projection arrives before debug snapshot instead of surfacing transient 404 as command failure
+  - WebUI debug SSE error rendering distinguishes reconnecting transport state from missing-snapshot pending state
   - WebUI latest-turn query/SSE public projection excludes raw completion schema and internal reasoning from public conversation while preserving user input
+  - WebUI latest-turn SSE renders tool lifecycle status updates (`waiting` then `completed`) from protocol truth
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
@@ -62,6 +65,8 @@
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input
   - submit-in-flight cancel path uses `CancelLatestActiveTurn` before a concrete `turn_id` arrives
   - query/SSE now return a public turn payload with `public_conversation` for main cards
+  - debug query remains snapshot-only, while debug SSE waits for late debug snapshots so turn/debug timing races are not user-visible failures; debug SSE errors render reconnecting state instead of stale pending
+  - latest-turn SSE now has regression coverage for tool waiting/completed status updates
   - protocol-only transport library reuse is landed
   - app remains protocol-only by dependency gate
   - migrated mainline-call source and generated wiki are kept in sync with this test design

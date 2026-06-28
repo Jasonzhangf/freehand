@@ -14,9 +14,10 @@ run_install_global() {
   install -m 0755 dist/bin/freehand-cli "$bin_dir/freehand-cli"
   install -m 0755 dist/bin/freehand-server "$bin_dir/freehand-server"
   install -m 0755 dist/bin/freehand-daemon "$bin_dir/freehand-daemon"
+  install -m 0755 scripts/freehand-daemon-launchd.sh "$bin_dir/freehand-daemon-launchd"
 
   echo "[freehand-install] installed:"
-  printf '  %s\n' "$bin_dir/freehand-cli" "$bin_dir/freehand-server" "$bin_dir/freehand-daemon"
+  printf '  %s\n' "$bin_dir/freehand-cli" "$bin_dir/freehand-server" "$bin_dir/freehand-daemon" "$bin_dir/freehand-daemon-launchd"
   echo "[freehand-install] ensure PATH contains: $bin_dir"
   echo "[freehand-install] daemon start: freehand-daemon serve --agent master --bind 127.0.0.1:4041"
 }

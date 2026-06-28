@@ -63,6 +63,7 @@ pub struct TurnStartInput {
 pub enum ReasonBroadcastEvent {
     Semantic(ReasonResp01SemanticEvent),
     Tool(ReasonReq04ToolCall),
+    ToolResult(ReasonReq05ToolResultReentry),
     Usage(ReasonResp02UsageEvent),
     Terminal(ReasonResp03TerminalEvent),
     Error(ErrorErr01RuntimeClassified),
@@ -304,7 +305,8 @@ impl ReasonTurnEngine {
                 );
             }
             ProviderSemanticOutput::ToolResultReentry(result) => {
-                turn.tool_results.push(result);
+                turn.tool_results.push(result.clone());
+                self.publish(ReasonBroadcastEvent::ToolResult(result));
                 self.emit_debug(
                     turn,
                     "ReasonTurnEngine::apply_provider_output",
@@ -768,6 +770,7 @@ mod tests {
     #[test]
     fn writes_tool_result_reentry_back_to_owning_turn() {
         let engine = ReasonTurnEngine::new();
+        let receiver = engine.subscribe(4);
         let mut history = session_history();
         let mut turn = engine
             .start_turn(&mut history, start_input())
@@ -790,6 +793,10 @@ mod tests {
             )
             .expect("apply provider output");
         assert_eq!(turn.tool_results, vec![result]);
+        assert!(matches!(
+            receiver.recv().expect("tool result broadcast"),
+            ReasonBroadcastEvent::ToolResult(_)
+        ));
     }
 
     #[test]

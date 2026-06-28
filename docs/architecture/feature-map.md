@@ -106,6 +106,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - repo workflow changes
   - CI/CD full-gate alignment changes
   - release or global-install script changes
+  - launchd service install/uninstall script changes
   - mainline generation shape changes
   - generated wiki freshness policy changes
   - mainline manifest cross-link policy changes
@@ -330,6 +331,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - update_triggers:
   - runtime transport injection changes
   - daemon bootstrap contract changes
+  - daemon service-manager startup contract changes
   - shared app transport injection shape changes
   - generated wiki freshness policy changes
 - lifecycle_checks:

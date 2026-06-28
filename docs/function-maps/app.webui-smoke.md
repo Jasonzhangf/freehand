@@ -22,6 +22,7 @@
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
+- per-turn debug SSE is a live subscription and waits for late debug snapshots when turn projection arrives before debug projection
 - transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing
 - front-end cancel button and Escape key send protocol-owned `CancelTurn` commands through command ingress
 - front-end Escape sends `CancelLatestActiveTurn` when submit is in flight but no concrete `turn_id` has reached the browser yet
@@ -35,11 +36,14 @@
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
 - app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
 - SSE subscribe routes now emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe must stay open on blank state until a turn exists
+- debug SSE subscribe stays open when a debug snapshot is not available yet, while debug HTTP query remains snapshot-only and returns explicit 404
+- front-end debug state distinguishes missing snapshot (`debug pending`) from debug SSE transport errors (`debug stream reconnecting`)
 - WebUI submit success path still actively re-queries latest turn truth after command receipt to cover command-complete-before-browser-subscriber timing
 - WebUI checkpoint panel renders protocol checkpoint summaries from query state and keeps checkpoint files out of app-boundary truth
 - WebUI cancel path sends `CancelTurn` for the current active turn, clears pending local input only after dispatch, and refreshes protocol truth
 - WebUI cancel path uses `CancelTurn` when `turn_id` is known and `CancelLatestActiveTurn` during the submit-in-flight pre-SSE window
 - front-end script projects protocol-owned `UiPublicTurnProjection` and `DebugStateSnapshot` into semantic message cards and detail panes, including the user prompt in the public conversation stream
+- front-end script renders protocol-projected tool lifecycle status from `public_conversation` so tool calls can show waiting and completed states over SSE
 - terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
 - theme module owns white/black theme switching and is separated from WebUI layout/runtime scripts
@@ -52,6 +56,8 @@
 - transport/render wiring failures are surfaced explicitly
 - unknown static assets return explicit 404
 - cancel without an active turn clears only local input and does not invent a runtime mutation
+- transient missing debug snapshots are rendered as pending debug state, not command failure
+- debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state
 - dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
 - direct reason/provider/node/config coupling is a policy violation, not a fallback path
 
@@ -81,8 +87,8 @@
 | 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve shared protocol-only router on a listener | TCP listener + protocol state + dispatch port + shutdown future | live HTTP/SSE transport boundary | app entrypoint/tests/runtime host | app server | bound |
 | 06 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate slave-card visibility by client kind | turn projection + client kind | client-specific projection | app boundary | protocol owner | bound |
 | 07 | `initializeThemeToggle` | `apps/freehand-server/assets/theme.js` | switch white/black visual theme only | UI theme choice | body theme class + persisted localStorage setting | WebUI shell | theme module | bound |
-| 08 | `subscription_event_stream` / `projection_to_sse_event` | `apps/freehand-server/src/lib.rs` | convert protocol-owned subscription updates into continuous HTTP SSE delivery | `UiSubscriptionEvent` receiver + selector | streamed SSE events | subscribe routes | protocol state | bound |
-| 09 | `refreshTurn` / `renderMessages` / `submitUserInput` | `apps/freehand-server/assets/webui.js` | consume protocol query/SSE public turn payloads, re-query latest turn after command receipt, and render semantic cards without owning filtering semantics | `UiPublicTurnProjection` JSON + command dispatch receipt | DOM message blocks + command status | WebUI shell | existing protocol endpoints | bound |
+| 08 | `subscription_event_stream` / `projection_to_sse_event` | `apps/freehand-server/src/lib.rs` | convert protocol-owned subscription updates into continuous HTTP SSE delivery, including waiting subscriptions for late debug snapshots | `UiSubscriptionEvent` receiver + selector | streamed SSE events | subscribe routes | protocol state | bound |
+| 09 | `refreshTurn` / `renderMessages` / `refreshDebug` / `submitUserInput` | `apps/freehand-server/assets/webui.js` | consume protocol query/SSE public turn payloads, render semantic/tool/debug cards without owning filtering semantics, and keep missing debug snapshots pending instead of failed | `UiPublicTurnProjection` JSON + debug snapshot/pending state + command dispatch receipt | DOM message blocks + command status | WebUI shell | existing protocol endpoints | bound |
 | 10 | `handle_query_checkpoints` / `refreshCheckpoints` | `apps/freehand-server/src/lib.rs` / `apps/freehand-server/assets/webui.js` | serve and render read-only checkpoint summaries from protocol state | protocol checkpoint snapshot | HTTP JSON checkpoint snapshot + secondary inspector cards | WebUI shell | ui.protocol state | bound |
 | 11 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` for the active protocol turn from button or Escape key | latest protocol turn id | command dispatch receipt + refreshed projection | WebUI shell | `/ui/command` | bound |
 | 12 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
@@ -99,9 +105,12 @@
 - runtime host reuse now happens through injected state and dispatch port, not by duplicating transport behavior
 - protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
+- debug subscribe route now also keeps one SSE connection open when the first debug snapshot is not available yet
 - WebUI submit path still explicitly refreshes latest turn truth after a successful command receipt
 - WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files
 - WebUI Cancel button and Escape key now send `CancelTurn` through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`
+- WebUI tool cards now render protocol-projected waiting/completed lifecycle states from SSE/query public conversation truth
+- WebUI missing-debug race is locked by pending-state rendering plus late-debug SSE subscription coverage; debug SSE transport errors render as reconnecting instead of stale pending
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics
 - generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes

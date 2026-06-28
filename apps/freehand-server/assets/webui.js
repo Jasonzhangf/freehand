@@ -109,9 +109,11 @@ function renderMessages() {
       const statusClass =
         item.kind === "Error" || item.status === "failed" || item.status === "cancelled"
           ? "failed"
+          : item.kind === "ToolSummary" && item.status === "completed"
+            ? "success"
           : item.kind === "Terminal"
             ? "success"
-            : item.kind === "ToolSummary"
+          : item.kind === "ToolSummary"
               ? "running"
               : "success";
       fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, item.body, variant));
@@ -252,7 +254,19 @@ async function refreshDebug() {
     return;
   }
   const config = shellConfig();
-  state.debug = await fetchJson(`${config.debugQueryBase}${state.turn.turn_id}`);
+  try {
+    state.debug = await fetchJson(`${config.debugQueryBase}${state.turn.turn_id}`);
+  } catch (error) {
+    if (error.status === 404) {
+      state.debug = {
+        status_text: "debug pending",
+        detail_lines: ["waiting for debug snapshot"],
+      };
+      renderDebug();
+      return;
+    }
+    throw error;
+  }
   renderDebug();
 }
 
@@ -289,6 +303,16 @@ function ensureDebugSubscription() {
     state.debug = JSON.parse(event.data);
     renderDebug();
   });
+  source.onerror = () => {
+    const status = state.debug?.status_text || "";
+    if (!state.debug || status === "debug pending" || status === "debug stream waiting") {
+      state.debug = {
+        status_text: "debug stream reconnecting",
+        detail_lines: ["waiting for debug SSE reconnect"],
+      };
+      renderDebug();
+    }
+  };
   state.debugEventSource = source;
 }
 
