@@ -27,7 +27,7 @@
     "debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines",
     "`ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state",
     "`ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`",
-    "tool-call lifecycle is projected as UiToolActivity inside UiTurnProjection: ReasonReq04ToolCall upserts a waiting activity and matching ReasonReq05ToolResultReentry marks the same activity completed",
+    "tool-call lifecycle is projected as UiToolActivity inside UiTurnProjection: ReasonReq04ToolCall upserts a waiting activity, matching ReasonReq05ToolResultReentry marks the same activity completed, and failed terminal truth marks still-waiting activities failed",
     "slave turn may surface as WebUI-only separate card while staying in one protocol truth",
     "client-specific projection gating stays inside the protocol owner, not in apps",
     "UI must be able to consume reason-turn state and debug-state projections without owning either truth source",

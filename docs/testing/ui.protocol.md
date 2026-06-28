@@ -14,7 +14,7 @@
   - subscribe returns an initial snapshot plus continuous incremental truth, or waits for the first matching turn when subscribing before any turn exists
   - debug subscribe returns per-turn read-only debug projections
   - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
-  - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`
+  - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`, or failed terminal truth marks still-waiting activities `failed`
   - terminal events preserve both terminal text and terminal status in UI projection
   - debug receiver drain ingests observation-only debug events into protocol state
   - source identity and stream kind stay explicit
@@ -48,7 +48,7 @@
   - checkpoint summary query smoke
   - CLI hides slave card while WebUI may render it
   - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries plus user input
-  - tool activity projection smoke covers waiting-before-result and completed-after-result, without rendering tool result bodies into public summary
+  - tool activity projection smoke covers waiting-before-result, completed-after-result, and failed-terminal-without-result, without rendering tool result bodies into public summary
   - duplicate tool-call projection smoke covers one public card per `tool_call_id`
   - cancelled/failed terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
@@ -81,5 +81,5 @@
   - client-specific projection gating remains protocol-owned
   - public turn projection is protocol-owned
   - terminal status is now preserved in `UiTurnProjection` and public conversation status mapping
-  - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries
+  - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries, including failed status for still-waiting tools when terminal truth is failed
   - tool summaries now expose `tool_call_id`, and duplicate same-id tool calls are regression-locked to one public card

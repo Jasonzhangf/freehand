@@ -60,7 +60,7 @@
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
 - `ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state
 - `ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`
-- tool-call lifecycle is projected as `UiToolActivity` inside `UiTurnProjection`: `ReasonReq04ToolCall` upserts a `waiting` activity, and matching `ReasonReq05ToolResultReentry` marks the same activity `completed`
+- tool-call lifecycle is projected as `UiToolActivity` inside `UiTurnProjection`: `ReasonReq04ToolCall` upserts a `waiting` activity, matching `ReasonReq05ToolResultReentry` marks the same activity `completed`, and failed terminal truth marks still-waiting tool activities `failed`
 - slave turn may surface as WebUI-only separate card while staying in one protocol truth
 - client-specific projection gating stays inside the protocol owner, not in apps
 - UI must be able to consume reason-turn state and debug-state projections without owning either truth source
@@ -158,6 +158,6 @@
 - debug-state projection consumes `freehand-debug::DebugStateSnapshot` instead of a UI-owned duplicate DTO
 - UI ingress versus truth-writer separation is now locked in the function map
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in `UiProtocolState`
-- tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation status mapping
+- tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation status mapping, including failed terminal projection for still-waiting tool calls
 - public tool summaries now preserve `tool_call_id`, and duplicate tool-call projections upsert into one activity before public rendering
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

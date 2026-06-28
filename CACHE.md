@@ -1,5 +1,20 @@
 # CACHE
 
+- Current verified live failure projection slice:
+  - `provider.reason-live-bridge` now materializes failed terminal/error truth before returning tool execution failure for unknown or unimplemented tools
+  - `runtime.ui-command-dispatch` refreshes `UiProtocolState` from authoritative persistence before returning dispatch failure, so WebUI query/SSE do not stay waiting
+  - `ui.protocol` marks still-waiting tool activities as `Failed` when terminal truth is failed
+  - regression locks:
+    - `live_bridge_fails_explicitly_on_unknown_tool_name`
+    - `live_bridge_fails_explicitly_on_registered_unimplemented_tool_name`
+    - `live_dispatch_projects_failed_tool_turn_into_ui_state` covers consecutive failure projection without historical tool leakage
+    - `failed_terminal_marks_waiting_tool_activity_failed`
+  - live fixed-port validation:
+    - global binary installed at `~/.local/bin/freehand-daemon`
+    - launchd label `com.freehand.daemon`, pid `47794`, fixed port `127.0.0.1:4041`
+    - `POST /ui/command` asking `ls path=~/code/codex` returned HTTP 500 explicit dispatch failure
+    - `GET /ui/query/latest-active-turn` returned `runtime-turn-17` with `terminal_status=Failed`, one current failed `ls` tool activity, and failed terminal/error public cards
+    - `GET /ui/subscribe/turn/latest` emitted the same failed projection over SSE
 - Current branch: `main`.
 - Current verified UI repair slice:
   - `ui.protocol` upserts duplicate same-`tool_call_id` tool calls into one activity

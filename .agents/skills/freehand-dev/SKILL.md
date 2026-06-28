@@ -224,6 +224,7 @@ Use this skill for any non-trivial work in this repo.
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - For state machine, stream, timeout, retry, error projection, or resource cleanup changes, add both positive and negative tests.
+- For live bridge error projection repairs, do not stop at persistence truth. Also verify runtime dispatch refreshes `UiProtocolState`, UI protocol marks user-visible activity status correctly, and fixed-port query plus SSE expose the same terminal/error state.
 - For provider recovery logic, classify errors as recoverable, unrecoverable, or periodic-recoverable. Periodic windows use provider-supplied seconds first, otherwise configured defaults.
 - For reason-turn stop logic, validate completion schema before terminal acceptance. Reject and explain invalid terminal submissions.
 - UI protocol black-box tests must cover standard user-visible flows, not only internal event wiring.

@@ -33,6 +33,7 @@
 - latest-active cancellation supports Esc during the short window before WebUI has received a concrete `turn_id`
 - live provider-backed multi-round turns keep the original operator prompt in public UI projection instead of exposing internal continuation prompts
 - final live multi-round UI projection preserves final-round visible text, usage, errors, and terminal status while aggregating tool-call/tool-result lifecycle activity across runtime rounds
+- live provider-backed submit refreshes `UiProtocolState` from authoritative persistence before returning dispatch failure when the live bridge materializes failed turn truth
 - node-backed direct-message commands return dispatch receipts after owner validation
 - runtime-backed rewind commands restore checkpointed workspace state without mutating reason/session/UI truth directly
 - config-selected runtime bootstrap returns one dispatcher for the requested agent
@@ -46,6 +47,7 @@
 - missing turn targets for cancel/resume return explicit dispatch-port failures
 - cancelled live turns return explicit cancelled dispatch failure to the original submitter and must not overwrite cancelled UI projection with later provider success
 - live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries
+- live provider/tool failures that materialize failed turn truth are returned as explicit dispatch failures only after the failed projection has been refreshed into `UiProtocolState`
 - `CancelLatestActiveTurn` with no active or persisted turn returns explicit target-not-found
 - missing checkpoint manifests return explicit dispatch target-not-found failures
 - wrong slave target node returns explicit dispatch-port failures
@@ -103,4 +105,5 @@
 - unwritable shared node metadata ledgers are now regression-locked as explicit bootstrap failures
 - config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
 - final live projection now aggregates only cross-round tool lifecycle state so earlier-round tool activity remains visible without leaking intermediate continuation text into the final latest turn
+- failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

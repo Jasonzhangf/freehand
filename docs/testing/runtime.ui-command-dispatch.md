@@ -15,6 +15,7 @@
   - reason-backed submit projects the original user prompt into derived UI public conversation truth
   - live provider submit incrementally updates derived UI turn/debug state before terminal receipt
   - live provider submit maps tool-result broadcasts into derived UI state so tool activity can transition to completed over SSE
+  - live provider submit maps bridge-materialized tool execution failure into derived UI state before returning dispatch failure, so query/SSE do not stay waiting
   - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately
   - live provider multi-round continuation prompts must not replace the public user prompt projection
   - final live multi-round projection aggregates tool activity from earlier rounds instead of showing only the final round, while excluding intermediate continuation text from the final public conversation
@@ -40,6 +41,7 @@
   - live reason final projection keeps original user prompt after tool-result continuation
   - live reason final projection keeps earlier-round tool activity visible after tool-result continuation
   - live reason final projection negative coverage proves intermediate continuation text is not exposed in the final public conversation
+  - live reason dispatch failure projection coverage proves bridge-materialized failed turns update `UiProtocolState` before the dispatch error is returned
   - node direct-message dispatch coverage
   - unsupported/missing-target dispatch failure coverage
 - module black-box plan:
@@ -69,6 +71,7 @@
   - provider-backed submit dispatch plus persisted restore/bootstrap is covered
   - live provider submit now streams incremental UI state updates through runtime-owned hooks
   - live provider submit now streams tool-result UI updates and final projection keeps earlier-round tool activity visible without exposing intermediate continuation text
+  - live provider submit now refreshes failed bridge truth from persistence before returning dispatch failure, preventing silent waiting UI state
   - reason-backed cancel dispatch is covered
   - active live cancel no longer waits behind provider IO because live submit releases the runtime mutex after active turn registration
   - latest-active cancel is covered for current-turn stop without a UI-known `turn_id`

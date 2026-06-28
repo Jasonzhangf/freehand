@@ -26,6 +26,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events and incrementally writes reason/debug/tool-result projection updates while the turn is still running
 - live provider-backed multi-round turns keep the original operator prompt in public UI projection instead of exposing internal continuation prompts
 - final live multi-round UI projection preserves final-round visible text, usage, errors, and terminal status while aggregating tool-call/tool-result lifecycle activity across runtime rounds
+- live provider-backed submit refreshes UiProtocolState from authoritative persistence before returning dispatch failure when the live bridge materializes failed turn truth
 - node-backed direct-message commands return dispatch receipts after owner validation
 - runtime-backed rewind commands restore checkpointed workspace state without mutating reason/session/UI truth directly
 - config-selected runtime bootstrap returns one dispatcher for the requested agent
@@ -46,6 +47,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - invalid persisted recovery truth or node-metadata bootstrap failure returns explicit runtime bootstrap failure
 - cancelled live turns return explicit cancelled dispatch failure to the original submitter and must not overwrite cancelled UI projection with later provider success
 - live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries
+- live provider/tool failures that materialize failed turn truth are returned as explicit dispatch failures only after the failed projection has been refreshed into UiProtocolState
 - CancelLatestActiveTurn with no active or persisted turn returns explicit target-not-found
 
 ## Shared Multi-Reference Functions

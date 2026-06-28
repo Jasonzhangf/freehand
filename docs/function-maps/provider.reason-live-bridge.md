@@ -47,8 +47,8 @@
 - invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times
 - incomplete tool calls are not executed and do not become tool-result truth
 - writable tools without preview/checkpoint support are rejected explicitly
-- unknown tool names fail explicitly instead of being ignored
-- registered but unimplemented tool names fail explicitly instead of being treated as successful fallback
+- unknown tool names fail explicitly instead of being ignored, and the active turn is materialized as failed truth before the bridge returns the tool execution error
+- registered but unimplemented tool names fail explicitly instead of being treated as successful fallback, and the active turn is materialized as failed truth before the bridge returns the tool execution error
 - provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`
 - provider raw debug-ledger write failures are returned as explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - persistence restore/write failures fail the live bridge explicitly
@@ -126,7 +126,7 @@
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
-- unknown tool names and registered-but-unimplemented tool names are expected to surface as explicit `RuntimeLiveBridgeError::ToolExecutionFailed(...)` failures from the runtime-owned tool loop and must not materialize tool-result or terminal success truth
+- unknown tool names and registered-but-unimplemented tool names are expected to surface as explicit `RuntimeLiveBridgeError::ToolExecutionFailed(...)` failures from the runtime-owned tool loop, materialize failed terminal/error truth, and must not materialize tool-result or terminal success truth
 - runtime white-box coverage now explicitly locks both unknown-tool and registered-but-unimplemented-tool failure paths at the live bridge boundary
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported

@@ -108,6 +108,7 @@ pub struct UiTurnProjection {
 pub enum UiToolActivityStatus {
     Waiting,
     Completed,
+    Failed,
 }
 
 impl UiToolActivityStatus {
@@ -115,6 +116,7 @@ impl UiToolActivityStatus {
         match self {
             UiToolActivityStatus::Waiting => "waiting",
             UiToolActivityStatus::Completed => "completed",
+            UiToolActivityStatus::Failed => "failed",
         }
     }
 }
@@ -510,6 +512,12 @@ impl UiProtocolState {
             );
             projection.terminal_status = Some(event.status.clone());
             projection.terminal_text = Some(terminal_text_projection(event));
+            if event.status == TerminalStatus::Failed {
+                fail_waiting_tool_activities(
+                    &mut projection.tool_activities,
+                    Some(event.summary.clone()),
+                );
+            }
             projection.clone()
         };
         self.latest_active_turn_id = Some(event.turn_id.clone());
@@ -835,6 +843,17 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
             UiToolActivityStatus::Completed => {
                 format!("Tool result returned for {}", activity.tool_name)
             }
+            UiToolActivityStatus::Failed => {
+                format!(
+                    "Tool execution failed for {}{}",
+                    activity.tool_name,
+                    activity
+                        .detail
+                        .as_ref()
+                        .map(|detail| format!(": {detail}"))
+                        .unwrap_or_default()
+                )
+            }
         };
         items.push(UiConversationItem {
             kind: UiConversationItemKind::ToolSummary,
@@ -964,6 +983,9 @@ fn upsert_tool_activity(
             (UiToolActivityStatus::Completed, UiToolActivityStatus::Waiting) => {
                 UiToolActivityStatus::Completed
             }
+            (UiToolActivityStatus::Completed, UiToolActivityStatus::Failed) => {
+                UiToolActivityStatus::Completed
+            }
             _ => status,
         };
         activity.detail = detail;
@@ -976,6 +998,15 @@ fn upsert_tool_activity(
         status,
         detail,
     });
+}
+
+fn fail_waiting_tool_activities(activities: &mut [UiToolActivity], detail: Option<String>) {
+    for activity in activities {
+        if activity.status == UiToolActivityStatus::Waiting {
+            activity.status = UiToolActivityStatus::Failed;
+            activity.detail = detail.clone();
+        }
+    }
 }
 
 fn command_kind(command: &UiCommand) -> &'static str {
@@ -1036,6 +1067,23 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             _ => {}
         }
     }
+    let mut tool_activities = tool_activities_from_input(&input.tool_calls, &input.tool_results);
+    if matches!(
+        input.terminal_event.as_ref().map(|event| &event.status),
+        Some(TerminalStatus::Failed)
+    ) {
+        let detail = input
+            .terminal_event
+            .as_ref()
+            .map(|event| event.summary.clone())
+            .or_else(|| {
+                input
+                    .error_events
+                    .first()
+                    .map(|event| event.error.message.clone())
+            });
+        fail_waiting_tool_activities(&mut tool_activities, detail);
+    }
     UiTurnProjection {
         source: UiSource {
             source_agent_id: input.source_agent_id,
@@ -1053,7 +1101,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             .iter()
             .map(|call| call.tool_call.tool_name.clone())
             .collect(),
-        tool_activities: tool_activities_from_input(&input.tool_calls, &input.tool_results),
+        tool_activities,
         usage: input
             .usage_events
             .iter()
@@ -1290,6 +1338,55 @@ mod tests {
         assert_eq!(completed_tool.status, "completed");
         assert!(completed_tool.body.contains("search"));
         assert!(!completed_tool.body.contains("result body"));
+    }
+
+    #[test]
+    fn failed_terminal_marks_waiting_tool_activity_failed() {
+        let projection = turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            user_text: Some("run the task".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: vec![ReasonReq04ToolCall {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                tool_call: freehand_contracts::ToolCallContract {
+                    tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
+                    tool_name: "ls".to_owned(),
+                    arguments: vec![],
+                    arguments_complete: true,
+                },
+            }],
+            tool_results: Vec::new(),
+            usage_events: Vec::new(),
+            terminal_event: Some(ReasonResp03TerminalEvent {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                status: TerminalStatus::Failed,
+                summary: "tool failed explicitly".to_owned(),
+            }),
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        });
+
+        assert_eq!(
+            projection.tool_activities[0].status,
+            UiToolActivityStatus::Failed
+        );
+        let tool = public_conversation_items(&projection)
+            .into_iter()
+            .find(|item| item.kind == UiConversationItemKind::ToolSummary)
+            .expect("tool item");
+        assert_eq!(tool.status, "failed");
+        assert!(tool.body.contains("tool failed explicitly"));
     }
 
     #[test]

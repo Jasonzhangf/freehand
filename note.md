@@ -1,5 +1,29 @@
 # note.md
 
+# 2026-06-28 live tool failure UI projection repair
+  - root cause:
+    - live bridge tool execution failure used to return `RuntimeLiveBridgeError::ToolExecutionFailed` before materializing failed turn truth, so protocol truth stayed active/non-terminal and WebUI could only show waiting
+    - first repair wrote failed truth to persistence but runtime dispatch `Err` branch still skipped UI projection; fixed by refreshing `UiProtocolState` from authoritative persistence before returning dispatch failure
+    - second live validation exposed a history-pollution bug: dispatch failure projection was aggregating all restored session turns; fixed by projecting only the current runtime-turn ordinal
+    - failed terminal projection still left waiting tool activities as waiting; fixed `ui.protocol` to mark still-waiting tool activities `Failed`
+  - locked by tests:
+    - `live_bridge_fails_explicitly_on_unknown_tool_name`
+    - `live_bridge_fails_explicitly_on_registered_unimplemented_tool_name`
+    - `live_dispatch_projects_failed_tool_turn_into_ui_state` now covers consecutive failures without historical tool leakage
+    - `failed_terminal_marks_waiting_tool_activity_failed`
+  - validation passed:
+    - `cargo test -p freehand-ui-protocol`
+    - `cargo test -p freehand-runtime`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `scripts/install-global.sh`
+    - `scripts/install-launchd.sh restart`
+    - fixed-port daemon `http://127.0.0.1:4041/health` -> 200 `ok`
+    - real command ingress with `ls path=~/code/codex` -> HTTP 500 explicit `command_dispatch_port_failure`
+    - latest-turn query for `runtime-turn-17` -> `terminal_status=Failed`, one current `tool_activities[0].status=Failed`, terminal/error public cards failed
+    - latest-turn SSE emitted same failed turn projection
+
 # 2026-06-28 WebUI tool card/status repair
   - root cause: whole-turn projection could duplicate same `tool_call_id` as separate waiting activities, and WebUI rendered tool summaries as static cards without stable tool identity
   - fix:

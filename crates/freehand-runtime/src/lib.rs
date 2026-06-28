@@ -22,9 +22,9 @@ use freehand_config::{
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
-    ContextSegmentKind, ContextStability, FeatureId, ReasonReq04ToolCall,
-    ReasonReq05ToolResultReentry, SessionId, ToolPreviewChangeKind, ToolPreviewContract,
-    ToolResultContract, TraceId, TurnId,
+    ContextSegmentKind, ContextStability, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified,
+    FeatureId, ReasonReq04ToolCall, ReasonReq05ToolResultReentry, RecoveryPolicy, SessionId,
+    ToolPreviewChangeKind, ToolPreviewContract, ToolResultContract, TraceId, TurnId,
 };
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
@@ -1072,12 +1072,117 @@ where
         if !completed_tool_calls.is_empty() {
             for tool_call in completed_tool_calls {
                 ensure_live_not_cancelled(&request)?;
-                let tool_result = execute_registry_tool_call(
+                let tool_result = match execute_registry_tool_call(
                     &tool_registry,
                     &request.runtime_home,
                     &turn,
                     &tool_call,
-                )?;
+                ) {
+                    Ok(tool_result) => tool_result,
+                    Err(err) => {
+                        let failure_message = err.to_string();
+                        let error_output =
+                            ProviderSemanticOutput::Error(ErrorErr01RuntimeClassified {
+                                session_id: Some(turn.request.session_id.clone()),
+                                turn_id: Some(turn.request.turn_id.clone()),
+                                trace_id: turn.request.trace_id.clone(),
+                                feature_id: turn.request.feature_id.clone(),
+                                agent_id: Some(turn.request.agent_id.clone()),
+                                error: ErrorContract {
+                                    code: "TOOL_EXECUTION_FAILED".to_owned(),
+                                    class: ErrorClass::Contract,
+                                    recovery: RecoveryPolicy::Unrecoverable,
+                                    message: failure_message.clone(),
+                                },
+                            });
+                        engine
+                            .apply_provider_output(&mut turn, error_output.clone())
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ProviderOutputApplyFailed(err.to_string())
+                            })?;
+                        persistence
+                            .record_provider_output_applied(
+                                &history,
+                                &turn,
+                                &error_output,
+                                schema_rejections.len() as u32,
+                            )
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                            })?;
+                        engine.fail_turn(&mut turn, failure_message.clone());
+                        drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                        drain_debug_events(&debug_receiver, &mut on_debug);
+                        write_live_bridge_metadata(
+                            &metadata_center,
+                            &agent_id,
+                            &request.session_id,
+                            RuntimeMetadataWriteSpec {
+                                turn_id: Some(&turn.request.turn_id),
+                                trace_id: &turn.request.trace_id,
+                                kind: MetadataKind::RuntimeState,
+                                pipeline_node: "RuntimeLive04TurnClosed",
+                                metadata_suffix: "tool_execution_failed".to_owned(),
+                                symbol_path: "run_live_anthropic_reason_turn",
+                                entries: vec![
+                                    MetadataEntry {
+                                        key: "bridge.rounds".to_owned(),
+                                        value: json!(round),
+                                    },
+                                    MetadataEntry {
+                                        key: "bridge.schema_rejections".to_owned(),
+                                        value: json!(schema_rejections.len()),
+                                    },
+                                    MetadataEntry {
+                                        key: "bridge.tool_executions".to_owned(),
+                                        value: json!(tool_executions),
+                                    },
+                                    MetadataEntry {
+                                        key: "terminal.status".to_owned(),
+                                        value: json!("Failed"),
+                                    },
+                                    MetadataEntry {
+                                        key: "tool.name".to_owned(),
+                                        value: json!(tool_call.tool_call.tool_name.as_str()),
+                                    },
+                                    MetadataEntry {
+                                        key: "tool.call_id".to_owned(),
+                                        value: json!(tool_call.tool_call.tool_call_id.as_str()),
+                                    },
+                                ],
+                            },
+                        )?;
+                        emit_live_bridge_debug(
+                            &debug_hub,
+                            &agent_id,
+                            &request.session_id,
+                            RuntimeDebugEmitSpec {
+                                turn_id: &turn.request.turn_id,
+                                trace_id: &turn.request.trace_id,
+                                pipeline_node: "RuntimeLive04TurnClosed",
+                                function: "run_live_anthropic_reason_turn",
+                                status_text: "turn failed",
+                                detail_lines: vec![
+                                    format!("round={round}"),
+                                    format!("tool_name={}", tool_call.tool_call.tool_name.as_str()),
+                                    format!(
+                                        "tool_call_id={}",
+                                        tool_call.tool_call.tool_call_id.as_str()
+                                    ),
+                                    "terminal_status=Failed".to_owned(),
+                                ],
+                            },
+                        );
+                        drain_debug_events(&debug_receiver, &mut on_debug);
+                        persistence
+                            .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                            })?;
+                        turns.push(turn);
+                        return Err(RuntimeLiveBridgeError::ToolExecutionFailed(failure_message));
+                    }
+                };
                 write_live_bridge_metadata(
                     &metadata_center,
                     &agent_id,
@@ -1835,21 +1940,64 @@ impl RuntimeCommandDispatcher {
                 RuntimeLiveBridgeError::Cancelled.to_string(),
             ));
         }
-        let outcome =
-            outcome.map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-        let projection = project_runtime_turn_history(
-            &state.config.reason_agent_id,
-            &state.config.master_node_id,
-            &outcome.turns,
-        );
-        state.turns.extend(outcome.turns.clone());
-        self.ui_state
-            .lock()
-            .expect("lock ui state")
-            .apply_turn_projection(projection);
-        self.refresh_checkpoint_projection_from_config(&state.config)
-            .map_err(map_checkpoint_dispatch_error)?;
-        Ok(outcome)
+        match outcome {
+            Ok(outcome) => {
+                let projection = project_runtime_turn_history(
+                    &state.config.reason_agent_id,
+                    &state.config.master_node_id,
+                    &outcome.turns,
+                );
+                state.turns.extend(outcome.turns.clone());
+                self.ui_state
+                    .lock()
+                    .expect("lock ui state")
+                    .apply_turn_projection(projection);
+                self.refresh_checkpoint_projection_from_config(&state.config)
+                    .map_err(map_checkpoint_dispatch_error)?;
+                Ok(outcome)
+            }
+            Err(err) => {
+                let persistence = ReasonPersistence::new(
+                    state
+                        .config
+                        .live
+                        .as_ref()
+                        .expect("live submit requires live config")
+                        .runtime_home
+                        .clone(),
+                    state.config.reason_agent_id.clone(),
+                );
+                let restored =
+                    persistence
+                        .restore(&state.config.session_id)
+                        .map_err(|restore_err| {
+                            UiCommandDispatchPortError::DispatchFailed(format!(
+                                "failed to project live error turn from persistence: {restore_err}"
+                            ))
+                        })?;
+                state.turns = restored.closed_turns;
+                if let Some(active_turn) = restored.active_turn {
+                    state.turns.push(active_turn.turn);
+                }
+                state
+                    .turns
+                    .sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
+                let current_turns =
+                    current_runtime_turns_for_projection(&state.turns, &prepared.turn_id)?;
+                let projection = project_runtime_turn_history(
+                    &state.config.reason_agent_id,
+                    &state.config.master_node_id,
+                    &current_turns,
+                );
+                self.ui_state
+                    .lock()
+                    .expect("lock ui state")
+                    .apply_turn_projection(projection);
+                self.refresh_checkpoint_projection_from_config(&state.config)
+                    .map_err(map_checkpoint_dispatch_error)?;
+                Err(UiCommandDispatchPortError::DispatchFailed(err.to_string()))
+            }
+        }
     }
 
     fn dispatch_cancel_turn(
@@ -2818,6 +2966,25 @@ fn project_runtime_turn_history(
         }),
         UiClientKind::WebUi,
     )
+}
+
+fn current_runtime_turns_for_projection(
+    turns: &[TurnRecord],
+    base_turn_id: &TurnId,
+) -> Result<Vec<TurnRecord>, UiCommandDispatchPortError> {
+    let target_ordinal = runtime_turn_position(base_turn_id).0;
+    let current_turns = turns
+        .iter()
+        .filter(|turn| runtime_turn_position(&turn.request.turn_id).0 == target_ordinal)
+        .cloned()
+        .collect::<Vec<_>>();
+    if current_turns.is_empty() {
+        return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+            "failed to project live error turn `{}` from persistence",
+            base_turn_id.as_str()
+        )));
+    }
+    Ok(current_turns)
 }
 
 fn project_runtime_turn(
@@ -4004,18 +4171,35 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
             .restore(&session_id)
             .expect("restore live session");
-        assert!(restored.closed_turns.is_empty());
         let latest = restored
-            .active_turn
-            .as_ref()
-            .expect("active turn should remain");
-        assert_eq!(latest.turn.tool_calls.len(), 1);
+            .closed_turns
+            .last()
+            .expect("failed turn should be materialized");
+        assert!(restored.active_turn.is_none());
+        assert_eq!(latest.tool_calls.len(), 1);
         assert_eq!(
-            latest.turn.tool_calls[0].tool_call.tool_name.as_str(),
+            latest.tool_calls[0].tool_call.tool_name.as_str(),
             "totally_unknown_tool"
         );
-        assert!(latest.turn.tool_results.is_empty());
-        assert!(latest.turn.terminal_event.is_none());
+        assert!(latest.tool_results.is_empty());
+        assert_eq!(
+            latest
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Failed)
+        );
+        assert!(latest.terminal_event.as_ref().is_some_and(|event| {
+            event
+                .summary
+                .contains("unknown tool `totally_unknown_tool`")
+        }));
+        assert!(
+            latest
+                .error_events
+                .iter()
+                .any(|event| event.error.code == "TOOL_EXECUTION_FAILED")
+        );
     }
 
     #[test]
@@ -4046,18 +4230,107 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
             .restore(&session_id)
             .expect("restore live session");
-        assert!(restored.closed_turns.is_empty());
         let latest = restored
-            .active_turn
-            .as_ref()
-            .expect("active turn should remain");
-        assert_eq!(latest.turn.tool_calls.len(), 1);
+            .closed_turns
+            .last()
+            .expect("failed turn should be materialized");
+        assert!(restored.active_turn.is_none());
+        assert_eq!(latest.tool_calls.len(), 1);
+        assert_eq!(latest.tool_calls[0].tool_call.tool_name.as_str(), "bg_jobs");
+        assert!(latest.tool_results.is_empty());
         assert_eq!(
-            latest.turn.tool_calls[0].tool_call.tool_name.as_str(),
-            "bg_jobs"
+            latest
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Failed)
         );
-        assert!(latest.turn.tool_results.is_empty());
-        assert!(latest.turn.terminal_event.is_none());
+        assert!(
+            latest
+                .terminal_event
+                .as_ref()
+                .is_some_and(|event| event.summary.contains("bg_jobs"))
+        );
+        assert!(
+            latest
+                .error_events
+                .iter()
+                .any(|event| event.error.code == "TOOL_EXECUTION_FAILED")
+        );
+    }
+
+    #[test]
+    fn live_dispatch_projects_failed_tool_turn_into_ui_state() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![tool_use_unknown_response(), tool_use_unknown_response()],
+        );
+        let runtime_home = temp_runtime_home();
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            runtime_home,
+            false,
+        )
+        .expect("runtime");
+
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "trigger tool failure".to_owned(),
+                })
+                .expect("envelope"),
+            )
+            .expect_err("submit should fail after tool execution failure");
+        let _ = rx.recv().expect("provider request");
+
+        assert!(matches!(
+            err,
+            UiCommandDispatchPortError::DispatchFailed(message)
+                if message.contains("unknown tool `totally_unknown_tool`")
+        ));
+        let second_err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "trigger tool failure again".to_owned(),
+                })
+                .expect("envelope"),
+            )
+            .expect_err("second submit should also fail explicitly");
+        let _ = rx.recv().expect("second provider request");
+        handle.join().expect("join");
+        assert!(matches!(
+            second_err,
+            UiCommandDispatchPortError::DispatchFailed(message)
+                if message.contains("unknown tool `totally_unknown_tool`")
+        ));
+
+        let latest = runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui state")
+            .query(&UiCommand::QueryLatestActiveTurn)
+            .expect("query");
+        match latest {
+            UiQueryResult::Turn(Some(turn)) => {
+                assert_eq!(turn.turn_id, TurnId::new("runtime-turn-2"));
+                assert_eq!(turn.tool_activities.len(), 1);
+                assert_eq!(turn.terminal_status, Some(TerminalStatus::Failed));
+                assert!(
+                    turn.terminal_text
+                        .as_deref()
+                        .is_some_and(|text| text.contains("unknown tool `totally_unknown_tool`"))
+                );
+                assert!(
+                    turn.errors
+                        .iter()
+                        .any(|error| error.contains("unknown tool `totally_unknown_tool`"))
+                );
+            }
+            other => panic!("unexpected failed latest turn: {other:?}"),
+        }
     }
 
     #[test]
