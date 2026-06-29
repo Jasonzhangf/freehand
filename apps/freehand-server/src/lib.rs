@@ -1095,10 +1095,14 @@ mod tests {
         assert!(js_body.contains("pendingSubmitBody"));
         assert!(js_body.contains("elapsedSince"));
         assert!(js_body.contains("submitStartedAt"));
+        assert!(js_body.contains("modelRequestStartedAt"));
+        assert!(js_body.contains("turnIsWaitingForModelResponse"));
+        assert!(js_body.contains("modelRequestBody"));
         assert!(js_body.contains("modelWaitStartedAt"));
         assert!(js_body.contains("turnIsWaitingForModel"));
         assert!(js_body.contains("modelWaitBody"));
         assert!(js_body.contains("hasPendingSubmit"));
+        assert!(js_body.contains("hasModelRequestWait"));
         assert!(js_body.contains("hasModelWait"));
         assert!(js_body.contains("waitingToolStatus"));
         assert!(js_body.contains("tool.detail || status"));

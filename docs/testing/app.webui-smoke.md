@@ -53,7 +53,7 @@
   - WebUI latest-turn query/SSE public projection excludes raw completion schema, internal reasoning, and detailed tool terms from public conversation while preserving user input
   - WebUI latest-turn SSE renders tool lifecycle status updates (`waiting` then `completed`) from protocol truth
   - WebUI ADP turn updates render tool lifecycle status updates (`waiting`, `completed`, and `failed`) from protocol truth
-- WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, submit/dispatch waiting timers, waiting-model timers, waiting animation assets, tool result detail rendering, and low-noise tool summary rendering with elapsed waiting timers
+- WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, submit/dispatch waiting timers, model-response waiting timers from protocol projection, waiting-model timers, waiting animation assets, tool result detail rendering, and low-noise tool summary rendering with elapsed waiting timers
 - WebUI JS asset smoke locks same-execution-cycle round grouping so `runtime-turn-N` and `runtime-turn-N-rM` render as one logical transcript group instead of duplicate user/tool cards
 - WebUI JS asset smoke locks assistant-text collapse into one card per logical turn and raw completion-schema stripping while preserving Final card projection
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
@@ -91,6 +91,7 @@
   - latest-turn SSE compatibility and WebUI ADP asset checks now have regression coverage for tool waiting/completed status updates and default ADP routing
 - WebUI tool cards now normalize by `tool_call_id`, waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
 - WebUI submit/dispatch pending state and tool waiting state now both refresh with visible elapsed time instead of static waiting text
+- WebUI model-response waiting state is driven by protocol-projected `model_request`, not local-only guessing
 - WebUI completed/failed tool cards now render protocol-projected result detail, and tool-complete-to-next-model waiting has its own elapsed timer
 - WebUI selected-session transcript grouping is landed for same execution-cycle round ids while protocol/session truth remains unmerged
 - WebUI assistant-card text now collapses to one card per logical turn, and raw `<freehand_completion>` blocks do not pollute the main chat stream

@@ -1,5 +1,24 @@
 # note.md
 
+# 2026-06-29 WebUI provider-request wait state repair
+  - gap found:
+    - submit/dispatch waiting was local WebUI state and did not prove provider request had been built/sent
+    - runtime already emitted `RuntimeLive02ProviderRequestBuilt` debug truth, but ADP turn projection did not expose request-sent/model-response-waiting lifecycle state
+  - fix:
+    - `UiTurnProjection.model_request` carries protocol-owned request-sent/model-response-waiting state
+    - `RuntimeLive02ProviderRequestBuilt` is mapped into `UiProtocolState::apply_model_request_waiting`
+    - WebUI renders an animated "waiting for model response" card with elapsed time from protocol projection
+    - model request wait clears on semantic response, tool call, tool result, usage, terminal, or error projection
+  - verification:
+    - `cargo fmt --check`
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-ui-protocol -- --nocapture`
+    - `cargo test -p freehand-server -- --nocapture`
+    - `cargo test -p freehand-runtime -- --nocapture`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+
 # 2026-06-29 WebUI tool-result and model-wait progress repair
   - gap found:
     - `ui.protocol` intentionally kept public tool summary body status-only, so WebUI could not show tool execution output

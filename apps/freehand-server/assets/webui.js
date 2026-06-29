@@ -36,6 +36,7 @@ const state = {
   debug: null,
   checkpoints: [],
   toolTimings: new Map(),
+  modelRequestStartedAt: null,
   modelWaitStartedAt: null,
   activeTurnId: null,
   pendingUserInput: null,
@@ -331,6 +332,28 @@ function pendingSubmitBody(text) {
   return elapsed ? `${text}\n等待调度 ${elapsed}` : text;
 }
 
+function turnIsWaitingForModelResponse(turn) {
+  return !!(turn && turn.model_request && !turn.terminal_text);
+}
+
+function syncModelRequestTiming(turn) {
+  if (!turnIsWaitingForModelResponse(turn)) {
+    state.modelRequestStartedAt = null;
+    return;
+  }
+  if (!state.modelRequestStartedAt) {
+    state.modelRequestStartedAt = Date.now();
+  }
+}
+
+function modelRequestBody(turn) {
+  const elapsed = elapsedSince(state.modelRequestStartedAt);
+  const detail = turn && turn.model_request && turn.model_request.detail
+    ? turn.model_request.detail
+    : "provider request sent";
+  return elapsed ? `${detail}\n等待模型响应 ${elapsed}` : `${detail}\n等待模型响应`;
+}
+
 function syncToolTimings(items) {
   const now = Date.now();
   const seen = new Set();
@@ -585,6 +608,7 @@ function startNewSession() {
   state.turn = null;
   state.publicConversation = [];
   state.pendingUserInput = null;
+  state.modelRequestStartedAt = null;
   state.modelWaitStartedAt = null;
   state.submitStartedAt = null;
   state.submitInFlight = false;
@@ -683,6 +707,7 @@ function setTurnProjection(turn, options = {}) {
   }
   state.publicConversation = derivePublicConversation(state.turn);
   syncToolTimings(state.publicConversation);
+  syncModelRequestTiming(state.turn);
   syncModelWaitTiming(state.turn);
   if (state.turn && state.pendingUserInput) {
     state.pendingUserInput = null;
@@ -774,6 +799,11 @@ function liveTurnStatus() {
   );
   if (waitingTools.length > 0) {
     return waitingToolStatus(waitingTools);
+  }
+
+  if (turnIsWaitingForModelResponse(state.turn)) {
+    const elapsed = elapsedSince(state.modelRequestStartedAt);
+    return elapsed ? `waiting for model response... ${elapsed}` : "waiting for model response...";
   }
 
   if (turnIsWaitingForModel(state.turn)) {
@@ -872,6 +902,17 @@ function renderMessages() {
       const body = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
       fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, body, variant, identity));
       });
+      if (turnIsWaitingForModelResponse(turn)) {
+        fragments.push(
+          card(
+            "Assistant",
+            { className: "running", label: "waiting" },
+            "等待模型响应",
+            modelRequestBody(turn),
+            "assistant",
+          ),
+        );
+      }
       if (turnIsWaitingForModel(turn)) {
         fragments.push(
           card(
@@ -1061,6 +1102,8 @@ function renderTurnMeta() {
     ? "completed"
     : runningTools.length > 0
       ? waitingToolStatus(runningTools).replace("tool executing", "tool running")
+      : turnIsWaitingForModelResponse(state.turn)
+        ? liveTurnStatus()
       : turnIsWaitingForModel(state.turn)
         ? liveTurnStatus()
       : state.submitInFlight
@@ -1086,8 +1129,9 @@ setInterval(() => {
   const hasWaitingTool = (state.publicConversation || []).some(
     (item) => item.kind === "ToolSummary" && item.status === "waiting",
   );
+  const hasModelRequestWait = turnIsWaitingForModelResponse(state.turn);
   const hasModelWait = turnIsWaitingForModel(state.turn);
-  if (hasPendingSubmit || hasWaitingTool || hasModelWait) {
+  if (hasPendingSubmit || hasWaitingTool || hasModelRequestWait || hasModelWait) {
     renderMessages();
     renderTurnMeta();
     renderCommandStatus();
@@ -1216,6 +1260,7 @@ async function cancelActiveTurn() {
   if (!turnId && !state.submitInFlight && !state.pendingUserInput) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.modelRequestStartedAt = null;
     state.modelWaitStartedAt = null;
     state.submitStartedAt = null;
     setCommandStatus("no active turn; input cleared", { stickyMs: 3000 });
@@ -1234,6 +1279,7 @@ async function cancelActiveTurn() {
     return;
   }
   state.pendingUserInput = null;
+  state.modelRequestStartedAt = null;
   state.modelWaitStartedAt = null;
   state.submitStartedAt = null;
   state.submitInFlight = false;
@@ -1262,6 +1308,7 @@ async function runSlashCommand(rawText) {
   if (command.startsWith("/")) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.modelRequestStartedAt = null;
     state.modelWaitStartedAt = null;
     state.submitStartedAt = null;
   }
@@ -1295,6 +1342,7 @@ async function runSlashCommand(rawText) {
     case "/clear":
       composerInput.value = "";
       state.pendingUserInput = null;
+      state.modelRequestStartedAt = null;
       state.modelWaitStartedAt = null;
       state.submitStartedAt = null;
       state.submitInFlight = false;

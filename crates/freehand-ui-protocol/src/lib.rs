@@ -99,6 +99,8 @@ pub struct UiTurnProjection {
     pub session_id: SessionId,
     pub turn_id: TurnId,
     pub user_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_request: Option<UiModelRequestActivity>,
     pub reasoning: Vec<String>,
     pub text: Vec<String>,
     pub tool_calls: Vec<String>,
@@ -108,6 +110,25 @@ pub struct UiTurnProjection {
     pub terminal_text: Option<String>,
     pub errors: Vec<String>,
     pub slave_substream_card: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiModelRequestActivity {
+    pub status: UiModelRequestStatus,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UiModelRequestStatus {
+    Waiting,
+}
+
+impl UiModelRequestStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UiModelRequestStatus::Waiting => "waiting",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -472,6 +493,7 @@ impl UiProtocolState {
                 SemanticEventKind::Text => projection.text.push(event.content.clone()),
                 _ => {}
             }
+            projection.model_request = None;
             projection.clone()
         };
         self.latest_active_turn_id = Some(event.turn_id.clone());
@@ -504,9 +526,38 @@ impl UiProtocolState {
                 UiToolActivityStatus::Waiting,
                 Some("waiting for tool execution".to_owned()),
             );
+            projection.model_request = None;
             projection.clone()
         };
         self.latest_active_turn_id = Some(event.turn_id.clone());
+        self.publish_projection(UiProjection::Turn(projection.clone()));
+        projection
+    }
+
+    pub fn apply_model_request_waiting(
+        &mut self,
+        source_agent_id: AgentId,
+        source_node_id: String,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        detail: Option<String>,
+        slave_substream_card: bool,
+    ) -> UiTurnProjection {
+        let projection = {
+            let projection = self.ensure_turn_projection(
+                source_agent_id,
+                source_node_id,
+                session_id,
+                turn_id,
+                slave_substream_card,
+            );
+            projection.model_request = Some(UiModelRequestActivity {
+                status: UiModelRequestStatus::Waiting,
+                detail,
+            });
+            projection.clone()
+        };
+        self.latest_active_turn_id = Some(turn_id.clone());
         self.publish_projection(UiProjection::Turn(projection.clone()));
         projection
     }
@@ -530,6 +581,7 @@ impl UiProtocolState {
                 "input={} output={}",
                 event.usage.input_tokens, event.usage.output_tokens
             ));
+            projection.model_request = None;
             projection.clone()
         };
         self.latest_active_turn_id = Some(event.turn_id.clone());
@@ -566,6 +618,7 @@ impl UiProtocolState {
                 tool_activity_status_from_result(event.tool_result.status),
                 Some(tool_activity_detail_from_result(&event.tool_result)),
             );
+            projection.model_request = None;
             projection.clone()
         };
         self.latest_active_turn_id = Some(event.turn_id.clone());
@@ -590,6 +643,7 @@ impl UiProtocolState {
             );
             projection.terminal_status = Some(event.status.clone());
             projection.terminal_text = Some(terminal_text_projection(event));
+            projection.model_request = None;
             if event.status == TerminalStatus::Failed {
                 fail_waiting_tool_activities(
                     &mut projection.tool_activities,
@@ -627,6 +681,7 @@ impl UiProtocolState {
                 slave_substream_card,
             );
             projection.errors.push(event.error.message.clone());
+            projection.model_request = None;
             projection.clone()
         };
         self.latest_active_turn_id = Some(turn_id);
@@ -736,6 +791,7 @@ impl UiProtocolState {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 user_text: None,
+                model_request: None,
                 reasoning: Vec::new(),
                 text: Vec::new(),
                 tool_calls: Vec::new(),
@@ -1299,6 +1355,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
         session_id: input.session_id,
         turn_id: input.turn_id,
         user_text: input.user_text,
+        model_request: None,
         reasoning,
         text,
         tool_calls: input
@@ -1734,6 +1791,52 @@ mod tests {
         assert_eq!(tool_cards.len(), 1);
         assert_eq!(tool_cards[0].status, "completed");
         assert_eq!(tool_cards[0].tool_call_id.as_deref(), Some("tool-1"));
+    }
+
+    #[test]
+    fn model_request_waiting_projection_clears_on_response_event() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("session-model-wait");
+        let turn_id = TurnId::new("turn-model-wait");
+        let waiting = state.apply_model_request_waiting(
+            AgentId::new("agent-1"),
+            "node-1".to_owned(),
+            &session_id,
+            &turn_id,
+            Some("provider request built".to_owned()),
+            false,
+        );
+        assert_eq!(
+            waiting
+                .model_request
+                .as_ref()
+                .map(|activity| activity.status),
+            Some(UiModelRequestStatus::Waiting)
+        );
+        assert_eq!(
+            waiting
+                .model_request
+                .as_ref()
+                .and_then(|activity| activity.detail.as_deref()),
+            Some("provider request built")
+        );
+
+        let responded = state.apply_semantic_event(
+            AgentId::new("agent-1"),
+            "node-1".to_owned(),
+            &ReasonResp01SemanticEvent {
+                session_id,
+                turn_id,
+                trace_id: TraceId::new("trace-model-wait"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                kind: SemanticEventKind::Text,
+                content: "model response arrived".to_owned(),
+            },
+            false,
+        );
+        assert_eq!(responded.model_request, None);
+        assert_eq!(responded.text, vec!["model response arrived".to_owned()]);
     }
 
     #[test]

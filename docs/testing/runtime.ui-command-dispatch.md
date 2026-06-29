@@ -16,9 +16,10 @@
   - latest-active cancel resolves the current active live turn when UI has not received a concrete `turn_id`
   - cancelled live provider success must not overwrite the cancelled UI projection or commit a success outcome
   - reason-backed submit projects the original user prompt into derived UI public conversation truth
-  - live provider submit incrementally updates derived UI turn/debug state before terminal receipt
-  - live provider submit maps tool-result broadcasts into derived UI state so tool activity can transition to completed over SSE
-  - live provider submit maps bridge-materialized tool execution failure into derived UI state before returning dispatch failure, so query/SSE do not stay waiting
+- live provider submit incrementally updates derived UI turn/debug state before terminal receipt
+- live provider submit maps tool-result broadcasts into derived UI state so tool activity can transition to completed over SSE
+- live provider submit maps provider-request-built debug events into derived UI state so model-response waiting is visible before provider response arrives
+- live provider submit maps bridge-materialized tool execution failure into derived UI state before returning dispatch failure, so query/SSE do not stay waiting
   - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately
   - live provider submit keeps the selected session id attached to the derived UI truth when one is supplied
   - live provider multi-round continuation prompts must not replace the public user prompt projection
@@ -40,8 +41,9 @@
   - live bridge cancellation checkpoint coverage before provider output, tool execution, and terminal write
   - checkpoint rewind dispatch coverage
   - checkpoint rewind missing-manifest target-not-found coverage
-  - live reason hook-to-ui-state coverage
-  - live reason tool-result hook-to-ui-state coverage
+- live reason hook-to-ui-state coverage
+- live provider-request-built debug-to-model-waiting UI coverage
+- live reason tool-result hook-to-ui-state coverage
   - live reason prompt-first projection coverage
   - live reason final projection keeps original user prompt after tool-result continuation
   - live reason final projection keeps earlier-round tool activity visible after tool-result continuation
@@ -76,8 +78,9 @@
   - config-selected live bootstrap now seeds node-owned metadata records into the shared metadata ledger before first command ingress
   - config-selected live bootstrap now rejects unwritable shared node metadata ledgers explicitly before a dispatcher can materialize
   - provider-backed submit dispatch plus persisted restore/bootstrap is covered
-  - live provider submit now streams incremental UI state updates through runtime-owned hooks
-  - live provider submit now streams tool-result UI updates and final projection keeps earlier-round tool activity visible without exposing intermediate continuation text
+- live provider submit now streams incremental UI state updates through runtime-owned hooks
+- live provider submit now projects provider-request-built lifecycle state into UI before model response arrives
+- live provider submit now streams tool-result UI updates and final projection keeps earlier-round tool activity visible without exposing intermediate continuation text
   - live bootstrap now restores earlier-round tool activity into UI transcripts after restart without changing closed-turn recovery truth
   - live provider submit now refreshes failed bridge truth from persistence before returning dispatch failure, preventing silent waiting UI state
   - reason-backed cancel dispatch is covered

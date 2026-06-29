@@ -55,6 +55,7 @@
 - front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket without surfacing verbose tool term text in the main card
 - front-end script normalizes tool cards by `tool_call_id`, renders waiting cards with animation and local elapsed timers, and clears the composer input immediately after submit while keeping the pending user card visible
 - front-end script renders submit/dispatch waiting as an animated pending card with elapsed time until a turn projection arrives, then switches visible lifecycle status to tool executing with elapsed time when tool activity is waiting
+- front-end script renders protocol-projected model request waiting as an animated card with elapsed time, clearly showing that the request has been sent and the UI is waiting for model response
 - front-end script renders completed/failed tool result detail in the same tool card and inserts an animated waiting-model card with elapsed time after tool completion until the model produces the next terminal or update
 - front-end script groups `runtime-turn-N` plus `runtime-turn-N-rM` round projections into one logical execution cycle for display so the same user input, assistant text, and same tool call are not duplicated in the selected-session transcript
 - front-end script collapses assistant text within each logical turn into one visible card, strips raw `<freehand_completion>` schema blocks from that card, and leaves user-facing completion details to the Final card
@@ -137,6 +138,7 @@
 - WebUI success/failure sample buttons now load reproducible ADP sample prompts into the composer
 - WebUI same-tool lifecycle updates now normalize by `tool_call_id`, waiting cards animate with local elapsed timers, and submit clears the input field immediately while retaining pending state in the conversation stream
 - WebUI submit/dispatch and tool-wait lifecycle states now both refresh once per second so users can see where the turn is blocked and how long it has waited
+- WebUI model-request waiting state now comes from `UiTurnProjection.model_request` and refreshes once per second with elapsed wait time
 - WebUI completed/failed tool cards now show protocol-projected result detail, and tool-complete-to-next-model waiting renders as its own timed lifecycle card
 - WebUI selected-session transcript display now groups same execution-cycle round ids such as `runtime-turn-47` and `runtime-turn-47-r2` into one visible logical turn while preserving ADP/session truth as separate persisted turns
 - WebUI assistant cards now collapse to one visible card per logical turn and strip raw `<freehand_completion>` blocks; final user-facing completion content remains in the Final card

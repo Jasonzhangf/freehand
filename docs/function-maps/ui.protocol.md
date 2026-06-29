@@ -55,6 +55,7 @@
 - subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel
 - ADP subscribe returns an explicit `SubscriptionAccepted` frame before later `SubscriptionEvent` frames so UI-less clients can distinguish waiting from transport failure
 - projections are read-only views over owner-written truth
+- model request lifecycle is projected as `UiModelRequestActivity` inside `UiTurnProjection` when runtime reports the provider request has been built and sent, and it clears when response/tool/usage/terminal/error projection arrives
 - terminal completion shows only final projected text
 - turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
 - public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
@@ -147,6 +148,7 @@
 | 10a | `public_conversation_items` / `public_turn_projection` | `crates/freehand-ui-protocol/src/lib.rs` | derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema | full turn projection | public turn projection | app transports/renderers | projector | bound |
 | 10b | `UiProtocolState::apply_terminal_event` / `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text + terminal status projection | runtime/app protocol consumers | protocol projector | bound |
 | 11 | `UiProtocolState::apply_semantic_event` / `apply_tool_call` / `apply_tool_result` / `apply_usage_event` / `apply_terminal_event` / `apply_error_event` | `crates/freehand-ui-protocol/src/lib.rs` | incrementally update one turn projection from shared contract events and publish subscription updates | shared reason/error contracts | updated queryable/subscribable turn projection | runtime/debug bridges | protocol state | bound |
+| 11a | `UiProtocolState::apply_model_request_waiting` | `crates/freehand-ui-protocol/src/lib.rs` | project provider-request-sent lifecycle state before model response arrives | runtime provider request built signal | queryable/subscribable turn projection with model request waiting | runtime debug bridge | protocol state | bound |
 | 12 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate client-specific slave substream visibility | turn projection + client kind | client-specific turn projection | CLI/WebUI adapter | projector | bound |
 | 13 | `UiProtocolState::set_debug_state` | `crates/freehand-ui-protocol/src/lib.rs` | store per-turn read-only debug projection for UI consumption and publish subscription updates | `freehand-debug` snapshot | queryable/subscribable debug state | reason/node/debug bridge | protocol state | bound |
 | 14 | `UiProtocolState::apply_debug_event` | `crates/freehand-ui-protocol/src/lib.rs` | ingest one observation-only debug event into UI protocol state when a snapshot is present | `freehand-debug` event | updated per-turn debug state or ignored event | reason/node/debug bridge | protocol state | bound |
@@ -163,6 +165,7 @@
 - checkpoint summary projection/query is read-only protocol state and code-bound
 - client-specific projection gating is now also bound in code
 - `UiProtocolState` now owns a continuous subscription channel plus incremental shared-contract turn projection updates
+- `UiProtocolState` now projects provider-request-sent waiting state into `UiTurnProjection.model_request` and clears it on response/tool/usage/terminal/error projection
 - debug-state projection consumes `freehand-debug::DebugStateSnapshot` instead of a UI-owned duplicate DTO
 - UI ingress versus truth-writer separation is now locked in the function map
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in `UiProtocolState`

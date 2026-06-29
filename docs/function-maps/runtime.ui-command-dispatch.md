@@ -30,6 +30,7 @@
 - live provider-backed submit incrementally writes reason/debug projection updates into `UiProtocolState` while the turn is still running
 - live provider-backed submit maps `ReasonBroadcastEvent::ToolResult` into `UiProtocolState::apply_tool_result` so tool lifecycle completion is visible over turn SSE
 - live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events so blank UI subscriptions can render a complete public conversation stream
+- live provider-backed submit maps `RuntimeLive02ProviderRequestBuilt` debug events into `UiProtocolState::apply_model_request_waiting` so ADP clients can see request-sent/model-response-waiting state
 - live provider-backed submit honors a selected session id when present and keeps the derived UI state pinned to that session instead of the latest global session
 - active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion
 - latest-active cancellation supports Esc during the short window before WebUI has received a concrete `turn_id`
@@ -94,6 +95,7 @@
 - runtime dispatch owner baseline is now bound in code
 - provider-backed submit input and cancel dispatch through `reason.turn` and update derived UI turn projections
 - live provider submit now streams reason/debug updates into `UiProtocolState` before final receipt is returned
+- live provider submit now projects provider-request-built debug events into `UiProtocolState.model_request` before model response arrives
 - live provider submit now streams tool-result updates into `UiProtocolState` so tool activities can transition to completed before final receipt
 - live submit now releases the runtime mutex before provider IO so `CancelTurn` can enter concurrently
 - active live cancel now publishes cancelled UI projection immediately and later provider success cannot overwrite it

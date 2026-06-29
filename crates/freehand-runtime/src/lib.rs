@@ -1837,7 +1837,7 @@ impl RuntimeCommandDispatcher {
             },
             |event| {
                 if !cancel_token.load(Ordering::SeqCst) {
-                    apply_runtime_debug_event(&ui_state, event);
+                    apply_runtime_debug_event(&ui_state, &reason_agent_id, &master_node_id, event);
                 }
             },
         );
@@ -2802,11 +2802,28 @@ fn apply_runtime_reason_broadcast(
     }
 }
 
-fn apply_runtime_debug_event(ui_state: &Arc<Mutex<UiProtocolState>>, event: &DebugEvent) {
-    let _ = ui_state
-        .lock()
-        .expect("lock ui state")
-        .apply_debug_event(event);
+fn apply_runtime_debug_event(
+    ui_state: &Arc<Mutex<UiProtocolState>>,
+    reason_agent_id: &AgentId,
+    master_node_id: &str,
+    event: &DebugEvent,
+) {
+    let mut ui = ui_state.lock().expect("lock ui state");
+    if event.envelope.semantic.pipeline_node.as_deref() == Some("RuntimeLive02ProviderRequestBuilt")
+    {
+        ui.apply_model_request_waiting(
+            reason_agent_id.clone(),
+            master_node_id.to_owned(),
+            &event.envelope.semantic.session_id,
+            &event.envelope.semantic.turn_id,
+            event
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.status_text.clone()),
+            false,
+        );
+    }
+    let _ = ui.apply_debug_event(event);
 }
 
 fn publish_live_pending_user_projection(
@@ -3244,6 +3261,68 @@ mod tests {
         });
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn provider_request_built_debug_projects_model_waiting_ui_state() {
+        let ui_state = Arc::new(Mutex::new(UiProtocolState::default()));
+        let session_id = SessionId::new("session-model-request");
+        let turn_id = TurnId::new("runtime-turn-77");
+        let trace_id = TraceId::new("trace-model-request");
+        let semantic = DebugSemanticPosition {
+            feature_id: FeatureId::new("provider.reason-live-bridge"),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            trace_id: trace_id.clone(),
+            agent_id: Some(AgentId::new("agent-1")),
+            pipeline_node: Some("RuntimeLive02ProviderRequestBuilt".to_owned()),
+        };
+        let scene = DebugScenePosition {
+            crate_name: "freehand-runtime".to_owned(),
+            file: "src/lib.rs".to_owned(),
+            function: "test".to_owned(),
+            line: None,
+            artifact_path: None,
+            raw_exchange_id: None,
+        };
+        let event = DebugEvent {
+            envelope: DebugTraceEnvelope {
+                semantic: semantic.clone(),
+                scene: scene.clone(),
+                input_hash: None,
+                output_hash: None,
+                artifact_path: None,
+                timestamp: "1".to_owned(),
+            },
+            snapshot: Some(DebugStateSnapshot::new(
+                semantic,
+                scene,
+                "provider request built",
+                vec!["model=MiniMax-M2.7".to_owned()],
+            )),
+        };
+
+        apply_runtime_debug_event(&ui_state, &AgentId::new("agent-1"), "node-1", &event);
+        let query = ui_state
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QueryTurn {
+                turn_id: turn_id.clone(),
+            })
+            .expect("query turn");
+        match query {
+            UiQueryResult::Turn(Some(turn)) => {
+                assert_eq!(turn.session_id, session_id);
+                assert_eq!(turn.turn_id, turn_id);
+                assert_eq!(
+                    turn.model_request
+                        .as_ref()
+                        .and_then(|activity| activity.detail.as_deref()),
+                    Some("provider request built")
+                );
+            }
+            other => panic!("unexpected query result: {other:?}"),
+        }
     }
 
     #[test]

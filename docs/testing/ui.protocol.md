@@ -17,6 +17,7 @@
   - ADP subscribe frames return an explicit accepted/waiting frame and then stream matching subscription events
   - debug subscribe returns per-turn read-only debug projections
   - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
+  - provider-request-sent lifecycle projection marks a turn as waiting for model response until response/tool/usage/terminal/error projection arrives
   - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`, or failed terminal truth marks still-waiting activities `failed`
   - terminal events preserve both terminal text and terminal status in UI projection
   - debug receiver drain ingests observation-only debug events into protocol state
@@ -38,6 +39,7 @@
   - debug-state query and subscription routing
   - protocol-owned subscription channel fanout
   - incremental turn projection updates from shared contracts
+  - model request waiting projection and response-clear behavior
   - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
   - duplicate same-`tool_call_id` tool-call projection upserts one activity and one public tool card
   - debug-event ingestion and receiver-drain behavior
@@ -85,6 +87,7 @@
   - checkpoint summary projection/query is code-bound as read-only UI protocol state
   - protocol-owned continuous subscription channel landed
   - incremental turn projection update methods from shared contracts landed
+  - model request waiting projection is landed and regression-locked
   - minimal per-turn debug-state query/subscribe baseline landed
   - debug receiver-drain bridge from `debug.core` into protocol state landed
   - debug-state snapshot shape now comes from `freehand-debug`

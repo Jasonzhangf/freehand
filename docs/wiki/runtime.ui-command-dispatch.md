@@ -23,7 +23,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 ## Response Mainline
 
 - reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections, including the original user prompt and explicit cancelled terminal status for public conversation projection
-- live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events and incrementally writes reason/debug/tool-result projection updates while the turn is still running
+- live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events, projects RuntimeLive02ProviderRequestBuilt as model-response waiting state, and incrementally writes reason/debug/tool-result projection updates while the turn is still running
 - live provider-backed multi-round turns keep the original operator prompt in public UI projection instead of exposing internal continuation prompts
 - final live multi-round UI projection preserves final-round visible text, usage, errors, and terminal status while aggregating tool-call/tool-result lifecycle activity across runtime rounds
 - live provider-backed submit refreshes UiProtocolState from authoritative persistence before returning dispatch failure when the live bridge materializes failed turn truth
@@ -84,6 +84,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime dispatch owner baseline is now bound in code
 - provider-backed submit input and cancel dispatch through `reason.turn` and update derived UI turn projections
 - live provider submit now streams reason/debug updates into `UiProtocolState` before final receipt is returned
+- live provider submit now projects provider-request-built debug events into UiProtocolState.model_request before model response arrives
 - live provider submit now streams tool-result updates into UiProtocolState so tool activities can transition to completed before final receipt
 - direct slave message dispatch routes through `node.master-slave`
 - explicit checkpoint rewind dispatch now routes through `runtime.checkpoint-rewind`
