@@ -1092,6 +1092,11 @@ mod tests {
         assert!(js_body.contains("stripFreehandCompletionBlock"));
         assert!(js_body.contains("<freehand_completion>"));
         assert!(js_body.contains("toolSummaryBody"));
+        assert!(js_body.contains("pendingSubmitBody"));
+        assert!(js_body.contains("elapsedSince"));
+        assert!(js_body.contains("submitStartedAt"));
+        assert!(js_body.contains("hasPendingSubmit"));
+        assert!(js_body.contains("waitingToolStatus"));
         assert!(js_body.contains("formatDuration"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("tool_call_id"));

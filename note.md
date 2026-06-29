@@ -1,5 +1,19 @@
 # note.md
 
+# 2026-06-29 WebUI lifecycle progress timing repair
+  - gap found: tool waiting had animation/timer, but submit/dispatch waiting before first turn projection only had static pending/status text
+  - fix:
+    - WebUI records `submitStartedAt`
+    - pending submit card renders animated running state and elapsed dispatch wait time
+    - lifecycle status refreshes once per second for submit/dispatch and tool waiting
+    - tool waiting status includes elapsed time in the main status strip as well as the tool card
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+
 # 2026-06-29 WebUI assistant-card collapse repair
   - review found a remaining regression after multiround transcript merge: same logical turn still rendered multiple assistant cards because `derivePublicConversation` emitted one `AssistantText` per text chunk
   - fixed by collapsing assistant text inside each turn into one visible card while preserving tool summaries and terminal/error cards

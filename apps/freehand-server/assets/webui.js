@@ -38,6 +38,7 @@ const state = {
   toolTimings: new Map(),
   activeTurnId: null,
   pendingUserInput: null,
+  submitStartedAt: null,
   submitInFlight: false,
   commandStatusMessage: "connecting to ADP...",
   commandStatusStickyUntil: 0,
@@ -317,6 +318,18 @@ function formatDuration(ms) {
   return `${hours}h ${String(remainingMinutes).padStart(2, "0")}m`;
 }
 
+function elapsedSince(startedAt) {
+  if (!startedAt) {
+    return "";
+  }
+  return formatDuration(Date.now() - startedAt);
+}
+
+function pendingSubmitBody(text) {
+  const elapsed = elapsedSince(state.submitStartedAt);
+  return elapsed ? `${text}\n等待调度 ${elapsed}` : text;
+}
+
 function syncToolTimings(items) {
   const now = Date.now();
   const seen = new Set();
@@ -355,6 +368,19 @@ function toolSummaryBody(item) {
   const elapsed = timing ? formatDuration(endAt - timing.startedAt) : "";
   const statusLabel = toolStatusLabel(item.status);
   return elapsed ? `${statusLabel} · ${elapsed}` : statusLabel;
+}
+
+function waitingToolStatus(tools) {
+  const names = tools.map((tool) => tool.tool_name).join(", ");
+  const elapsedValues = tools
+    .map((tool) => {
+      const timing = tool.tool_call_id ? state.toolTimings.get(tool.tool_call_id) : null;
+      return timing ? Date.now() - timing.startedAt : null;
+    })
+    .filter((elapsed) => Number.isFinite(elapsed));
+  const longestElapsed = elapsedValues.length > 0 ? Math.max(...elapsedValues) : null;
+  const elapsed = longestElapsed === null ? "" : formatDuration(longestElapsed);
+  return elapsed ? `tool executing: ${names} · ${elapsed}` : `tool executing: ${names}`;
 }
 
 function variantPayload(value, variant) {
@@ -523,6 +549,8 @@ function startNewSession() {
   state.turn = null;
   state.publicConversation = [];
   state.pendingUserInput = null;
+  state.submitStartedAt = null;
+  state.submitInFlight = false;
   setSelectedSessionId(sessionId);
   composerInput.value = "";
   composerInput.focus();
@@ -695,19 +723,24 @@ function applyAdpSubscriptionEvent(event) {
 }
 
 function liveTurnStatus() {
+  if (state.submitInFlight && !state.turn) {
+    const elapsed = elapsedSince(state.submitStartedAt);
+    return elapsed ? `dispatching... ${elapsed}` : "dispatching...";
+  }
   if (!state.turn) {
     return null;
-  }
-
-  if (state.submitInFlight) {
-    return "dispatching...";
   }
 
   const waitingTools = (state.turn.tool_activities || []).filter(
     (tool) => tool.status === "Waiting" || tool.status === "waiting",
   );
   if (waitingTools.length > 0) {
-    return `tool executing: ${waitingTools.map((tool) => tool.tool_name).join(", ")}`;
+    return waitingToolStatus(waitingTools);
+  }
+
+  if (state.submitInFlight) {
+    const elapsed = elapsedSince(state.submitStartedAt);
+    return elapsed ? `dispatching... ${elapsed}` : "dispatching...";
   }
 
   if (state.turn.terminal_text) {
@@ -735,9 +768,12 @@ function renderMessages() {
     fragments.push(
       card(
         "User",
-        { className: "pending", label: "pending" },
-        "待写入输入",
-        state.pendingUserInput,
+        {
+          className: state.submitInFlight ? "running" : "pending",
+          label: state.submitInFlight ? "dispatching" : "pending",
+        },
+        state.submitInFlight ? "正在提交输入" : "待写入输入",
+        pendingSubmitBody(state.pendingUserInput),
         "user",
       ),
     );
@@ -953,7 +989,7 @@ function renderTurnMeta() {
     setText("strip-session", state.selectedSessionId || "-");
     setText("strip-turn", "-");
     setText("conversation-turn", state.selectedSessionId || "latest active turn");
-    setText("turn-status", "waiting");
+    setText("turn-status", liveTurnStatus() || "waiting");
     setText("strip-slave", "idle");
     setText("slave-chip", "waiting");
     setText("slave-title", "no slave card yet");
@@ -970,9 +1006,9 @@ function renderTurnMeta() {
   const turnStatus = state.turn.terminal_text
     ? "completed"
     : runningTools.length > 0
-      ? `tool running: ${runningTools.map((tool) => tool.tool_name).join(", ")}`
+      ? waitingToolStatus(runningTools).replace("tool executing", "tool running")
       : state.submitInFlight
-        ? "dispatching"
+        ? liveTurnStatus()
         : "streaming";
   setText("turn-status", turnStatus);
 
@@ -990,14 +1026,14 @@ function renderTurnMeta() {
 }
 
 setInterval(() => {
-  if (!state.turn) {
-    return;
-  }
+  const hasPendingSubmit = state.submitInFlight || !!state.pendingUserInput;
   const hasWaitingTool = (state.publicConversation || []).some(
     (item) => item.kind === "ToolSummary" && item.status === "waiting",
   );
-  if (hasWaitingTool) {
+  if (hasPendingSubmit || hasWaitingTool) {
     renderMessages();
+    renderTurnMeta();
+    renderCommandStatus();
   }
 }, 1000);
 
@@ -1123,6 +1159,7 @@ async function cancelActiveTurn() {
   if (!turnId && !state.submitInFlight && !state.pendingUserInput) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.submitStartedAt = null;
     setCommandStatus("no active turn; input cleared", { stickyMs: 3000 });
     renderMessages();
     return;
@@ -1139,6 +1176,8 @@ async function cancelActiveTurn() {
     return;
   }
   state.pendingUserInput = null;
+  state.submitStartedAt = null;
+  state.submitInFlight = false;
   composerInput.value = "";
   setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id}`);
   await refreshTurn().catch((error) => {
@@ -1164,6 +1203,7 @@ async function runSlashCommand(rawText) {
   if (command.startsWith("/")) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.submitStartedAt = null;
   }
   switch (command) {
     case "/help":
@@ -1195,6 +1235,8 @@ async function runSlashCommand(rawText) {
     case "/clear":
       composerInput.value = "";
       state.pendingUserInput = null;
+      state.submitStartedAt = null;
+      state.submitInFlight = false;
       setCommandStatus("local composer cleared", { stickyMs: 3000 });
       renderMessages();
       return true;
@@ -1224,12 +1266,14 @@ composerForm.addEventListener("submit", async (event) => {
   }
   setCommandStatus("dispatching...");
   state.pendingUserInput = text;
+  state.submitStartedAt = Date.now();
   state.submitInFlight = true;
   composerInput.value = "";
   renderMessages();
   try {
     const receipt = await submitUserInput(text);
     state.submitInFlight = false;
+    state.submitStartedAt = null;
     try {
       await refreshAllProtocolState();
       renderCommandStatus();
@@ -1239,6 +1283,7 @@ composerForm.addEventListener("submit", async (event) => {
   } catch (error) {
     state.submitInFlight = false;
     state.pendingUserInput = null;
+    state.submitStartedAt = null;
     renderMessages();
     setCommandStatus(`dispatch failed: ${error.message}`);
   }

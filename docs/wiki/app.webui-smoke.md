@@ -43,6 +43,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - front-end debug state distinguishes missing snapshot (debug pending) from debug SSE transport errors (debug stream reconnecting)
 - front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket without surfacing verbose tool term text in the main card
 - front-end script normalizes tool cards by tool_call_id, renders waiting cards with animation and local elapsed timers, and clears the composer input immediately after submit while keeping the pending user card visible
+- front-end script renders submit and dispatch waiting as an animated pending card with elapsed time, then switches to tool executing with elapsed time when a waiting tool activity is visible
 - front-end script groups runtime-turn-N plus runtime-turn-N-rM round projections into one logical execution cycle for display and collapses assistant text into one visible card per logical turn while preserving tool, terminal, and error cards
 - front-end script projects checkpoint summaries into a secondary inspector card and sends explicit rewind commands through command ingress
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
