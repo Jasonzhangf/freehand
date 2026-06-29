@@ -2947,14 +2947,26 @@ fn restore_all_persisted_sessions_into_ui(
     let sessions = persistence.list_persisted_sessions()?;
     let mut ui = ui_state.lock().expect("lock ui state");
     for session in sessions {
-        let restored = persistence.restore(&session.session_id)?;
-        let mut turns = restored.closed_turns;
-        if let Some(active) = restored.active_turn {
-            turns.push(active.turn);
-        }
+        let mut turns = persistence.restore_turn_snapshots_for_ui(&session.session_id)?;
         turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
-        for turn in &turns {
-            ui.apply_turn_projection(project_runtime_turn(reason_agent_id, master_node_id, turn));
+        let mut index = 0usize;
+        while index < turns.len() {
+            let ordinal = runtime_turn_position(&turns[index].request.turn_id).0;
+            let end = if ordinal == 0 {
+                index + 1
+            } else {
+                turns[index..]
+                    .iter()
+                    .position(|turn| runtime_turn_position(&turn.request.turn_id).0 != ordinal)
+                    .map(|offset| index + offset)
+                    .unwrap_or(turns.len())
+            };
+            ui.apply_turn_projection(project_runtime_turn_history(
+                reason_agent_id,
+                master_node_id,
+                &turns[index..end],
+            ));
+            index = end;
         }
     }
     Ok(())
@@ -3161,6 +3173,75 @@ mod tests {
             }
             other => panic!("unexpected session turns query: {other:?}"),
         }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bootstrap_restores_multiround_tool_activity_into_ui_state() {
+        let runtime_home = temp_runtime_home();
+        with_temp_workspace(|_| {
+            let (base_url, rx, handle) = spawn_sequence_server(
+                "application/json",
+                vec![
+                    tool_use_bash_response("printf restored-tool"),
+                    complete_single_response("final after tool"),
+                ],
+            );
+            run_live_reason_turn(
+                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+                live_request_for(&runtime_home, "runtime-session-tool-restore", 9),
+            )
+            .expect("persist multi-round session");
+            let _ = rx.recv().expect("provider request round 1");
+            let _ = rx.recv().expect("provider request round 2");
+            handle.join().expect("join provider");
+
+            let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+                &live_selected_agent(
+                    "http://127.0.0.1:1".to_owned(),
+                    freehand_config::ProviderType::Anthropic,
+                ),
+                runtime_home.clone(),
+                false,
+            )
+            .expect("runtime bootstrap");
+
+            let transcript = runtime
+                .ui_state()
+                .lock()
+                .expect("lock ui")
+                .query(&UiCommand::QuerySessionTurns {
+                    session_id: SessionId::new("runtime-session-tool-restore"),
+                })
+                .expect("session turns query");
+            match transcript {
+                UiQueryResult::SessionTurns(transcript) => {
+                    assert_eq!(transcript.turns.len(), 1);
+                    let turn = &transcript.turns[0];
+                    assert_eq!(turn.turn_id, TurnId::new("runtime-turn-9-r2"));
+                    assert_eq!(
+                        turn.user_text.as_deref(),
+                        Some("prompt for runtime-session-tool-restore")
+                    );
+                    assert!(
+                        turn.tool_activities.iter().any(|tool| {
+                            tool.tool_name == "bash"
+                                && tool.status
+                                    == freehand_ui_protocol::UiToolActivityStatus::Completed
+                        }),
+                        "restored transcript must retain earlier-round bash activity: {:?}",
+                        turn.tool_activities
+                    );
+                    assert!(
+                        turn.terminal_text
+                            .as_deref()
+                            .is_some_and(|text| text.contains("final after tool"))
+                    );
+                }
+                other => panic!("unexpected session turns query: {other:?}"),
+            }
+        });
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }

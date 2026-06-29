@@ -1,5 +1,16 @@
 # note.md
 
+# 2026-06-29 WebUI multiround restore closeout
+  - verified live fixed-port daemon at `http://127.0.0.1:4041/` and `ws://127.0.0.1:4041/adp`
+  - real browser evidence now shows one logical transcript item per execution cycle, with `runtime-turn-N` and `runtime-turn-N-rM` merged for display only
+  - assistant cards now strip raw `<freehand_completion>...</freehand_completion>` blocks, while the Final card keeps user-facing completion content
+  - restart restore now rebuilds UI projections from reason-ledger per-turn snapshots so earlier-round tool activity survives daemon restart
+  - verification evidence:
+    - `artifacts/webui-visual-session/20260629-multiround-slowtool-success/`
+    - `artifacts/webui-visual-session/20260629-final-restore-merged-clean/`
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-runtime live_bootstrap_restores_multiround_tool_activity_into_ui_state`
+
 # 2026-06-28 Minimonth config and WebUI alignment goal
   - config check:
     - requested source config `/Volumes/extension/.rcc/provider/minimonth/config.v2.toml` contains provider id `minimonth`, type `anthropic`, base URL `https://api.53hk.cn`, default model `MiniMax-M2.7`, and a present API key

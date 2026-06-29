@@ -339,6 +339,36 @@ impl ReasonPersistence {
         self.load_session_index()
     }
 
+    pub fn restore_turn_snapshots_for_ui(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<TurnRecord>, ReasonPersistenceError> {
+        let mut turns_by_id = BTreeMap::<TurnId, TurnRecord>::new();
+        for row in self.load_reason_ledger(session_id)? {
+            match row.payload {
+                ReasonLedgerPayload::TurnStarted { snapshot }
+                | ReasonLedgerPayload::ProviderOutputApplied { snapshot, .. }
+                | ReasonLedgerPayload::CompletionRejected { snapshot, .. } => {
+                    turns_by_id.insert(snapshot.turn.request.turn_id.clone(), snapshot.turn);
+                }
+                ReasonLedgerPayload::TurnClosed { turn, .. } => {
+                    turns_by_id.insert(turn.request.turn_id.clone(), turn);
+                }
+                ReasonLedgerPayload::RewriteStateUpdated => {}
+            }
+        }
+        if turns_by_id.is_empty() {
+            let restored = self.restore(session_id)?;
+            for turn in restored.closed_turns {
+                turns_by_id.insert(turn.request.turn_id.clone(), turn);
+            }
+            if let Some(active) = restored.active_turn {
+                turns_by_id.insert(active.turn.request.turn_id.clone(), active.turn);
+            }
+        }
+        Ok(turns_by_id.into_values().collect())
+    }
+
     fn persist_row(
         &self,
         history: &SessionHistory,

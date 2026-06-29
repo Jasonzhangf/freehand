@@ -11,6 +11,7 @@
   - `ReasonPersistence::record_rewrite_state_updated`
   - `ReasonPersistence::record_provider_raw_event`
   - `ReasonPersistence::restore`
+  - `ReasonPersistence::restore_turn_snapshots_for_ui`
   - `SessionHistory::persist_json`
   - `SessionHistory::from_persisted_json`
   - `SessionHistory::persist_to_path`
@@ -31,6 +32,7 @@
 - reason persistence appends a reason-ledger row together with current session-history truth, then refreshes authoritative snapshots and derived sidecars
 - reason persistence appends provider raw debug-ledger rows under `~/.freehand/ledgers/providers/<family>/<agent>/<session>/<turn>.jsonl` without mutating authoritative session truth
 - reason persistence returns deterministic restore state from snapshot plus reason-ledger tail replay, or from reason-ledger-only rebuild when snapshots are missing or invalid
+- reason persistence can return latest per-turn snapshots from the reason ledger for derived UI restore so non-terminal tool rounds remain visible without becoming closed-turn truth
 - terminal turn persistence yields immutable per-turn truth plus updated session cursor truth
 - derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete
 
@@ -92,6 +94,7 @@
 | 10 | `ReasonPersistence::record_rewrite_state_updated` | `crates/freehand-reason/src/persistence.rs` | append rewrite-state ledger row and refresh session snapshots | updated session-history truth | durable rewrite-state persistence | rewrite runtime / recovery path | persistence owner | bound |
 | 11 | `ReasonPersistence::record_provider_raw_event` | `crates/freehand-reason/src/persistence.rs` | append debug-only provider raw ledger rows without mutating authoritative turn/session truth | provider family + session/turn/trace identity + raw wire body + scene provenance | durable provider raw debug evidence | runtime/live bridge | persistence owner | bound |
 | 12 | `ReasonPersistence::restore` | `crates/freehand-reason/src/persistence.rs` | rebuild authoritative state from snapshots plus reason-ledger tail, or from ledger alone | snapshot directory + reason ledger | restored in-memory session and turn truth | runtime/bootstrap/testkit/CLI smoke | persistence owner | bound |
+| 13 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | rebuild latest per-turn snapshots from reason ledger for derived UI restore without changing authoritative closed-turn recovery semantics | reason ledger | latest snapshot per turn id | runtime UI bootstrap | persistence owner | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -103,6 +106,7 @@
 ## Sync Status Against Code
 
 - current code baseline now binds session-history JSON/file round-trip, reason-ledger append, provider-raw debug-ledger append, active-turn refresh, terminal turn materialization, derived sidecar writes, and snapshot-plus-tail / ledger-only recovery
+- current code exposes ledger-backed per-turn snapshot restore for UI projection so multi-round tool activity can survive daemon restart without relying on UI sidecars as truth
 - CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer
 - live Anthropic runtime path now records provider raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` while keeping those ledgers outside recovery truth
 - explicit owner-bound regression coverage now locks ledger sequence gaps plus provider-raw-only and UI-sidecar-only missing-recovery rejection

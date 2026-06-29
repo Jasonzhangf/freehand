@@ -378,11 +378,12 @@ function derivePublicConversation(turn) {
     });
   }
   (turn.text || []).forEach((text) => {
-    if (text && text.trim()) {
+    const visibleText = stripFreehandCompletionBlock(text);
+    if (visibleText) {
       items.push({
         kind: "AssistantText",
         title: "Assistant",
-        body: text,
+        body: visibleText,
         status: "streaming",
       });
     }
@@ -427,8 +428,71 @@ function derivePublicConversation(turn) {
   return items;
 }
 
+function stripFreehandCompletionBlock(text) {
+  const stripped = `${text || ""}`
+    .replace(/<freehand_completion>[\s\S]*?<\/freehand_completion>/g, "")
+    .trim();
+  return stripped;
+}
+
 function conversationItemsForTurn(turn) {
   return normalizePublicConversation(derivePublicConversation(turn));
+}
+
+function logicalTurnKey(turnId) {
+  const raw = `${turnId || ""}`;
+  const runtimeMatch = raw.match(/^(runtime-turn-\d+)(?:-r\d+)?$/);
+  return runtimeMatch ? runtimeMatch[1] : raw;
+}
+
+function mergeLogicalTurnGroup(turns) {
+  const group = turns.filter(Boolean);
+  if (group.length === 0) {
+    return null;
+  }
+  const latest = group[group.length - 1];
+  const first = group[0];
+  const merged = {
+    ...latest,
+    turn_id: latest.turn_id,
+    user_text: first.user_text || latest.user_text,
+    text: [],
+    tool_activities: [],
+    errors: [],
+  };
+  const toolById = new Map();
+  group.forEach((turn) => {
+    (turn.text || []).forEach((text) => {
+      if (text && text.trim()) {
+        merged.text.push(text);
+      }
+    });
+    (turn.tool_activities || []).forEach((tool) => {
+      const key = tool.tool_call_id || `${tool.tool_name}:${tool.status}`;
+      toolById.set(key, tool);
+    });
+    (turn.errors || []).forEach((error) => {
+      if (error && !merged.errors.includes(error)) {
+        merged.errors.push(error);
+      }
+    });
+  });
+  merged.tool_activities = Array.from(toolById.values());
+  return merged;
+}
+
+function logicalSessionTurns(turns) {
+  const groups = new Map();
+  const order = [];
+  turns.filter(Boolean).forEach((turn) => {
+    const key = logicalTurnKey(turn.turn_id);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key).push(turn);
+  });
+  return order.map((key) => mergeLogicalTurnGroup(groups.get(key))).filter(Boolean);
 }
 
 function setSelectedSessionId(sessionId) {
@@ -693,7 +757,11 @@ function renderMessages() {
       ),
     );
   } else {
-    const turns = state.sessionTurns.length > 0 ? state.sessionTurns : state.selectedSessionId ? [] : [state.turn];
+    const turns = state.sessionTurns.length > 0
+      ? logicalSessionTurns(state.sessionTurns)
+      : state.selectedSessionId
+        ? []
+        : [state.turn];
     turns.filter(Boolean).forEach((turn) => {
       conversationItemsForTurn(turn).forEach((item) => {
       const variant =

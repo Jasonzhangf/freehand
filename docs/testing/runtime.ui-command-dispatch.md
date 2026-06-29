@@ -9,6 +9,7 @@
   - submit commands may carry an optional selected session id and must create or continue that session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
   - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
+  - live bootstrap restores multi-round tool activity from reason-ledger snapshots into derived UI session transcripts after daemon restart
   - reason-backed submit/cancel update derived UI state
   - reason-backed submit with a selected session id keeps the session transcript queryable under that session
   - active live cancel sets a cancel token and publishes cancelled projection without waiting for provider completion
@@ -44,6 +45,7 @@
   - live reason prompt-first projection coverage
   - live reason final projection keeps original user prompt after tool-result continuation
   - live reason final projection keeps earlier-round tool activity visible after tool-result continuation
+  - live bootstrap projection keeps earlier-round tool activity visible after restart
   - live reason final projection negative coverage proves intermediate continuation text is not exposed in the final public conversation
   - live reason dispatch failure projection coverage proves bridge-materialized failed turns update `UiProtocolState` before the dispatch error is returned
   - node direct-message dispatch coverage
@@ -56,6 +58,7 @@
   - runtime-derived cancelled terminal projection smoke
   - config-selected runtime bootstrap smoke
   - config-selected live restart/restore smoke
+  - config-selected live multi-round tool restore smoke
   - config-selected live node-metadata-ledger bootstrap smoke
   - runtime checkpoint rewind receipt smoke
 - project black-box impact:
@@ -75,6 +78,7 @@
   - provider-backed submit dispatch plus persisted restore/bootstrap is covered
   - live provider submit now streams incremental UI state updates through runtime-owned hooks
   - live provider submit now streams tool-result UI updates and final projection keeps earlier-round tool activity visible without exposing intermediate continuation text
+  - live bootstrap now restores earlier-round tool activity into UI transcripts after restart without changing closed-turn recovery truth
   - live provider submit now refreshes failed bridge truth from persistence before returning dispatch failure, preventing silent waiting UI state
   - reason-backed cancel dispatch is covered
   - active live cancel no longer waits behind provider IO because live submit releases the runtime mutex after active turn registration

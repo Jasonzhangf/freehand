@@ -7,6 +7,7 @@
   - active turn truth is refreshed after durable reason-ledger append
   - terminal turn truth is materialized as immutable per-turn files
   - restart recovery restores from snapshot plus reason-ledger tail, or from reason-ledger-only rebuild when snapshots are missing or invalid
+  - UI restore can read latest per-turn ledger snapshots so non-terminal multi-round tool activity remains projectable after restart without becoming closed-turn truth
   - derived UI and index sidecars rebuild from authoritative truth and are never recovery truth
   - provider raw ledgers remain debug-only and never become session truth
 - white-box plan:
@@ -20,6 +21,7 @@
   - stale duplicate reason-ledger row skip test gated by presence of a later authoritative expected-sequence row
   - snapshot-plus-tail replay tests
   - ledger-only rebuild tests
+  - ledger-backed UI snapshot restore tests through runtime bootstrap
   - atomic snapshot replace tests
   - provider-raw debug-ledger write tests
   - provider-raw-ledger exclusion tests
@@ -47,6 +49,7 @@
 - sync status between design and implementation:
   - design is locked
   - session snapshot, active-turn snapshot, reason-ledger append, provider-raw debug-ledger append, terminal turn materialization, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
+  - ledger-backed UI snapshot restore is implemented through `ReasonPersistence::restore_turn_snapshots_for_ui`
   - shared harness and CLI smoke are implemented
   - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
   - runtime white-box coverage now explicitly locks ledger sequence-gap rejection plus provider-raw-only and UI-sidecar-only missing-recovery rejection
