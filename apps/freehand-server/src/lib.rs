@@ -685,6 +685,7 @@ fn sample_slave_turn_projection() -> UiTurnProjection {
         source_node_id: "slave-node".to_owned(),
         session_id: SessionId::new("session-webui-smoke"),
         turn_id: TurnId::new("turn-webui-smoke"),
+        cwd: None,
         user_text: Some("inspect slave status".to_owned()),
         semantic_events: vec![
             ReasonResp01SemanticEvent {
@@ -905,6 +906,8 @@ mod tests {
         assert!(html.contains("id=\"attach-video-button\""));
         assert!(html.contains("id=\"preview-attachments-button\""));
         assert!(html.contains("id=\"refresh-session-button\""));
+        assert!(html.contains("id=\"cwd-input\""));
+        assert!(html.contains("id=\"strip-cwd\""));
         assert!(html.contains("id=\"model-selector\""));
         assert!(html.contains("id=\"attachment-tray\""));
     }
@@ -1083,11 +1086,13 @@ mod tests {
         assert!(js_body.contains("isDraftSessionId"));
         assert!(js_body.contains("startNewSession"));
         assert!(js_body.contains("SubmitUserInput.session_id"));
+        assert!(js_body.contains("SubmitUserInput.cwd"));
+        assert!(js_body.contains("freehand-webui-selected-cwd"));
         assert!(js_body.contains("turn.session_id !== state.selectedSessionId"));
         assert!(js_body.contains("scrollMessagesToBottom"));
         assert!(js_body.contains("window.scrollTo"));
         assert!(js_body.contains("case \"/new\""));
-        assert!(js_body.contains("selected session:"));
+        assert!(!js_body.contains("selected session:"));
         assert!(js_body.contains("CancelTurn"));
         assert!(js_body.contains("CancelLatestActiveTurn"));
         assert!(js_body.contains("event.key !== \"Escape\""));
@@ -1205,6 +1210,7 @@ mod tests {
                 source_node_id: "slave-node".to_owned(),
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-webui-smoke-2"),
+                cwd: None,
                 user_text: Some("second prompt".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {
                     session_id: SessionId::new("session-webui-smoke"),
@@ -1302,6 +1308,7 @@ mod tests {
                 source_node_id: "slave-node".to_owned(),
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-webui-first"),
+                cwd: None,
                 user_text: Some("first prompt".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {
                     session_id: SessionId::new("session-webui-smoke"),
@@ -1345,6 +1352,7 @@ mod tests {
                 source_node_id: "slave-node".to_owned(),
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-debug-late"),
+                cwd: None,
                 user_text: Some("debug should arrive later".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {
                     session_id: SessionId::new("session-webui-smoke"),
@@ -1507,6 +1515,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "run task".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -1546,6 +1555,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "run task".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -1573,6 +1583,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "run task".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await

@@ -11,9 +11,9 @@
     "registry exports provider-neutral tool definitions without importing provider adapter DTOs",
     "registry can export one stable implemented-tool schema fingerprint for planner/cache diagnostics without leaking provider DTOs into reason owners",
     "registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner",
-    "foreground `bash` starts in one locked workspace root: the canonical process current working directory",
-    "path-based read-only tools resolve against one locked workspace root: the canonical process current working directory",
-    "path-based tools resolve against one locked workspace root: the canonical process current working directory",
+    "foreground `bash` starts in one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root",
+    "path-based read-only tools resolve against one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root",
+    "path-based tools resolve against one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root",
     "runtime may choose a subset of implemented definitions for live execution",
     "writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`",
     "provider adapters render schemas; they do not own tool registry truth"
@@ -25,6 +25,7 @@
     "first real file-mutation execution set is: `write_file`, `edit_file`, `multi_edit`",
     "implemented tools return user/model-visible tool result text",
     "foreground `bash` is executable but is not a checkpointable file-mutation preview target",
+    "runtime may bind one explicit per-call workspace root through `with_workspace_root` without mutating process-global cwd or environment",
     "unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth"
   ],
   "error_mainline": [
@@ -38,7 +39,7 @@
     {
       "symbol": "locked_workspace_root",
       "owner": "crates/freehand-tools/src/lib.rs",
-      "purpose": "derive the canonical locked workspace root for all first-version path tools",
+      "purpose": "derive the canonical locked workspace root for all first-version path tools, respecting the explicit per-call workspace context installed by `with_workspace_root`",
       "allowed_callers": [
         "execute_read_file",
         "execute_glob",
@@ -50,6 +51,18 @@
         "runtime live tool loop test"
       ],
       "why_shared": "keeps directory-lock truth in one owner helper instead of per-tool duplication"
+    },
+    {
+      "symbol": "with_workspace_root",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "install an explicit thread-local workspace root for one registry tool execution",
+      "allowed_callers": [
+        "runtime live bridge"
+      ],
+      "related_tests": [
+        "runtime live tool execution with requested session cwd"
+      ],
+      "why_shared": "keeps session workspace execution in the tool owner instead of process-global env switching in runtime"
     },
     {
       "symbol": "resolve_locked_path",

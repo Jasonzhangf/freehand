@@ -19,6 +19,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 - live submit registers an active turn cancel token before provider execution and releases the runtime mutex before running provider IO
 - CancelLatestActiveTurn resolves to the newest active live turn before falling back to latest persisted runtime turn
+- submit commands may carry selected cwd; runtime canonicalizes and binds cwd to the selected session
 
 ## Response Mainline
 
@@ -35,6 +36,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime-owned UI state reflects derived projections only, not authoritative turn truth
 - active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion
 - latest-active cancellation supports Esc during the short window before WebUI has received a concrete turn_id
+- selected session cwd is persisted on turn records, projected to UiProtocolState, and restored for later same-session inheritance
 
 ## Error Mainline
 

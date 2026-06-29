@@ -357,6 +357,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "daemon turn".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -468,6 +469,7 @@ mod tests {
                     command: UiCommand::SubmitUserInput {
                         text: "daemon adp turn".to_owned(),
                         session_id: None,
+                        cwd: None,
                     },
                 })
                 .expect("command json")
@@ -596,6 +598,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "daemon streamed user prompt".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -638,6 +641,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "daemon turn".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -673,6 +677,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "create writable checkpoint".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -766,6 +771,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "create writable checkpoint".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -839,6 +845,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "first daemon turn".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -911,6 +918,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "second daemon turn".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -970,6 +978,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "first streamed daemon turn".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await
@@ -1003,6 +1012,7 @@ mod tests {
             .json(&UiCommand::SubmitUserInput {
                 text: "second streamed daemon turn".to_owned(),
                 session_id: None,
+                cwd: None,
             })
             .send()
             .await

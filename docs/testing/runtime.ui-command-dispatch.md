@@ -6,12 +6,13 @@
   - config-selected bootstrap becomes one runtime dispatcher
   - config-selected live bootstrap may seed one shared node metadata ledger before the first command
   - accepted command ingress becomes a dispatch envelope
-  - submit commands may carry an optional selected session id and must create or continue that session instead of silently flattening everything into the default session
+  - submit commands may carry an optional selected session id and selected cwd and must create or continue that cwd-bound session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
   - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
   - live bootstrap restores multi-round tool activity from reason-ledger snapshots into derived UI session transcripts after daemon restart
   - reason-backed submit/cancel update derived UI state
   - reason-backed submit with a selected session id keeps the session transcript queryable under that session
+  - reason-backed submit with selected cwd projects cwd into session transcript and later same-session submits inherit it
   - active live cancel sets a cancel token and publishes cancelled projection without waiting for provider completion
   - latest-active cancel resolves the current active live turn when UI has not received a concrete `turn_id`
   - cancelled live provider success must not overwrite the cancelled UI projection or commit a success outcome
@@ -22,6 +23,7 @@
 - live provider submit maps bridge-materialized tool execution failure into derived UI state before returning dispatch failure, so query/SSE do not stay waiting
   - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately
   - live provider submit keeps the selected session id attached to the derived UI truth when one is supplied
+  - live provider submit keeps the selected cwd attached to derived UI truth and tool execution workspace when one is supplied
   - live provider multi-round continuation prompts must not replace the public user prompt projection
   - final live multi-round projection aggregates tool activity from earlier rounds instead of showing only the final round, while excluding intermediate continuation text from the final public conversation
   - node-backed direct message returns owner-backed receipt
@@ -32,6 +34,8 @@
   - config-selected live shared node-metadata-ledger bootstrap coverage
   - config-selected live shared node-metadata-ledger bootstrap failure coverage
   - selected-session live submit coverage
+  - selected-session cwd inheritance coverage
+  - live tool execution with requested session cwd coverage
   - persisted latest-turn restore coverage
   - next runtime turn ordinal restore coverage
   - submit/cancel reason dispatch coverage
@@ -57,6 +61,7 @@
   - owner-routing smoke
   - runtime-derived UI latest-turn smoke
   - runtime-derived UI latest-turn user prompt projection smoke
+  - runtime-derived UI session cwd projection smoke
   - runtime-derived cancelled terminal projection smoke
   - config-selected runtime bootstrap smoke
   - config-selected live restart/restore smoke
@@ -78,10 +83,13 @@
   - config-selected live bootstrap now seeds node-owned metadata records into the shared metadata ledger before first command ingress
   - config-selected live bootstrap now rejects unwritable shared node metadata ledgers explicitly before a dispatcher can materialize
   - provider-backed submit dispatch plus persisted restore/bootstrap is covered
+- selected-session cwd projection and inheritance are covered
 - live provider submit now streams incremental UI state updates through runtime-owned hooks
 - live provider submit now projects provider-request-built lifecycle state into UI before model response arrives
 - live provider submit now streams tool-result UI updates and final projection keeps earlier-round tool activity visible without exposing intermediate continuation text
+  - live provider submit now executes registry tools against the requested session cwd and projects that cwd into UI state
   - live bootstrap now restores earlier-round tool activity into UI transcripts after restart without changing closed-turn recovery truth
+  - live bootstrap now restores persisted session cwd from turn records for UI projection and same-session inheritance
   - live provider submit now refreshes failed bridge truth from persistence before returning dispatch failure, preventing silent waiting UI state
   - reason-backed cancel dispatch is covered
   - active live cancel no longer waits behind provider IO because live submit releases the runtime mutex after active turn registration

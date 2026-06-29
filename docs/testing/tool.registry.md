@@ -5,7 +5,7 @@
 - lifecycle path under test:
   - registry is created per run
   - Reasonix-aligned tool names and schemas are exported in stable registry order
-  - implemented tools execute and return explicit result text
+  - implemented tools execute against the explicit per-call workspace root when runtime supplies session cwd and return explicit result text
   - unimplemented registered tools fail explicitly
   - unknown tools fail explicitly
 - white-box plan:
@@ -13,7 +13,7 @@
   - implemented schema fingerprint stability tests
   - implemented schema fingerprint change detection tests
 - `read_only` metadata tests
-- `bash` success-path, workspace-cwd, timeout, and non-zero-exit tests
+- `bash` success-path, workspace-cwd, explicit workspace root, timeout, and non-zero-exit tests
 - live runtime checkpoint routing must not treat non-file-mutation tools such as `bash` as preview/checkpointable file mutations
   - `read_file` line-window and path-lock tests
   - `write_file` create/overwrite/path-lock tests
@@ -27,11 +27,11 @@
   - unknown/unimplemented tool error tests
 - module black-box plan:
   - runtime live bridge can advertise implemented tool definitions without hardcoded demo tools
-  - runtime live bridge can execute a real implemented read-only registry tool and re-enter the result
+  - runtime live bridge can execute a real implemented read-only registry tool and re-enter the result, including requested session cwd execution
 - project black-box impact:
   - provider live turn tool loop may now execute foreground `bash` through the registry owner instead of forcing file-only tools
   - provider live turn tool loop no longer depends on `echo_json` or forced `todo_write`
-  - daemon and runtime smokes now prove `read_file` can run through the registry-owned live path
+  - daemon and runtime smokes now prove `read_file` can run through the registry-owned live path using session cwd
   - writable file-mutation tools now still enter the live path only through the registry owner instead of runtime orchestration
   - future bash/web/notebook tools still have one owner and cannot be implemented in runtime orchestration
 - mainline/wiki sync:
@@ -43,6 +43,7 @@
   - `bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
 - sync status between design and implementation:
   - registry-backed foreground `bash`, read-only file/search, and first text-mutation tools are landed
+  - explicit per-call workspace root support is landed through `with_workspace_root`
   - implemented tool schema fingerprint export is landed for planner/cache diagnostics consumers
   - writable tool live exposure is routed through the code-bound `tool.preview` plus `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts
   - runtime and daemon smokes now consume real registry tools instead of a forced demo first tool

@@ -17,6 +17,7 @@ const attachVideoButton = document.getElementById("attach-video-button");
 const previewAttachmentsButton = document.getElementById("preview-attachments-button");
 const refreshSessionButton = document.getElementById("refresh-session-button");
 const modelSelector = document.getElementById("model-selector");
+const cwdInput = document.getElementById("cwd-input");
 const attachmentFileInput = document.getElementById("attachment-file-input");
 const attachmentImageInput = document.getElementById("attachment-image-input");
 const attachmentVideoInput = document.getElementById("attachment-video-input");
@@ -30,16 +31,19 @@ const samplePrompts = {
 };
 
 const selectedSessionStorageKey = "freehand-webui-selected-session";
+const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
 const adpRequestTimeoutMs = 8000;
 const shortcutHelp =
   "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /new /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
+const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) || "";
 
 const state = {
   turn: null,
   sessions: [],
   selectedSessionId: initialSelectedSessionId,
+  selectedCwd: initialSelectedCwd,
   draftSessionId: initialSelectedSessionId && initialSelectedSessionId.startsWith("webui-session-")
     ? initialSelectedSessionId
     : null,
@@ -869,6 +873,36 @@ function setSelectedSessionId(sessionId) {
   }
 }
 
+function normalizeCwd(cwd) {
+  return `${cwd || ""}`.trim();
+}
+
+function setSelectedCwd(cwd) {
+  state.selectedCwd = normalizeCwd(cwd);
+  if (cwdInput && cwdInput.value !== state.selectedCwd) {
+    cwdInput.value = state.selectedCwd;
+  }
+  if (state.selectedCwd) {
+    window.localStorage.setItem(selectedCwdStorageKey, state.selectedCwd);
+  } else {
+    window.localStorage.removeItem(selectedCwdStorageKey);
+  }
+}
+
+function sessionSummaryForSelected() {
+  if (!state.selectedSessionId) {
+    return null;
+  }
+  return state.sessions.find((session) => session.session_id === state.selectedSessionId) || null;
+}
+
+function syncSelectedCwdFromProjection(projection) {
+  const cwd = normalizeCwd(projection && projection.cwd);
+  if (cwd) {
+    setSelectedCwd(cwd);
+  }
+}
+
 function newDraftSessionId() {
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
   return `webui-session-${stamp}-${crypto.randomUUID().slice(0, 8)}`;
@@ -887,9 +921,10 @@ function startNewSession() {
   state.submitStartedAt = null;
   state.submitInFlight = false;
   setSelectedSessionId(sessionId);
+  setSelectedCwd(state.selectedCwd);
   composerInput.value = "";
   composerInput.focus();
-  setCommandStatus(`new session ready: ${sessionId}`, { stickyMs: 6000 });
+  setCommandStatus("new session ready", { stickyMs: 3000 });
   renderAll();
 }
 
@@ -906,10 +941,15 @@ function setSessionList(projection) {
     const active = state.sessions.find((session) => session.active_turn_id);
     setSelectedSessionId((active || state.sessions[state.sessions.length - 1]).session_id);
   }
+  const selected = sessionSummaryForSelected();
+  if (selected) {
+    syncSelectedCwdFromProjection(selected);
+  }
 }
 
 function setSessionTranscript(projection) {
   state.sessionTurns = (projection && projection.turns) || [];
+  syncSelectedCwdFromProjection(projection);
   if (projection && projection.session_id && state.sessionTurns.length > 0) {
     setSelectedSessionId(projection.session_id);
     if (state.draftSessionId === projection.session_id) {
@@ -968,6 +1008,7 @@ function setTurnProjection(turn, options = {}) {
   if (state.turn && !state.selectedSessionId) {
     setSelectedSessionId(state.turn.session_id);
   }
+  syncSelectedCwdFromProjection(state.turn);
   if (state.turn && !options.preserveSessionTurns) {
     const existingIndex = state.sessionTurns.findIndex(
       (existing) => existing.turn_id === state.turn.turn_id,
@@ -1128,15 +1169,7 @@ function renderMessages() {
   }
 
   if (state.selectedSessionId && !hasSelectedSessionTranscript) {
-    fragments.push(
-      card(
-        "Session",
-        { className: "pending", label: "selected" },
-        "等待会话内容",
-        `selected session: ${state.selectedSessionId} · no turns yet`,
-        "assistant",
-      ),
-    );
+    // A newly selected draft session should stay visually clean until the user sends.
   } else if (state.sessionTurns.length === 0 && !state.turn) {
     fragments.push(
       card(
@@ -1215,15 +1248,12 @@ function renderMessages() {
   }
 
   if (fragments.length === 0) {
-    fragments.push(
-      card(
-        "Assistant",
-        { className: "pending", label: "idle" },
-        "等待内容",
-        "当前 turn 暂无可显示语义内容。",
-        "assistant",
-      ),
-    );
+    const empty = document.createElement("div");
+    empty.className = "chat-empty-state";
+    empty.textContent = state.selectedSessionId
+      ? "New session. Send a message to start."
+      : "Waiting for protocol state.";
+    fragments.push(empty);
   }
 
   fragments.forEach((fragment) => messageList.appendChild(fragment));
@@ -1286,7 +1316,9 @@ function renderSessions() {
     item.type = "button";
     item.dataset.sessionId = session.session_id;
 
-    const turnText = session.latest_turn_id ? `${session.latest_turn_id} · ${session.turn_count} turn(s)` : `${session.turn_count} turn(s)`;
+    const cwd = normalizeCwd(session.cwd);
+    const cwdTail = cwd ? ` · ${cwd.split("/").filter(Boolean).slice(-2).join("/") || cwd}` : "";
+    const turnText = session.latest_turn_id ? `${session.latest_turn_id} · ${session.turn_count} turn(s)${cwdTail}` : `${session.turn_count} turn(s)${cwdTail}`;
     appendSessionParts(
       item,
       session.active_turn_id ? "active" : session.latest_status || "session",
@@ -1309,7 +1341,7 @@ function renderDraftSessionItem() {
   item.className = `session-item session-button${state.draftSessionId === state.selectedSessionId ? " active" : ""}`;
   item.type = "button";
   item.dataset.sessionId = state.draftSessionId;
-  appendSessionParts(item, "draft", state.draftSessionId, "first send creates session");
+  appendSessionParts(item, "draft", state.draftSessionId, state.selectedCwd ? `cwd ${state.selectedCwd}` : "first send creates session");
   item.addEventListener("click", () => {
     setSelectedSessionId(state.draftSessionId);
     state.sessionTurns = [];
@@ -1358,6 +1390,7 @@ function renderTurnMeta() {
     setText("session-copy", state.selectedSessionId ? "no turns in selected session" : "no active turn yet");
     setText("strip-session", state.selectedSessionId || "-");
     setText("strip-turn", "-");
+    setText("strip-cwd", state.selectedCwd || "-");
     setText("conversation-turn", state.selectedSessionId || "latest active turn");
     setText("turn-status", liveTurnStatus() || "waiting");
     setText("strip-slave", "idle");
@@ -1368,9 +1401,10 @@ function renderTurnMeta() {
   }
 
   setText("session-title", state.turn.session_id);
-  setText("session-copy", state.turn.turn_id);
+  setText("session-copy", state.turn.cwd ? `${state.turn.turn_id} · ${state.turn.cwd}` : state.turn.turn_id);
   setText("strip-session", state.turn.session_id);
   setText("strip-turn", state.turn.turn_id);
+  setText("strip-cwd", state.turn.cwd || state.selectedCwd || "-");
   setText("conversation-turn", state.turn.turn_id);
   const runningTools = (state.turn.tool_activities || []).filter((tool) => tool.status === "Waiting" || tool.status === "waiting");
   const turnStatus = state.turn.terminal_text
@@ -1521,6 +1555,10 @@ async function submitUserInput(text) {
   const command = { SubmitUserInput: { text } };
   if (state.selectedSessionId) {
     command.SubmitUserInput.session_id = state.selectedSessionId;
+  }
+  const cwd = normalizeCwd(state.selectedCwd);
+  if (cwd) {
+    command.SubmitUserInput.cwd = cwd;
   }
   const payload = await adpCommand(command);
   setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id}`);
@@ -1741,6 +1779,12 @@ refreshSessionButton.addEventListener("click", () => {
 modelSelector.addEventListener("change", () => {
   modelSelector.value = "runtime";
   setCommandStatus("model selector is read-only; runtime config owns active model", { stickyMs: 6000 });
+});
+cwdInput.value = state.selectedCwd;
+cwdInput.addEventListener("change", () => {
+  setSelectedCwd(cwdInput.value);
+  setCommandStatus(state.selectedCwd ? `session cwd selected: ${state.selectedCwd}` : "session cwd cleared; runtime default will be used", { stickyMs: 5000 });
+  renderAll();
 });
 
 document.addEventListener("keydown", (event) => {

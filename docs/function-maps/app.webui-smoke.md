@@ -22,9 +22,9 @@
 - app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets
 - app boundary keeps theme assets separate from WebUI layout assets
 - front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames
-- front-end session list can create a draft session with `/new`, persist the selected session id locally, and bind future ADP submit frames to the selected session when present
+- front-end session list can create a draft session with `/new`, persist the selected session id and selected cwd locally, and bind future ADP submit frames to the selected cwd-bound session when present
 - front-end exposes success and failure sample prompt buttons that load reproducible ADP sample prompts into the composer without bypassing normal Send/ADP command flow
-- front-end composer control strip exposes attachment buttons, preview, selected-session refresh, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP
+- front-end composer control strip exposes attachment buttons, preview, selected-session refresh, cwd input, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP
 - front-end attachment drafts are scoped by selected session, persist metadata only, append placeholder lines to the current send, clear on command receipt, and remain available for retry after dispatch failure
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
@@ -42,7 +42,7 @@
 - app boundary renders a protocol-driven WebUI page shell; live content is populated from ADP query/subscribe/command frames by default
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason/debug truth writer
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
-- app boundary keeps one selected session at a time, can synthesize a draft session entry before the first turn exists, and keeps the selected transcript pinned to that session instead of falling back to global latest turn
+- app boundary keeps one selected session at a time, can synthesize a draft session entry before the first turn exists, keeps the selected transcript pinned to that session instead of falling back to global latest turn, and keeps a new draft session visually clean instead of rendering system feedback as chat content
 - app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
 - ADP subscribe returns an explicit accepted/waiting state before later turn/debug events, so the WebUI can render waiting instead of appearing frozen
 - SSE subscribe routes now emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe must stay open on blank state until a turn exists
@@ -141,13 +141,13 @@
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
 - debug subscribe route now also keeps one SSE connection open when the first debug snapshot is not available yet
 - WebUI submit path still explicitly refreshes latest turn truth over ADP after a successful command receipt
-- WebUI submit path now forwards an optional selected session id through `SubmitUserInput` so a new conversation can be created from the selected draft session instead of always using the global default session
+- WebUI submit path now forwards an optional selected session id and cwd through `SubmitUserInput` so a new conversation can be created from the selected draft session/workspace instead of always using the global default session
 - WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files
 - WebUI Cancel button and Escape key now send `CancelTurn` through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`
 - WebUI tool cards now render protocol-projected waiting/completed/failed lifecycle states from ADP turn projection truth
 - WebUI success/failure sample buttons now load reproducible ADP sample prompts into the composer
-- WebUI composer control strip now exposes file/image/video attachment, preview, selected-session refresh, and read-only model selector controls without changing ADP framing
+- WebUI composer control strip now exposes file/image/video attachment, preview, selected-session refresh, cwd input, and read-only model selector controls without changing ADP framing beyond the protocol-owned `SubmitUserInput.cwd`
 - WebUI attachment drafts are session-scoped in local UI metadata, render as placeholder chips, append placeholder lines to the current submitted text, clear after successful command receipt, and remain for retry after dispatch failure
 - WebUI same-tool lifecycle updates now normalize by `tool_call_id`, waiting cards animate with local elapsed timers, and submit clears the input field immediately while retaining pending state in the conversation stream
 - WebUI submit/dispatch and tool-wait lifecycle states now both refresh once per second so users can see where the turn is blocked and how long it has waited
@@ -155,6 +155,7 @@
 - WebUI completed/failed tool cards now show protocol-projected result detail, and tool-complete-to-next-model waiting renders as its own timed lifecycle card
 - WebUI tool cards now render `display.action`, `display.summary`, `display.parameter_summary`, `display.result_summary`, `display.fields`, and `display.diff`; category parsing stays in `tool.display`, not in JavaScript
 - WebUI selected-session transcript display now groups same execution-cycle round ids such as `runtime-turn-47` and `runtime-turn-47-r2` into one visible logical turn while preserving ADP/session truth as separate persisted turns
+- WebUI `/new` no longer renders the old selected-session/no-turns system card in the chat stream
 - WebUI assistant cards now collapse to one visible card per logical turn and strip raw `<freehand_completion>` blocks; final user-facing completion content remains in the Final card
 - WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics

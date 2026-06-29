@@ -246,6 +246,7 @@ fn spawn_adp_sample_mock_server(status: TerminalStatus) -> (String, thread::Join
                             build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                                 text: text.clone(),
                                 session_id: None,
+                                cwd: None,
                             })
                             .expect("sample envelope");
                         send_adp_response(
@@ -349,6 +350,7 @@ fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
                                 result: UiQueryResult::SessionList(UiSessionListProjection {
                                     sessions: vec![UiSessionSummary {
                                         session_id: SessionId::new("cli-session"),
+                                        cwd: Some("/tmp/cli-session".to_owned()),
                                         latest_turn_id: Some(TurnId::new("runtime-turn-10")),
                                         active_turn_id: None,
                                         turn_count: 2,
@@ -383,6 +385,7 @@ fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
                                 result: UiQueryResult::SessionTurns(
                                     UiSessionTranscriptProjection {
                                         session_id,
+                                        cwd: Some("/tmp/cli-session".to_owned()),
                                         turns: vec![first, second],
                                     },
                                 ),
@@ -431,6 +434,7 @@ fn test_turn_projection() -> UiTurnProjection {
         },
         session_id: SessionId::new("cli-session"),
         turn_id: TurnId::new("cli-adp-turn"),
+        cwd: Some("/tmp/cli-session".to_owned()),
         user_text: Some("cli adp smoke".to_owned()),
         model_request: None,
         reasoning: Vec::new(),
@@ -457,6 +461,7 @@ fn test_sample_turn_projection(prompt: &str, status: TerminalStatus) -> UiTurnPr
         },
         session_id: SessionId::new("cli-session"),
         turn_id: TurnId::new("cli-adp-sample-turn"),
+        cwd: Some("/tmp/cli-session".to_owned()),
         user_text: Some(prompt.to_owned()),
         model_request: None,
         reasoning: Vec::new(),

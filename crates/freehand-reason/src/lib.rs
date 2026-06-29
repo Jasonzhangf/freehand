@@ -81,6 +81,8 @@ pub struct TurnRecord {
     pub request: ReasonReq02ContextComposedInput,
     pub provider_payload: ReasonReq03ProviderPayload,
     pub planned_context: PlannedContext,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
     pub semantic_events: Vec<ReasonResp01SemanticEvent>,
     pub tool_calls: Vec<ReasonReq04ToolCall>,
     pub tool_results: Vec<ReasonReq05ToolResultReentry>,
@@ -213,6 +215,7 @@ impl ReasonTurnEngine {
             request,
             provider_payload,
             planned_context,
+            cwd: None,
             semantic_events: Vec::new(),
             tool_calls: Vec::new(),
             tool_results: Vec::new(),

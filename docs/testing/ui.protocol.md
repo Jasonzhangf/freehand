@@ -7,7 +7,7 @@
   - commands act as ingress only and do not make UI a truth writer
   - command ingress accepts only mutation-intent commands and rejects query-route misuse explicitly
   - accepted command ingress is routed to declared owner feature/module before transport dispatch
-  - submit command validation accepts an optional selected session id without weakening empty-text rejection
+  - submit command validation accepts an optional selected session id and optional selected cwd without weakening empty-text rejection
   - latest-active cancellation is accepted as mutation intent and routes to `reason.turn`
   - query returns snapshot truth
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
@@ -26,6 +26,7 @@
   - slave turn presentation divergence remains protocol-safe
   - client-specific projection gating keeps slave card visible only for WebUI
   - public conversation projection preserves the user prompt while hiding reasoning, usage, debug details, raw completion schema blocks, and verbose tool term text from the main user-visible stream
+  - session list and transcript queries project the cwd bound to the selected session
   - cancelled terminal status remains visible to public conversation status mapping and is not projected as completed
   - public tool summaries carry `tool_call_id` so same-tool waiting/completed updates remain one UI activity
 - white-box plan:
@@ -33,6 +34,7 @@
   - command ingress acceptance and rejection mapping
   - command dispatch routing mapping
   - submit command selected-session validation mapping
+  - submit command selected-cwd validation and JSON roundtrip mapping
   - explicit cancel and latest-active cancel owner-routing mapping
   - checkpoint rewind ingress validation and owner-routing mapping
   - checkpoint projection storage and query mapping
@@ -49,6 +51,7 @@
 - module black-box plan:
   - command ingress accept/reject smoke
   - selected-session submit command smoke
+  - selected-session cwd projection smoke
   - command dispatch envelope owner-routing smoke
   - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
   - debug-state snapshot/query by `turn_id`
@@ -83,7 +86,7 @@
   - debug-state contract is minimal and per-turn only for now
 - sync status between design and implementation:
   - command/query/subscribe/projection baseline landed
-  - submit command optional selected-session id is landed and regression-locked
+  - submit command optional selected-session id and selected cwd are landed and regression-locked
   - command ingress ack/rejection baseline landed
   - command dispatch envelope routing baseline landed
   - checkpoint rewind command ingress and runtime owner routing are landed
@@ -101,3 +104,4 @@
   - tool summaries now expose `tool_call_id`, duplicate same-id tool calls are regression-locked to one public card, and completed/failed public tool bodies include tool result detail
   - tool summaries now expose `display` from the `tool.display` owner, and public bodies prefer structured result summaries over raw detail text
   - ADP request/response frames are landed and regression-locked by JSON roundtrip coverage
+  - session cwd summary/transcript projection is landed and regression-locked

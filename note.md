@@ -32,6 +32,35 @@
     - `05-reloaded-final-parameter.png` captured terminal state with `turn completed`, no waiting text, `Read file` card showing parameter and failed result, plus shell command card showing `command=... · timeout=60`
     - ADP truth for `webui-session-20260629044814-5eb78029` showed `runtime-turn-43-r4` Success with `display.parameter_summary=path=definitely-missing-freehand-file.txt`
 
+# 2026-06-29 session cwd owner wiring
+  - user requirement:
+    - session must have a working directory and WebUI must allow choosing it
+    - `/new` should not render system feedback as a chat message
+  - implementation:
+    - `SubmitUserInput.cwd` is protocol-owned and empty cwd is rejected as `empty_session_cwd`
+    - `UiTurnProjection`, `UiSessionSummary`, and `UiSessionTranscriptProjection` expose cwd
+    - runtime canonicalizes requested cwd, binds it to the selected session, persists it on `TurnRecord.cwd`, restores it after bootstrap, and inherits it on later same-session submits
+    - tool execution uses `freehand-tools::with_workspace_root` so session cwd is passed as an explicit per-call workspace root instead of mutating process-global cwd/env
+    - WebUI adds a cwd input, forwards `SubmitUserInput.cwd`, shows cwd in topbar/session metadata, and `/new` now renders a clean empty state instead of the old selected-session/no-turns chat card
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-ui-protocol -- --nocapture`
+    - `cargo test -p freehand-runtime -- --nocapture`
+    - `cargo test -p freehand-server -- --nocapture`
+    - `cargo test -p freehand-tools -- --nocapture`
+    - `cargo test -p freehand-reason -- --nocapture`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`
+  - live WebUI verification:
+    - local WebUI smoke server on `127.0.0.1:4088` returned `/health=ok`
+    - Playwright real page operation clicked `New session`, set cwd `/Volumes/extension/code/freehand`, verified no `selected session:` system card, submitted a prompt, and observed command receipt/status
+    - screenshots:
+      - `artifacts/webui-session-cwd-e2e/20260629-session-cwd/01-initial-cwd-control.png`
+      - `artifacts/webui-session-cwd-e2e/20260629-session-cwd/02-new-session-cwd-clean.png`
+      - `artifacts/webui-session-cwd-e2e/20260629-session-cwd/03-submit-cwd-status.png`
+
 # 2026-06-29 WebUI provider-request wait state repair
   - gap found:
     - submit/dispatch waiting was local WebUI state and did not prove provider request had been built/sent

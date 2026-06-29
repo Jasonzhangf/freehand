@@ -48,6 +48,8 @@ pub enum UiCommand {
         text: String,
         #[serde(default)]
         session_id: Option<SessionId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
     },
     SubscribeLatestActiveTurn {
         client: UiClientKind,
@@ -101,6 +103,8 @@ pub struct UiTurnProjection {
     pub source: UiSource,
     pub session_id: SessionId,
     pub turn_id: TurnId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
     pub user_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_request: Option<UiModelRequestActivity>,
@@ -191,6 +195,8 @@ pub struct UiPublicTurnProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiSessionSummary {
     pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
     pub latest_turn_id: Option<TurnId>,
     pub active_turn_id: Option<TurnId>,
     pub turn_count: usize,
@@ -206,6 +212,8 @@ pub struct UiSessionListProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiSessionTranscriptProjection {
     pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
     pub turns: Vec<UiTurnProjection>,
 }
 
@@ -264,6 +272,7 @@ pub struct TurnProjectionInput {
     pub source_node_id: String,
     pub session_id: SessionId,
     pub turn_id: TurnId,
+    pub cwd: Option<String>,
     pub user_text: Option<String>,
     pub semantic_events: Vec<ReasonResp01SemanticEvent>,
     pub tool_calls: Vec<ReasonReq04ToolCall>,
@@ -424,6 +433,7 @@ pub struct SubscriptionSelector {
 pub struct UiProtocolState {
     latest_active_turn_id: Option<TurnId>,
     turns: BTreeMap<TurnId, UiTurnProjection>,
+    session_cwds: BTreeMap<SessionId, String>,
     node_status: BTreeMap<String, NodeStatusSnapshot>,
     progress: BTreeMap<TurnId, TaskProgressSnapshot>,
     debug: BTreeMap<TurnId, DebugStateSnapshot>,
@@ -435,6 +445,8 @@ pub struct UiProtocolState {
 pub enum UiProtocolError {
     #[error("submit user input command requires non-empty text")]
     EmptyUserInput,
+    #[error("session cwd must be non-empty when provided")]
+    EmptySessionCwd,
     #[error("direct slave message requires non-empty text")]
     EmptySlaveMessage,
     #[error("rewind checkpoint command requires non-empty checkpoint id")]
@@ -461,6 +473,7 @@ impl UiProtocolState {
         Self {
             latest_active_turn_id: None,
             turns: BTreeMap::new(),
+            session_cwds: BTreeMap::new(),
             node_status: BTreeMap::new(),
             progress: BTreeMap::new(),
             debug: BTreeMap::new(),
@@ -475,9 +488,22 @@ impl UiProtocolState {
 
     pub fn apply_turn_projection(&mut self, projection: UiTurnProjection) {
         self.latest_active_turn_id = Some(projection.turn_id.clone());
+        if let Some(cwd) = projection.cwd.clone() {
+            self.session_cwds.insert(projection.session_id.clone(), cwd);
+        }
         self.turns
             .insert(projection.turn_id.clone(), projection.clone());
         self.publish_projection(UiProjection::Turn(projection));
+    }
+
+    pub fn set_session_cwd(&mut self, session_id: SessionId, cwd: impl Into<String>) {
+        let cwd = cwd.into();
+        self.session_cwds.insert(session_id.clone(), cwd.clone());
+        for projection in self.turns.values_mut() {
+            if projection.session_id == session_id {
+                projection.cwd = Some(cwd.clone());
+            }
+        }
     }
 
     pub fn apply_semantic_event(
@@ -766,10 +792,11 @@ impl UiProtocolState {
             }
             UiCommand::QuerySessionList => Ok(UiQueryResult::SessionList(session_list_projection(
                 &self.turns,
+                &self.session_cwds,
                 self.latest_active_turn_id.as_ref(),
             ))),
             UiCommand::QuerySessionTurns { session_id } => Ok(UiQueryResult::SessionTurns(
-                session_transcript_projection(session_id, &self.turns),
+                session_transcript_projection(session_id, &self.turns, &self.session_cwds),
             )),
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
                 self.node_status.get(node_id).cloned(),
@@ -808,6 +835,7 @@ impl UiProtocolState {
                 },
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
+                cwd: self.session_cwds.get(session_id).cloned(),
                 user_text: None,
                 model_request: None,
                 reasoning: Vec::new(),
@@ -841,6 +869,9 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::SubmitUserInput { text, .. } if text.trim().is_empty() => {
             Err(UiProtocolError::EmptyUserInput)
         }
+        UiCommand::SubmitUserInput { cwd: Some(cwd), .. } if cwd.trim().is_empty() => {
+            Err(UiProtocolError::EmptySessionCwd)
+        }
         UiCommand::SendDirectMessageToSlave { text, .. } if text.trim().is_empty() => {
             Err(UiProtocolError::EmptySlaveMessage)
         }
@@ -867,6 +898,7 @@ pub fn accept_command_ingress(command: &UiCommand) -> Result<UiCommandIngressAck
 pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
     let code = match err {
         UiProtocolError::EmptyUserInput => "empty_user_input",
+        UiProtocolError::EmptySessionCwd => "empty_session_cwd",
         UiProtocolError::EmptySlaveMessage => "empty_slave_message",
         UiProtocolError::EmptyCheckpointId => "empty_checkpoint_id",
         UiProtocolError::IngressCommandKindMismatch => "ingress_command_kind_mismatch",
@@ -1099,6 +1131,7 @@ fn empty_checkpoint_snapshot() -> UiCheckpointSnapshot {
 
 fn session_list_projection(
     turns: &BTreeMap<TurnId, UiTurnProjection>,
+    session_cwds: &BTreeMap<SessionId, String>,
     latest_active_turn_id: Option<&TurnId>,
 ) -> UiSessionListProjection {
     let mut grouped: Vec<(SessionId, Vec<&UiTurnProjection>)> = Vec::new();
@@ -1125,8 +1158,13 @@ fn session_list_projection(
                     .any(|turn| &turn.turn_id == turn_id)
                     .then(|| turn_id.clone())
             });
+            let cwd = session_cwds
+                .get(&session_id)
+                .cloned()
+                .or_else(|| latest.and_then(|turn| turn.cwd.clone()));
             UiSessionSummary {
                 session_id,
+                cwd,
                 latest_turn_id: latest.map(|turn| turn.turn_id.clone()),
                 active_turn_id,
                 turn_count: session_turns.len(),
@@ -1144,16 +1182,24 @@ fn session_list_projection(
 fn session_transcript_projection(
     session_id: &SessionId,
     turns: &BTreeMap<TurnId, UiTurnProjection>,
+    session_cwds: &BTreeMap<SessionId, String>,
 ) -> UiSessionTranscriptProjection {
+    let cwd = session_cwds.get(session_id).cloned();
     let mut session_turns = turns
         .values()
         .filter(|turn| &turn.session_id == session_id)
         .cloned()
         .collect::<Vec<_>>();
+    for turn in &mut session_turns {
+        if turn.cwd.is_none() {
+            turn.cwd = cwd.clone();
+        }
+    }
     session_turns
         .sort_by(|left, right| turn_order_key(&left.turn_id).cmp(&turn_order_key(&right.turn_id)));
     UiSessionTranscriptProjection {
         session_id: session_id.clone(),
+        cwd,
         turns: session_turns,
     }
 }
@@ -1408,6 +1454,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
         },
         session_id: input.session_id,
         turn_id: input.turn_id,
+        cwd: input.cwd,
         user_text: input.user_text,
         model_request: None,
         reasoning,
@@ -1479,6 +1526,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: vec![
                 ReasonResp01SemanticEvent {
@@ -1587,6 +1635,7 @@ mod tests {
         validate_command(&UiCommand::SubmitUserInput {
             text: "hello".to_owned(),
             session_id: None,
+            cwd: None,
         })
         .expect("valid");
 
@@ -1605,12 +1654,79 @@ mod tests {
         let command = UiCommand::SubmitUserInput {
             text: "hello new session".to_owned(),
             session_id: Some(SessionId::new("webui-session-test")),
+            cwd: None,
         };
         validate_command(&command).expect("valid command");
         let encoded = serde_json::to_string(&command).expect("json");
         assert!(encoded.contains("webui-session-test"));
         let decoded: UiCommand = serde_json::from_str(&encoded).expect("decode");
         assert_eq!(decoded, command);
+    }
+
+    #[test]
+    fn submit_user_input_carries_session_cwd_and_rejects_empty_cwd() {
+        let command = UiCommand::SubmitUserInput {
+            text: "hello cwd session".to_owned(),
+            session_id: Some(SessionId::new("webui-session-cwd")),
+            cwd: Some("/tmp/freehand-cwd".to_owned()),
+        };
+        validate_command(&command).expect("valid cwd command");
+        let encoded = serde_json::to_string(&command).expect("json");
+        assert!(encoded.contains("/tmp/freehand-cwd"));
+        let decoded: UiCommand = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded, command);
+
+        let err = validate_command(&UiCommand::SubmitUserInput {
+            text: "bad cwd".to_owned(),
+            session_id: None,
+            cwd: Some("   ".to_owned()),
+        })
+        .expect_err("blank cwd must be rejected");
+        assert_eq!(err, UiProtocolError::EmptySessionCwd);
+        assert_eq!(protocol_rejection(err).code, "empty_session_cwd");
+    }
+
+    #[test]
+    fn session_list_and_transcript_project_session_cwd() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("webui-session-cwd");
+        state.apply_turn_projection(turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: TurnId::new("turn-cwd-1"),
+            cwd: Some("/tmp/freehand-cwd".to_owned()),
+            user_text: Some("run in cwd".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            usage_events: Vec::new(),
+            terminal_event: None,
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        }));
+
+        match state.query(&UiCommand::QuerySessionList).expect("list") {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions[0].cwd.as_deref(), Some("/tmp/freehand-cwd"));
+            }
+            other => panic!("unexpected list result: {other:?}"),
+        }
+        match state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.cwd.as_deref(), Some("/tmp/freehand-cwd"));
+                assert_eq!(
+                    transcript.turns[0].cwd.as_deref(),
+                    Some("/tmp/freehand-cwd")
+                );
+            }
+            other => panic!("unexpected transcript result: {other:?}"),
+        }
     }
 
     #[test]
@@ -1636,6 +1752,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
             tool_calls: vec![ReasonReq04ToolCall {
@@ -1694,6 +1811,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
             tool_calls: vec![ReasonReq04ToolCall {
@@ -1760,6 +1878,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
             tool_calls: vec![ReasonReq04ToolCall {
@@ -1823,6 +1942,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
             tool_calls: vec![tool_call.clone(), tool_call],
@@ -2289,6 +2409,7 @@ mod tests {
         let ack = accept_command_ingress(&UiCommand::SubmitUserInput {
             text: "ship it".to_owned(),
             session_id: None,
+            cwd: None,
         })
         .expect("ack");
         assert!(ack.accepted);
@@ -2331,6 +2452,7 @@ mod tests {
         let envelope = build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
             text: "run task".to_owned(),
             session_id: None,
+            cwd: None,
         })
         .expect("envelope");
         assert_eq!(envelope.ingress.command_kind, "submit_user_input");
@@ -2365,6 +2487,7 @@ mod tests {
         let envelope = build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
             text: "run task".to_owned(),
             session_id: None,
+            cwd: None,
         })
         .expect("envelope");
         let port = StaticUiCommandDispatchPort::new("queued_by_test_port");

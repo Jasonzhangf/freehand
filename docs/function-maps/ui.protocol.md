@@ -41,7 +41,7 @@
 - accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - `CancelLatestActiveTurn` is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete `turn_id`
-- `SubmitUserInput` may carry an optional selected `session_id` so the protocol can route a new turn into an explicitly chosen session or draft session
+- `SubmitUserInput` may carry an optional selected `session_id` and selected `cwd` so the protocol can route a new turn into an explicitly chosen cwd-bound session or draft session
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
@@ -61,6 +61,7 @@
 - public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation session selection stays explicit: submit can target a selected session id, and session-level transcript queries stay separate from the global latest turn
+- session list and transcript projections expose session `cwd`, and turn projections carry `cwd` when the runtime owner has bound a session to a workspace
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed tool summaries include the protocol-projected tool result detail
 - public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/parameters/result without parsing raw tool terms
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
@@ -78,6 +79,7 @@
 ## Error Mainline
 
 - invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors
+- empty `SubmitUserInput.cwd` is rejected at the protocol boundary instead of being treated as runtime default
 - query/subscribe commands sent to command-ingress route are explicit protocol misuse errors
 - query commands sent as ADP command frames are explicit protocol misuse errors, not mutation attempts
 - `CancelLatestActiveTurn` without any active or persisted turn returns explicit target-not-found from the owner module
@@ -169,7 +171,7 @@
 ## Sync Status Against Code
 
 - command validation, query selection, subscription routing, turn projection, and debug-state projection are bound in code
-- command ingress acceptance, dispatch-envelope routing, and rejection payload mapping are now bound in code
+- command ingress acceptance, dispatch-envelope routing, `cwd` validation, and rejection payload mapping are now bound in code
 - checkpoint rewind is now a protocol-owned mutation-intent command routed to `runtime.checkpoint-rewind`
 - checkpoint summary projection/query is read-only protocol state and code-bound
 - client-specific projection gating is now also bound in code
@@ -182,4 +184,5 @@
 - tool activities now carry structured `display` projection from `tool.display`; public tool cards expose semantic action/target/parameter/result summaries instead of making UI infer categories from raw tool detail
 - public tool summaries now preserve `tool_call_id`, expose tool result detail, and duplicate tool-call projections upsert into one activity before public rendering
 - ADP request/response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
+- session cwd projection is landed for `UiTurnProjection`, `UiSessionSummary`, and `UiSessionTranscriptProjection`
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

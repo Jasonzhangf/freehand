@@ -19,6 +19,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 - CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id
+- SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation
 
 ## Response Mainline
 
@@ -43,6 +44,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
 - public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed public tool bodies expose protocol-projected tool result detail
 - cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn
+- session list and transcript projections expose cwd bound by runtime/session truth
 
 ## Error Mainline
 
@@ -56,6 +58,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors
 - cancelled terminal projection must stay explicit and must not be collapsed into failed or completed UI status
 - CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module
+- empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently
 
 ## Shared Multi-Reference Functions
 

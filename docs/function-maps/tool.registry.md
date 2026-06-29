@@ -11,6 +11,7 @@
   - `BuiltinToolRegistry::implemented_definitions`
   - `BuiltinToolRegistry::implemented_schema_fingerprint`
   - `BuiltinToolRegistry::execute`
+  - `with_workspace_root`
   - `reasonix_aligned_builtin_specs`
   - `execute_bash`
   - `execute_write_file`
@@ -23,9 +24,9 @@
 - registry exports provider-neutral tool definitions without importing provider adapter DTOs
 - registry can export one stable implemented-tool schema fingerprint for planner/cache diagnostics without leaking provider DTOs into reason owners
 - registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner
-- foreground `bash` starts in one locked workspace root: the canonical process current working directory
-- path-based read-only tools resolve against one locked workspace root: the canonical process current working directory
-- path-based tools resolve against one locked workspace root: the canonical process current working directory
+- foreground `bash` starts in one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root
+- path-based read-only tools resolve against one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root
+- path-based tools resolve against one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root
 - runtime may choose a subset of implemented definitions for live execution
 - writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`
 - provider adapters render schemas; they do not own tool registry truth
@@ -59,10 +60,16 @@
 
 - `locked_workspace_root`
   - owner: `crates/freehand-tools/src/lib.rs`
-  - purpose: derive the canonical locked workspace root for all first-version path tools
+  - purpose: derive the canonical locked workspace root for all first-version path tools, respecting the explicit per-call workspace context installed by `with_workspace_root`
   - allowed callers: `read_file`, `glob`, `grep`, `ls`
   - related tests: read-file path-lock test, runtime live tool loop test
   - why shared: keeps directory-lock truth in one owner helper instead of per-tool duplication
+- `with_workspace_root`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: install an explicit thread-local workspace root for one tool execution so session cwd does not mutate process-global cwd or environment
+  - allowed callers: runtime live bridge tool execution
+  - related tests: runtime live tool execution with requested session cwd
+  - why shared: keeps session workspace execution in the tool owner instead of process-global env switching in runtime
 - `resolve_locked_path`
   - owner: `crates/freehand-tools/src/lib.rs`
   - purpose: resolve path arguments and reject escapes outside the locked workspace root
@@ -109,6 +116,7 @@
 | 03 | `BuiltinToolRegistry::implemented_definitions` | `crates/freehand-tools/src/lib.rs` | export currently executable provider-neutral tool schemas | registry | provider tool definitions | runtime live bridge | tool owner | bound |
 | 04 | `BuiltinToolRegistry::implemented_schema_fingerprint` | `crates/freehand-tools/src/lib.rs` | export deterministic implemented-tool schema fingerprint for planner/cache diagnostics | registry | stable tool-schema fingerprint string | runtime live bridge | tool owner | bound |
 | 05 | `BuiltinToolRegistry::execute` | `crates/freehand-tools/src/lib.rs` | dispatch completed tool calls into the single owner implementation set | `ReasonReq04ToolCall` | tool execution output | runtime live bridge | tool owner | bound |
+| 05a | `with_workspace_root` | `crates/freehand-tools/src/lib.rs` | bind one explicit workspace root around a single registry tool execution | canonical session cwd + tool execution closure | tool execution output with workspace lock applied | runtime live bridge | tool owner | bound |
 | 06 | `execute_bash` | `crates/freehand-tools/src/lib.rs` | run one foreground shell command from the locked workspace root with timeout and explicit failure reporting | `command` + optional `timeout_seconds` | combined stdout/stderr text | registry execute | command tool owner | bound |
 | 07 | `execute_read_file` | `crates/freehand-tools/src/lib.rs` | read UTF-8 text from one locked in-root file with line-windowing | `path` + optional `offset` + optional `limit` | numbered text window | registry execute | read-only file tool owner | bound |
 | 08 | `execute_write_file` | `crates/freehand-tools/src/lib.rs` | create or overwrite one UTF-8 text file inside the locked root | `path` + `content` | write summary | registry execute | file-mutation tool owner | bound |
@@ -133,7 +141,7 @@
   - `todo_write`
   - `complete_step`
 - implemented tool schema fingerprint export is now bound in `freehand-tools` and is the owner path for planner/cache diagnostics consumers
-- first-version path tools are locked to the canonical process current working directory and reject path escape outside that root
+- first-version path tools are locked to the explicit per-call workspace root when supplied, otherwise the canonical runtime workspace root, and reject path escape outside that root
 - first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing
 - first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path
 - checkpointed live writable execution now depends on the code-bound `tool.preview` and `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts

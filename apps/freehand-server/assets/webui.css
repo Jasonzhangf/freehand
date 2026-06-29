@@ -511,6 +511,13 @@ body.theme-dark .dialog-block {
   justify-self: start;
 }
 
+.chat-empty-state {
+  justify-self: center;
+  color: var(--text-soft);
+  font-size: 12px;
+  padding: 16px 10px 28px;
+}
+
 body.theme-dark .user-block {
   background: linear-gradient(180deg, rgba(24, 38, 51, 0.95), rgba(20, 32, 44, 0.98));
 }
@@ -716,7 +723,8 @@ body.theme-dark .composer-input {
 }
 
 .control-chip,
-.model-control {
+.model-control,
+.cwd-control {
   min-height: 34px;
   border: 1px solid rgba(31, 108, 88, 0.2);
   border-radius: 999px;
@@ -731,26 +739,44 @@ body.theme-dark .composer-input {
   cursor: pointer;
 }
 
-.model-control {
+.model-control,
+.cwd-control {
   display: inline-flex;
   gap: 7px;
   align-items: center;
+}
+
+.model-control {
   margin-left: auto;
 }
 
-.model-control span {
+.cwd-control {
+  flex: 1 1 280px;
+  min-width: 220px;
+  border-radius: 14px;
+}
+
+.model-control span,
+.cwd-control span {
   font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
   letter-spacing: 0.055em;
   text-transform: uppercase;
 }
 
-.model-control select {
+.model-control select,
+.cwd-control input {
   border: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
   outline: none;
+}
+
+.cwd-control input {
+  min-width: 0;
+  width: 100%;
+  font-size: 12px;
 }
 
 .attachment-tray {
@@ -807,6 +833,7 @@ body.theme-dark .composer-input {
 
 body.theme-dark .control-chip,
 body.theme-dark .model-control,
+body.theme-dark .cwd-control,
 body.theme-dark .attachment-chip {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(88, 176, 141, 0.25);

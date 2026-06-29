@@ -50,7 +50,7 @@ use freehand_reason::{
     ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonBroadcastEvent, ReasonPersistence,
     ReasonPersistenceError, ReasonTurnEngine, SessionHistory, TurnRecord, TurnStartInput,
 };
-use freehand_tools::BuiltinToolRegistry;
+use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
     UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt, UiProtocolState,
@@ -68,6 +68,7 @@ pub struct LiveReasonTurnRequest {
     pub turn_id: TurnId,
     pub trace_id: TraceId,
     pub prompt: String,
+    pub cwd: Option<PathBuf>,
     pub stream: bool,
     pub cancel_token: Option<LiveReasonCancelToken>,
 }
@@ -212,7 +213,22 @@ impl RuntimeCheckpointStore {
         agent_id: &AgentId,
         session_id: &SessionId,
     ) -> Result<Self, RuntimeCheckpointError> {
-        let workspace_root = checkpoint_workspace_root()?;
+        Self::new_with_workspace_root(
+            runtime_home,
+            agent_id,
+            session_id,
+            checkpoint_workspace_root()?,
+        )
+    }
+
+    fn new_with_workspace_root(
+        runtime_home: &Path,
+        agent_id: &AgentId,
+        session_id: &SessionId,
+        workspace_root: PathBuf,
+    ) -> Result<Self, RuntimeCheckpointError> {
+        let workspace_root = fs::canonicalize(workspace_root)
+            .map_err(|err| RuntimeCheckpointError::StoreBootstrapFailed(err.to_string()))?;
         let manifests_dir = runtime_home
             .join("state")
             .join("checkpoints")
@@ -854,6 +870,10 @@ where
                 },
             )
             .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
+        turn.cwd = request
+            .cwd
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned());
         persistence
             .record_turn_started(&history, &turn, schema_rejections.len() as u32)
             .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
@@ -1093,6 +1113,7 @@ where
                 let tool_result = execute_registry_tool_call(
                     &tool_registry,
                     &request.runtime_home,
+                    request.cwd.as_deref(),
                     &turn,
                     &tool_call,
                 )?;
@@ -1463,6 +1484,7 @@ struct RuntimeCommandDispatcherState {
     reason_engine: ReasonTurnEngine,
     session_history: SessionHistory,
     turns: Vec<TurnRecord>,
+    session_cwds: BTreeMap<SessionId, PathBuf>,
     active_turns: Vec<ActiveRuntimeTurn>,
     node_runtime: LocalNodeRuntime,
     next_turn_ordinal: u64,
@@ -1472,6 +1494,7 @@ struct RuntimeCommandDispatcherState {
 struct ActiveRuntimeTurn {
     turn_id: TurnId,
     session_id: SessionId,
+    cwd: PathBuf,
     trace_id: TraceId,
     user_text: String,
     cancel_token: LiveReasonCancelToken,
@@ -1482,6 +1505,7 @@ struct PreparedLiveSubmit {
     reason_agent_id: AgentId,
     master_node_id: String,
     session_id: SessionId,
+    cwd: PathBuf,
     turn_id: TurnId,
     trace_id: TraceId,
     prompt: String,
@@ -1682,6 +1706,7 @@ impl RuntimeCommandDispatcher {
             }
         }
 
+        let session_cwds = session_cwds_from_turns(&turns);
         let dispatcher = Self {
             ui_state,
             state: Mutex::new(RuntimeCommandDispatcherState {
@@ -1689,6 +1714,7 @@ impl RuntimeCommandDispatcher {
                 reason_engine: ReasonTurnEngine::new(),
                 session_history,
                 turns,
+                session_cwds,
                 active_turns: Vec::new(),
                 node_runtime,
                 next_turn_ordinal,
@@ -1710,8 +1736,10 @@ impl RuntimeCommandDispatcher {
         envelope: UiCommandDispatchEnvelope,
         text: String,
         requested_session_id: Option<SessionId>,
+        requested_cwd: Option<String>,
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
         let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
+        let cwd = resolve_session_cwd(state, &session_id, requested_cwd)?;
         state.next_turn_ordinal += 1;
         let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
         let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
@@ -1722,7 +1750,7 @@ impl RuntimeCommandDispatcher {
                 .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?
         };
 
-        let turn = state
+        let mut turn = state
             .reason_engine
             .start_turn(
                 &mut session_history,
@@ -1739,6 +1767,7 @@ impl RuntimeCommandDispatcher {
                 },
             )
             .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        turn.cwd = Some(cwd.to_string_lossy().into_owned());
         if session_id == state.config.session_id {
             state.session_history = session_history;
         }
@@ -1747,6 +1776,7 @@ impl RuntimeCommandDispatcher {
             &state.config.reason_agent_id,
             &state.config.master_node_id,
             std::slice::from_ref(&turn),
+            Some(cwd.to_string_lossy().into_owned()),
         );
         state.turns.push(turn);
         self.ui_state
@@ -1767,9 +1797,11 @@ impl RuntimeCommandDispatcher {
         state: &mut RuntimeCommandDispatcherState,
         text: String,
         requested_session_id: Option<SessionId>,
+        requested_cwd: Option<String>,
     ) -> Option<PreparedLiveSubmit> {
         let live = state.config.live.clone()?;
         let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
+        let cwd = resolve_session_cwd(state, &session_id, requested_cwd).ok()?;
         state.next_turn_ordinal += 1;
         let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
         let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
@@ -1777,6 +1809,7 @@ impl RuntimeCommandDispatcher {
         state.active_turns.push(ActiveRuntimeTurn {
             turn_id: turn_id.clone(),
             session_id: session_id.clone(),
+            cwd: cwd.clone(),
             trace_id: trace_id.clone(),
             user_text: text.clone(),
             cancel_token: Arc::clone(&cancel_token),
@@ -1786,6 +1819,7 @@ impl RuntimeCommandDispatcher {
             reason_agent_id: state.config.reason_agent_id.clone(),
             master_node_id: state.config.master_node_id.clone(),
             session_id,
+            cwd,
             turn_id,
             trace_id,
             prompt: text,
@@ -1799,6 +1833,7 @@ impl RuntimeCommandDispatcher {
             &prepared.reason_agent_id,
             &prepared.master_node_id,
             &prepared.session_id,
+            &prepared.cwd,
             &prepared.turn_id,
             &prepared.prompt,
         );
@@ -1822,6 +1857,7 @@ impl RuntimeCommandDispatcher {
                 turn_id: prepared.turn_id.clone(),
                 trace_id: prepared.trace_id.clone(),
                 prompt: prepared.prompt.clone(),
+                cwd: Some(prepared.cwd.clone()),
                 stream: prepared.live.stream,
                 cancel_token: Some(Arc::clone(&cancel_token)),
             },
@@ -1878,6 +1914,7 @@ impl RuntimeCommandDispatcher {
                     &state.config.reason_agent_id,
                     &state.config.master_node_id,
                     &outcome.turns,
+                    Some(prepared.cwd.to_string_lossy().into_owned()),
                 );
                 state.turns.extend(outcome.turns.clone());
                 self.ui_state
@@ -1914,12 +1951,14 @@ impl RuntimeCommandDispatcher {
                 state
                     .turns
                     .sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
+                state.session_cwds = session_cwds_from_turns(&state.turns);
                 let current_turns =
                     current_runtime_turns_for_projection(&state.turns, &prepared.turn_id)?;
                 let projection = project_runtime_turn_history(
                     &state.config.reason_agent_id,
                     &state.config.master_node_id,
                     &current_turns,
+                    Some(prepared.cwd.to_string_lossy().into_owned()),
                 );
                 self.ui_state
                     .lock()
@@ -1948,10 +1987,7 @@ impl RuntimeCommandDispatcher {
                 &self.ui_state,
                 &state.config.reason_agent_id,
                 &state.config.master_node_id,
-                &active.session_id,
-                &active.turn_id,
-                &active.trace_id,
-                &active.user_text,
+                &active,
             );
             return Ok(UiCommandDispatchReceipt {
                 ingress: envelope.ingress,
@@ -1972,10 +2008,15 @@ impl RuntimeCommandDispatcher {
         state
             .reason_engine
             .cancel_turn(turn, "cancelled by ui command");
+        let cwd = state
+            .session_cwds
+            .get(&turn.request.session_id)
+            .map(|path| path.to_string_lossy().into_owned());
         let projection = project_runtime_turn(
             &state.config.reason_agent_id,
             &state.config.master_node_id,
             turn,
+            cwd,
         );
         self.ui_state
             .lock()
@@ -2104,21 +2145,93 @@ impl RuntimeCommandDispatcher {
     }
 }
 
+fn resolve_session_cwd(
+    state: &mut RuntimeCommandDispatcherState,
+    session_id: &SessionId,
+    requested_cwd: Option<String>,
+) -> Result<PathBuf, UiCommandDispatchPortError> {
+    let cwd = if let Some(cwd) = requested_cwd {
+        canonicalize_session_cwd(&cwd)?
+    } else if let Some(existing) = state.session_cwds.get(session_id) {
+        existing.clone()
+    } else {
+        canonicalize_default_runtime_cwd()?
+    };
+    state.session_cwds.insert(session_id.clone(), cwd.clone());
+    Ok(cwd)
+}
+
+fn session_cwds_from_turns(turns: &[TurnRecord]) -> BTreeMap<SessionId, PathBuf> {
+    let mut cwds = BTreeMap::new();
+    for turn in turns {
+        if let Some(cwd) = &turn.cwd
+            && let Ok(path) = fs::canonicalize(cwd)
+        {
+            cwds.insert(turn.request.session_id.clone(), path);
+        }
+    }
+    cwds
+}
+
+fn canonicalize_session_cwd(cwd: &str) -> Result<PathBuf, UiCommandDispatchPortError> {
+    let trimmed = cwd.trim();
+    if trimmed.is_empty() {
+        return Err(UiCommandDispatchPortError::DispatchFailed(
+            "session cwd must be non-empty".to_owned(),
+        ));
+    }
+    fs::canonicalize(trimmed).map_err(|err| {
+        UiCommandDispatchPortError::TargetNotFound(format!(
+            "session cwd `{trimmed}` is not accessible: {err}"
+        ))
+    })
+}
+
+fn canonicalize_default_runtime_cwd() -> Result<PathBuf, UiCommandDispatchPortError> {
+    let root = env::var_os("FREEHAND_WORKSPACE_ROOT")
+        .or_else(|| env::var_os("FREEHAND_DAEMON_WORKDIR"))
+        .map(PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(|| {
+            env::current_dir().map_err(|err| {
+                UiCommandDispatchPortError::DispatchFailed(format!(
+                    "cannot read runtime current working directory: {err}"
+                ))
+            })
+        })?;
+    fs::canonicalize(&root).map_err(|err| {
+        UiCommandDispatchPortError::DispatchFailed(format!(
+            "cannot canonicalize runtime workspace `{}`: {err}",
+            root.display()
+        ))
+    })
+}
+
 impl UiCommandDispatchPort for RuntimeCommandDispatcher {
     fn dispatch(
         &self,
         envelope: UiCommandDispatchEnvelope,
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
-        if let UiCommand::SubmitUserInput { text, session_id } = envelope.command.clone() {
+        if let UiCommand::SubmitUserInput {
+            text,
+            session_id,
+            cwd,
+        } = envelope.command.clone()
+        {
             let prepared = {
                 let mut state = self.state.lock().expect("lock runtime dispatcher state");
-                self.prepare_live_submit_user_input(&mut state, text.clone(), session_id.clone())
+                self.prepare_live_submit_user_input(
+                    &mut state,
+                    text.clone(),
+                    session_id.clone(),
+                    cwd.clone(),
+                )
             };
             if let Some(prepared) = prepared {
                 return self.dispatch_prepared_live_submit(envelope, prepared);
             }
             let mut state = self.state.lock().expect("lock runtime dispatcher state");
-            return self.dispatch_submit_user_input(&mut state, envelope, text, session_id);
+            return self.dispatch_submit_user_input(&mut state, envelope, text, session_id, cwd);
         }
 
         let mut state = self.state.lock().expect("lock runtime dispatcher state");
@@ -2603,6 +2716,7 @@ fn pending_completed_tool_calls(
 fn execute_registry_tool_call(
     registry: &BuiltinToolRegistry,
     runtime_home: &Path,
+    workspace_root: Option<&Path>,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ReasonReq05ToolResultReentry, RuntimeLiveBridgeError> {
@@ -2614,12 +2728,31 @@ fn execute_registry_tool_call(
             "Tool execution failed: cannot execute incomplete tool arguments".to_owned(),
         ));
     }
+    if let Some(root) = workspace_root {
+        return with_workspace_root(root, || {
+            execute_registry_tool_call_with_workspace(registry, runtime_home, root, turn, tool_call)
+        })
+        .map_err(|err| RuntimeLiveBridgeError::ToolExecutionFailed(err.to_string()))?;
+    }
+    let root = checkpoint_workspace_root()
+        .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
+    execute_registry_tool_call_with_workspace(registry, runtime_home, &root, turn, tool_call)
+}
+
+fn execute_registry_tool_call_with_workspace(
+    registry: &BuiltinToolRegistry,
+    runtime_home: &Path,
+    workspace_root: &Path,
+    turn: &TurnRecord,
+    tool_call: &ReasonReq04ToolCall,
+) -> Result<ReasonReq05ToolResultReentry, RuntimeLiveBridgeError> {
     let tool_name = tool_call.tool_call.tool_name.as_str();
     if is_checkpointable_file_mutation_tool(tool_name) {
-        let store = RuntimeCheckpointStore::new(
+        let store = RuntimeCheckpointStore::new_with_workspace_root(
             runtime_home,
             &turn.request.agent_id,
             &turn.request.session_id,
+            workspace_root.to_path_buf(),
         )
         .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
         let preview = registry.preview(tool_call).map_err(|err| {
@@ -2831,6 +2964,7 @@ fn publish_live_pending_user_projection(
     reason_agent_id: &AgentId,
     master_node_id: &str,
     session_id: &SessionId,
+    cwd: &Path,
     base_turn_id: &TurnId,
     user_text: &str,
 ) {
@@ -2843,6 +2977,7 @@ fn publish_live_pending_user_projection(
                 source_node_id: master_node_id.to_owned(),
                 session_id: session_id.clone(),
                 turn_id: derived_turn_id(base_turn_id, 1),
+                cwd: Some(cwd.to_string_lossy().into_owned()),
                 user_text: Some(user_text.to_owned()),
                 semantic_events: Vec::new(),
                 tool_calls: Vec::new(),
@@ -2860,10 +2995,7 @@ fn publish_live_cancelled_projection(
     ui_state: &Arc<Mutex<UiProtocolState>>,
     reason_agent_id: &AgentId,
     master_node_id: &str,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-    trace_id: &TraceId,
-    user_text: &str,
+    active: &ActiveRuntimeTurn,
 ) {
     ui_state
         .lock()
@@ -2872,17 +3004,18 @@ fn publish_live_cancelled_projection(
             turn_projection_from_events(TurnProjectionInput {
                 source_agent_id: reason_agent_id.clone(),
                 source_node_id: master_node_id.to_owned(),
-                session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
-                user_text: Some(user_text.to_owned()),
+                session_id: active.session_id.clone(),
+                turn_id: active.turn_id.clone(),
+                cwd: Some(active.cwd.to_string_lossy().into_owned()),
+                user_text: Some(active.user_text.clone()),
                 semantic_events: Vec::new(),
                 tool_calls: Vec::new(),
                 tool_results: Vec::new(),
                 usage_events: Vec::new(),
                 terminal_event: Some(freehand_contracts::ReasonResp03TerminalEvent {
-                    session_id: session_id.clone(),
-                    turn_id: turn_id.clone(),
-                    trace_id: trace_id.clone(),
+                    session_id: active.session_id.clone(),
+                    turn_id: active.turn_id.clone(),
+                    trace_id: active.trace_id.clone(),
                     feature_id: FeatureId::new("runtime.ui-command-dispatch"),
                     agent_id: reason_agent_id.clone(),
                     status: freehand_contracts::TerminalStatus::Cancelled,
@@ -2899,6 +3032,7 @@ fn project_runtime_turn_history(
     reason_agent_id: &AgentId,
     master_node_id: &str,
     turns: &[TurnRecord],
+    cwd: Option<String>,
 ) -> UiTurnProjection {
     let turn = turns
         .last()
@@ -2915,6 +3049,7 @@ fn project_runtime_turn_history(
             source_node_id: master_node_id.to_owned(),
             session_id: turn.request.session_id.clone(),
             turn_id: turn.request.turn_id.clone(),
+            cwd: cwd.or_else(|| turn.cwd.clone()),
             user_text: Some(ui_user_text_for_turn(turn)),
             semantic_events: turn.semantic_events.clone(),
             tool_calls,
@@ -2951,8 +3086,14 @@ fn project_runtime_turn(
     reason_agent_id: &AgentId,
     master_node_id: &str,
     turn: &TurnRecord,
+    cwd: Option<String>,
 ) -> UiTurnProjection {
-    project_runtime_turn_history(reason_agent_id, master_node_id, std::slice::from_ref(turn))
+    project_runtime_turn_history(
+        reason_agent_id,
+        master_node_id,
+        std::slice::from_ref(turn),
+        cwd,
+    )
 }
 
 fn restore_all_persisted_sessions_into_ui(
@@ -2982,6 +3123,7 @@ fn restore_all_persisted_sessions_into_ui(
                 reason_agent_id,
                 master_node_id,
                 &turns[index..end],
+                None,
             ));
             index = end;
         }
@@ -3090,6 +3232,7 @@ mod tests {
             &AgentId::new("agent-live"),
             "agent-live-node",
             &outcome.turns,
+            None,
         );
         let public = freehand_ui_protocol::public_turn_projection(projection);
         assert_eq!(public.public_conversation[0].body, "reply exactly pong");
@@ -3345,6 +3488,7 @@ mod tests {
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "hello from new session".to_owned(),
                     session_id: Some(requested_session.clone()),
+                    cwd: None,
                 })
                 .expect("envelope"),
             )
@@ -3382,6 +3526,136 @@ mod tests {
         }
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn submit_cwd_is_projected_and_inherited_by_session() {
+        let root = temp_runtime_home();
+        fs::create_dir_all(&root).expect("create cwd");
+        let runtime = runtime();
+        let session_id = SessionId::new("webui-session-cwd-runtime");
+        let cwd = fs::canonicalize(&root)
+            .expect("canonical cwd")
+            .to_string_lossy()
+            .into_owned();
+
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "first cwd turn".to_owned(),
+                    session_id: Some(session_id.clone()),
+                    cwd: Some(cwd.clone()),
+                })
+                .expect("first envelope"),
+            )
+            .expect("first receipt");
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "second cwd turn".to_owned(),
+                    session_id: Some(session_id.clone()),
+                    cwd: None,
+                })
+                .expect("second envelope"),
+            )
+            .expect("second receipt");
+
+        match runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("query transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.cwd.as_deref(), Some(cwd.as_str()));
+                assert_eq!(transcript.turns.len(), 2);
+                assert!(
+                    transcript
+                        .turns
+                        .iter()
+                        .all(|turn| turn.cwd.as_deref() == Some(cwd.as_str()))
+                );
+            }
+            other => panic!("unexpected transcript: {other:?}"),
+        }
+
+        fs::remove_dir_all(root).expect("cleanup cwd");
+    }
+
+    #[test]
+    fn live_tool_execution_uses_requested_session_cwd() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let workspace = temp_runtime_home();
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(workspace.join("session-cwd.txt"), "session cwd content\n")
+            .expect("write workspace file");
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_named_response(
+                    "toolu_session_cwd",
+                    "read_file",
+                    json!({"path":"session-cwd.txt","offset":0,"limit":5}),
+                ),
+                complete_single_response("read session cwd"),
+            ],
+        );
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+        let session_id = SessionId::new("webui-session-tool-cwd");
+        let cwd = fs::canonicalize(&workspace)
+            .expect("canonical workspace")
+            .to_string_lossy()
+            .into_owned();
+
+        let receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "read the session cwd file".to_owned(),
+                    session_id: Some(session_id.clone()),
+                    cwd: Some(cwd.clone()),
+                })
+                .expect("envelope"),
+            )
+            .expect("submit receipt");
+        let _first_request = rx.recv().expect("first provider request");
+        let reentry_request = rx.recv().expect("tool reentry provider request");
+        handle.join().expect("join provider");
+
+        assert!(
+            receipt
+                .dispatch_status
+                .contains("reason_live_turn_completed")
+        );
+        assert!(reentry_request.contains("session cwd content"));
+        match runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("query transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.cwd.as_deref(), Some(cwd.as_str()));
+                assert_eq!(transcript.turns[0].cwd.as_deref(), Some(cwd.as_str()));
+            }
+            other => panic!("unexpected transcript: {other:?}"),
+        }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+        fs::remove_dir_all(workspace).expect("cleanup workspace");
     }
 
     fn selected_master_agent() -> SelectedAgentConfig {
@@ -3459,6 +3733,7 @@ mod tests {
             turn_id: TurnId::new("turn-live"),
             trace_id: TraceId::new("trace-live"),
             prompt: "reply exactly pong".to_owned(),
+            cwd: None,
             stream,
             cancel_token: None,
         }
@@ -3475,6 +3750,7 @@ mod tests {
             turn_id: TurnId::new(format!("runtime-turn-{ordinal}")),
             trace_id: TraceId::new(format!("runtime-trace-{ordinal}")),
             prompt: format!("prompt for {session_id}"),
+            cwd: None,
             stream: false,
             cancel_token: None,
         }
@@ -4564,6 +4840,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "trigger tool failure".to_owned(),
                     session_id: None,
+                    cwd: None,
                 })
                 .expect("envelope"),
             )
@@ -4582,6 +4859,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "trigger tool failure again".to_owned(),
                     session_id: None,
+                    cwd: None,
                 })
                 .expect("envelope"),
             )
@@ -5090,6 +5368,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 turn_id: TurnId::new("runtime-turn-1"),
                 trace_id: TraceId::new("runtime-trace-1"),
                 prompt: "first request".to_owned(),
+                cwd: None,
                 stream: false,
                 cancel_token: None,
             },
@@ -5142,6 +5421,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "second request".to_owned(),
                     session_id: None,
+                    cwd: None,
                 })
                 .expect("envelope"),
             )
@@ -5181,6 +5461,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "hello runtime".to_owned(),
                     session_id: None,
+                    cwd: None,
                 })
                 .expect("envelope"),
             )
@@ -5214,6 +5495,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "cancel me".to_owned(),
                     session_id: None,
+                    cwd: None,
                 })
                 .expect("envelope"),
             )
@@ -5254,6 +5536,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "cancel latest".to_owned(),
                     session_id: None,
+                    cwd: None,
                 })
                 .expect("submit envelope"),
             )
@@ -5341,6 +5624,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "start long stream".to_owned(),
                     session_id: None,
+                    cwd: None,
                 })
                 .expect("submit envelope"),
             )
@@ -5502,6 +5786,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                         text: "create checkpoint".to_owned(),
                         session_id: None,
+                        cwd: None,
                     })
                     .expect("envelope"),
                 )

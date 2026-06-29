@@ -17,7 +17,7 @@
 - runtime bootstrap may first select one configured agent from `~/.freehand/config.toml`
 - config-selected bootstrap consumes local node id, paired node id, paired allowed IP, and paired token env from `config.core`
 - config-selected live bootstrap may also seed one shared metadata ledger path for node-owned bootstrap and pairing provenance
-- submit commands may carry an optional selected session id so a draft or explicitly chosen session can receive the new turn instead of always using the default session
+- submit commands may carry an optional selected session id and selected cwd so a draft or explicitly chosen cwd-bound session can receive the new turn instead of always using the default session
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
 - runtime dispatch owner reads the declared owner target from the envelope
 - live submit registers active turn cancellation state before provider execution and releases the runtime mutex before provider IO
@@ -32,6 +32,7 @@
 - live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events so blank UI subscriptions can render a complete public conversation stream
 - live provider-backed submit maps `RuntimeLive02ProviderRequestBuilt` debug events into `UiProtocolState::apply_model_request_waiting` so ADP clients can see request-sent/model-response-waiting state
 - live provider-backed submit honors a selected session id when present and keeps the derived UI state pinned to that session instead of the latest global session
+- live provider-backed submit honors a selected cwd when present, persists it on the turn record, and reuses the session cwd for later submits that omit cwd
 - active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion
 - latest-active cancellation supports Esc during the short window before WebUI has received a concrete `turn_id`
 - live provider-backed multi-round turns keep the original operator prompt in public UI projection instead of exposing internal continuation prompts
@@ -43,6 +44,7 @@
 - config-selected runtime bootstrap returns one dispatcher for the requested agent
 - config-selected live bootstrap may materialize node-owned bootstrap and pairing metadata into the shared metadata ledger before the first command runs
 - live bootstrap rehydrates `UiProtocolState` from persisted turn truth and resumes runtime turn-id allocation from persisted ordinals
+- live bootstrap rehydrates session cwd from persisted turn records into both `UiProtocolState` and runtime session cwd inheritance state
 - live bootstrap groups persisted `runtime-turn-N` round snapshots into one UI projection when restoring session transcripts, while keeping authoritative closed-turn recovery unchanged
 - runtime-owned UI state reflects derived projections only, not authoritative turn truth
 
@@ -85,7 +87,7 @@
 | 04 | `RuntimeCommandDispatcher::dispatch` | `crates/freehand-runtime/src/lib.rs` | execute protocol-owned dispatch envelope through the correct owner adapter | dispatch envelope | dispatch receipt or failure | app/daemon runtime boundary | reason/node owner adapter | bound |
 | 05 | `RuntimeCommandDispatcher::ui_state` | `crates/freehand-runtime/src/lib.rs` | expose derived UI projection state for runtime-side consumers/tests | runtime dispatcher | shared derived UI state | runtime tests/future daemon | UI protocol state | bound |
 | 06 | `run_live_reason_turn_with_hooks` | `crates/freehand-runtime/src/lib.rs` | execute a live provider turn while streaming reason/debug/tool-result callbacks to runtime-owned consumers | selected live config + live request + callbacks | live turn outcome plus incremental callbacks | runtime dispatch/tests | live bridge owner | bound |
-| 07 | `RuntimeCommandDispatcher::prepare_live_submit_user_input` | `crates/freehand-runtime/src/lib.rs` | register active live turn cancellation state before provider execution and bind an optional requested session id | runtime state + submitted user text + optional requested session id | prepared live submit + active cancel token | `RuntimeCommandDispatcher::dispatch` | runtime owner | bound |
+| 07 | `RuntimeCommandDispatcher::prepare_live_submit_user_input` | `crates/freehand-runtime/src/lib.rs` | register active live turn cancellation state before provider execution and bind optional requested session id/cwd | runtime state + submitted user text + optional requested session id/cwd | prepared live submit + active cancel token + canonical cwd | `RuntimeCommandDispatcher::dispatch` | runtime owner | bound |
 | 08 | `RuntimeCommandDispatcher::dispatch_prepared_live_submit` | `crates/freehand-runtime/src/lib.rs` | run provider-backed live turn outside runtime mutex while honoring active cancel token | prepared live submit | live receipt or cancelled dispatch failure | `RuntimeCommandDispatcher::dispatch` | `run_live_reason_turn_with_hooks` | bound |
 | 09 | `RuntimeCommandDispatcher::dispatch_cancel_turn` | `crates/freehand-runtime/src/lib.rs` | cancel active or persisted turns through reason-owned terminal semantics and UI projection | cancel command turn id | cancel receipt + cancelled projection | `RuntimeCommandDispatcher::dispatch` | reason owner / active cancel registry | bound |
 | 10 | `restore_all_persisted_sessions_into_ui` | `crates/freehand-runtime/src/lib.rs` | rehydrate UI protocol state from reason-ledger turn snapshots and group same-ordinal runtime rounds for transcript projection | persisted reason sessions | derived UI session list/transcripts with retained tool activity | runtime bootstrap | reason persistence + UI protocol | bound |
@@ -95,6 +97,7 @@
 - runtime dispatch owner baseline is now bound in code
 - provider-backed submit input and cancel dispatch through `reason.turn` and update derived UI turn projections
 - live provider submit now streams reason/debug updates into `UiProtocolState` before final receipt is returned
+- live provider submit now binds requested/session cwd into pending, final, and restored UI projection state
 - live provider submit now projects provider-request-built debug events into `UiProtocolState.model_request` before model response arrives
 - live provider submit now streams tool-result updates into `UiProtocolState` so tool activities can transition to completed before final receipt
 - live submit now releases the runtime mutex before provider IO so `CancelTurn` can enter concurrently
@@ -112,6 +115,7 @@
 - unwritable shared node metadata ledgers are now regression-locked as explicit bootstrap failures
 - config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
 - config-selected live bootstrap now restores multi-round tool activity into UI session transcripts after daemon restart
+- config-selected live bootstrap now restores persisted session cwd from turn records and preserves cwd for later same-session submits
 - final live projection now aggregates only cross-round tool lifecycle state so earlier-round tool activity remains visible without leaking intermediate continuation text into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

@@ -327,6 +327,7 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
             command: UiCommand::SubmitUserInput {
                 text: sample.prompt().to_owned(),
                 session_id: None,
+                cwd: None,
             },
         },
     )
@@ -674,6 +675,7 @@ fn run_reason_live(args: Vec<String>) -> Result<String, String> {
             turn_id: TurnId::new(format!("cli-live-turn-{stamp}")),
             trace_id: TraceId::new(format!("cli-live-trace-{stamp}")),
             prompt: args[3].clone(),
+            cwd: None,
             stream,
             cancel_token: None,
         },

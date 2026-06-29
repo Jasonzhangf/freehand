@@ -1,5 +1,6 @@
 //! Tool registry and built-in tool surface for Freehand.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
@@ -31,6 +32,30 @@ pub struct BuiltinToolSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolExecutionOutput {
     pub text: String,
+}
+
+thread_local! {
+    static TOOL_WORKSPACE_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+pub fn with_workspace_root<R>(
+    root: impl AsRef<Path>,
+    run: impl FnOnce() -> R,
+) -> Result<R, ToolRegistryError> {
+    let canonical =
+        fs::canonicalize(root.as_ref()).map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: "workspace".to_owned(),
+            message: format!(
+                "cannot canonicalize selected workspace `{}`: {err}",
+                root.as_ref().display()
+            ),
+        })?;
+    TOOL_WORKSPACE_ROOT.with(|slot| {
+        let previous = slot.replace(Some(canonical));
+        let result = run();
+        slot.replace(previous);
+        Ok(result)
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1316,6 +1341,9 @@ fn invalid_tool_argument(tool: &str, index: usize, message: &str) -> ToolRegistr
 }
 
 fn locked_workspace_root(tool: &str) -> Result<PathBuf, ToolRegistryError> {
+    if let Some(root) = TOOL_WORKSPACE_ROOT.with(|slot| slot.borrow().clone()) {
+        return Ok(root);
+    }
     locked_workspace_root_from_env(
         tool,
         env::var_os("FREEHAND_WORKSPACE_ROOT").or_else(|| env::var_os("FREEHAND_DAEMON_WORKDIR")),
