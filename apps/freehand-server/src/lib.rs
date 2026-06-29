@@ -1106,6 +1106,8 @@ mod tests {
         assert!(js_body.contains("<freehand_completion>"));
         assert!(js_body.contains("toolSummaryBody"));
         assert!(js_body.contains("renderToolBody"));
+        assert!(js_body.contains("pushCompactToolLine"));
+        assert!(js_body.contains("escapeRegExp"));
         assert!(js_body.contains("display.parameter_summary"));
         assert!(js_body.contains("pendingSubmitBody"));
         assert!(js_body.contains("elapsedSince"));
@@ -1116,6 +1118,10 @@ mod tests {
         assert!(js_body.contains("modelWaitStartedAt"));
         assert!(js_body.contains("turnIsWaitingForModel"));
         assert!(js_body.contains("modelWaitBody"));
+        assert!(js_body.contains("shouldRenderLiveWaitForTurn"));
+        assert!(js_body.contains("compactToolResultLine"));
+        assert!(js_body.contains("succeeded: result returned"));
+        assert!(js_body.contains("succeeded: shell command"));
         assert!(js_body.contains("hasPendingSubmit"));
         assert!(js_body.contains("hasModelRequestWait"));
         assert!(js_body.contains("hasModelWait"));
@@ -1123,6 +1129,7 @@ mod tests {
         assert!(js_body.contains("tool.display || null"));
         assert!(js_body.contains("display.result_summary"));
         assert!(js_body.contains("display.diff"));
+        assert!(js_body.contains("compact-tool-state"));
         assert!(js_body.contains("display.fields"));
         assert!(js_body.contains("formatDuration"));
         assert!(js_body.contains("composerInput.value = \"\";"));

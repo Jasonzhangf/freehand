@@ -480,7 +480,14 @@ function card(role, status, title, body, variant = "assistant", identity = null)
 
   const stateBadge = document.createElement("span");
   stateBadge.className = `block-state ${status.className}`;
-  stateBadge.textContent = status.label;
+  if (variant === "tool" && (status.className === "success" || status.className === "failed")) {
+    stateBadge.classList.add("compact-tool-state");
+    stateBadge.textContent = "";
+    stateBadge.title = status.label;
+    stateBadge.setAttribute("aria-label", status.label);
+  } else {
+    stateBadge.textContent = status.label;
+  }
 
   head.append(roleBadge, stateBadge);
 
@@ -554,6 +561,11 @@ function toolStatusLabel(status) {
   }
 }
 
+function isTerminalStatus(status) {
+  const normalized = `${status || ""}`.toLowerCase();
+  return ["success", "failed", "blocked", "interrupted", "cancelled"].includes(normalized);
+}
+
 function formatDuration(ms) {
   if (!Number.isFinite(ms) || ms < 0) {
     return "";
@@ -586,7 +598,7 @@ function pendingSubmitBody(text, attachments = []) {
 }
 
 function turnIsWaitingForModelResponse(turn) {
-  return !!(turn && turn.model_request && !turn.terminal_text);
+  return !!(turn && turn.model_request && !turn.terminal_text && !isTerminalStatus(turn.terminal_status));
 }
 
 function syncModelRequestTiming(turn) {
@@ -643,35 +655,68 @@ function toolSummaryBody(item) {
   const timing = item.tool_call_id ? state.toolTimings.get(item.tool_call_id) : null;
   const endAt = timing && timing.finishedAt ? timing.finishedAt : Date.now();
   const elapsed = timing ? formatDuration(endAt - timing.startedAt) : "";
-  const statusLabel = toolStatusLabel(item.status);
   const display = item.display || null;
-  const lines = [elapsed ? `${statusLabel} · ${elapsed}` : statusLabel];
-  if (display && display.summary) {
-    lines.push(display.summary);
-  } else if (item.body && item.body !== item.status) {
-    lines.push(item.body);
-  }
-  if (display && display.parameter_summary) {
-    lines.push(display.parameter_summary);
-  }
-  if (display && display.result_summary) {
-    lines.push(display.result_summary);
+  const status = `${item.status || ""}`.toLowerCase();
+  const lines = [];
+  if (status === "waiting") {
+    const statusLabel = toolStatusLabel(item.status);
+    lines.push(elapsed ? `${statusLabel} · ${elapsed}` : statusLabel);
   }
   if (display && display.diff) {
     lines.push(`diff: ${display.diff.target}`);
     lines.push(`- ${display.diff.before}`);
     lines.push(`+ ${display.diff.after}`);
-  }
-  if (!display?.parameter_summary && display && Array.isArray(display.fields) && display.fields.length > 0) {
+  } else if (display && display.parameter_summary) {
+    pushCompactToolLine(lines, display.parameter_summary, item.title);
+  } else if (display && display.summary) {
+    pushCompactToolLine(lines, display.summary, item.title);
+  } else if (display && Array.isArray(display.fields) && display.fields.length > 0) {
     const compactFields = display.fields
       .slice(0, 4)
       .map((field) => `${field.label}: ${field.value}`)
       .join(" · ");
-    if (compactFields) {
-      lines.push(compactFields);
+    pushCompactToolLine(lines, compactFields, item.title);
+  } else if (item.body && item.body !== item.status) {
+    pushCompactToolLine(lines, item.body, item.title);
+  }
+  if (display && display.result_summary && !display.parameter_summary && !display.diff) {
+    const result = compactToolResultLine(display.result_summary, item.title);
+    if (result && !lines.some((line) => line.toLowerCase() === result.toLowerCase())) {
+      lines.push(result);
     }
   }
-  return lines.join("\n");
+  return lines.filter(Boolean).join("\n");
+}
+
+function pushCompactToolLine(lines, value, title = "") {
+  const line = compactToolResultLine(value, title);
+  if (!line) {
+    return;
+  }
+  if (!lines.some((existing) => existing.toLowerCase() === line.toLowerCase())) {
+    lines.push(line);
+  }
+}
+
+function compactToolResultLine(value, title = "") {
+  const text = `${value || ""}`.trim();
+  if (!text) {
+    return "";
+  }
+  const lower = text.toLowerCase();
+  if (lower === "succeeded: result returned" || lower === "succeeded: shell command") {
+    return "";
+  }
+  return text
+    .replace(/^result:\s*/i, "")
+    .replace(/^succeeded:\s*/i, "")
+    .replace(/^failure:\s*/i, "")
+    .replace(new RegExp(`^${escapeRegExp(title)}:\\s*`, "i"), "")
+    .trim();
+}
+
+function escapeRegExp(value) {
+  return `${value || ""}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function waitingToolStatus(tools) {
@@ -688,7 +733,7 @@ function waitingToolStatus(tools) {
 }
 
 function turnIsWaitingForModel(turn) {
-  if (!turn || turn.terminal_text) {
+  if (!turn || turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
     return false;
   }
   const tools = turn.tool_activities || [];
@@ -716,6 +761,16 @@ function syncModelWaitTiming(turn) {
 function modelWaitBody() {
   const elapsed = elapsedSince(state.modelWaitStartedAt);
   return elapsed ? `工具结果已返回，等待模型继续推理 ${elapsed}` : "工具结果已返回，等待模型继续推理";
+}
+
+function shouldRenderLiveWaitForTurn(turn) {
+  if (!turn || !state.turn) {
+    return false;
+  }
+  if (turn.turn_id !== state.turn.turn_id) {
+    return false;
+  }
+  return !turn.terminal_text && !isTerminalStatus(turn.terminal_status);
 }
 
 function variantPayload(value, variant) {
@@ -1208,9 +1263,10 @@ function renderMessages() {
               : "success";
       const identity = item.tool_call_id ? `tool:${item.tool_call_id}` : null;
       const body = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
-      fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, body, variant, identity));
+      const role = item.kind === "ToolSummary" ? "Tool" : item.title;
+      fragments.push(card(role, { className: statusClass, label: item.status }, item.title, body, variant, identity));
       });
-      if (turnIsWaitingForModelResponse(turn)) {
+      if (shouldRenderLiveWaitForTurn(turn) && turnIsWaitingForModelResponse(turn)) {
         fragments.push(
           card(
             "Assistant",
@@ -1221,7 +1277,7 @@ function renderMessages() {
           ),
         );
       }
-      if (turnIsWaitingForModel(turn)) {
+      if (shouldRenderLiveWaitForTurn(turn) && turnIsWaitingForModel(turn)) {
         fragments.push(
           card(
             "Assistant",

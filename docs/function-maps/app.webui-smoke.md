@@ -62,6 +62,8 @@
 - front-end script renders submit/dispatch waiting as an animated pending card with elapsed time until a turn projection arrives, then switches visible lifecycle status to tool executing with elapsed time when tool activity is waiting
 - front-end script renders protocol-projected model request waiting as an animated card with elapsed time, clearly showing that the request has been sent and the UI is waiting for model response
 - front-end script renders completed/failed tool result detail in the same tool card and inserts an animated waiting-model card with elapsed time after tool completion until the model produces the next terminal or update
+- front-end script renders waiting/model continuation animation only for the current live turn; historical completed or superseded turns must not keep blinking
+  - front-end script renders completed/failed tool cards with color-state only and low-noise semantic lines, compressing repeated title/summary/body text and filtering generic result strings such as `succeeded: result returned`
 - front-end script consumes `UiToolActivity.display` structured projection for tool category/action/target/result/diff fields and must not classify tools from raw argument or result strings
 - front-end script groups `runtime-turn-N` plus `runtime-turn-N-rM` round projections into one logical execution cycle for display so the same user input, assistant text, and same tool call are not duplicated in the selected-session transcript
 - front-end script collapses assistant text within each logical turn into one visible card, strips raw `<freehand_completion>` schema blocks from that card, and leaves user-facing completion details to the Final card
@@ -153,6 +155,8 @@
 - WebUI submit/dispatch and tool-wait lifecycle states now both refresh once per second so users can see where the turn is blocked and how long it has waited
 - WebUI model-request waiting state now comes from `UiTurnProjection.model_request` and refreshes once per second with elapsed wait time
 - WebUI completed/failed tool cards now show protocol-projected result detail, and tool-complete-to-next-model waiting renders as its own timed lifecycle card
+- WebUI waiting/model continuation cards are now gated to the current live turn so restored history cannot show fake animation after execution has stopped
+  - WebUI tool terminal state now uses green/red compact state dots and compresses repeated title/summary/body text instead of rendering mechanical status/result lines
 - WebUI tool cards now render `display.action`, `display.summary`, `display.parameter_summary`, `display.result_summary`, `display.fields`, and `display.diff`; category parsing stays in `tool.display`, not in JavaScript
 - WebUI selected-session transcript display now groups same execution-cycle round ids such as `runtime-turn-47` and `runtime-turn-47-r2` into one visible logical turn while preserving ADP/session truth as separate persisted turns
 - WebUI `/new` no longer renders the old selected-session/no-turns system card in the chat stream

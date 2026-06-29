@@ -63,6 +63,9 @@
     - headless ADP smoke against the same source server: `cargo run -p freehand-cli -- adp-smoke --url ws://127.0.0.1:4079/adp`
   - known remaining risk: first slice does not implement backend binary upload/storage; it preserves current-page `File` handles for retry and stores metadata/placeholder history only, matching the no-ADP-framing-change constraint.
 - Current verified tool display semantic slice:
+  - latest UI closeout gates wait/model-continuation animations to the current live non-terminal turn; restored completed history no longer blinks
+  - terminal tool state renders as compact green/red dots and the tool body suppresses repeated title/summary/result text when the parameter or diff line already carries the target
+  - real daemon screenshot evidence: `artifacts/webui-state-render-fix/20260629-compact-tool-display-live-v2/01-live-failure-sample.png`, counts `wait_model_continue_count=0`, `compact_tool_state_count=1`, `tool_block_count=1`, `running_state_count=0`
   - `tool.display` owner is `crates/freehand-blocks/src/tool_display.rs`
   - classification/parsing functions are independent: read/list, file mutation, search, plan, shell, generic
   - `UiToolActivity.display` carries structured action/target/parameter_summary/summary/result/diff fields through ADP/session projection
