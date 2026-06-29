@@ -15,6 +15,9 @@
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
   - WebUI default status/control path uses ADP WebSocket `/adp` for query, subscribe, command, and visible failure frames
   - WebUI exposes success/failure sample prompt buttons that fill the composer while preserving the normal ADP submit path
+  - WebUI control strip exposes session switching, `/new`, refresh, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
+  - WebUI attachment lifecycle keeps draft attachments session-scoped, clears them only after successful send, and preserves them across send failure for retry
+  - WebUI transcript history renders attachment placeholders rather than raw payload blobs
   - HTTP query, SSE subscribe, and POST command ingress remain compatibility transport routes rather than WebUI default truth
   - WebUI Cancel button and Escape key send `CancelTurn` through command ingress when a turn is active
   - WebUI Escape sends latest-active cancellation during submit-in-flight before a concrete `turn_id` is known
@@ -31,10 +34,14 @@
   - WebUI JS asset smoke locks default ADP WebSocket usage and rejects `fetch` / `EventSource` as the default live path
   - WebUI ADP subscription accepted/waiting status rendering smoke
   - WebUI ADP failure frame visible-card/status smoke
+  - WebUI ADP request timeout visible-failure smoke
   - WebUI ADP failure card ordering smoke: failure card must not render ahead of the current conversation items
   - WebUI success/failure sample prompt button asset smoke
   - WebUI keyboard shortcut smoke for submit, cancel, refresh, focus composer, and sample loading
   - WebUI slash command smoke for `/help`, `/sessions`, `/reload`, `/success`, `/failure`, `/cancel`, and `/clear`
+  - WebUI attachment control smoke for add/remove/preview and session-scoped draft retention
+  - WebUI attachment success-clear smoke
+  - WebUI attachment failure-retain smoke
   - WebUI submit-success path refresh smoke
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
@@ -90,6 +97,7 @@
   - ADP query/subscription now drive the default WebUI cards, while HTTP query/SSE compatibility routes still expose public projection smoke coverage
   - debug query remains snapshot-only, while ADP debug subscriptions wait for late debug snapshots so turn/debug timing races are not user-visible failures; ADP failure frames render visible status/cards instead of stale pending
   - latest-turn SSE compatibility and WebUI ADP asset checks now have regression coverage for tool waiting/completed status updates and default ADP routing
+  - attachment placeholder and draft-retention semantics are now part of the design contract and must stay session-scoped
 - WebUI tool cards now normalize by `tool_call_id`, waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
 - WebUI submit/dispatch pending state and tool waiting state now both refresh with visible elapsed time instead of static waiting text
 - WebUI model-response waiting state is driven by protocol-projected `model_request`, not local-only guessing

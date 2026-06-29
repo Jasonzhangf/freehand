@@ -29,6 +29,7 @@ Use this directory family for durable design truth.
 - `docs/design/node-master-slave-design.md`
 - `docs/design/ui-protocol-design.md`
 - `docs/design/webui-console-proposal.md`
+- `docs/design/webui-layered-controls-and-attachments.md`
 - `docs/design/runtime-command-dispatch-design.md`
 - `docs/design/runtime-checkpoint-rewind-design.md`
 - `docs/design/runtime-daemon-design.md`

@@ -899,6 +899,14 @@ mod tests {
         assert!(html.contains("id=\"new-session-button\""));
         assert!(html.contains("id=\"success-sample-button\""));
         assert!(html.contains("id=\"failure-sample-button\""));
+        assert!(html.contains("composer-control-strip"));
+        assert!(html.contains("id=\"attach-file-button\""));
+        assert!(html.contains("id=\"attach-image-button\""));
+        assert!(html.contains("id=\"attach-video-button\""));
+        assert!(html.contains("id=\"preview-attachments-button\""));
+        assert!(html.contains("id=\"refresh-session-button\""));
+        assert!(html.contains("id=\"model-selector\""));
+        assert!(html.contains("id=\"attachment-tray\""));
     }
 
     #[tokio::test]
@@ -1119,8 +1127,22 @@ mod tests {
         assert!(js_body.contains("loadSamplePrompt"));
         assert!(js_body.contains("shortcutHelp"));
         assert!(js_body.contains("runSlashCommand"));
+        assert!(js_body.contains("attachmentDraftStorageKey"));
+        assert!(js_body.contains("freehand-webui-attachment-drafts-v1"));
+        assert!(js_body.contains("loadAttachmentDrafts"));
+        assert!(js_body.contains("persistAttachmentDrafts"));
+        assert!(js_body.contains("addAttachmentFiles"));
+        assert!(js_body.contains("renderAttachmentTray"));
+        assert!(js_body.contains("textWithAttachmentPlaceholders"));
+        assert!(js_body.contains("clearCurrentAttachments"));
+        assert!(js_body.contains("dispatch failed; draft attachments retained for retry"));
+        assert!(js_body.contains("case \"/attachments\""));
+        assert!(js_body.contains("case \"/model\""));
+        assert!(js_body.contains("model selector is read-only"));
         assert!(js_body.contains("setCommandStatus"));
         assert!(js_body.contains("setBackgroundCommandStatus"));
+        assert!(js_body.contains("adpRequestTimeoutMs"));
+        assert!(js_body.contains("ADP ${kind} request timed out"));
         assert!(js_body.contains("commandStatusStickyUntil"));
         assert!(js_body.contains("stickyMs"));
         assert!(js_body.contains("Cmd/Ctrl+Enter"));
@@ -1136,6 +1158,9 @@ mod tests {
         assert!(js_body.contains("case \"/failure\""));
         assert!(js_body.contains("case \"/cancel\""));
         assert!(js_body.contains("case \"/clear\""));
+        assert!(webui_css_body.contains("composer-control-strip"));
+        assert!(webui_css_body.contains("attachment-tray"));
+        assert!(webui_css_body.contains("attachment-chip"));
         assert!(!js_body.contains("Tool call requested"));
         assert!(!js_body.contains("Tool result returned for"));
         assert!(!js_body.contains("Tool execution failed for"));

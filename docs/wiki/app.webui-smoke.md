@@ -18,6 +18,8 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - app boundary keeps theme assets separate from WebUI layout assets
 - front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames
 - front-end exposes success and failure sample prompt buttons that load reproducible ADP sample prompts into the composer without bypassing normal Send/ADP command flow
+- front-end composer control strip exposes attachment buttons, preview, selected-session refresh, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP
+- front-end attachment drafts are scoped by selected session, persist metadata only, append placeholder lines to the current send, clear on command receipt, and remain available for retry after dispatch failure
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
@@ -39,6 +41,9 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection, latest-turn subscribe keeps waiting when no turn exists yet, and debug subscribe keeps waiting when no debug snapshot exists yet
 - WebUI submit success path actively re-queries latest turn truth over ADP after command receipt to cover command-complete-before-browser-subscriber timing
 - WebUI success/failure sample buttons populate the composer with the same sample prompts used by CLI/headless ADP sample automation, then the operator can send them through the normal ADP submit path
+- WebUI composer control strip renders low-noise controls below the composer without creating a second protocol or truth source
+- WebUI attachment tray renders session-scoped draft metadata and file-handle availability; restored metadata stays visible but is not treated as rehydrated binary payload
+- WebUI sends attachment placeholders as current-send text only, clears the session draft after successful command receipt, and restores the composer text while retaining draft attachments after dispatch failure
 - front-end script projects protocol-owned ADP `UiQueryResult`, `UiSubscriptionEvent`, and `DebugStateSnapshot` frames into semantic message cards and detail panes, including the user prompt
 - front-end debug state distinguishes missing snapshot (debug pending) from debug SSE transport errors (debug stream reconnecting)
 - front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket without surfacing verbose tool term text in the main card
@@ -61,12 +66,15 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - invalid smoke input or missing projection returns explicit app error
 - transport or render wiring failures are surfaced explicitly
 - ADP transport failures, decode failures, and protocol failure frames are rendered as visible failure cards and status text
+- ADP command/query/subscribe request timeouts are explicit UI failures so the composer cannot stay in a silent dispatching state
 - unknown static assets return explicit 404
 - checkpoint query uses protocol state only and must not parse runtime checkpoint files in the app boundary
 - blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn
 - dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
 - direct reason, provider, node, or config coupling is a policy violation, not a fallback path
 - cancel without an active turn clears only local input and does not invent a runtime mutation
+- attachment dispatch failure preserves draft metadata and page-held file handles for retry and must not silently drop the selected files
+- restored attachment metadata without a current page file handle is visible as metadata-only and must not pretend the binary payload was rehydrated
 - transient missing debug snapshots are rendered as pending debug state, not command failure
 - debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state
 
@@ -100,6 +108,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | 09 | `handle_adp_socket / handle_adp_connection` | `apps/freehand-server/src/lib.rs` | expose protocol-owned ADP WebSocket frames for WebUI default query, subscribe, and command control | ADP WebSocket frames plus protocol state plus dispatch port | ADP response frames and subscription events | WebUI shell | shared protocol transport | bound |
 | 10 | `ensureAdpSocket / requestAdp / handleAdpFrame` | `apps/freehand-server/assets/webui.js` | maintain the default WebUI ADP connection and route query_result, subscription_accepted, subscription_event, command_receipt, and failure frames | `UiAdpResponse` JSON frames | visible WebUI state updates or failure cards | WebUI shell | daemon `/adp` | bound |
 | 11 | `refreshTurn / renderMessages / logicalSessionTurns / stripFreehandCompletionBlock / normalizePublicConversation / renderCommandStatus / refreshDebug / submitUserInput` | `apps/freehand-server/assets/webui.js` | consume ADP query and subscription turn payloads, render semantic/tool/debug cards, collapse same execution-cycle rounds into one transcript group, collapse assistant text into one visible card, keep same-tool updates in one card, and keep missing debug snapshots pending instead of failed | `UiAdpResponse` frames plus debug snapshot/pending state plus command dispatch receipt | DOM message blocks plus command status | WebUI shell | ADP protocol frames | bound |
+| 11b | `loadAttachmentDrafts / persistAttachmentDrafts / addAttachmentFiles / renderAttachmentTray / textWithAttachmentPlaceholders / clearCurrentAttachments` | `apps/freehand-server/assets/webui.js` | manage session-scoped attachment draft metadata, render placeholder chips, append current-send placeholders, clear on successful command receipt, and preserve drafts after dispatch failure | selected session plus browser File handles plus metadata-only restored drafts | attachment tray DOM plus placeholder text appended to submitted command | WebUI control layer | ADP command text placeholder only | bound |
 | 12 | `handle_query_checkpoints / refreshCheckpoints` | `apps/freehand-server/src/lib.rs / apps/freehand-server/assets/webui.js` | serve compatibility checkpoint query and render read-only checkpoint summaries from ADP protocol state by default | protocol checkpoint snapshot | checkpoint snapshot plus secondary inspector cards | WebUI shell | ui.protocol state | bound |
 | 13 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send CancelTurn or CancelLatestActiveTurn over ADP for the active protocol turn from button or Escape key | latest protocol turn id | ADP command receipt plus refreshed projection | WebUI shell | daemon `/adp` | bound |
 | 14 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP compatibility transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
@@ -112,6 +121,8 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - WebUI layout and protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`
 - WebUI shell now advertises `data-adp-endpoint="/adp"` and the front-end opens a WebSocket to that endpoint by default
 - WebUI shell now exposes success/failure sample buttons and WebUI JS carries the paired sample prompts
+- WebUI shell now exposes composer controls for file, image, video, preview, selected-session refresh, and read-only model selection
+- WebUI attachment drafts are session-scoped in local UI metadata, render as placeholder chips, append placeholder lines to current submitted text, clear after successful command receipt, and remain for retry after dispatch failure
 - app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface
 - app boundary now serves protocol-only POST command ingress dispatch-receipt or failure smoke route from that shared transport surface
 - HTTP/SSE/POST routes remain compatibility transport surfaces; WebUI JS no longer uses `fetch` or `EventSource` as its default live path

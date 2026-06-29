@@ -24,6 +24,8 @@
 - front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames
 - front-end session list can create a draft session with `/new`, persist the selected session id locally, and bind future ADP submit frames to the selected session when present
 - front-end exposes success and failure sample prompt buttons that load reproducible ADP sample prompts into the composer without bypassing normal Send/ADP command flow
+- front-end composer control strip exposes attachment buttons, preview, selected-session refresh, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP
+- front-end attachment drafts are scoped by selected session, persist metadata only, append placeholder lines to the current send, clear on command receipt, and remain available for retry after dispatch failure
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
@@ -48,6 +50,9 @@
 - front-end debug state distinguishes missing snapshot (`debug pending`) from debug SSE transport errors (`debug stream reconnecting`)
 - WebUI submit success path still actively re-queries latest turn truth over ADP after command receipt to cover command-complete-before-browser-subscriber timing
 - WebUI success/failure sample buttons populate the composer with the same sample prompts used by CLI/headless ADP sample automation, then the operator can send them through the normal ADP submit path
+- WebUI composer control strip renders low-noise controls below the composer without creating a second protocol or truth source
+- WebUI attachment tray renders session-scoped draft metadata and file-handle availability; restored metadata stays visible but is not treated as rehydrated binary payload
+- WebUI sends attachment placeholders as current-send text only, clears the session draft after successful command receipt, and restores the composer text while retaining draft attachments after dispatch failure
 - WebUI checkpoint panel renders protocol checkpoint summaries from query state and keeps checkpoint files out of app-boundary truth
 - WebUI cancel path sends `CancelTurn` for the current active turn, clears pending local input only after dispatch, and refreshes protocol truth
 - WebUI cancel path uses `CancelTurn` when `turn_id` is known and `CancelLatestActiveTurn` during the submit-in-flight pre-SSE window
@@ -71,9 +76,12 @@
 - invalid smoke input or missing projection returns explicit app error
 - transport/render wiring failures are surfaced explicitly
 - ADP transport failures, decode failures, and protocol failure frames are rendered as visible failure cards and status text
+- ADP command/query/subscribe request timeouts are explicit UI failures so the composer cannot stay in a silent dispatching state
 - ADP failure cards must not render ahead of the current conversation timeline; transport failure is secondary to the current turn order
 - unknown static assets return explicit 404
 - cancel without an active turn clears only local input and does not invent a runtime mutation
+- attachment dispatch failure preserves draft metadata/file handles for retry and must not silently drop the selected files
+- restored attachment metadata without a current page file handle is visible as metadata-only and must not pretend the binary payload was rehydrated
 - transient missing debug snapshots are rendered as pending debug state, not command failure
 - debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state
 - dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
@@ -109,6 +117,7 @@
 | 09 | `handle_adp_socket` / `handle_adp_connection` | `apps/freehand-server/src/lib.rs` | expose protocol-owned ADP WebSocket frames for WebUI default query/subscribe/command control | ADP WebSocket frames + protocol state + dispatch port | ADP response frames and subscription events | WebUI shell | shared protocol transport | bound |
 | 10 | `ensureAdpSocket` / `requestAdp` / `handleAdpFrame` | `apps/freehand-server/assets/webui.js` | maintain the default WebUI ADP connection and route query_result, subscription_accepted, subscription_event, command_receipt, and failure frames | `UiAdpResponse` JSON frames | visible WebUI state updates or failure cards | WebUI shell | daemon `/adp` | bound |
 | 11 | `refreshTurn` / `renderMessages` / `logicalSessionTurns` / `stripFreehandCompletionBlock` / `normalizePublicConversation` / `renderCommandStatus` / `refreshDebug` / `submitUserInput` / `setSessionList` / `setSessionTranscript` / `startNewSession` | `apps/freehand-server/assets/webui.js` | consume ADP query/subscription turn payloads, manage selected and draft sessions, render semantic/tool/debug cards, collapse same execution-cycle rounds into one transcript group, strip raw completion schema from assistant cards, keep same-tool updates in one card, and keep missing debug snapshots pending instead of failed | `UiAdpResponse` frames + debug snapshot/pending state + command dispatch receipt | DOM message blocks + command status | WebUI shell | ADP protocol frames | bound |
+| 11b | `loadAttachmentDrafts` / `persistAttachmentDrafts` / `addAttachmentFiles` / `renderAttachmentTray` / `textWithAttachmentPlaceholders` / `clearCurrentAttachments` | `apps/freehand-server/assets/webui.js` | manage session-scoped attachment draft metadata, render placeholder chips, append current-send placeholders, clear on successful command receipt, and preserve drafts after dispatch failure | selected session + browser `File` handles + metadata-only restored drafts | attachment tray DOM + placeholder text appended to submitted command | WebUI control layer | ADP command text placeholder only | bound |
 | 11a | `toolSummaryBody` / `derivePublicConversation` | `apps/freehand-server/assets/webui.js` | render protocol-projected `display` fields for tool cards without reclassifying raw tool text | `UiToolActivity.display` | low-noise tool card body | WebUI shell | ui.protocol projection | bound |
 | 12 | `handle_query_checkpoints` / `refreshCheckpoints` | `apps/freehand-server/src/lib.rs` / `apps/freehand-server/assets/webui.js` | serve compatibility checkpoint query and render read-only checkpoint summaries from ADP protocol state by default | protocol checkpoint snapshot | checkpoint snapshot + secondary inspector cards | WebUI shell | ui.protocol state | bound |
 | 13 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` or `CancelLatestActiveTurn` over ADP for the active protocol turn from button or Escape key | latest protocol turn id | ADP command receipt + refreshed projection | WebUI shell | daemon `/adp` | bound |
@@ -138,6 +147,8 @@
 - WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`
 - WebUI tool cards now render protocol-projected waiting/completed/failed lifecycle states from ADP turn projection truth
 - WebUI success/failure sample buttons now load reproducible ADP sample prompts into the composer
+- WebUI composer control strip now exposes file/image/video attachment, preview, selected-session refresh, and read-only model selector controls without changing ADP framing
+- WebUI attachment drafts are session-scoped in local UI metadata, render as placeholder chips, append placeholder lines to the current submitted text, clear after successful command receipt, and remain for retry after dispatch failure
 - WebUI same-tool lifecycle updates now normalize by `tool_call_id`, waiting cards animate with local elapsed timers, and submit clears the input field immediately while retaining pending state in the conversation stream
 - WebUI submit/dispatch and tool-wait lifecycle states now both refresh once per second so users can see where the turn is blocked and how long it has waited
 - WebUI model-request waiting state now comes from `UiTurnProjection.model_request` and refreshes once per second with elapsed wait time

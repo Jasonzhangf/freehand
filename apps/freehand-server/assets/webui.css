@@ -705,6 +705,122 @@ body.theme-dark .composer-input {
   justify-content: flex-end;
 }
 
+.composer-control-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.control-chip,
+.model-control {
+  min-height: 34px;
+  border: 1px solid rgba(31, 108, 88, 0.2);
+  border-radius: 999px;
+  background: rgba(247, 251, 248, 0.88);
+  color: var(--text-soft);
+  padding: 7px 11px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.control-chip {
+  cursor: pointer;
+}
+
+.model-control {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.model-control span {
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.model-control select {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.attachment-tray {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.attachment-summary {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid rgba(31, 108, 88, 0.2);
+  border-radius: 999px;
+  background: rgba(232, 243, 238, 0.8);
+  padding: 6px 7px 6px 10px;
+}
+
+.attachment-chip.metadata-only {
+  border-color: rgba(155, 109, 28, 0.34);
+  background: rgba(246, 239, 223, 0.78);
+}
+
+.attachment-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-remove {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--text-soft);
+  padding: 4px 7px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+body.theme-dark .control-chip,
+body.theme-dark .model-control,
+body.theme-dark .attachment-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(88, 176, 141, 0.25);
+}
+
+body.theme-dark .attachment-chip.metadata-only {
+  background: rgba(138, 106, 48, 0.16);
+  border-color: rgba(155, 109, 28, 0.42);
+}
+
+body.theme-dark .attachment-remove {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .button {
   width: 100%;
   padding: 12px 13px;

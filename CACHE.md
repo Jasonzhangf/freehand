@@ -1,5 +1,27 @@
 # CACHE
 
+- Current verified WebUI layered controls slice:
+  - `app.webui-smoke` now renders a composer control strip with file/image/video attachment buttons, attachment preview, selected-session refresh, and read-only runtime model selector
+  - WebUI attachment drafts are session-scoped UI metadata in `freehand-webui-attachment-drafts-v1`; current page `File` handles are retained for retry, restored metadata is marked `metadata-only`, and submitted ADP text receives placeholder lines only
+  - command receipt clears current-session attachment draft; ADP dispatch failure restores composer text and preserves draft attachments for retry
+  - ADP request timeout is explicit in WebUI (`adpRequestTimeoutMs`) so a black-holed WebSocket cannot leave the composer silently dispatching forever
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server -- --nocapture`
+    - `cargo test -p freehand-ui-protocol -- --nocapture`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci` -> `MAKE_CI_EXIT=0`
+    - real WebUI Playwright screenshots:
+      - `artifacts/webui-layered-controls-e2e/20260629-layered-attachments-success-v2/01-initial-controls.png`
+      - `artifacts/webui-layered-controls-e2e/20260629-layered-attachments-success-v2/02-attachment-chip-ready.png`
+      - `artifacts/webui-layered-controls-e2e/20260629-layered-attachments-success-v2/03-success-cleared-attachments.png`
+      - `artifacts/webui-layered-controls-e2e/20260629-layered-attachments-failure-v2/01-adp-timeout-retained-attachments.png`
+      - `artifacts/webui-layered-controls-e2e/20260629-layered-session-reload-v2/01-before-reload-selected-session.png`
+      - `artifacts/webui-layered-controls-e2e/20260629-layered-session-reload-v2/02-after-reload-selected-session.png`
+    - headless ADP smoke against the same source server: `cargo run -p freehand-cli -- adp-smoke --url ws://127.0.0.1:4079/adp`
+  - known remaining risk: first slice does not implement backend binary upload/storage; it preserves current-page `File` handles for retry and stores metadata/placeholder history only, matching the no-ADP-framing-change constraint.
 - Current verified tool display semantic slice:
   - `tool.display` owner is `crates/freehand-blocks/src/tool_display.rs`
   - classification/parsing functions are independent: read/list, file mutation, search, plan, shell, generic

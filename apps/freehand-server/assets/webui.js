@@ -11,6 +11,16 @@ const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
 const successSampleButton = document.getElementById("success-sample-button");
 const failureSampleButton = document.getElementById("failure-sample-button");
+const attachFileButton = document.getElementById("attach-file-button");
+const attachImageButton = document.getElementById("attach-image-button");
+const attachVideoButton = document.getElementById("attach-video-button");
+const previewAttachmentsButton = document.getElementById("preview-attachments-button");
+const refreshSessionButton = document.getElementById("refresh-session-button");
+const modelSelector = document.getElementById("model-selector");
+const attachmentFileInput = document.getElementById("attachment-file-input");
+const attachmentImageInput = document.getElementById("attachment-image-input");
+const attachmentVideoInput = document.getElementById("attachment-video-input");
+const attachmentTray = document.getElementById("attachment-tray");
 
 const samplePrompts = {
   success:
@@ -20,8 +30,10 @@ const samplePrompts = {
 };
 
 const selectedSessionStorageKey = "freehand-webui-selected-session";
+const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
+const adpRequestTimeoutMs = 8000;
 const shortcutHelp =
-  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /new /sessions /reload /success /failure /cancel /clear";
+  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /new /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
 
 const state = {
@@ -40,6 +52,7 @@ const state = {
   modelWaitStartedAt: null,
   activeTurnId: null,
   pendingUserInput: null,
+  pendingAttachments: [],
   submitStartedAt: null,
   submitInFlight: false,
   commandStatusMessage: "connecting to ADP...",
@@ -51,6 +64,8 @@ const state = {
   adpRequests: new Map(),
   adpSubscriptions: new Set(),
   requestSequence: 0,
+  attachmentDrafts: loadAttachmentDrafts(),
+  attachmentsPreviewOpen: true,
 };
 
 function shellConfig() {
@@ -124,6 +139,9 @@ function ensureAdpSocket() {
       for (const { reject: rejectRequest } of state.adpRequests.values()) {
         rejectRequest(new Error("ADP closed"));
       }
+      for (const { timeoutId } of state.adpRequests.values()) {
+        window.clearTimeout(timeoutId);
+      }
       state.adpRequests.clear();
       renderAll();
     });
@@ -142,12 +160,20 @@ function requestAdp(kind, payloadKey, payload, prefix) {
   const frame = { kind, request_id: requestId };
   frame[payloadKey] = payload;
   const promise = new Promise((resolve, reject) => {
-    state.adpRequests.set(requestId, { resolve, reject, kind });
+    const timeoutId = window.setTimeout(() => {
+      if (!state.adpRequests.has(requestId)) {
+        return;
+      }
+      state.adpRequests.delete(requestId);
+      reject(new Error(`ADP ${kind} request timed out after ${formatDuration(adpRequestTimeoutMs)}`));
+    }, adpRequestTimeoutMs);
+    state.adpRequests.set(requestId, { resolve, reject, kind, timeoutId });
   });
   sendAdpFrame(frame).catch((error) => {
     const request = state.adpRequests.get(requestId);
     state.adpRequests.delete(requestId);
     if (request) {
+      window.clearTimeout(request.timeoutId);
       request.reject(error);
     }
   });
@@ -186,6 +212,7 @@ function handleAdpFrame(frame) {
       state.adpFailure = null;
       if (request) {
         state.adpRequests.delete(frame.request_id);
+        window.clearTimeout(request.timeoutId);
         request.resolve(frame.result);
       }
       return;
@@ -193,6 +220,7 @@ function handleAdpFrame(frame) {
       state.adpFailure = null;
       if (request) {
         state.adpRequests.delete(frame.request_id);
+        window.clearTimeout(request.timeoutId);
         request.resolve(frame.receipt);
       }
       setBackgroundCommandStatus(`${frame.receipt.dispatch_status} -> ${frame.receipt.target_feature_id}`);
@@ -201,6 +229,7 @@ function handleAdpFrame(frame) {
       state.adpFailure = null;
       if (request) {
         state.adpRequests.delete(frame.request_id);
+        window.clearTimeout(request.timeoutId);
         request.resolve(frame.selector);
       }
       state.adpSubscriptions.add(frame.request_id);
@@ -214,6 +243,7 @@ function handleAdpFrame(frame) {
       state.adpFailure = frame.failure.message || frame.failure.code;
       if (request) {
         state.adpRequests.delete(frame.request_id);
+        window.clearTimeout(request.timeoutId);
         request.reject(new Error(frame.failure.message || frame.failure.code));
       }
       setCommandStatus(`ADP failure: ${frame.failure.code}`);
@@ -228,6 +258,206 @@ function setText(id, value) {
   if (element) {
     element.textContent = value;
   }
+}
+
+function loadAttachmentDrafts() {
+  try {
+    const raw = window.localStorage.getItem(attachmentDraftStorageKey);
+    if (!raw) {
+      return new Map();
+    }
+    const parsed = JSON.parse(raw);
+    const entries = Array.isArray(parsed) ? parsed : [];
+    return new Map(
+      entries
+        .filter((entry) => entry && typeof entry.session_id === "string" && Array.isArray(entry.attachments))
+        .map((entry) => [
+          entry.session_id,
+          entry.attachments.map((attachment) => ({
+            ...attachment,
+            file: null,
+            available: false,
+            status: "metadata-only",
+          })),
+        ]),
+    );
+  } catch (error) {
+    return new Map();
+  }
+}
+
+function persistAttachmentDrafts() {
+  const entries = Array.from(state.attachmentDrafts.entries()).map(([sessionId, attachments]) => ({
+    session_id: sessionId,
+    attachments: attachments.map(({ file, ...metadata }) => ({
+      ...metadata,
+      available: false,
+      status: metadata.status === "ready" ? "metadata-only" : metadata.status,
+    })),
+  }));
+  window.localStorage.setItem(attachmentDraftStorageKey, JSON.stringify(entries));
+}
+
+function attachmentSessionId() {
+  if (state.selectedSessionId) {
+    return state.selectedSessionId;
+  }
+  const sessionId = newDraftSessionId();
+  state.draftSessionId = sessionId;
+  setSelectedSessionId(sessionId);
+  return sessionId;
+}
+
+function currentAttachmentSessionId() {
+  return state.selectedSessionId || state.draftSessionId || null;
+}
+
+function currentAttachments() {
+  const sessionId = currentAttachmentSessionId();
+  if (!sessionId) {
+    return [];
+  }
+  return state.attachmentDrafts.get(sessionId) || [];
+}
+
+function setCurrentAttachments(attachments) {
+  const sessionId = attachments.length > 0 ? attachmentSessionId() : currentAttachmentSessionId();
+  if (!sessionId) {
+    return;
+  }
+  if (attachments.length === 0) {
+    state.attachmentDrafts.delete(sessionId);
+  } else {
+    state.attachmentDrafts.set(sessionId, attachments);
+  }
+  persistAttachmentDrafts();
+  renderAttachmentTray();
+  renderMessages();
+}
+
+function attachmentKind(file, forcedKind = null) {
+  if (forcedKind) {
+    return forcedKind;
+  }
+  if (file.type.startsWith("image/")) {
+    return "image";
+  }
+  if (file.type.startsWith("video/")) {
+    return "video";
+  }
+  return "file";
+}
+
+function formatBytes(size) {
+  if (!Number.isFinite(size)) {
+    return "unknown size";
+  }
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function addAttachmentFiles(files, forcedKind = null) {
+  const next = [...currentAttachments()];
+  Array.from(files || []).forEach((file) => {
+    next.push({
+      id: crypto.randomUUID(),
+      name: file.name,
+      size: file.size,
+      type: file.type || "application/octet-stream",
+      kind: attachmentKind(file, forcedKind),
+      added_at: new Date().toISOString(),
+      status: "ready",
+      available: true,
+      file,
+    });
+  });
+  setCurrentAttachments(next);
+  setCommandStatus(`${next.length} attachment draft(s) in selected session`, { stickyMs: 4000 });
+}
+
+function removeAttachment(id) {
+  const next = currentAttachments().filter((attachment) => attachment.id !== id);
+  setCurrentAttachments(next);
+  setCommandStatus("attachment removed", { stickyMs: 3000 });
+}
+
+function clearCurrentAttachments() {
+  setCurrentAttachments([]);
+}
+
+function attachmentPlaceholderLines(attachments = currentAttachments()) {
+  if (attachments.length === 0) {
+    return [];
+  }
+  const lines = ["[attachments: current-send placeholders]"];
+  attachments.forEach((attachment) => {
+    const availability = attachment.available ? "ready" : "metadata-only";
+    lines.push(
+      `- ${attachment.kind}: ${attachment.name} (${formatBytes(attachment.size)}, ${attachment.type || "unknown"}, ${availability})`,
+    );
+  });
+  return lines;
+}
+
+function textWithAttachmentPlaceholders(text, attachments = currentAttachments()) {
+  const placeholders = attachmentPlaceholderLines(attachments);
+  if (placeholders.length === 0) {
+    return text;
+  }
+  return `${text}\n\n${placeholders.join("\n")}`;
+}
+
+function attachmentSummary(attachments = currentAttachments()) {
+  if (attachments.length === 0) {
+    return "no draft attachments";
+  }
+  const ready = attachments.filter((attachment) => attachment.available).length;
+  return `${attachments.length} draft attachment(s), ${ready} ready in this page`;
+}
+
+function renderAttachmentTray() {
+  if (!attachmentTray) {
+    return;
+  }
+  const attachments = currentAttachments();
+  attachmentTray.replaceChildren();
+  const summary = document.createElement("div");
+  summary.className = "attachment-summary";
+  summary.textContent = attachmentSummary(attachments);
+  attachmentTray.appendChild(summary);
+
+  if (!state.attachmentsPreviewOpen || attachments.length === 0) {
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "attachment-list";
+  attachments.forEach((attachment) => {
+    const chip = document.createElement("div");
+    chip.className = `attachment-chip ${attachment.available ? "ready" : "metadata-only"}`;
+
+    const text = document.createElement("span");
+    text.className = "attachment-chip-text";
+    text.textContent = `${attachment.kind} · ${attachment.name} · ${formatBytes(attachment.size)}`;
+    text.title = attachment.available
+      ? "This page still holds the File handle for retry."
+      : "Metadata restored from session; reselect the file before sending binary payload.";
+
+    const remove = document.createElement("button");
+    remove.className = "attachment-remove";
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => removeAttachment(attachment.id));
+
+    chip.append(text, remove);
+    list.appendChild(chip);
+  });
+  attachmentTray.appendChild(list);
 }
 
 function card(role, status, title, body, variant = "assistant", identity = null) {
@@ -345,9 +575,10 @@ function elapsedSince(startedAt) {
   return formatDuration(Date.now() - startedAt);
 }
 
-function pendingSubmitBody(text) {
+function pendingSubmitBody(text, attachments = []) {
   const elapsed = elapsedSince(state.submitStartedAt);
-  return elapsed ? `${text}\n等待调度 ${elapsed}` : text;
+  const body = textWithAttachmentPlaceholders(text, attachments);
+  return elapsed ? `${body}\n等待调度 ${elapsed}` : body;
 }
 
 function turnIsWaitingForModelResponse(turn) {
@@ -650,6 +881,7 @@ function startNewSession() {
   state.turn = null;
   state.publicConversation = [];
   state.pendingUserInput = null;
+  state.pendingAttachments = [];
   state.modelRequestStartedAt = null;
   state.modelWaitStartedAt = null;
   state.submitStartedAt = null;
@@ -753,6 +985,7 @@ function setTurnProjection(turn, options = {}) {
   syncModelWaitTiming(state.turn);
   if (state.turn && state.pendingUserInput) {
     state.pendingUserInput = null;
+    state.pendingAttachments = [];
   }
 }
 
@@ -888,7 +1121,7 @@ function renderMessages() {
           label: state.submitInFlight ? "dispatching" : "pending",
         },
         state.submitInFlight ? "正在提交输入" : "待写入输入",
-        pendingSubmitBody(state.pendingUserInput),
+        pendingSubmitBody(state.pendingUserInput, state.pendingAttachments),
         "user",
       ),
     );
@@ -1185,6 +1418,7 @@ function renderAll() {
   renderSessions();
   renderTurnMeta();
   renderMessages();
+  renderAttachmentTray();
   renderDebug();
   renderCheckpoints();
   renderCommandStatus();
@@ -1302,6 +1536,7 @@ async function cancelActiveTurn() {
   if (!turnId && !state.submitInFlight && !state.pendingUserInput) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.pendingAttachments = [];
     state.modelRequestStartedAt = null;
     state.modelWaitStartedAt = null;
     state.submitStartedAt = null;
@@ -1321,6 +1556,7 @@ async function cancelActiveTurn() {
     return;
   }
   state.pendingUserInput = null;
+  state.pendingAttachments = [];
   state.modelRequestStartedAt = null;
   state.modelWaitStartedAt = null;
   state.submitStartedAt = null;
@@ -1350,6 +1586,7 @@ async function runSlashCommand(rawText) {
   if (command.startsWith("/")) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.pendingAttachments = [];
     state.modelRequestStartedAt = null;
     state.modelWaitStartedAt = null;
     state.submitStartedAt = null;
@@ -1384,12 +1621,21 @@ async function runSlashCommand(rawText) {
     case "/clear":
       composerInput.value = "";
       state.pendingUserInput = null;
+      state.pendingAttachments = [];
       state.modelRequestStartedAt = null;
       state.modelWaitStartedAt = null;
       state.submitStartedAt = null;
       state.submitInFlight = false;
       setCommandStatus("local composer cleared", { stickyMs: 3000 });
       renderMessages();
+      return true;
+    case "/attachments":
+      state.attachmentsPreviewOpen = !state.attachmentsPreviewOpen;
+      renderAttachmentTray();
+      setCommandStatus(`attachments ${state.attachmentsPreviewOpen ? "preview visible" : "preview collapsed"}: ${attachmentSummary()}`, { stickyMs: 5000 });
+      return true;
+    case "/model":
+      setCommandStatus("model selection is controlled by runtime config for this ADP surface", { stickyMs: 6000 });
       return true;
     default:
       if (command.startsWith("/")) {
@@ -1416,15 +1662,20 @@ composerForm.addEventListener("submit", async (event) => {
     return;
   }
   setCommandStatus("dispatching...");
+  const attachments = currentAttachments();
+  const commandText = textWithAttachmentPlaceholders(text, attachments);
   state.pendingUserInput = text;
+  state.pendingAttachments = attachments;
   state.submitStartedAt = Date.now();
   state.submitInFlight = true;
   composerInput.value = "";
   renderMessages();
   try {
-    const receipt = await submitUserInput(text);
+    const receipt = await submitUserInput(commandText);
+    clearCurrentAttachments();
     state.submitInFlight = false;
     state.submitStartedAt = null;
+    state.pendingAttachments = [];
     try {
       await refreshAllProtocolState();
       renderCommandStatus();
@@ -1434,9 +1685,11 @@ composerForm.addEventListener("submit", async (event) => {
   } catch (error) {
     state.submitInFlight = false;
     state.pendingUserInput = null;
+    state.pendingAttachments = [];
     state.submitStartedAt = null;
+    composerInput.value = text;
     renderMessages();
-    setCommandStatus(`dispatch failed: ${error.message}`);
+    setCommandStatus(`dispatch failed; draft attachments retained for retry: ${error.message}`);
   }
 });
 
@@ -1459,6 +1712,36 @@ function loadSamplePrompt(kind) {
 newSessionButton.addEventListener("click", startNewSession);
 successSampleButton.addEventListener("click", () => loadSamplePrompt("success"));
 failureSampleButton.addEventListener("click", () => loadSamplePrompt("failure"));
+attachFileButton.addEventListener("click", () => attachmentFileInput.click());
+attachImageButton.addEventListener("click", () => attachmentImageInput.click());
+attachVideoButton.addEventListener("click", () => attachmentVideoInput.click());
+attachmentFileInput.addEventListener("change", (event) => {
+  addAttachmentFiles(event.target.files, "file");
+  event.target.value = "";
+});
+attachmentImageInput.addEventListener("change", (event) => {
+  addAttachmentFiles(event.target.files, "image");
+  event.target.value = "";
+});
+attachmentVideoInput.addEventListener("change", (event) => {
+  addAttachmentFiles(event.target.files, "video");
+  event.target.value = "";
+});
+previewAttachmentsButton.addEventListener("click", () => {
+  state.attachmentsPreviewOpen = !state.attachmentsPreviewOpen;
+  renderAttachmentTray();
+  setCommandStatus(`attachments ${state.attachmentsPreviewOpen ? "preview visible" : "preview collapsed"}: ${attachmentSummary()}`, { stickyMs: 5000 });
+});
+refreshSessionButton.addEventListener("click", () => {
+  setCommandStatus("refreshing selected session...", { stickyMs: 3000 });
+  refreshSelectedSession()
+    .then(() => setCommandStatus("selected session refreshed", { stickyMs: 4000 }))
+    .catch((error) => setCommandStatus(`selected session refresh failed: ${error.message}`, { stickyMs: 8000 }));
+});
+modelSelector.addEventListener("change", () => {
+  modelSelector.value = "runtime";
+  setCommandStatus("model selector is read-only; runtime config owns active model", { stickyMs: 6000 });
+});
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {
