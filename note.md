@@ -1,5 +1,14 @@
 # note.md
 
+# 2026-06-29 WebUI assistant-card collapse repair
+  - review found a remaining regression after multiround transcript merge: same logical turn still rendered multiple assistant cards because `derivePublicConversation` emitted one `AssistantText` per text chunk
+  - fixed by collapsing assistant text inside each turn into one visible card while preserving tool summaries and terminal/error cards
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+
 # 2026-06-29 WebUI multiround restore closeout
   - verified live fixed-port daemon at `http://127.0.0.1:4041/` and `ws://127.0.0.1:4041/adp`
   - real browser evidence now shows one logical transcript item per execution cycle, with `runtime-turn-N` and `runtime-turn-N-rM` merged for display only

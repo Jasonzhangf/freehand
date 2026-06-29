@@ -1088,6 +1088,7 @@ mod tests {
         assert!(js_body.contains("logicalTurnKey"));
         assert!(js_body.contains("mergeLogicalTurnGroup"));
         assert!(js_body.contains("logicalSessionTurns(state.sessionTurns)"));
+        assert!(js_body.contains("assistantBodies.join(\"\\n\")"));
         assert!(js_body.contains("stripFreehandCompletionBlock"));
         assert!(js_body.contains("<freehand_completion>"));
         assert!(js_body.contains("toolSummaryBody"));

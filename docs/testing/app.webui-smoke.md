@@ -55,7 +55,7 @@
   - WebUI ADP turn updates render tool lifecycle status updates (`waiting`, `completed`, and `failed`) from protocol truth
 - WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, waiting animation assets, and low-noise tool summary rendering with elapsed waiting timers
 - WebUI JS asset smoke locks same-execution-cycle round grouping so `runtime-turn-N` and `runtime-turn-N-rM` render as one logical transcript group instead of duplicate user/tool cards
-- WebUI JS asset smoke locks raw completion-schema stripping from assistant cards while preserving Final card projection
+- WebUI JS asset smoke locks assistant-text collapse into one card per logical turn and raw completion-schema stripping while preserving Final card projection
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
@@ -91,7 +91,7 @@
   - latest-turn SSE compatibility and WebUI ADP asset checks now have regression coverage for tool waiting/completed status updates and default ADP routing
 - WebUI tool cards now normalize by `tool_call_id`, waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
 - WebUI selected-session transcript grouping is landed for same execution-cycle round ids while protocol/session truth remains unmerged
-- WebUI assistant-card completion-schema stripping is landed so raw `<freehand_completion>` blocks do not pollute the main chat stream
+- WebUI assistant-card text now collapses to one card per logical turn, and raw `<freehand_completion>` blocks do not pollute the main chat stream
   - protocol-only transport library reuse is landed
   - app remains protocol-only by dependency gate
   - migrated mainline-call source and generated wiki are kept in sync with this test design

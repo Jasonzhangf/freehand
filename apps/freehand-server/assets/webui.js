@@ -377,17 +377,21 @@ function derivePublicConversation(turn) {
       status: "submitted",
     });
   }
+  const assistantBodies = [];
   (turn.text || []).forEach((text) => {
     const visibleText = stripFreehandCompletionBlock(text);
     if (visibleText) {
-      items.push({
-        kind: "AssistantText",
-        title: "Assistant",
-        body: visibleText,
-        status: "streaming",
-      });
+      assistantBodies.push(visibleText);
     }
   });
+  if (assistantBodies.length > 0) {
+    items.push({
+      kind: "AssistantText",
+      title: "Assistant",
+      body: assistantBodies.join("\n"),
+      status: "streaming",
+    });
+  }
   (turn.tool_activities || []).forEach((tool) => {
     const status = `${tool.status || "waiting"}`.toLowerCase();
     items.push({
@@ -461,10 +465,12 @@ function mergeLogicalTurnGroup(turns) {
     errors: [],
   };
   const toolById = new Map();
+  const assistantBodies = [];
   group.forEach((turn) => {
     (turn.text || []).forEach((text) => {
-      if (text && text.trim()) {
-        merged.text.push(text);
+      const visibleText = stripFreehandCompletionBlock(text);
+      if (visibleText) {
+        assistantBodies.push(visibleText);
       }
     });
     (turn.tool_activities || []).forEach((tool) => {
@@ -477,6 +483,7 @@ function mergeLogicalTurnGroup(turns) {
       }
     });
   });
+  merged.text = assistantBodies.length > 0 ? [assistantBodies.join("\n")] : [];
   merged.tool_activities = Array.from(toolById.values());
   return merged;
 }
