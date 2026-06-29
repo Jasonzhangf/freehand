@@ -5,7 +5,8 @@
 - lifecycle path under test:
   - tool call enters pure display parser
   - classifier selects one display kind from tool name and structured arguments
-  - class-specific parser extracts target/action/summary fields
+- class-specific parser extracts target/action/summary fields
+- class-specific parser extracts explicit parameter summaries such as `path=...`, `pattern=...`, and `command=...`
   - result update preserves the same display object and changes status/result fields
   - unknown tools route to generic display projection instead of UI-local guessing
 - white-box plan:
@@ -14,7 +15,7 @@
   - shell command classification covers common read/search/list command shapes
   - result success and result failure update structured display without changing tool truth
 - module black-box plan:
-  - `project_tool_call_display` returns low-noise display fields for read/search/write/plan/shell/generic samples
+- `project_tool_call_display` returns low-noise display fields and parameter summaries for read/search/write/plan/shell/generic samples
   - `project_tool_result_display` preserves category and target while updating outcome summary
 - project black-box impact:
   - WebUI, Android, and CLI can render semantic tool cards from `ui.protocol` without parsing raw tool arguments or result text
@@ -27,6 +28,6 @@
 - sync status between design and implementation:
   - parser implementation landed in `crates/freehand-blocks/src/tool_display.rs`
   - UI protocol projection carries `ToolDisplayProjection`
-  - WebUI consumes `display` fields for tool card body/title rendering
+- WebUI consumes `display` fields and renders parameter summaries as low-weight secondary tool lines
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with display owner code and function map updates

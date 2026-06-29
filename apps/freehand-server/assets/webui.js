@@ -259,11 +259,29 @@ function card(role, status, title, body, variant = "assistant", identity = null)
   content.appendChild(titleNode);
 
   const bodyNode = document.createElement("div");
-  bodyNode.textContent = body;
+  if (variant === "tool") {
+    renderToolBody(bodyNode, body);
+  } else {
+    bodyNode.textContent = body;
+  }
   content.appendChild(bodyNode);
 
   article.append(head, content);
   return article;
+}
+
+function renderToolBody(container, body) {
+  const lines = `${body || ""}`.split("\n").filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    container.textContent = "";
+    return;
+  }
+  lines.forEach((line, index) => {
+    const lineNode = document.createElement("div");
+    lineNode.className = index === 0 ? "tool-primary-line" : "tool-secondary-line";
+    lineNode.textContent = line;
+    container.appendChild(lineNode);
+  });
 }
 
 function normalizePublicConversation(items) {
@@ -398,6 +416,9 @@ function toolSummaryBody(item) {
   } else if (item.body && item.body !== item.status) {
     lines.push(item.body);
   }
+  if (display && display.parameter_summary) {
+    lines.push(display.parameter_summary);
+  }
   if (display && display.result_summary) {
     lines.push(display.result_summary);
   }
@@ -406,7 +427,7 @@ function toolSummaryBody(item) {
     lines.push(`- ${display.diff.before}`);
     lines.push(`+ ${display.diff.after}`);
   }
-  if (display && Array.isArray(display.fields) && display.fields.length > 0) {
+  if (!display?.parameter_summary && display && Array.isArray(display.fields) && display.fields.length > 0) {
     const compactFields = display.fields
       .slice(0, 4)
       .map((field) => `${field.label}: ${field.value}`)

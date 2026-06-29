@@ -632,6 +632,21 @@ body.theme-dark .failure-block {
   color: #4c3b20;
 }
 
+.tool-primary-line {
+  font-weight: 750;
+}
+
+.tool-secondary-line {
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+body.theme-dark .tool-secondary-line {
+  color: rgba(231, 239, 234, 0.62);
+}
+
 body.theme-dark .text-kind {
   color: #e7efea;
 }

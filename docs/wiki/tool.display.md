@@ -17,7 +17,7 @@ Generated from `docs/mainline-calls/tool.display.json`. Do not edit by hand.
 
 ## Response Mainline
 
-- read-file tools project target path plus read status without exposing file contents in the main card
+- read-file tools project target path and parameter_summary plus read status without exposing file contents in the main card
 - file-mutation tools project target path plus mutation kind and compact diff-oriented semantic payload when available
 - search/list tools project pattern or path target plus match/list status without dumping full output into the main card
 - plan tools project compact plan status and counts
@@ -63,4 +63,4 @@ Generated from `docs/mainline-calls/tool.display.json`. Do not edit by hand.
 
 - implementation is bound in crates/freehand-blocks/src/tool_display.rs
 - ui.protocol consumes project_tool_call_display and project_tool_result_display when projecting UiToolActivity.display
-- WebUI consumes protocol display projection and does not classify tools locally
+- WebUI consumes protocol display projection including parameter_summary and does not classify tools locally

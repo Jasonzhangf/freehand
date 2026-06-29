@@ -22,11 +22,12 @@
 - Parser input is shared tool contracts: tool name, arguments, status, and result text.
 - Tool display classification is not owned by WebUI, Android, CLI, runtime, provider, or reason orchestration.
 - Each display class has one independent parser function.
-- Parser output is structured semantic display projection, not raw term text.
+- Parser output is structured semantic display projection, including `parameter_summary`, not raw term text.
 
 ## Response Mainline
 
 - read-file tools project target path plus read status without exposing file contents in the main card.
+- read-file tools must expose the requested file path in `parameter_summary` so UI can show the target without parsing raw arguments.
 - file-mutation tools project target path plus mutation kind and, when available from arguments, a compact diff-oriented semantic payload.
 - search/list tools project pattern or path target plus match/list status without dumping full output into the main card.
 - plan tools project compact plan status and counts.
@@ -73,5 +74,5 @@
 
 - implementation is bound in `crates/freehand-blocks/src/tool_display.rs`
 - `ui.protocol` consumes `project_tool_call_display` and `project_tool_result_display` when projecting `UiToolActivity.display`
-- WebUI consumes the protocol `display` projection and does not classify tools locally
+- WebUI consumes the protocol `display` projection, including `parameter_summary`, and does not classify tools locally
 - generated wiki must be regenerated from `docs/mainline-calls/tool.display.json` when this function-map truth changes

@@ -3,8 +3,8 @@
 - Current verified tool display semantic slice:
   - `tool.display` owner is `crates/freehand-blocks/src/tool_display.rs`
   - classification/parsing functions are independent: read/list, file mutation, search, plan, shell, generic
-  - `UiToolActivity.display` carries structured action/target/summary/result/diff fields through ADP/session projection
-  - WebUI consumes `display` and does not classify tools from raw argument/result text
+  - `UiToolActivity.display` carries structured action/target/parameter_summary/summary/result/diff fields through ADP/session projection
+  - WebUI consumes `display`, renders parameters/results as secondary lines, and does not classify tools from raw argument/result text
   - verification:
     - `cargo fmt --check`
     - `node --check apps/freehand-server/assets/webui.js`

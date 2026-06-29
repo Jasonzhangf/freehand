@@ -7,11 +7,11 @@
     - UI must not guess categories; UI only consumes parsed projection
   - implementation:
     - added `tool.display` owner in `crates/freehand-blocks/src/tool_display.rs`
-    - added structured `ToolDisplayProjection` with kind/outcome/action/target/summary/result_summary/fields/diff
+    - added structured `ToolDisplayProjection` with kind/outcome/action/target/parameter_summary/summary/result_summary/fields/diff
     - added independent parser functions for read/list, file mutation, search, plan, shell, and generic tools
     - `ui.protocol` now attaches `UiToolActivity.display` during tool call projection and updates it on tool result projection
-    - public tool summaries now prefer structured display action/summary/result over raw detail
-    - WebUI `toolSummaryBody` consumes `display` fields and does not classify raw tool text
+    - public tool summaries now prefer structured display action/summary/parameter/result over raw detail
+    - WebUI `toolSummaryBody` consumes `display` fields and renders tool parameters/results as secondary grey lines instead of classifying raw tool text
   - verification:
     - `cargo fmt --check`
     - `node --check apps/freehand-server/assets/webui.js`

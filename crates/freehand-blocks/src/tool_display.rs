@@ -63,6 +63,7 @@ pub struct ToolDisplayProjection {
     pub outcome: ToolDisplayOutcome,
     pub action: String,
     pub target: Option<String>,
+    pub parameter_summary: Option<String>,
     pub summary: String,
     pub result_summary: Option<String>,
     pub fields: Vec<ToolDisplayField>,
@@ -138,6 +139,12 @@ pub fn parse_read_file_tool_display(
         outcome: ToolDisplayOutcome::Waiting,
         action: action.clone(),
         target: Some(target.clone()),
+        parameter_summary: parameter_summary_for(vec![
+            ("path", Some(target.clone())),
+            ("offset", string_argument(arguments, "offset")),
+            ("limit", string_argument(arguments, "limit")),
+            ("recursive", string_argument(arguments, "recursive")),
+        ]),
         summary: format!("{action}: {target}"),
         result_summary: None,
         fields: compact_fields([
@@ -188,6 +195,11 @@ pub fn parse_file_mutation_tool_display(
         outcome: ToolDisplayOutcome::Waiting,
         action: action.clone(),
         target: Some(target.clone()),
+        parameter_summary: parameter_summary_for(vec![
+            ("path", Some(target.clone())),
+            ("old_string", string_argument(arguments, "old_string")),
+            ("new_string", string_argument(arguments, "new_string")),
+        ]),
         summary: format!("{action}: {target}"),
         result_summary: None,
         fields: compact_fields([
@@ -220,6 +232,10 @@ pub fn parse_search_tool_display(
         outcome: ToolDisplayOutcome::Waiting,
         action: action.clone(),
         target: Some(target.clone()),
+        parameter_summary: parameter_summary_for(vec![
+            ("pattern", Some(target.clone())),
+            ("path", string_argument(arguments, "path")),
+        ]),
         summary: format!("{action}: {target}"),
         result_summary: None,
         fields: compact_fields([
@@ -254,6 +270,10 @@ pub fn parse_plan_tool_display(
         outcome: ToolDisplayOutcome::Waiting,
         action: action.clone(),
         target: Some(target_text.clone()),
+        parameter_summary: parameter_summary_for(vec![
+            ("target", target.clone()),
+            ("items", count.map(|count| count.to_string())),
+        ]),
         summary: format!("{action}: {target_text}"),
         result_summary: None,
         fields: compact_fields([
@@ -281,6 +301,10 @@ pub fn parse_shell_tool_display(arguments: &[ToolArgument]) -> ToolDisplayProjec
         outcome: ToolDisplayOutcome::Waiting,
         action: action.clone(),
         target: Some(command.clone()),
+        parameter_summary: parameter_summary_for(vec![
+            ("command", Some(command.clone())),
+            ("timeout", string_argument(arguments, "timeout_seconds")),
+        ]),
         summary: format!("{action}: {command}"),
         result_summary: None,
         fields: compact_fields([
@@ -309,6 +333,7 @@ pub fn parse_generic_tool_display(
         outcome: ToolDisplayOutcome::Waiting,
         action: "Run tool".to_owned(),
         target: Some(tool_name.to_owned()),
+        parameter_summary: fields_to_parameter_summary(&fields),
         summary: format!("Run tool: {tool_name}"),
         result_summary: None,
         fields,
@@ -389,6 +414,30 @@ fn compact_value(value: &Value) -> String {
     }
 }
 
+fn parameter_summary_for(items: Vec<(&str, Option<String>)>) -> Option<String> {
+    let parts = items
+        .into_iter()
+        .filter_map(|(label, value)| value.map(|value| format!("{label}={value}")))
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}
+
+fn fields_to_parameter_summary(fields: &[ToolDisplayField]) -> Option<String> {
+    let parts = fields
+        .iter()
+        .map(|field| format!("{}={}", field.label, field.value))
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}
+
 fn field(label: &str, value: &str) -> Option<ToolDisplayField> {
     Some(ToolDisplayField {
         label: label.to_owned(),
@@ -430,6 +479,10 @@ mod tests {
         assert_eq!(display.kind, ToolDisplayKind::ReadFile);
         assert_eq!(display.action, "Read file");
         assert_eq!(display.target.as_deref(), Some("src/lib.rs"));
+        assert_eq!(
+            display.parameter_summary.as_deref(),
+            Some("path=src/lib.rs · limit=20")
+        );
         assert!(display.diff.is_none());
     }
 
@@ -460,6 +513,10 @@ mod tests {
 
         assert_eq!(display.kind, ToolDisplayKind::Search);
         assert_eq!(display.target.as_deref(), Some("needle"));
+        assert_eq!(
+            display.parameter_summary.as_deref(),
+            Some("pattern=needle · path=src")
+        );
         assert!(display.fields.iter().any(|field| field.label == "path"));
     }
 

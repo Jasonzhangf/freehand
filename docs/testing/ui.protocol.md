@@ -59,7 +59,7 @@
   - CLI hides slave card while WebUI may render it
   - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries plus user input
   - tool activity projection smoke covers waiting-before-result, completed-after-result, failed-result detail rendering, and failed-terminal-without-result without rendering verbose tool terms into the public summary
-  - public tool summary smoke covers `display.kind`, semantic action title, target summary, result summary, and no UI-local category guessing
+- public tool summary smoke covers `display.kind`, semantic action title, parameter summary, target summary, result summary, and no UI-local category guessing
   - duplicate tool-call projection smoke covers one public card per `tool_call_id`
   - cancelled/failed terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early

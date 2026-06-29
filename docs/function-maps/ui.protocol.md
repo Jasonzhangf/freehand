@@ -62,7 +62,7 @@
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation session selection stays explicit: submit can target a selected session id, and session-level transcript queries stay separate from the global latest turn
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed tool summaries include the protocol-projected tool result detail
-- public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/result without parsing raw tool terms
+- public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/parameters/result without parsing raw tool terms
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
 - `bridge.html` in the Android APK renders the same public conversation projection as WebUI, so the live shell and browser shell share one projection truth
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
@@ -179,7 +179,7 @@
 - UI ingress versus truth-writer separation is now locked in the function map
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in `UiProtocolState`
 - tool activity status and result detail are now preserved in `UiTurnProjection.tool_activities` and public conversation status mapping, including failed tool-result projection and failed terminal projection for still-waiting tool calls
-- tool activities now carry structured `display` projection from `tool.display`; public tool cards expose semantic action/target/result summaries instead of making UI infer categories from raw tool detail
+- tool activities now carry structured `display` projection from `tool.display`; public tool cards expose semantic action/target/parameter/result summaries instead of making UI infer categories from raw tool detail
 - public tool summaries now preserve `tool_call_id`, expose tool result detail, and duplicate tool-call projections upsert into one activity before public rendering
 - ADP request/response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

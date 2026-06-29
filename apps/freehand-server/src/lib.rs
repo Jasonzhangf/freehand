@@ -1092,6 +1092,8 @@ mod tests {
         assert!(js_body.contains("stripFreehandCompletionBlock"));
         assert!(js_body.contains("<freehand_completion>"));
         assert!(js_body.contains("toolSummaryBody"));
+        assert!(js_body.contains("renderToolBody"));
+        assert!(js_body.contains("display.parameter_summary"));
         assert!(js_body.contains("pendingSubmitBody"));
         assert!(js_body.contains("elapsedSince"));
         assert!(js_body.contains("submitStartedAt"));

@@ -142,7 +142,7 @@
 - WebUI submit/dispatch and tool-wait lifecycle states now both refresh once per second so users can see where the turn is blocked and how long it has waited
 - WebUI model-request waiting state now comes from `UiTurnProjection.model_request` and refreshes once per second with elapsed wait time
 - WebUI completed/failed tool cards now show protocol-projected result detail, and tool-complete-to-next-model waiting renders as its own timed lifecycle card
-- WebUI tool cards now render `display.action`, `display.summary`, `display.result_summary`, `display.fields`, and `display.diff`; category parsing stays in `tool.display`, not in JavaScript
+- WebUI tool cards now render `display.action`, `display.summary`, `display.parameter_summary`, `display.result_summary`, `display.fields`, and `display.diff`; category parsing stays in `tool.display`, not in JavaScript
 - WebUI selected-session transcript display now groups same execution-cycle round ids such as `runtime-turn-47` and `runtime-turn-47-r2` into one visible logical turn while preserving ADP/session truth as separate persisted turns
 - WebUI assistant cards now collapse to one visible card per logical turn and strip raw `<freehand_completion>` blocks; final user-facing completion content remains in the Final card
 - WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending
