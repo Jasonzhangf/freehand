@@ -36,7 +36,7 @@
     "transport adapters may drain debug receivers and query protocol snapshots, but projection ownership stays in `freehand-ui-protocol`",
     "turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states",
     "public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed",
-    "public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and public tool bodies are status-only by default",
+    "public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed public tool bodies expose protocol-projected tool result detail",
     "cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn"
   ],
   "error_mainline": [
@@ -403,8 +403,8 @@
     "minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in UiProtocolState",
     "public turn projection is protocol-owned",
     "terminal status is now preserved in UiTurnProjection and public conversation status mapping",
-    "tool activity status is now preserved in UiTurnProjection.tool_activities and public conversation status mapping",
-    "public tool summaries preserve tool_call_id, duplicate same-id tool calls upsert into one public card, and the default public tool body stays status-only",
+    "tool activity status and result detail are now preserved in UiTurnProjection.tool_activities and public conversation status mapping",
+    "public tool summaries preserve tool_call_id, duplicate same-id tool calls upsert into one public card, and completed/failed public tool bodies expose tool result detail",
     "CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn",
     "ADP request and response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients"
   ]

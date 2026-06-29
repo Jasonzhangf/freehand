@@ -54,7 +54,7 @@
   - checkpoint summary query smoke
   - CLI hides slave card while WebUI may render it
   - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries plus user input
-  - tool activity projection smoke covers waiting-before-result, completed-after-result, and failed-terminal-without-result, without rendering tool result bodies or detailed tool terms into the public summary
+  - tool activity projection smoke covers waiting-before-result, completed-after-result, failed-result detail rendering, and failed-terminal-without-result without rendering verbose tool terms into the public summary
   - duplicate tool-call projection smoke covers one public card per `tool_call_id`
   - cancelled/failed terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
@@ -92,5 +92,5 @@
   - public turn projection is protocol-owned
   - terminal status is now preserved in `UiTurnProjection` and public conversation status mapping
   - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries, including failed status for still-waiting tools when terminal truth is failed
-  - tool summaries now expose `tool_call_id`, duplicate same-id tool calls are regression-locked to one public card, and public tool bodies are status-only by default
+  - tool summaries now expose `tool_call_id`, duplicate same-id tool calls are regression-locked to one public card, and completed/failed public tool bodies include tool result detail
   - ADP request/response frames are landed and regression-locked by JSON roundtrip coverage

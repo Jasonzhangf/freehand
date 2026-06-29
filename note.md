@@ -1,5 +1,23 @@
 # note.md
 
+# 2026-06-29 WebUI tool-result and model-wait progress repair
+  - gap found:
+    - `ui.protocol` intentionally kept public tool summary body status-only, so WebUI could not show tool execution output
+    - WebUI only timed submit/dispatch and tool execution waiting; after tool completion while waiting for model continuation, there was no dedicated timed lifecycle card
+  - fix:
+    - `UiToolActivity.detail` now carries completed/failed tool result detail from `ToolResultContract.output`
+    - public tool summaries expose the protocol-projected result detail
+    - WebUI tool cards render result detail together with status and elapsed execution time
+    - WebUI renders a timed animated "waiting for model" card after completed/failed tool activity until terminal/update arrives
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-ui-protocol -- --nocapture`
+    - `cargo test -p freehand-server`
+    - `cargo test -p freehand-runtime -- --nocapture`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+
 # 2026-06-29 WebUI lifecycle progress timing repair
   - gap found: tool waiting had animation/timer, but submit/dispatch waiting before first turn projection only had static pending/status text
   - fix:

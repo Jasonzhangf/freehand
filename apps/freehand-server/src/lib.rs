@@ -1095,8 +1095,13 @@ mod tests {
         assert!(js_body.contains("pendingSubmitBody"));
         assert!(js_body.contains("elapsedSince"));
         assert!(js_body.contains("submitStartedAt"));
+        assert!(js_body.contains("modelWaitStartedAt"));
+        assert!(js_body.contains("turnIsWaitingForModel"));
+        assert!(js_body.contains("modelWaitBody"));
         assert!(js_body.contains("hasPendingSubmit"));
+        assert!(js_body.contains("hasModelWait"));
         assert!(js_body.contains("waitingToolStatus"));
+        assert!(js_body.contains("tool.detail || status"));
         assert!(js_body.contains("formatDuration"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("tool_call_id"));
@@ -1439,7 +1444,7 @@ mod tests {
                     tool_result: ToolResultContract {
                         tool_call_id: ToolCallId::new("tool-sse-1"),
                         status: freehand_contracts::ToolResultStatus::Success,
-                        output: "private result body".to_owned(),
+                        output: "visible result body".to_owned(),
                     },
                 },
                 false,
@@ -1448,8 +1453,7 @@ mod tests {
         let completed_body = read_next_sse_event(&mut turn_sse, &mut turn_buffer).await;
         assert!(completed_body.contains("\"status\":\"completed\""));
         assert!(completed_body.contains("\"title\":\"read_file\""));
-        assert!(completed_body.contains("\"body\":\"completed\""));
-        assert!(!completed_body.contains("private result body"));
+        assert!(completed_body.contains("\"body\":\"result: visible result body\""));
 
         drop(turn_sse);
         server.stop().await;

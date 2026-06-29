@@ -7,7 +7,7 @@ use freehand_blocks::strip_completion_submission_block;
 use freehand_contracts::{
     AgentId, ErrorErr01RuntimeClassified, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
     ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent,
-    SemanticEventKind, SessionId, TerminalStatus, ToolResultStatus, TurnId,
+    SemanticEventKind, SessionId, TerminalStatus, ToolResultContract, ToolResultStatus, TurnId,
 };
 pub use freehand_debug::{
     DebugEvent, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot, DebugTraceEnvelope,
@@ -564,7 +564,7 @@ impl UiProtocolState {
                 tool_call_id,
                 tool_name,
                 tool_activity_status_from_result(event.tool_result.status),
-                Some(tool_activity_detail_from_result(event.tool_result.status)),
+                Some(tool_activity_detail_from_result(&event.tool_result)),
             );
             projection.clone()
         };
@@ -918,11 +918,14 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
         }
     }
     for activity in &projection.tool_activities {
-        let body = match activity.status {
-            UiToolActivityStatus::Waiting => "waiting".to_owned(),
-            UiToolActivityStatus::Completed => "completed".to_owned(),
-            UiToolActivityStatus::Failed => "failed".to_owned(),
-        };
+        let body = activity
+            .detail
+            .clone()
+            .unwrap_or_else(|| match activity.status {
+                UiToolActivityStatus::Waiting => "waiting".to_owned(),
+                UiToolActivityStatus::Completed => "completed".to_owned(),
+                UiToolActivityStatus::Failed => "failed".to_owned(),
+            });
         items.push(UiConversationItem {
             kind: UiConversationItemKind::ToolSummary,
             title: activity.tool_name.clone(),
@@ -1140,7 +1143,7 @@ fn tool_activities_from_input(
             tool_call_id,
             tool_name,
             tool_activity_status_from_result(result.tool_result.status),
-            Some(tool_activity_detail_from_result(result.tool_result.status)),
+            Some(tool_activity_detail_from_result(&result.tool_result)),
         );
     }
     activities
@@ -1186,11 +1189,18 @@ fn tool_activity_status_from_result(status: ToolResultStatus) -> UiToolActivityS
     }
 }
 
-fn tool_activity_detail_from_result(status: ToolResultStatus) -> String {
-    match status {
-        ToolResultStatus::Success => "tool result returned".to_owned(),
-        ToolResultStatus::Failed => "tool execution returned failure result".to_owned(),
+fn tool_activity_detail_from_result(result: &ToolResultContract) -> String {
+    let prefix = match result.status {
+        ToolResultStatus::Success => "result",
+        ToolResultStatus::Failed => "failure",
+    };
+    if result.output.trim().is_empty() {
+        return match result.status {
+            ToolResultStatus::Success => "result: <empty>".to_owned(),
+            ToolResultStatus::Failed => "failure: <empty>".to_owned(),
+        };
     }
+    format!("{prefix}: {}", result.output)
 }
 
 fn fail_waiting_tool_activities(activities: &mut [UiToolActivity], detail: Option<String>) {
@@ -1504,7 +1514,7 @@ mod tests {
             .expect("tool item");
         assert_eq!(tool.status, "waiting");
         assert_eq!(tool.title, "search");
-        assert_eq!(tool.body, "waiting");
+        assert_eq!(tool.body, "waiting for tool execution");
 
         let completed = turn_projection_from_events(TurnProjectionInput {
             source_agent_id: AgentId::new("agent-1"),
@@ -1535,7 +1545,7 @@ mod tests {
                 tool_result: freehand_contracts::ToolResultContract {
                     tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
                     status: freehand_contracts::ToolResultStatus::Success,
-                    output: "result body is not rendered in public summary".to_owned(),
+                    output: "result body rendered in public summary".to_owned(),
                 },
             }],
             usage_events: Vec::new(),
@@ -1549,7 +1559,10 @@ mod tests {
             .expect("completed tool item");
         assert_eq!(completed_tool.status, "completed");
         assert_eq!(completed_tool.title, "search");
-        assert_eq!(completed_tool.body, "completed");
+        assert_eq!(
+            completed_tool.body,
+            "result: result body rendered in public summary"
+        );
     }
 
     #[test]
@@ -1583,7 +1596,7 @@ mod tests {
                 tool_result: freehand_contracts::ToolResultContract {
                     tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
                     status: freehand_contracts::ToolResultStatus::Failed,
-                    output: "private failure body is model-visible only".to_owned(),
+                    output: "failure body rendered in public summary".to_owned(),
                 },
             }],
             usage_events: Vec::new(),
@@ -1607,7 +1620,10 @@ mod tests {
         assert_eq!(tool_cards.len(), 1);
         assert_eq!(tool_cards[0].status, "failed");
         assert_eq!(tool_cards[0].title, "read_file");
-        assert_eq!(tool_cards[0].body, "failed");
+        assert_eq!(
+            tool_cards[0].body,
+            "failure: failure body rendered in public summary"
+        );
         assert!(
             cards
                 .iter()
@@ -1662,8 +1678,7 @@ mod tests {
             .expect("tool item");
         assert_eq!(tool.status, "failed");
         assert_eq!(tool.title, "ls");
-        assert_eq!(tool.body, "failed");
-        assert!(!tool.body.contains("tool failed explicitly"));
+        assert_eq!(tool.body, "tool failed explicitly");
     }
 
     #[test]

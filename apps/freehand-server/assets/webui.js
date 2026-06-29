@@ -36,6 +36,7 @@ const state = {
   debug: null,
   checkpoints: [],
   toolTimings: new Map(),
+  modelWaitStartedAt: null,
   activeTurnId: null,
   pendingUserInput: null,
   submitStartedAt: null,
@@ -367,7 +368,11 @@ function toolSummaryBody(item) {
   const endAt = timing && timing.finishedAt ? timing.finishedAt : Date.now();
   const elapsed = timing ? formatDuration(endAt - timing.startedAt) : "";
   const statusLabel = toolStatusLabel(item.status);
-  return elapsed ? `${statusLabel} · ${elapsed}` : statusLabel;
+  const lines = [elapsed ? `${statusLabel} · ${elapsed}` : statusLabel];
+  if (item.body && item.body !== item.status) {
+    lines.push(item.body);
+  }
+  return lines.join("\n");
 }
 
 function waitingToolStatus(tools) {
@@ -381,6 +386,37 @@ function waitingToolStatus(tools) {
   const longestElapsed = elapsedValues.length > 0 ? Math.max(...elapsedValues) : null;
   const elapsed = longestElapsed === null ? "" : formatDuration(longestElapsed);
   return elapsed ? `tool executing: ${names} · ${elapsed}` : `tool executing: ${names}`;
+}
+
+function turnIsWaitingForModel(turn) {
+  if (!turn || turn.terminal_text) {
+    return false;
+  }
+  const tools = turn.tool_activities || [];
+  const hasFinishedTool = tools.some((tool) => {
+    const status = `${tool.status || ""}`.toLowerCase();
+    return status === "completed" || status === "failed";
+  });
+  const hasWaitingTool = tools.some((tool) => {
+    const status = `${tool.status || ""}`.toLowerCase();
+    return status === "waiting";
+  });
+  return hasFinishedTool && !hasWaitingTool;
+}
+
+function syncModelWaitTiming(turn) {
+  if (!turnIsWaitingForModel(turn)) {
+    state.modelWaitStartedAt = null;
+    return;
+  }
+  if (!state.modelWaitStartedAt) {
+    state.modelWaitStartedAt = Date.now();
+  }
+}
+
+function modelWaitBody() {
+  const elapsed = elapsedSince(state.modelWaitStartedAt);
+  return elapsed ? `工具结果已返回，等待模型继续推理 ${elapsed}` : "工具结果已返回，等待模型继续推理";
 }
 
 function variantPayload(value, variant) {
@@ -423,7 +459,7 @@ function derivePublicConversation(turn) {
     items.push({
       kind: "ToolSummary",
       title: tool.tool_name || "Tool",
-      body: status,
+      body: tool.detail || status,
       status,
       tool_call_id: tool.tool_call_id,
     });
@@ -549,6 +585,7 @@ function startNewSession() {
   state.turn = null;
   state.publicConversation = [];
   state.pendingUserInput = null;
+  state.modelWaitStartedAt = null;
   state.submitStartedAt = null;
   state.submitInFlight = false;
   setSelectedSessionId(sessionId);
@@ -646,6 +683,7 @@ function setTurnProjection(turn, options = {}) {
   }
   state.publicConversation = derivePublicConversation(state.turn);
   syncToolTimings(state.publicConversation);
+  syncModelWaitTiming(state.turn);
   if (state.turn && state.pendingUserInput) {
     state.pendingUserInput = null;
   }
@@ -736,6 +774,11 @@ function liveTurnStatus() {
   );
   if (waitingTools.length > 0) {
     return waitingToolStatus(waitingTools);
+  }
+
+  if (turnIsWaitingForModel(state.turn)) {
+    const elapsed = elapsedSince(state.modelWaitStartedAt);
+    return elapsed ? `waiting for model... ${elapsed}` : "waiting for model...";
   }
 
   if (state.submitInFlight) {
@@ -829,6 +872,17 @@ function renderMessages() {
       const body = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
       fragments.push(card(item.title, { className: statusClass, label: item.status }, item.title, body, variant, identity));
       });
+      if (turnIsWaitingForModel(turn)) {
+        fragments.push(
+          card(
+            "Assistant",
+            { className: "running", label: "thinking" },
+            "等待模型继续",
+            modelWaitBody(),
+            "assistant",
+          ),
+        );
+      }
     });
   }
 
@@ -1007,6 +1061,8 @@ function renderTurnMeta() {
     ? "completed"
     : runningTools.length > 0
       ? waitingToolStatus(runningTools).replace("tool executing", "tool running")
+      : turnIsWaitingForModel(state.turn)
+        ? liveTurnStatus()
       : state.submitInFlight
         ? liveTurnStatus()
         : "streaming";
@@ -1030,7 +1086,8 @@ setInterval(() => {
   const hasWaitingTool = (state.publicConversation || []).some(
     (item) => item.kind === "ToolSummary" && item.status === "waiting",
   );
-  if (hasPendingSubmit || hasWaitingTool) {
+  const hasModelWait = turnIsWaitingForModel(state.turn);
+  if (hasPendingSubmit || hasWaitingTool || hasModelWait) {
     renderMessages();
     renderTurnMeta();
     renderCommandStatus();
@@ -1159,6 +1216,7 @@ async function cancelActiveTurn() {
   if (!turnId && !state.submitInFlight && !state.pendingUserInput) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.modelWaitStartedAt = null;
     state.submitStartedAt = null;
     setCommandStatus("no active turn; input cleared", { stickyMs: 3000 });
     renderMessages();
@@ -1176,6 +1234,7 @@ async function cancelActiveTurn() {
     return;
   }
   state.pendingUserInput = null;
+  state.modelWaitStartedAt = null;
   state.submitStartedAt = null;
   state.submitInFlight = false;
   composerInput.value = "";
@@ -1203,6 +1262,7 @@ async function runSlashCommand(rawText) {
   if (command.startsWith("/")) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.modelWaitStartedAt = null;
     state.submitStartedAt = null;
   }
   switch (command) {
@@ -1235,6 +1295,7 @@ async function runSlashCommand(rawText) {
     case "/clear":
       composerInput.value = "";
       state.pendingUserInput = null;
+      state.modelWaitStartedAt = null;
       state.submitStartedAt = null;
       state.submitInFlight = false;
       setCommandStatus("local composer cleared", { stickyMs: 3000 });
