@@ -1,20 +1,23 @@
 # note.md
 
-# 2026-06-28 Minimax config and WebUI alignment goal
+# 2026-06-28 Minimonth config and WebUI alignment goal
   - config check:
-    - requested source config `/Volumes/extension/.rcc/provider/minimax/config.v2.toml` contains provider id `minimax`, type `anthropic`, base URL `https://api.minimaxi.com/anthropic`, default model `MiniMax-M3`, and a present API key
-    - current runtime config `~/.freehand/config.toml` still uses provider id `minimonth`, base URL `https://api.53hk.cn`, default model `MiniMax-M2.7`, and a different API key; active `master` and `worker` agents both point to `minimonth`
+    - requested source config `/Volumes/extension/.rcc/provider/minimonth/config.v2.toml` contains provider id `minimonth`, type `anthropic`, base URL `https://api.53hk.cn`, default model `MiniMax-M2.7`, and a present API key
+    - current runtime config `~/.freehand/config.toml` uses provider id `minimonth`, base URL `https://api.53hk.cn`, default model `MiniMax-M2.7`, and the active `master` and `worker` agents both point to `minimonth`
     - Freehand config schema requires explicit `protocol`; RCC `transportBackend` is not a Freehand runtime config field
   - goal doc:
     - added `docs/goals/webui-session-transcript-alignment-plan.md`
     - goal locks WebUI rendering to persisted session truth plus latest ADP overlay, Codex-style low-noise conversation/tool display, and Reasonix-style session restore/history rebuild
   - 2026-06-28 progress:
-    - `~/.freehand/config.toml` updated to runtime provider `minimax` with base URL `https://api.minimaxi.com/anthropic` and model `MiniMax-M3`; secret copied from RCC source without printing it
-    - `freehand-cli --agent master` verified active provider `minimax`, protocol `messages`, model `MiniMax-M3`, and Minimax base URL
+    - `~/.freehand/config.toml` updated to runtime provider `minimonth` with base URL `https://api.53hk.cn` and model `MiniMax-M2.7`; secret copied from RCC source without printing it
+    - `freehand-cli --agent master` verified active provider `minimonth`, protocol `messages`, model `MiniMax-M2.7`, and Minimonth base URL
     - fixed session transcript ordering in `ui.protocol` and WebUI local overlay path so numeric turn ids such as `runtime-turn-10` do not sort before `runtime-turn-2`
     - added `freehand-cli adp-session-query --url ... [--session <id>]` for no-UI session list/transcript validation over ADP
     - WebUI input layer now has shortcut and slash-command affordances routed through existing ADP/query/cancel/sample helpers: `/help`, `/sessions`, `/reload`, `/success`, `/failure`, `/cancel`, `/clear`; shortcuts include Cmd/Ctrl+Enter, Esc, Cmd/Ctrl+R, Cmd/Ctrl+K, Cmd/Ctrl+1, Cmd/Ctrl+2
     - targeted verification passed: `node --check apps/freehand-server/assets/webui.js`, `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-cli`, `cargo test -p freehand-server`, `cargo test -p freehand-runtime`
+  - 2026-06-29 final smoke:
+    - `curl -4fsS http://127.0.0.1:4041/health` returned `ok`
+    - `FREEHAND_PAIR_TOKEN_SHARED=test-pair-token ~/.local/bin/freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample success` returned `adp_turn_sample_ok` with `turn=runtime-turn-41` and `rounds=1`
 
 # 2026-06-28 WebUI conversation/session product repair
   - user correction:
@@ -478,4 +481,6 @@ Current real root cause split:
   - Sequential success sample passed: `runtime-turn-38`, `rounds=1`, `tool_executions=0`.
   - Sequential failure sample passed: `runtime-turn-39-r2`, `rounds=2`, `tool_executions=1`.
   - `adp-session-query --session runtime-session-master` returned 36 ordered turns through `runtime-turn-39-r2`.
-  - Latest projection for `runtime-turn-39-r2` has `terminal_status=Success` and one `read_file` tool activity with `status=Failed`.
+- Latest projection for `runtime-turn-39-r2` has `terminal_status=Success` and one `read_file` tool activity with `status=Failed`.
+
+2026-06-29: Current `/new` session issue is a render-state bug, not an ADP transport bug. The draft session can be created, but empty `QuerySessionTurns` results must not clear `draftSessionId`, and the main transcript should prefer the selected session over the global latest turn. Also avoid timestamp-only draft IDs because repeated `/new` can collide inside the same second.

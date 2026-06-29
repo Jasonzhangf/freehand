@@ -5,6 +5,7 @@
 - lifecycle path under test:
   - runtime asks the tool owner for writable preview before execution
   - preview reuses writable tool validation and transform semantics without writing
+  - preview and execute resolve the same canonical workspace root from daemon/runtime workspace env before falling back to cwd
   - preview produces canonical create / modify / delete truth on locked paths
   - preview post-image equals execute post-image
   - writable live execution is blocked when preview is unavailable
@@ -13,6 +14,7 @@
   - edit-file preview exact-match parity tests
   - multi-edit preview ordered-transform parity tests
   - preview path-lock and parent-directory parity tests
+  - configured workspace root canonicalization tests
   - preview invalid-argument rejection parity tests
 - module black-box plan:
   - runtime can request preview from the tool owner for writable tools
@@ -27,6 +29,7 @@
   - (none closed)
 - sync status between design and implementation:
   - code-bound preview implementation is landed for `write_file`, `edit_file`, `multi_edit`, and `delete_range`
+  - configured daemon workspace root resolution is landed and regression-locked
   - owner tests now lock preview/execute parity for all four writable file-mutation tools
   - runtime tests now prove live writable execution consumes preview before checkpointed execute
   - migrated mainline-call source and generated wiki must stay in sync with this test design

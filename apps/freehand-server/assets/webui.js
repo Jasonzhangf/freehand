@@ -5,6 +5,7 @@ initializeThemeToggle(document);
 const shell = document.querySelector("[data-webui-shell]");
 const messageList = document.getElementById("message-list");
 const sessionList = document.getElementById("session-list");
+const newSessionButton = document.getElementById("new-session-button");
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
@@ -20,12 +21,16 @@ const samplePrompts = {
 
 const selectedSessionStorageKey = "freehand-webui-selected-session";
 const shortcutHelp =
-  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /sessions /reload /success /failure /cancel /clear";
+  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /new /sessions /reload /success /failure /cancel /clear";
+const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
 
 const state = {
   turn: null,
   sessions: [],
-  selectedSessionId: window.localStorage.getItem(selectedSessionStorageKey) || null,
+  selectedSessionId: initialSelectedSessionId,
+  draftSessionId: initialSelectedSessionId && initialSelectedSessionId.startsWith("webui-session-")
+    ? initialSelectedSessionId
+    : null,
   sessionTurns: [],
   publicConversation: [],
   debug: null,
@@ -435,10 +440,30 @@ function setSelectedSessionId(sessionId) {
   }
 }
 
+function newDraftSessionId() {
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  return `webui-session-${stamp}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function startNewSession() {
+  const sessionId = newDraftSessionId();
+  state.draftSessionId = sessionId;
+  state.sessionTurns = [];
+  state.turn = null;
+  state.publicConversation = [];
+  state.pendingUserInput = null;
+  setSelectedSessionId(sessionId);
+  composerInput.value = "";
+  composerInput.focus();
+  setCommandStatus(`new session ready: ${sessionId}`, { stickyMs: 6000 });
+  renderAll();
+}
+
 function setSessionList(projection) {
   state.sessions = (projection && projection.sessions) || [];
   if (
     state.selectedSessionId &&
+    !isDraftSessionId(state.selectedSessionId) &&
     !state.sessions.some((session) => session.session_id === state.selectedSessionId)
   ) {
     setSelectedSessionId(null);
@@ -451,8 +476,11 @@ function setSessionList(projection) {
 
 function setSessionTranscript(projection) {
   state.sessionTurns = (projection && projection.turns) || [];
-  if (projection && projection.session_id) {
+  if (projection && projection.session_id && state.sessionTurns.length > 0) {
     setSelectedSessionId(projection.session_id);
+    if (state.draftSessionId === projection.session_id) {
+      state.draftSessionId = null;
+    }
   }
   const latestTurn = state.sessionTurns[state.sessionTurns.length - 1] || null;
   setTurnProjection(latestTurn, { preserveSessionTurns: true });
@@ -527,6 +555,10 @@ function setTurnProjection(turn, options = {}) {
 function applyAdpQueryResult(result) {
   const turn = variantPayload(result, "Turn");
   if (turn !== undefined) {
+    if (state.selectedSessionId && turn.session_id !== state.selectedSessionId) {
+      renderAll();
+      return;
+    }
     setTurnProjection(turn);
     renderAll();
     if (state.turn) {
@@ -568,6 +600,10 @@ function applyAdpSubscriptionEvent(event) {
   const projection = event.projection || {};
   const turn = variantPayload(projection, "Turn");
   if (turn !== undefined) {
+    if (state.selectedSessionId && turn.session_id !== state.selectedSessionId) {
+      renderCommandStatus();
+      return;
+    }
     setTurnProjection(turn);
     setBackgroundCommandStatus("ADP turn update received");
     renderAll();
@@ -622,6 +658,7 @@ function renderCommandStatus() {
 function renderMessages() {
   messageList.replaceChildren();
   const fragments = [];
+  const hasSelectedSessionTranscript = state.sessionTurns.length > 0;
 
   if (state.pendingUserInput) {
     fragments.push(
@@ -635,7 +672,17 @@ function renderMessages() {
     );
   }
 
-  if (state.sessionTurns.length === 0 && !state.turn) {
+  if (state.selectedSessionId && !hasSelectedSessionTranscript) {
+    fragments.push(
+      card(
+        "Session",
+        { className: "pending", label: "selected" },
+        "等待会话内容",
+        `selected session: ${state.selectedSessionId} · no turns yet`,
+        "assistant",
+      ),
+    );
+  } else if (state.sessionTurns.length === 0 && !state.turn) {
     fragments.push(
       card(
         "Assistant",
@@ -646,7 +693,7 @@ function renderMessages() {
       ),
     );
   } else {
-    const turns = state.sessionTurns.length > 0 ? state.sessionTurns : [state.turn];
+    const turns = state.sessionTurns.length > 0 ? state.sessionTurns : state.selectedSessionId ? [] : [state.turn];
     turns.filter(Boolean).forEach((turn) => {
       conversationItemsForTurn(turn).forEach((item) => {
       const variant =
@@ -699,6 +746,37 @@ function renderMessages() {
   }
 
   fragments.forEach((fragment) => messageList.appendChild(fragment));
+  scrollMessagesToBottom();
+}
+
+function scrollMessagesToBottom() {
+  window.requestAnimationFrame(() => {
+    messageList.scrollTop = messageList.scrollHeight;
+    messageList.lastElementChild?.scrollIntoView({ block: "end" });
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
+  });
+}
+
+function isDraftSessionId(sessionId) {
+  return !!sessionId && sessionId.startsWith("webui-session-");
+}
+
+function appendSessionParts(item, label, title, meta) {
+  const labelNode = document.createElement("div");
+  labelNode.className = "meta-label session-state";
+  labelNode.textContent = label;
+
+  const titleNode = document.createElement("div");
+  titleNode.className = "session-title";
+  titleNode.textContent = title;
+  titleNode.title = title;
+
+  const metaNode = document.createElement("div");
+  metaNode.className = "session-copy";
+  metaNode.textContent = meta;
+  metaNode.title = meta;
+
+  item.append(labelNode, titleNode, metaNode);
 }
 
 function renderSessions() {
@@ -709,10 +787,16 @@ function renderSessions() {
   if (state.sessions.length === 0) {
     const empty = document.createElement("section");
     empty.className = "session-item active";
-    empty.innerHTML =
-      "<div class=\"meta-label\">empty</div><div class=\"session-title\">no sessions</div><div class=\"session-copy\">waiting for first turn</div>";
+    appendSessionParts(empty, "empty", "no sessions", "waiting for first turn");
     sessionList.appendChild(empty);
+    if (state.draftSessionId && state.selectedSessionId === state.draftSessionId) {
+      renderDraftSessionItem();
+    }
     return;
+  }
+
+  if (state.draftSessionId && !state.sessions.some((session) => session.session_id === state.draftSessionId)) {
+    renderDraftSessionItem();
   }
 
   state.sessions.forEach((session) => {
@@ -721,20 +805,14 @@ function renderSessions() {
     item.type = "button";
     item.dataset.sessionId = session.session_id;
 
-    const label = document.createElement("div");
-    label.className = "meta-label";
-    label.textContent = session.active_turn_id ? "active" : session.latest_status || "session";
-
-    const title = document.createElement("div");
-    title.className = "session-title";
-    title.textContent = session.session_id;
-
-    const copy = document.createElement("div");
-    copy.className = "session-copy";
     const turnText = session.latest_turn_id ? `${session.latest_turn_id} · ${session.turn_count} turn(s)` : `${session.turn_count} turn(s)`;
-    copy.textContent = session.latest_summary ? `${turnText} · ${session.latest_summary}` : turnText;
+    appendSessionParts(
+      item,
+      session.active_turn_id ? "active" : session.latest_status || "session",
+      session.session_id,
+      turnText,
+    );
 
-    item.append(label, title, copy);
     item.addEventListener("click", () => {
       setSelectedSessionId(session.session_id);
       refreshSelectedSession().catch((error) => {
@@ -743,6 +821,21 @@ function renderSessions() {
     });
     sessionList.appendChild(item);
   });
+}
+
+function renderDraftSessionItem() {
+  const item = document.createElement("button");
+  item.className = `session-item session-button${state.draftSessionId === state.selectedSessionId ? " active" : ""}`;
+  item.type = "button";
+  item.dataset.sessionId = state.draftSessionId;
+  appendSessionParts(item, "draft", state.draftSessionId, "first send creates session");
+  item.addEventListener("click", () => {
+    setSelectedSessionId(state.draftSessionId);
+    state.sessionTurns = [];
+    setTurnProjection(null, { preserveSessionTurns: true });
+    renderAll();
+  });
+  sessionList.appendChild(item);
 }
 
 function renderDebug() {
@@ -784,7 +877,7 @@ function renderTurnMeta() {
     setText("session-copy", state.selectedSessionId ? "no turns in selected session" : "no active turn yet");
     setText("strip-session", state.selectedSessionId || "-");
     setText("strip-turn", "-");
-    setText("conversation-turn", "latest active turn");
+    setText("conversation-turn", state.selectedSessionId || "latest active turn");
     setText("turn-status", "waiting");
     setText("strip-slave", "idle");
     setText("slave-chip", "waiting");
@@ -937,7 +1030,11 @@ function ensureDebugSubscription() {
 }
 
 async function submitUserInput(text) {
-  const payload = await adpCommand({ SubmitUserInput: { text } });
+  const command = { SubmitUserInput: { text } };
+  if (state.selectedSessionId) {
+    command.SubmitUserInput.session_id = state.selectedSessionId;
+  }
+  const payload = await adpCommand(command);
   setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id}`);
   return payload;
 }
@@ -996,6 +1093,9 @@ async function runSlashCommand(rawText) {
   switch (command) {
     case "/help":
       setCommandStatus(shortcutHelp, { stickyMs: 10000 });
+      return true;
+    case "/new":
+      startNewSession();
       return true;
     case "/sessions":
       setCommandStatus("refreshing sessions...", { stickyMs: 3000 });
@@ -1085,6 +1185,7 @@ function loadSamplePrompt(kind) {
   setCommandStatus(`${kind} sample loaded; press Send to run through ADP`, { stickyMs: 5000 });
 }
 
+newSessionButton.addEventListener("click", startNewSession);
 successSampleButton.addEventListener("click", () => loadSamplePrompt("success"));
 failureSampleButton.addEventListener("click", () => loadSamplePrompt("failure"));
 

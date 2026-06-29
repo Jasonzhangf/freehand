@@ -212,8 +212,7 @@ impl RuntimeCheckpointStore {
         agent_id: &AgentId,
         session_id: &SessionId,
     ) -> Result<Self, RuntimeCheckpointError> {
-        let workspace_root = env::current_dir()
-            .map_err(|err| RuntimeCheckpointError::StoreBootstrapFailed(err.to_string()))?;
+        let workspace_root = checkpoint_workspace_root()?;
         let manifests_dir = runtime_home
             .join("state")
             .join("checkpoints")
@@ -577,6 +576,25 @@ impl RuntimeCheckpointStore {
             ),
         })
     }
+}
+
+fn checkpoint_workspace_root() -> Result<PathBuf, RuntimeCheckpointError> {
+    checkpoint_workspace_root_from_env(
+        env::var_os("FREEHAND_WORKSPACE_ROOT").or_else(|| env::var_os("FREEHAND_DAEMON_WORKDIR")),
+    )
+}
+
+fn checkpoint_workspace_root_from_env(
+    configured_root: Option<std::ffi::OsString>,
+) -> Result<PathBuf, RuntimeCheckpointError> {
+    let root = if let Some(path) = configured_root {
+        PathBuf::from(path)
+    } else {
+        env::current_dir()
+            .map_err(|err| RuntimeCheckpointError::StoreBootstrapFailed(err.to_string()))?
+    };
+    fs::canonicalize(root)
+        .map_err(|err| RuntimeCheckpointError::StoreBootstrapFailed(err.to_string()))
 }
 
 pub fn rewind_checkpoint(
@@ -1691,17 +1709,25 @@ impl RuntimeCommandDispatcher {
         state: &mut RuntimeCommandDispatcherState,
         envelope: UiCommandDispatchEnvelope,
         text: String,
+        requested_session_id: Option<SessionId>,
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
         state.next_turn_ordinal += 1;
         let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
         let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
+        let mut session_history = if &session_id == state.session_history.session_id() {
+            state.session_history.clone()
+        } else {
+            SessionHistory::new(session_id.clone(), Vec::new())
+                .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?
+        };
 
         let turn = state
             .reason_engine
             .start_turn(
-                &mut state.session_history,
+                &mut session_history,
                 TurnStartInput {
-                    session_id: state.config.session_id.clone(),
+                    session_id: session_id.clone(),
                     turn_id,
                     trace_id,
                     feature_id: FeatureId::new("reason.turn"),
@@ -1713,6 +1739,9 @@ impl RuntimeCommandDispatcher {
                 },
             )
             .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        if session_id == state.config.session_id {
+            state.session_history = session_history;
+        }
 
         let projection = project_runtime_turn_history(
             &state.config.reason_agent_id,
@@ -1737,15 +1766,17 @@ impl RuntimeCommandDispatcher {
         &self,
         state: &mut RuntimeCommandDispatcherState,
         text: String,
+        requested_session_id: Option<SessionId>,
     ) -> Option<PreparedLiveSubmit> {
         let live = state.config.live.clone()?;
+        let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
         state.next_turn_ordinal += 1;
         let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
         let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
         let cancel_token = Arc::new(AtomicBool::new(false));
         state.active_turns.push(ActiveRuntimeTurn {
             turn_id: turn_id.clone(),
-            session_id: state.config.session_id.clone(),
+            session_id: session_id.clone(),
             trace_id: trace_id.clone(),
             user_text: text.clone(),
             cancel_token: Arc::clone(&cancel_token),
@@ -1754,7 +1785,7 @@ impl RuntimeCommandDispatcher {
             live,
             reason_agent_id: state.config.reason_agent_id.clone(),
             master_node_id: state.config.master_node_id.clone(),
-            session_id: state.config.session_id.clone(),
+            session_id,
             turn_id,
             trace_id,
             prompt: text,
@@ -1870,7 +1901,7 @@ impl RuntimeCommandDispatcher {
                 );
                 let restored =
                     persistence
-                        .restore(&state.config.session_id)
+                        .restore(&prepared.session_id)
                         .map_err(|restore_err| {
                             UiCommandDispatchPortError::DispatchFailed(format!(
                                 "failed to project live error turn from persistence: {restore_err}"
@@ -1894,8 +1925,7 @@ impl RuntimeCommandDispatcher {
                     .lock()
                     .expect("lock ui state")
                     .apply_turn_projection(projection);
-                self.refresh_checkpoint_projection_from_config(&state.config)
-                    .map_err(map_checkpoint_dispatch_error)?;
+                let _ = self.refresh_checkpoint_projection_from_config(&state.config);
                 Err(UiCommandDispatchPortError::DispatchFailed(err.to_string()))
             }
         }
@@ -2079,16 +2109,16 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
         &self,
         envelope: UiCommandDispatchEnvelope,
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
-        if let UiCommand::SubmitUserInput { text } = envelope.command.clone() {
+        if let UiCommand::SubmitUserInput { text, session_id } = envelope.command.clone() {
             let prepared = {
                 let mut state = self.state.lock().expect("lock runtime dispatcher state");
-                self.prepare_live_submit_user_input(&mut state, text.clone())
+                self.prepare_live_submit_user_input(&mut state, text.clone(), session_id.clone())
             };
             if let Some(prepared) = prepared {
                 return self.dispatch_prepared_live_submit(envelope, prepared);
             }
             let mut state = self.state.lock().expect("lock runtime dispatcher state");
-            return self.dispatch_submit_user_input(&mut state, envelope, text);
+            return self.dispatch_submit_user_input(&mut state, envelope, text, session_id);
         }
 
         let mut state = self.state.lock().expect("lock runtime dispatcher state");
@@ -3130,6 +3160,65 @@ mod tests {
                 );
             }
             other => panic!("unexpected session turns query: {other:?}"),
+        }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_submit_uses_requested_session_id_for_new_webui_session() {
+        let runtime_home = temp_runtime_home();
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![complete_single_response("new session answer")],
+        );
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+
+        let requested_session = SessionId::new("webui-session-test");
+        let receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "hello from new session".to_owned(),
+                    session_id: Some(requested_session.clone()),
+                })
+                .expect("envelope"),
+            )
+            .expect("submit receipt");
+        assert!(
+            receipt
+                .dispatch_status
+                .contains("reason_live_turn_completed")
+        );
+        let _ = rx.recv().expect("provider request");
+        handle.join().expect("join provider");
+
+        let transcript = runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: requested_session.clone(),
+            })
+            .expect("query transcript");
+        match transcript {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.session_id, requested_session);
+                assert_eq!(transcript.turns.len(), 1);
+                assert_eq!(
+                    transcript.turns[0].user_text.as_deref(),
+                    Some("hello from new session")
+                );
+                assert_eq!(
+                    transcript.turns[0].terminal_status,
+                    Some(TerminalStatus::Success)
+                );
+            }
+            other => panic!("unexpected transcript: {other:?}"),
         }
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
@@ -4314,6 +4403,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .dispatch(
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "trigger tool failure".to_owned(),
+                    session_id: None,
                 })
                 .expect("envelope"),
             )
@@ -4331,6 +4421,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .dispatch(
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "trigger tool failure again".to_owned(),
+                    session_id: None,
                 })
                 .expect("envelope"),
             )
@@ -4670,6 +4761,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
+    fn checkpoint_store_uses_daemon_workdir_env_before_current_dir() {
+        let workspace_root = temp_runtime_home().join("daemon-workdir");
+        fs::create_dir_all(&workspace_root).expect("create workspace root");
+        let root = checkpoint_workspace_root_from_env(Some(workspace_root.clone().into()))
+            .expect("workspace root");
+        assert_eq!(
+            root,
+            fs::canonicalize(workspace_root).expect("canonical workspace root")
+        );
+    }
+
+    #[test]
     fn rewind_checkpoint_rejects_missing_blob_file_explicitly() {
         with_temp_workspace(|root| {
             let file_path = root.join("edit-target.txt");
@@ -4878,6 +4981,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .dispatch(
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "second request".to_owned(),
+                    session_id: None,
                 })
                 .expect("envelope"),
             )
@@ -4916,6 +5020,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .dispatch(
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "hello runtime".to_owned(),
+                    session_id: None,
                 })
                 .expect("envelope"),
             )
@@ -4948,6 +5053,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .dispatch(
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "cancel me".to_owned(),
+                    session_id: None,
                 })
                 .expect("envelope"),
             )
@@ -4987,6 +5093,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .dispatch(
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "cancel latest".to_owned(),
+                    session_id: None,
                 })
                 .expect("submit envelope"),
             )
@@ -5073,6 +5180,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             submit_runtime.dispatch(
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                     text: "start long stream".to_owned(),
+                    session_id: None,
                 })
                 .expect("submit envelope"),
             )
@@ -5233,6 +5341,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 .dispatch(
                     build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                         text: "create checkpoint".to_owned(),
+                        session_id: None,
                     })
                     .expect("envelope"),
                 )

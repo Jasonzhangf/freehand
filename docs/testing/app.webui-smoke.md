@@ -7,6 +7,7 @@
   - app boundary receives protocol-owned command ingress intent and returns dispatch receipt/failure only
   - app boundary renders a usable protocol-driven WebUI shell
   - app boundary serves split theme and WebUI assets
+  - app boundary renders a compact session rail with a new-session affordance and selected-session persistence
   - app boundary renders protocol-owned debug query projection
   - app boundary renders slave-card visibility only for WebUI
   - CLI and WebUI divergences stay protocol-safe
@@ -75,8 +76,10 @@
   - HTTP query and continuous SSE subscribe transport smoke is landed
   - HTTP command ingress dispatch-receipt/failure smoke is landed
   - WebUI root shell now exposes `/adp`, and WebUI JS defaults to ADP WebSocket instead of `fetch` / `EventSource`
+  - WebUI session rail now supports `/new`, compact session summaries, and selected-session draft creation without inventing a separate navigation path
   - WebUI root shell now exposes success/failure sample buttons, and WebUI JS carries the paired sample prompts
   - WebUI JS must keep shortcuts and slash commands as input-layer affordances that call existing ADP query/command helpers instead of mutating protocol truth directly
+  - WebUI session creation and selection must remain input-layer affordances over ADP/query state, not local truth writers
   - command-ingress dispatch-port failure and join-failure projection coverage is landed
   - submit-success path now refreshes latest turn truth after command receipt
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input

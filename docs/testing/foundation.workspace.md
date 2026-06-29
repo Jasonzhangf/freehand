@@ -12,6 +12,7 @@
   - Android release artifact packaging disables Android release lint checks in Gradle config; release regression truth is `make ci` plus Android JVM tests, not the failing Android Lint Vital task
   - global install script installs release host binaries into the configured prefix
   - launchd install script installs release host binaries, writes `~/Library/LaunchAgents/com.freehand.daemon.plist`, writes `~/.freehand/daemon.env` with explicit daemon binary path, starts the user service, and exposes fixed logs/WebUI
+  - launchd install script does not leak daemon workspace root overrides into release/global-install regression subprocesses
   - gate command can validate policy locks
   - gate command can reject data/control boundary leaks at the repo source level
   - mainline generation command can render wiki from JSON truth
@@ -28,6 +29,7 @@
   - Android release packaging config disables Android release lint checks explicitly
   - global install prefix logic
   - launchd daemon binary prefix mismatch rejection
+  - launchd release subprocess daemon-workdir env isolation
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
 - module black-box plan:
   - `xtask gates check` smoke from repo root

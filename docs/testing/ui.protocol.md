@@ -7,6 +7,7 @@
   - commands act as ingress only and do not make UI a truth writer
   - command ingress accepts only mutation-intent commands and rejects query-route misuse explicitly
   - accepted command ingress is routed to declared owner feature/module before transport dispatch
+  - submit command validation accepts an optional selected session id without weakening empty-text rejection
   - latest-active cancellation is accepted as mutation intent and routes to `reason.turn`
   - query returns snapshot truth
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
@@ -29,6 +30,7 @@
   - command/projection mapping, status query, terminal projection, slave subscription semantics
   - command ingress acceptance and rejection mapping
   - command dispatch routing mapping
+  - submit command selected-session validation mapping
   - explicit cancel and latest-active cancel owner-routing mapping
   - checkpoint rewind ingress validation and owner-routing mapping
   - checkpoint projection storage and query mapping
@@ -42,6 +44,7 @@
   - ADP frame serialization and failure-frame shape
 - module black-box plan:
   - command ingress accept/reject smoke
+  - selected-session submit command smoke
   - command dispatch envelope owner-routing smoke
   - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
   - debug-state snapshot/query by `turn_id`
@@ -75,6 +78,7 @@
   - debug-state contract is minimal and per-turn only for now
 - sync status between design and implementation:
   - command/query/subscribe/projection baseline landed
+  - submit command optional selected-session id is landed and regression-locked
   - command ingress ack/rejection baseline landed
   - command dispatch envelope routing baseline landed
   - checkpoint rewind command ingress and runtime owner routing are landed

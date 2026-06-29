@@ -17,6 +17,7 @@
 - runtime bootstrap may first select one configured agent from `~/.freehand/config.toml`
 - config-selected bootstrap consumes local node id, paired node id, paired allowed IP, and paired token env from `config.core`
 - config-selected live bootstrap may also seed one shared metadata ledger path for node-owned bootstrap and pairing provenance
+- submit commands may carry an optional selected session id so a draft or explicitly chosen session can receive the new turn instead of always using the default session
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
 - runtime dispatch owner reads the declared owner target from the envelope
 - live submit registers active turn cancellation state before provider execution and releases the runtime mutex before provider IO
@@ -29,6 +30,7 @@
 - live provider-backed submit incrementally writes reason/debug projection updates into `UiProtocolState` while the turn is still running
 - live provider-backed submit maps `ReasonBroadcastEvent::ToolResult` into `UiProtocolState::apply_tool_result` so tool lifecycle completion is visible over turn SSE
 - live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events so blank UI subscriptions can render a complete public conversation stream
+- live provider-backed submit honors a selected session id when present and keeps the derived UI state pinned to that session instead of the latest global session
 - active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion
 - latest-active cancellation supports Esc during the short window before WebUI has received a concrete `turn_id`
 - live provider-backed multi-round turns keep the original operator prompt in public UI projection instead of exposing internal continuation prompts
@@ -80,7 +82,7 @@
 | 04 | `RuntimeCommandDispatcher::dispatch` | `crates/freehand-runtime/src/lib.rs` | execute protocol-owned dispatch envelope through the correct owner adapter | dispatch envelope | dispatch receipt or failure | app/daemon runtime boundary | reason/node owner adapter | bound |
 | 05 | `RuntimeCommandDispatcher::ui_state` | `crates/freehand-runtime/src/lib.rs` | expose derived UI projection state for runtime-side consumers/tests | runtime dispatcher | shared derived UI state | runtime tests/future daemon | UI protocol state | bound |
 | 06 | `run_live_reason_turn_with_hooks` | `crates/freehand-runtime/src/lib.rs` | execute a live provider turn while streaming reason/debug/tool-result callbacks to runtime-owned consumers | selected live config + live request + callbacks | live turn outcome plus incremental callbacks | runtime dispatch/tests | live bridge owner | bound |
-| 07 | `RuntimeCommandDispatcher::prepare_live_submit_user_input` | `crates/freehand-runtime/src/lib.rs` | register active live turn cancellation state before provider execution | runtime state + submitted user text | prepared live submit + active cancel token | `RuntimeCommandDispatcher::dispatch` | runtime owner | bound |
+| 07 | `RuntimeCommandDispatcher::prepare_live_submit_user_input` | `crates/freehand-runtime/src/lib.rs` | register active live turn cancellation state before provider execution and bind an optional requested session id | runtime state + submitted user text + optional requested session id | prepared live submit + active cancel token | `RuntimeCommandDispatcher::dispatch` | runtime owner | bound |
 | 08 | `RuntimeCommandDispatcher::dispatch_prepared_live_submit` | `crates/freehand-runtime/src/lib.rs` | run provider-backed live turn outside runtime mutex while honoring active cancel token | prepared live submit | live receipt or cancelled dispatch failure | `RuntimeCommandDispatcher::dispatch` | `run_live_reason_turn_with_hooks` | bound |
 | 09 | `RuntimeCommandDispatcher::dispatch_cancel_turn` | `crates/freehand-runtime/src/lib.rs` | cancel active or persisted turns through reason-owned terminal semantics and UI projection | cancel command turn id | cancel receipt + cancelled projection | `RuntimeCommandDispatcher::dispatch` | reason owner / active cancel registry | bound |
 

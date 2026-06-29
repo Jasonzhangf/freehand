@@ -17,6 +17,7 @@
 - runtime identifies a writable tool call that wants checkpointed live execution
 - runtime asks the tool owner for preview truth before any file write
 - tool owner applies the same argument validation, path lock, and transform semantics as execute
+- tool owner resolves locked workspace root from `FREEHAND_WORKSPACE_ROOT`, then `FREEHAND_DAEMON_WORKDIR`, then current directory, and canonicalizes the result before preview or execute
 - preview computes canonical file-change truth without writing to disk
 - runtime may use preview truth for checkpoint scope, debug evidence, and future UI projection
 
@@ -31,6 +32,7 @@
 
 - invalid tool arguments return explicit preview failure
 - path escape or parent-directory violations return explicit preview failure
+- mismatched or non-canonical workspace roots return explicit preview failure instead of allowing runtime checkpoint scope to diverge from tool path scope
 - ambiguity, anchor-not-found, or unsupported preview shape return explicit preview failure
 - writable live execution without preview support must be blocked explicitly
 
@@ -69,7 +71,7 @@
 | 02 | `plan_write_file` | `crates/freehand-tools/src/lib.rs` | compute create/overwrite preview without writing and return the exact post-image later persisted by execute | `path` plus `content` | canonical file-change truth | preview dispatch and execute | write tool preview owner | bound |
 | 03 | `plan_edit_file` | `crates/freehand-tools/src/lib.rs` | compute exact-match edit preview without writing and return the exact post-image later persisted by execute | `path` plus `old_string` plus `new_string` | canonical file-change truth | preview dispatch and execute | edit tool preview owner | bound |
 | 04 | `plan_multi_edit` | `crates/freehand-tools/src/lib.rs` | compute ordered multi-edit preview without writing and return the exact post-image later persisted by execute | `path` plus ordered edits | canonical file-change truth | preview dispatch and execute | multi-edit preview owner | bound |
-| 05 | `pending: delete_range preview entry` | `crates/freehand-tools/src/lib.rs` | compute anchor-based delete preview without writing | `path` plus range anchors | canonical file-change truth | preview dispatch | delete-range preview owner | pending |
+| 05 | `locked_workspace_root` / `locked_workspace_root_from_env` | `crates/freehand-tools/src/lib.rs` | resolve and canonicalize the single locked workspace root used by preview and execute | configured workspace env or cwd | canonical workspace root | preview dispatch and execute | workspace root resolver | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -81,6 +83,7 @@
 
 - `BuiltinToolRegistry::preview` is now code-bound for `write_file`, `edit_file`, and `multi_edit`
 - preview/execute parity now runs through one shared transform path for those three writable tools
+- preview and execute now share canonical workspace root resolution with daemon/runtime workspace env
 - `delete_range` preview is still pending because its anchor semantics are not locked in code yet
 - current live runtime path now consumes preview before writable execution and rejects previewless writable tools explicitly
 - generated wiki must be regenerated from `docs/mainline-calls/tool.preview.json` when this function-map truth changes

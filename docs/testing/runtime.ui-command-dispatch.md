@@ -6,9 +6,11 @@
   - config-selected bootstrap becomes one runtime dispatcher
   - config-selected live bootstrap may seed one shared node metadata ledger before the first command
   - accepted command ingress becomes a dispatch envelope
+  - submit commands may carry an optional selected session id and must create or continue that session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
   - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
   - reason-backed submit/cancel update derived UI state
+  - reason-backed submit with a selected session id keeps the session transcript queryable under that session
   - active live cancel sets a cancel token and publishes cancelled projection without waiting for provider completion
   - latest-active cancel resolves the current active live turn when UI has not received a concrete `turn_id`
   - cancelled live provider success must not overwrite the cancelled UI projection or commit a success outcome
@@ -17,6 +19,7 @@
   - live provider submit maps tool-result broadcasts into derived UI state so tool activity can transition to completed over SSE
   - live provider submit maps bridge-materialized tool execution failure into derived UI state before returning dispatch failure, so query/SSE do not stay waiting
   - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately
+  - live provider submit keeps the selected session id attached to the derived UI truth when one is supplied
   - live provider multi-round continuation prompts must not replace the public user prompt projection
   - final live multi-round projection aggregates tool activity from earlier rounds instead of showing only the final round, while excluding intermediate continuation text from the final public conversation
   - node-backed direct message returns owner-backed receipt
@@ -26,6 +29,7 @@
   - config-selected bootstrap coverage
   - config-selected live shared node-metadata-ledger bootstrap coverage
   - config-selected live shared node-metadata-ledger bootstrap failure coverage
+  - selected-session live submit coverage
   - persisted latest-turn restore coverage
   - next runtime turn ordinal restore coverage
   - submit/cancel reason dispatch coverage

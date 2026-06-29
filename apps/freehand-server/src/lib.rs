@@ -896,6 +896,7 @@ mod tests {
         assert!(html.contains("/assets/webui.js"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("id=\"session-list\""));
+        assert!(html.contains("id=\"new-session-button\""));
         assert!(html.contains("id=\"success-sample-button\""));
         assert!(html.contains("id=\"failure-sample-button\""));
     }
@@ -1005,6 +1006,7 @@ mod tests {
         assert!(root_body.contains("/assets/theme.css"));
         assert!(root_body.contains("data-adp-endpoint=\"/adp\""));
         assert!(root_body.contains("id=\"session-list\""));
+        assert!(root_body.contains("id=\"new-session-button\""));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
         assert!(root_body.contains("Success sample"));
         assert!(root_body.contains("Failure sample"));
@@ -1067,6 +1069,17 @@ mod tests {
         assert!(js_body.contains("QuerySessionList"));
         assert!(js_body.contains("QuerySessionTurns"));
         assert!(js_body.contains("refreshSelectedSession"));
+        assert!(js_body.contains("newDraftSessionId"));
+        assert!(js_body.contains("crypto.randomUUID"));
+        assert!(js_body.contains("initialSelectedSessionId"));
+        assert!(js_body.contains("isDraftSessionId"));
+        assert!(js_body.contains("startNewSession"));
+        assert!(js_body.contains("SubmitUserInput.session_id"));
+        assert!(js_body.contains("turn.session_id !== state.selectedSessionId"));
+        assert!(js_body.contains("scrollMessagesToBottom"));
+        assert!(js_body.contains("window.scrollTo"));
+        assert!(js_body.contains("case \"/new\""));
+        assert!(js_body.contains("selected session:"));
         assert!(js_body.contains("CancelTurn"));
         assert!(js_body.contains("CancelLatestActiveTurn"));
         assert!(js_body.contains("event.key !== \"Escape\""));
@@ -1091,6 +1104,7 @@ mod tests {
         assert!(js_body.contains("if (command.startsWith(\"/\"))"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("case \"/help\""));
+        assert!(js_body.contains("case \"/new\""));
         assert!(js_body.contains("case \"/sessions\""));
         assert!(js_body.contains("case \"/reload\""));
         assert!(js_body.contains("case \"/success\""));
@@ -1439,6 +1453,7 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "run task".to_owned(),
+                session_id: None,
             })
             .send()
             .await
@@ -1477,6 +1492,7 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "run task".to_owned(),
+                session_id: None,
             })
             .send()
             .await
@@ -1503,6 +1519,7 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "run task".to_owned(),
+                session_id: None,
             })
             .send()
             .await

@@ -22,6 +22,7 @@
 - app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets
 - app boundary keeps theme assets separate from WebUI layout assets
 - front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames
+- front-end session list can create a draft session with `/new`, persist the selected session id locally, and bind future ADP submit frames to the selected session when present
 - front-end exposes success and failure sample prompt buttons that load reproducible ADP sample prompts into the composer without bypassing normal Send/ADP command flow
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
@@ -39,6 +40,7 @@
 - app boundary renders a protocol-driven WebUI page shell; live content is populated from ADP query/subscribe/command frames by default
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason/debug truth writer
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
+- app boundary keeps one selected session at a time, can synthesize a draft session entry before the first turn exists, and keeps the selected transcript pinned to that session instead of falling back to global latest turn
 - app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
 - ADP subscribe returns an explicit accepted/waiting state before later turn/debug events, so the WebUI can render waiting instead of appearing frozen
 - SSE subscribe routes now emit one initial snapshot followed by continuous incremental projection updates over the same connection, and latest-turn subscribe must stay open on blank state until a turn exists
@@ -100,7 +102,7 @@
 | 08 | `subscription_event_stream` / `projection_to_sse_event` | `apps/freehand-server/src/lib.rs` | convert protocol-owned subscription updates into continuous HTTP SSE delivery, including waiting subscriptions for late debug snapshots | `UiSubscriptionEvent` receiver + selector | streamed SSE events | subscribe routes | protocol state | bound |
 | 09 | `handle_adp_socket` / `handle_adp_connection` | `apps/freehand-server/src/lib.rs` | expose protocol-owned ADP WebSocket frames for WebUI default query/subscribe/command control | ADP WebSocket frames + protocol state + dispatch port | ADP response frames and subscription events | WebUI shell | shared protocol transport | bound |
 | 10 | `ensureAdpSocket` / `requestAdp` / `handleAdpFrame` | `apps/freehand-server/assets/webui.js` | maintain the default WebUI ADP connection and route query_result, subscription_accepted, subscription_event, command_receipt, and failure frames | `UiAdpResponse` JSON frames | visible WebUI state updates or failure cards | WebUI shell | daemon `/adp` | bound |
-| 11 | `refreshTurn` / `renderMessages` / `normalizePublicConversation` / `renderCommandStatus` / `refreshDebug` / `submitUserInput` | `apps/freehand-server/assets/webui.js` | consume ADP query/subscription turn payloads, render semantic/tool/debug cards, keep same-tool updates in one card, and keep missing debug snapshots pending instead of failed | `UiAdpResponse` frames + debug snapshot/pending state + command dispatch receipt | DOM message blocks + command status | WebUI shell | ADP protocol frames | bound |
+| 11 | `refreshTurn` / `renderMessages` / `normalizePublicConversation` / `renderCommandStatus` / `refreshDebug` / `submitUserInput` / `setSessionList` / `setSessionTranscript` / `startNewSession` | `apps/freehand-server/assets/webui.js` | consume ADP query/subscription turn payloads, manage selected and draft sessions, render semantic/tool/debug cards, keep same-tool updates in one card, and keep missing debug snapshots pending instead of failed | `UiAdpResponse` frames + debug snapshot/pending state + command dispatch receipt | DOM message blocks + command status | WebUI shell | ADP protocol frames | bound |
 | 12 | `handle_query_checkpoints` / `refreshCheckpoints` | `apps/freehand-server/src/lib.rs` / `apps/freehand-server/assets/webui.js` | serve compatibility checkpoint query and render read-only checkpoint summaries from ADP protocol state by default | protocol checkpoint snapshot | checkpoint snapshot + secondary inspector cards | WebUI shell | ui.protocol state | bound |
 | 13 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` or `CancelLatestActiveTurn` over ADP for the active protocol turn from button or Escape key | latest protocol turn id | ADP command receipt + refreshed projection | WebUI shell | daemon `/adp` | bound |
 | 14 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP compatibility transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
@@ -112,6 +114,7 @@
 - theme code is split into `assets/theme.css` and `assets/theme.js`
 - WebUI layout/protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`
 - WebUI shell now advertises `data-adp-endpoint="/adp"` and the front-end opens a WebSocket to that endpoint by default
+- WebUI shell now renders a compact session rail with a draft session entry, selected-session persistence, and `/new` session creation
 - app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface
 - app boundary now serves protocol-only POST command ingress dispatch-receipt/failure smoke route from that shared transport surface
 - HTTP/SSE/POST routes remain compatibility transport surfaces; WebUI JS no longer uses `fetch` or `EventSource` as its default live path
@@ -122,6 +125,7 @@
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
 - debug subscribe route now also keeps one SSE connection open when the first debug snapshot is not available yet
 - WebUI submit path still explicitly refreshes latest turn truth over ADP after a successful command receipt
+- WebUI submit path now forwards an optional selected session id through `SubmitUserInput` so a new conversation can be created from the selected draft session instead of always using the global default session
 - WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files
 - WebUI Cancel button and Escape key now send `CancelTurn` through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`

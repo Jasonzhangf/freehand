@@ -326,6 +326,7 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
             request_id: cmd_id.clone(),
             command: UiCommand::SubmitUserInput {
                 text: sample.prompt().to_owned(),
+                session_id: None,
             },
         },
     )

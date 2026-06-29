@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -1315,10 +1316,24 @@ fn invalid_tool_argument(tool: &str, index: usize, message: &str) -> ToolRegistr
 }
 
 fn locked_workspace_root(tool: &str) -> Result<PathBuf, ToolRegistryError> {
-    let root = env::current_dir().map_err(|err| ToolRegistryError::ExecutionFailed {
-        tool: tool.to_owned(),
-        message: format!("cannot read current working directory: {err}"),
-    })?;
+    locked_workspace_root_from_env(
+        tool,
+        env::var_os("FREEHAND_WORKSPACE_ROOT").or_else(|| env::var_os("FREEHAND_DAEMON_WORKDIR")),
+    )
+}
+
+fn locked_workspace_root_from_env(
+    tool: &str,
+    configured_root: Option<OsString>,
+) -> Result<PathBuf, ToolRegistryError> {
+    let root = if let Some(path) = configured_root {
+        PathBuf::from(path)
+    } else {
+        env::current_dir().map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: format!("cannot read current working directory: {err}"),
+        })?
+    };
     fs::canonicalize(root).map_err(|err| ToolRegistryError::ExecutionFailed {
         tool: tool.to_owned(),
         message: format!("cannot canonicalize current working directory: {err}"),
@@ -1684,6 +1699,26 @@ mod tests {
         assert_eq!(registry.read_only("grep"), Some(true));
         assert_eq!(registry.read_only("ls"), Some(true));
         assert_eq!(registry.read_only("todo_write"), Some(true));
+    }
+
+    #[test]
+    fn locked_workspace_root_accepts_configured_daemon_workspace() {
+        let root = env::temp_dir().join(format!(
+            "freehand-tools-configured-root-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("create configured root");
+
+        let resolved =
+            locked_workspace_root_from_env("write_file", Some(root.clone().into_os_string()))
+                .expect("configured root");
+
+        assert_eq!(resolved, fs::canonicalize(&root).expect("canonical root"));
+        fs::remove_dir_all(root).expect("cleanup configured root");
     }
 
     #[test]

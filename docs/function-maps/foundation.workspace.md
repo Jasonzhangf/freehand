@@ -31,6 +31,7 @@
 - release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
 - global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
 - launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths
+- launchd install script keeps daemon workspace env out of the release/global-install regression subprocess so daemon runtime path selection cannot pollute workspace tests
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 - generated wiki writer materializes `docs/wiki/*.md` and `docs/wiki/README.md` from the JSON truth
@@ -45,6 +46,7 @@
 - release artifacts include `freehand-cli`, `freehand-server`, `freehand-daemon`, and the Android release APK under `dist/`
 - global install exposes `freehand-cli`, `freehand-server`, and `freehand-daemon` on the chosen install prefix
 - launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
+- release/global-install regressions run without inherited daemon workspace root overrides while the final LaunchAgent still receives the configured daemon workdir
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
 - gate returns explicit failure with missing path or missing policy snippet
 - mainline generation returns fresh wiki artifacts derived from machine-readable source

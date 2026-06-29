@@ -48,6 +48,25 @@ EOF
     if [[ -z "${FREEHAND_DAEMON_BIN:-}" ]]; then
       printf '\nFREEHAND_DAEMON_BIN="%s"\n' "$daemon_bin" >>"$env_file"
     fi
+    if [[ "${FREEHAND_DAEMON_WORKDIR:-}" != "$workdir" ]]; then
+      tmp_env="$(mktemp)"
+      awk -v workdir="$workdir" '
+        BEGIN { updated = 0 }
+        /^FREEHAND_DAEMON_WORKDIR=/ {
+          printf "FREEHAND_DAEMON_WORKDIR=\"%s\"\n", workdir
+          updated = 1
+          next
+        }
+        { print }
+        END {
+          if (updated == 0) {
+            printf "FREEHAND_DAEMON_WORKDIR=\"%s\"\n", workdir
+          }
+        }
+      ' "$env_file" >"$tmp_env"
+      cat "$tmp_env" >"$env_file"
+      rm -f "$tmp_env"
+    fi
     if [[ -z "${HOME:-}" ]]; then
       printf '\nHOME="%s"\n' "$HOME" >>"$env_file"
     elif ! rg -q '^HOME=' "$env_file"; then
@@ -138,7 +157,7 @@ wait_for_health() {
 
 case "${1:-install}" in
   install)
-    scripts/install-global.sh
+    env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-global.sh
     write_launchd_env
     write_launchd_plist
     run_install_launchd

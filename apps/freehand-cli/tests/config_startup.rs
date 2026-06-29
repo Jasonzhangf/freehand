@@ -238,13 +238,14 @@ fn spawn_adp_sample_mock_server(status: TerminalStatus) -> (String, thread::Join
                     }
                     UiAdpRequest::Command {
                         request_id,
-                        command: UiCommand::SubmitUserInput { text },
+                        command: UiCommand::SubmitUserInput { text, .. },
                     } => {
                         let turn = test_sample_turn_projection(&text, status.clone());
                         sample_turn = Some(turn.clone());
                         let envelope =
                             build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                                 text: text.clone(),
+                                session_id: None,
                             })
                             .expect("sample envelope");
                         send_adp_response(

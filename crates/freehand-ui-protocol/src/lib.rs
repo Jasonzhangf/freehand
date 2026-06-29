@@ -43,6 +43,8 @@ pub struct UiSource {
 pub enum UiCommand {
     SubmitUserInput {
         text: String,
+        #[serde(default)]
+        session_id: Option<SessionId>,
     },
     SubscribeLatestActiveTurn {
         client: UiClientKind,
@@ -762,7 +764,7 @@ impl Default for UiProtocolState {
 
 pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
     match command {
-        UiCommand::SubmitUserInput { text } if text.trim().is_empty() => {
+        UiCommand::SubmitUserInput { text, .. } if text.trim().is_empty() => {
             Err(UiProtocolError::EmptyUserInput)
         }
         UiCommand::SendDirectMessageToSlave { text, .. } if text.trim().is_empty() => {
@@ -1463,6 +1465,7 @@ mod tests {
     fn command_to_projection_smoke() {
         validate_command(&UiCommand::SubmitUserInput {
             text: "hello".to_owned(),
+            session_id: None,
         })
         .expect("valid");
 
@@ -1474,6 +1477,19 @@ mod tests {
             projection.tool_activities[0].status,
             UiToolActivityStatus::Waiting
         );
+    }
+
+    #[test]
+    fn submit_user_input_accepts_optional_session_id() {
+        let command = UiCommand::SubmitUserInput {
+            text: "hello new session".to_owned(),
+            session_id: Some(SessionId::new("webui-session-test")),
+        };
+        validate_command(&command).expect("valid command");
+        let encoded = serde_json::to_string(&command).expect("json");
+        assert!(encoded.contains("webui-session-test"));
+        let decoded: UiCommand = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded, command);
     }
 
     #[test]
@@ -2089,6 +2105,7 @@ mod tests {
     fn command_ingress_accepts_mutation_intent_without_writing_truth() {
         let ack = accept_command_ingress(&UiCommand::SubmitUserInput {
             text: "ship it".to_owned(),
+            session_id: None,
         })
         .expect("ack");
         assert!(ack.accepted);
@@ -2130,6 +2147,7 @@ mod tests {
     fn command_dispatch_envelope_routes_submit_input_to_reason_owner() {
         let envelope = build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
             text: "run task".to_owned(),
+            session_id: None,
         })
         .expect("envelope");
         assert_eq!(envelope.ingress.command_kind, "submit_user_input");
@@ -2163,6 +2181,7 @@ mod tests {
     fn static_dispatch_port_returns_dispatch_receipt() {
         let envelope = build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
             text: "run task".to_owned(),
+            session_id: None,
         })
         .expect("envelope");
         let port = StaticUiCommandDispatchPort::new("queued_by_test_port");

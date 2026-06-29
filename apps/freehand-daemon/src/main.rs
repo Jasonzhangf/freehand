@@ -186,6 +186,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let original = env::current_dir().expect("current dir");
+        let old_workspace_root = env::var_os("FREEHAND_WORKSPACE_ROOT");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time")
@@ -196,9 +197,11 @@ mod tests {
         ));
         fs::create_dir_all(&root).expect("create temp workspace");
         env::set_current_dir(&root).expect("set cwd");
+        unsafe { env::set_var("FREEHAND_WORKSPACE_ROOT", &root) };
         TempWorkspace {
             root,
             original,
+            old_workspace_root,
             _lock: lock,
         }
     }
@@ -211,6 +214,7 @@ mod tests {
     struct TempWorkspace<'a> {
         root: PathBuf,
         original: PathBuf,
+        old_workspace_root: Option<OsString>,
         _lock: std::sync::MutexGuard<'a, ()>,
     }
 
@@ -223,6 +227,10 @@ mod tests {
     impl Drop for TempWorkspace<'_> {
         fn drop(&mut self) {
             let _ = env::set_current_dir(&self.original);
+            match self.old_workspace_root.clone() {
+                Some(value) => unsafe { env::set_var("FREEHAND_WORKSPACE_ROOT", value) },
+                None => unsafe { env::remove_var("FREEHAND_WORKSPACE_ROOT") },
+            }
             let _ = fs::remove_dir_all(&self.root);
         }
     }
@@ -348,6 +356,7 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "daemon turn".to_owned(),
+                session_id: None,
             })
             .send()
             .await
@@ -458,6 +467,7 @@ mod tests {
                     request_id: "cmd-1".to_owned(),
                     command: UiCommand::SubmitUserInput {
                         text: "daemon adp turn".to_owned(),
+                        session_id: None,
                     },
                 })
                 .expect("command json")
@@ -585,6 +595,7 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "daemon streamed user prompt".to_owned(),
+                session_id: None,
             })
             .send()
             .await
@@ -626,6 +637,7 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "daemon turn".to_owned(),
+                session_id: None,
             })
             .send()
             .await
@@ -660,11 +672,16 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "create writable checkpoint".to_owned(),
+                session_id: None,
             })
             .send()
             .await
             .expect("submit response");
-        assert_eq!(submitted.status(), reqwest::StatusCode::ACCEPTED);
+        let submitted_status = submitted.status();
+        if submitted_status != reqwest::StatusCode::ACCEPTED {
+            let body = submitted.text().await.expect("submit failure body");
+            panic!("expected checkpoint submit 202, got {submitted_status}: {body}");
+        }
         let submitted: UiCommandDispatchReceipt = submitted.json().await.expect("receipt json");
         assert!(
             submitted
@@ -748,11 +765,16 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "create writable checkpoint".to_owned(),
+                session_id: None,
             })
             .send()
             .await
             .expect("submit response");
-        assert_eq!(submitted.status(), reqwest::StatusCode::ACCEPTED);
+        let submitted_status = submitted.status();
+        if submitted_status != reqwest::StatusCode::ACCEPTED {
+            let body = submitted.text().await.expect("submit failure body");
+            panic!("expected checkpoint submit 202, got {submitted_status}: {body}");
+        }
         let _: UiCommandDispatchReceipt = submitted.json().await.expect("receipt json");
         let _ = request_rx.recv().expect("first request");
         let _ = request_rx.recv().expect("second request");
@@ -816,6 +838,7 @@ mod tests {
             .post(format!("{}/ui/command", first_server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "first daemon turn".to_owned(),
+                session_id: None,
             })
             .send()
             .await
@@ -887,6 +910,7 @@ mod tests {
             .post(format!("{}/ui/command", resumed_server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "second daemon turn".to_owned(),
+                session_id: None,
             })
             .send()
             .await
@@ -945,6 +969,7 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "first streamed daemon turn".to_owned(),
+                session_id: None,
             })
             .send()
             .await
@@ -977,6 +1002,7 @@ mod tests {
             .post(format!("{}/ui/command", server.base_url))
             .json(&UiCommand::SubmitUserInput {
                 text: "second streamed daemon turn".to_owned(),
+                session_id: None,
             })
             .send()
             .await

@@ -41,6 +41,7 @@
 - accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - `CancelLatestActiveTurn` is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete `turn_id`
+- `SubmitUserInput` may carry an optional selected `session_id` so the protocol can route a new turn into an explicitly chosen session or draft session
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
@@ -58,6 +59,7 @@
 - turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
 - public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
+- public conversation session selection stays explicit: submit can target a selected session id, and session-level transcript queries stay separate from the global latest turn
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and the default public body stays status-only
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
 - `bridge.html` in the Android APK renders the same public conversation projection as WebUI, so the live shell and browser shell share one projection truth
