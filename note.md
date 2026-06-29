@@ -23,6 +23,14 @@
     - `cargo run -p xtask -- mainlines generate`
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
+  - live WebUI verification:
+    - global install + launchd fixed-port restart completed
+    - `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
+    - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` -> `adp_smoke_ok`
+    - real WebUI page operation loaded `Failure sample`, submitted it, and captured screenshots under `artifacts/webui-tool-display-e2e/20260629-parameters/`
+    - `03-tool-parameter-visible.png` captured in-flight read_file tool card with `path=definitely-missing-freehand-file.txt`
+    - `05-reloaded-final-parameter.png` captured terminal state with `turn completed`, no waiting text, `Read file` card showing parameter and failed result, plus shell command card showing `command=... · timeout=60`
+    - ADP truth for `webui-session-20260629044814-5eb78029` showed `runtime-turn-43-r4` Success with `display.parameter_summary=path=definitely-missing-freehand-file.txt`
 
 # 2026-06-29 WebUI provider-request wait state repair
   - gap found:

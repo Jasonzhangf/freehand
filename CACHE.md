@@ -16,6 +16,7 @@
     - `cargo run -p xtask -- mainlines generate`
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
+    - fixed-port online WebUI screenshot evidence: `artifacts/webui-tool-display-e2e/20260629-parameters/03-tool-parameter-visible.png`, `05-reloaded-final-parameter.png`
 - Current verified CLI/headless ADP slice:
   - `freehand-cli adp-smoke --url ws://.../adp` connects without UI, sends ADP subscribe/query/query-as-command frames, and requires `subscription_accepted`, `subscription_event`, `query_result`, plus explicit `ingress_command_kind_mismatch`
   - `freehand-cli adp-turn-sample --url ws://.../adp --sample success|failure` generates reproducible success/failure latest-turn samples over the same ADP path and verifies terminal projection
