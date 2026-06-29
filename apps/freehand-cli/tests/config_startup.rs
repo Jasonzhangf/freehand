@@ -350,6 +350,8 @@ fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
                                 result: UiQueryResult::SessionList(UiSessionListProjection {
                                     sessions: vec![UiSessionSummary {
                                         session_id: SessionId::new("cli-session"),
+                                        title: None,
+                                        archived: false,
                                         cwd: Some("/tmp/cli-session".to_owned()),
                                         latest_turn_id: Some(TurnId::new("runtime-turn-10")),
                                         active_turn_id: None,
@@ -385,6 +387,8 @@ fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
                                 result: UiQueryResult::SessionTurns(
                                     UiSessionTranscriptProjection {
                                         session_id,
+                                        title: None,
+                                        archived: false,
                                         cwd: Some("/tmp/cli-session".to_owned()),
                                         turns: vec![first, second],
                                     },

@@ -42,6 +42,7 @@
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - `CancelLatestActiveTurn` is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete `turn_id`
 - `SubmitUserInput` may carry an optional selected `session_id` and selected `cwd` so the protocol can route a new turn into an explicitly chosen cwd-bound session or draft session
+- session management commands (`CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`) are mutation intents only; the protocol validates and routes them while `reason.persistence` owns durable session metadata truth
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
@@ -62,6 +63,7 @@
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation session selection stays explicit: submit can target a selected session id, and session-level transcript queries stay separate from the global latest turn
 - session list and transcript projections expose session `cwd`, and turn projections carry `cwd` when the runtime owner has bound a session to a workspace
+- session list projections expose owner-supplied session `title` and `archived` metadata so WebUI, Android, CLI, and headless ADP clients share one CRUD truth
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed tool summaries include the protocol-projected tool result detail
 - public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/parameters/result without parsing raw tool terms
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
@@ -80,6 +82,7 @@
 
 - invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors
 - empty `SubmitUserInput.cwd` is rejected at the protocol boundary instead of being treated as runtime default
+- empty session ids and empty session titles are rejected at the protocol boundary for session management commands
 - query/subscribe commands sent to command-ingress route are explicit protocol misuse errors
 - query commands sent as ADP command frames are explicit protocol misuse errors, not mutation attempts
 - `CancelLatestActiveTurn` without any active or persisted turn returns explicit target-not-found from the owner module
@@ -167,6 +170,7 @@
 | 16 | `debug_projection_from_event` | `crates/freehand-ui-protocol/src/lib.rs` | map one debug event to read-only UI debug projection when snapshot exists | `freehand-debug` event | `UiProjection::Debug` | protocol tests/transport adapters | projector | bound |
 | 17 | `UiProtocolState::set_checkpoint_snapshot` / `checkpoint_projection_from_runtime_summary` | `crates/freehand-ui-protocol/src/lib.rs` | store and query read-only checkpoint summaries supplied by runtime owner | runtime checkpoint summary DTO | checkpoint query result | runtime dispatcher / app query handlers | protocol state | bound |
 | 18 | `UiAdpRequest` / `UiAdpResponse` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP frames for command/query/subscribe automation | ADP JSON frame | typed command/query/subscription response or failure | WebUI/Android/CLI automation transports | protocol owner | bound |
+| 19 | `validate_command` / `command_dispatch_target` | `crates/freehand-ui-protocol/src/lib.rs` | validate session-management mutation intents and route them to the session persistence owner | session CRUD command | owner-routed dispatch envelope or protocol rejection | WebUI/Android/CLI transports | runtime/reason persistence owner path | bound |
 
 ## Sync Status Against Code
 
@@ -185,4 +189,5 @@
 - public tool summaries now preserve `tool_call_id`, expose tool result detail, and duplicate tool-call projections upsert into one activity before public rendering
 - ADP request/response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
 - session cwd projection is landed for `UiTurnProjection`, `UiSessionSummary`, and `UiSessionTranscriptProjection`
+- session CRUD protocol routing is bound for create, rename, archive, restore, and delete-as-archive commands through `runtime.ui-command-dispatch` into `reason.persistence`
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

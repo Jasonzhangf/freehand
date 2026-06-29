@@ -32,6 +32,44 @@
     - `05-reloaded-final-parameter.png` captured terminal state with `turn completed`, no waiting text, `Read file` card showing parameter and failed result, plus shell command card showing `command=... · timeout=60`
     - ADP truth for `webui-session-20260629044814-5eb78029` showed `runtime-turn-43-r4` Success with `display.parameter_summary=path=definitely-missing-freehand-file.txt`
 
+# 2026-06-29 session CRUD protocol support
+  - user requirement:
+    - before UI presentation, session CRUD must be supported through shared protocol/runtime truth
+    - WebUI must not invent local-only session management state
+  - implementation:
+    - `ui.protocol` added session management commands: `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`
+    - `UiSessionSummary` and `UiSessionTranscriptProjection` now expose `title` and `archived`
+    - `UiProtocolState` can project metadata-only sessions and archived-session list separately
+    - `reason.persistence` owns `PersistedSessionMetadataEntry` in `~/.freehand/state/ui/<agent>/session-metadata.json`
+    - `delete` is currently non-destructive delete-as-archive because physical deletion of turn truth needs explicit destructive lifecycle approval
+    - `runtime.ui-command-dispatch` routes CRUD commands into `ReasonPersistence` and refreshes shared UI projection
+    - `freehand-cli adp-session-manage` provides no-UI ADP CRUD control
+  - verification:
+    - `cargo test -p freehand-ui-protocol -- --nocapture` -> 38 passed
+    - `cargo test -p freehand-reason -- --nocapture` -> 56 passed
+    - `cargo test -p freehand-runtime -- --nocapture` -> 51 passed
+    - `cargo test -p freehand-cli -- --nocapture` -> 12 passed
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+  - live ADP verification:
+    - existing fixed daemon `127.0.0.1:4041` health and ADP smoke passed
+    - current workspace daemon on `127.0.0.1:4092` health passed
+    - `target/debug/freehand-cli adp-session-manage --action create --session adp-crud-session-20260629 --title 'ADP CRUD Session' --cwd /tmp` returned `target=reason.persistence status=session_metadata_updated`
+    - rename returned `session_metadata_updated`
+    - active query showed `adp-crud-session-20260629:0:empty`
+    - archive hid it from active session list
+    - restore made it visible again
+    - delete hid it again through non-destructive archive semantics
+    - unknown archive returned explicit `command_dispatch_target_not_found`
+  - remaining risk:
+    - WebUI session context menu/UI presentation is not implemented in this slice
+    - archived-session list is protocol-supported but CLI query helper currently prints only active list unless extended further
+    - 4092 debug daemon health still responded after validation, but process PID was not discoverable through allowed exact-PID lookup; no broad kill was attempted
+
 # 2026-06-29 session cwd owner wiring
   - user requirement:
     - session must have a working directory and WebUI must allow choosing it

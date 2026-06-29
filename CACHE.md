@@ -19,6 +19,27 @@
     - `make ci`
     - Playwright page operation against local `127.0.0.1:4088` with screenshots under `artifacts/webui-session-cwd-e2e/20260629-session-cwd/`
 
+- Current verified session CRUD protocol slice:
+  - `ui.protocol` owns `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, plus session `title` and `archived` projections
+  - `reason.persistence` owns session metadata sidecar truth at `~/.freehand/state/ui/<agent>/session-metadata.json`
+  - `runtime.ui-command-dispatch` routes CRUD commands into `ReasonPersistence` and refreshes shared `UiProtocolState`
+  - `freehand-cli adp-session-manage --url ws://.../adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]` provides no-UI ADP control
+  - `DeleteSession` currently means non-destructive delete-as-archive; physical deletion of authoritative turn truth is not implemented without explicit destructive lifecycle approval
+  - verification:
+    - `cargo test -p freehand-ui-protocol -- --nocapture` -> 38 passed
+    - `cargo test -p freehand-reason -- --nocapture` -> 56 passed
+    - `cargo test -p freehand-runtime -- --nocapture` -> 51 passed
+    - `cargo test -p freehand-cli -- --nocapture` -> 12 passed
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - live current-workspace daemon on `127.0.0.1:4092`: ADP create/rename/archive/restore/delete and unknown-session failure verified with `target/debug/freehand-cli adp-session-manage`
+  - remaining UI work:
+    - WebUI context menu/buttons for rename/archive/restore/delete are not implemented yet; use ADP/CLI for now
+
 - Current verified WebUI layered controls slice:
   - `app.webui-smoke` now renders a composer control strip with file/image/video attachment buttons, attachment preview, selected-session refresh, and read-only runtime model selector
   - WebUI attachment drafts are session-scoped UI metadata in `freehand-webui-attachment-drafts-v1`; current page `File` handles are retained for retry, restored metadata is marked `metadata-only`, and submitted ADP text receives placeholder lines only

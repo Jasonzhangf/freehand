@@ -8,6 +8,7 @@
   - accepted command ingress becomes a dispatch envelope
   - submit commands may carry an optional selected session id and selected cwd and must create or continue that cwd-bound session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
+  - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
   - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
   - live bootstrap restores multi-round tool activity from reason-ledger snapshots into derived UI session transcripts after daemon restart
   - reason-backed submit/cancel update derived UI state
@@ -28,6 +29,7 @@
   - final live multi-round projection aggregates tool activity from earlier rounds instead of showing only the final round, while excluding intermediate continuation text from the final public conversation
   - node-backed direct message returns owner-backed receipt
   - unsupported resume path fails explicitly
+  - unknown session metadata mutation targets fail explicitly as target-not-found
 - white-box plan:
   - runtime bootstrap coverage
   - config-selected bootstrap coverage
@@ -35,6 +37,8 @@
   - config-selected live shared node-metadata-ledger bootstrap failure coverage
   - selected-session live submit coverage
   - selected-session cwd inheritance coverage
+  - session metadata dispatch coverage for create, rename, archive, restore, and delete-as-archive
+  - session metadata negative coverage for unknown session id and empty title rejection before runtime dispatch
   - live tool execution with requested session cwd coverage
   - persisted latest-turn restore coverage
   - next runtime turn ordinal restore coverage
@@ -68,6 +72,7 @@
   - config-selected live multi-round tool restore smoke
   - config-selected live node-metadata-ledger bootstrap smoke
   - runtime checkpoint rewind receipt smoke
+  - runtime session CRUD receipt smoke over the shared UI protocol state
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
 - fixtures / replay inputs / runtime evidence paths:
@@ -84,6 +89,7 @@
   - config-selected live bootstrap now rejects unwritable shared node metadata ledgers explicitly before a dispatcher can materialize
   - provider-backed submit dispatch plus persisted restore/bootstrap is covered
 - selected-session cwd projection and inheritance are covered
+- session metadata dispatch coverage is implemented through runtime dispatch into `reason.persistence` and shared UI projection queries
 - live provider submit now streams incremental UI state updates through runtime-owned hooks
 - live provider submit now projects provider-request-built lifecycle state into UI before model response arrives
 - live provider submit now streams tool-result UI updates and final projection keeps earlier-round tool activity visible without exposing intermediate continuation text

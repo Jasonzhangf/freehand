@@ -44,6 +44,26 @@ pub struct UiSource {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiCommand {
+    CreateSession {
+        session_id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+    },
+    RenameSession {
+        session_id: SessionId,
+        title: String,
+    },
+    ArchiveSession {
+        session_id: SessionId,
+    },
+    RestoreSession {
+        session_id: SessionId,
+    },
+    DeleteSession {
+        session_id: SessionId,
+    },
     SubmitUserInput {
         text: String,
         #[serde(default)]
@@ -69,6 +89,7 @@ pub enum UiCommand {
         turn_id: TurnId,
     },
     QuerySessionList,
+    QueryArchivedSessionList,
     QuerySessionTurns {
         session_id: SessionId,
     },
@@ -196,6 +217,10 @@ pub struct UiPublicTurnProjection {
 pub struct UiSessionSummary {
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     pub latest_turn_id: Option<TurnId>,
     pub active_turn_id: Option<TurnId>,
@@ -213,8 +238,23 @@ pub struct UiSessionListProjection {
 pub struct UiSessionTranscriptProjection {
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     pub turns: Vec<UiTurnProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionMetadataProjection {
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -434,6 +474,7 @@ pub struct UiProtocolState {
     latest_active_turn_id: Option<TurnId>,
     turns: BTreeMap<TurnId, UiTurnProjection>,
     session_cwds: BTreeMap<SessionId, String>,
+    session_metadata: BTreeMap<SessionId, UiSessionMetadataProjection>,
     node_status: BTreeMap<String, NodeStatusSnapshot>,
     progress: BTreeMap<TurnId, TaskProgressSnapshot>,
     debug: BTreeMap<TurnId, DebugStateSnapshot>,
@@ -443,6 +484,10 @@ pub struct UiProtocolState {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum UiProtocolError {
+    #[error("session command requires non-empty session id")]
+    EmptySessionId,
+    #[error("session title must be non-empty when provided")]
+    EmptySessionTitle,
     #[error("submit user input command requires non-empty text")]
     EmptyUserInput,
     #[error("session cwd must be non-empty when provided")]
@@ -474,6 +519,7 @@ impl UiProtocolState {
             latest_active_turn_id: None,
             turns: BTreeMap::new(),
             session_cwds: BTreeMap::new(),
+            session_metadata: BTreeMap::new(),
             node_status: BTreeMap::new(),
             progress: BTreeMap::new(),
             debug: BTreeMap::new(),
@@ -499,10 +545,42 @@ impl UiProtocolState {
     pub fn set_session_cwd(&mut self, session_id: SessionId, cwd: impl Into<String>) {
         let cwd = cwd.into();
         self.session_cwds.insert(session_id.clone(), cwd.clone());
+        self.session_metadata
+            .entry(session_id.clone())
+            .and_modify(|metadata| metadata.cwd = Some(cwd.clone()))
+            .or_insert_with(|| UiSessionMetadataProjection {
+                session_id: session_id.clone(),
+                title: None,
+                archived: false,
+                cwd: Some(cwd.clone()),
+            });
         for projection in self.turns.values_mut() {
             if projection.session_id == session_id {
                 projection.cwd = Some(cwd.clone());
             }
+        }
+    }
+
+    pub fn set_session_metadata(&mut self, metadata: UiSessionMetadataProjection) {
+        if let Some(cwd) = metadata.cwd.clone() {
+            self.session_cwds
+                .insert(metadata.session_id.clone(), cwd.clone());
+            for projection in self.turns.values_mut() {
+                if projection.session_id == metadata.session_id && projection.cwd.is_none() {
+                    projection.cwd = Some(cwd.clone());
+                }
+            }
+        }
+        self.session_metadata
+            .insert(metadata.session_id.clone(), metadata);
+    }
+
+    pub fn set_session_metadata_entries(
+        &mut self,
+        entries: impl IntoIterator<Item = UiSessionMetadataProjection>,
+    ) {
+        for entry in entries {
+            self.set_session_metadata(entry);
         }
     }
 
@@ -793,11 +871,27 @@ impl UiProtocolState {
             UiCommand::QuerySessionList => Ok(UiQueryResult::SessionList(session_list_projection(
                 &self.turns,
                 &self.session_cwds,
+                &self.session_metadata,
                 self.latest_active_turn_id.as_ref(),
+                false,
             ))),
-            UiCommand::QuerySessionTurns { session_id } => Ok(UiQueryResult::SessionTurns(
-                session_transcript_projection(session_id, &self.turns, &self.session_cwds),
-            )),
+            UiCommand::QueryArchivedSessionList => {
+                Ok(UiQueryResult::SessionList(session_list_projection(
+                    &self.turns,
+                    &self.session_cwds,
+                    &self.session_metadata,
+                    self.latest_active_turn_id.as_ref(),
+                    true,
+                )))
+            }
+            UiCommand::QuerySessionTurns { session_id } => {
+                Ok(UiQueryResult::SessionTurns(session_transcript_projection(
+                    session_id,
+                    &self.turns,
+                    &self.session_cwds,
+                    &self.session_metadata,
+                )))
+            }
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
                 self.node_status.get(node_id).cloned(),
             )),
@@ -866,6 +960,33 @@ impl Default for UiProtocolState {
 
 pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
     match command {
+        UiCommand::CreateSession {
+            session_id, title, ..
+        } if session_id.as_str().trim().is_empty()
+            || title.as_ref().is_some_and(|title| title.trim().is_empty()) =>
+        {
+            if session_id.as_str().trim().is_empty() {
+                Err(UiProtocolError::EmptySessionId)
+            } else {
+                Err(UiProtocolError::EmptySessionTitle)
+            }
+        }
+        UiCommand::RenameSession { session_id, title }
+            if session_id.as_str().trim().is_empty() || title.trim().is_empty() =>
+        {
+            if session_id.as_str().trim().is_empty() {
+                Err(UiProtocolError::EmptySessionId)
+            } else {
+                Err(UiProtocolError::EmptySessionTitle)
+            }
+        }
+        UiCommand::ArchiveSession { session_id }
+        | UiCommand::RestoreSession { session_id }
+        | UiCommand::DeleteSession { session_id }
+            if session_id.as_str().trim().is_empty() =>
+        {
+            Err(UiProtocolError::EmptySessionId)
+        }
         UiCommand::SubmitUserInput { text, .. } if text.trim().is_empty() => {
             Err(UiProtocolError::EmptyUserInput)
         }
@@ -897,6 +1018,8 @@ pub fn accept_command_ingress(command: &UiCommand) -> Result<UiCommandIngressAck
 
 pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
     let code = match err {
+        UiProtocolError::EmptySessionId => "empty_session_id",
+        UiProtocolError::EmptySessionTitle => "empty_session_title",
         UiProtocolError::EmptyUserInput => "empty_user_input",
         UiProtocolError::EmptySessionCwd => "empty_session_cwd",
         UiProtocolError::EmptySlaveMessage => "empty_slave_message",
@@ -1132,7 +1255,9 @@ fn empty_checkpoint_snapshot() -> UiCheckpointSnapshot {
 fn session_list_projection(
     turns: &BTreeMap<TurnId, UiTurnProjection>,
     session_cwds: &BTreeMap<SessionId, String>,
+    session_metadata: &BTreeMap<SessionId, UiSessionMetadataProjection>,
     latest_active_turn_id: Option<&TurnId>,
+    archived: bool,
 ) -> UiSessionListProjection {
     let mut grouped: Vec<(SessionId, Vec<&UiTurnProjection>)> = Vec::new();
     for turn in turns.values() {
@@ -1158,12 +1283,16 @@ fn session_list_projection(
                     .any(|turn| &turn.turn_id == turn_id)
                     .then(|| turn_id.clone())
             });
+            let metadata = session_metadata.get(&session_id);
             let cwd = session_cwds
                 .get(&session_id)
                 .cloned()
+                .or_else(|| metadata.and_then(|metadata| metadata.cwd.clone()))
                 .or_else(|| latest.and_then(|turn| turn.cwd.clone()));
             UiSessionSummary {
                 session_id,
+                title: metadata.and_then(|metadata| metadata.title.clone()),
+                archived: metadata.is_some_and(|metadata| metadata.archived),
                 cwd,
                 latest_turn_id: latest.map(|turn| turn.turn_id.clone()),
                 active_turn_id,
@@ -1175,6 +1304,30 @@ fn session_list_projection(
             }
         })
         .collect::<Vec<_>>();
+    for metadata in session_metadata.values() {
+        if metadata.archived != archived
+            || sessions
+                .iter()
+                .any(|session| session.session_id == metadata.session_id)
+        {
+            continue;
+        }
+        sessions.push(UiSessionSummary {
+            session_id: metadata.session_id.clone(),
+            title: metadata.title.clone(),
+            archived: metadata.archived,
+            cwd: metadata
+                .cwd
+                .clone()
+                .or_else(|| session_cwds.get(&metadata.session_id).cloned()),
+            latest_turn_id: None,
+            active_turn_id: None,
+            turn_count: 0,
+            latest_status: "empty".to_owned(),
+            latest_summary: metadata.title.clone(),
+        });
+    }
+    sessions.retain(|session| session.archived == archived);
     sessions.sort_by(|left, right| left.session_id.as_str().cmp(right.session_id.as_str()));
     UiSessionListProjection { sessions }
 }
@@ -1183,8 +1336,13 @@ fn session_transcript_projection(
     session_id: &SessionId,
     turns: &BTreeMap<TurnId, UiTurnProjection>,
     session_cwds: &BTreeMap<SessionId, String>,
+    session_metadata: &BTreeMap<SessionId, UiSessionMetadataProjection>,
 ) -> UiSessionTranscriptProjection {
-    let cwd = session_cwds.get(session_id).cloned();
+    let metadata = session_metadata.get(session_id);
+    let cwd = session_cwds
+        .get(session_id)
+        .cloned()
+        .or_else(|| metadata.and_then(|metadata| metadata.cwd.clone()));
     let mut session_turns = turns
         .values()
         .filter(|turn| &turn.session_id == session_id)
@@ -1199,6 +1357,8 @@ fn session_transcript_projection(
         .sort_by(|left, right| turn_order_key(&left.turn_id).cmp(&turn_order_key(&right.turn_id)));
     UiSessionTranscriptProjection {
         session_id: session_id.clone(),
+        title: metadata.and_then(|metadata| metadata.title.clone()),
+        archived: metadata.is_some_and(|metadata| metadata.archived),
         cwd,
         turns: session_turns,
     }
@@ -1370,6 +1530,11 @@ fn fail_waiting_tool_activities(activities: &mut [UiToolActivity], detail: Optio
 
 fn command_kind(command: &UiCommand) -> &'static str {
     match command {
+        UiCommand::CreateSession { .. } => "create_session",
+        UiCommand::RenameSession { .. } => "rename_session",
+        UiCommand::ArchiveSession { .. } => "archive_session",
+        UiCommand::RestoreSession { .. } => "restore_session",
+        UiCommand::DeleteSession { .. } => "delete_session",
         UiCommand::SubmitUserInput { .. } => "submit_user_input",
         UiCommand::SubscribeLatestActiveTurn { .. } => "subscribe_latest_active_turn",
         UiCommand::SubscribeTurn { .. } => "subscribe_turn",
@@ -1379,6 +1544,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryLatestActiveTurn => "query_latest_active_turn",
         UiCommand::QueryTurn { .. } => "query_turn",
         UiCommand::QuerySessionList => "query_session_list",
+        UiCommand::QueryArchivedSessionList => "query_archived_session_list",
         UiCommand::QuerySessionTurns { .. } => "query_session_turns",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
@@ -1395,7 +1561,12 @@ fn command_kind(command: &UiCommand) -> &'static str {
 fn is_command_ingress_kind(command: &UiCommand) -> bool {
     matches!(
         command,
-        UiCommand::SubmitUserInput { .. }
+        UiCommand::CreateSession { .. }
+            | UiCommand::RenameSession { .. }
+            | UiCommand::ArchiveSession { .. }
+            | UiCommand::RestoreSession { .. }
+            | UiCommand::DeleteSession { .. }
+            | UiCommand::SubmitUserInput { .. }
             | UiCommand::SendDirectMessageToSlave { .. }
             | UiCommand::RewindCheckpoint { .. }
             | UiCommand::CancelTurn { .. }
@@ -1406,6 +1577,11 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
 
 fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) {
     match command {
+        UiCommand::CreateSession { .. }
+        | UiCommand::RenameSession { .. }
+        | UiCommand::ArchiveSession { .. }
+        | UiCommand::RestoreSession { .. }
+        | UiCommand::DeleteSession { .. } => ("reason.persistence", "crates/freehand-reason"),
         UiCommand::SubmitUserInput { .. }
         | UiCommand::CancelTurn { .. }
         | UiCommand::CancelLatestActiveTurn { .. }
@@ -2480,6 +2656,75 @@ mod tests {
         assert_eq!(envelope.ingress.command_kind, "rewind_checkpoint");
         assert_eq!(envelope.target_feature_id, "runtime.checkpoint-rewind");
         assert_eq!(envelope.target_owner_module, "crates/freehand-runtime");
+    }
+
+    #[test]
+    fn command_dispatch_envelope_routes_session_crud_to_persistence_owner() {
+        let envelope = build_command_dispatch_envelope(&UiCommand::RenameSession {
+            session_id: SessionId::new("session-crud"),
+            title: "Renamed".to_owned(),
+        })
+        .expect("envelope");
+        assert_eq!(envelope.ingress.command_kind, "rename_session");
+        assert_eq!(envelope.target_feature_id, "reason.persistence");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-reason");
+    }
+
+    #[test]
+    fn session_crud_validation_rejects_empty_title() {
+        let err = accept_command_ingress(&UiCommand::RenameSession {
+            session_id: SessionId::new("session-crud"),
+            title: "   ".to_owned(),
+        })
+        .expect_err("empty title must fail");
+        assert_eq!(err, UiProtocolError::EmptySessionTitle);
+        assert_eq!(protocol_rejection(err).code, "empty_session_title");
+    }
+
+    #[test]
+    fn session_metadata_projection_includes_empty_and_archived_sessions() {
+        let mut state = UiProtocolState::default();
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: SessionId::new("session-empty"),
+            title: Some("Empty session".to_owned()),
+            archived: false,
+            cwd: Some("/tmp".to_owned()),
+        });
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: SessionId::new("session-archived"),
+            title: Some("Archived session".to_owned()),
+            archived: true,
+            cwd: None,
+        });
+
+        match state
+            .query(&UiCommand::QuerySessionList)
+            .expect("active list")
+        {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions.len(), 1);
+                assert_eq!(list.sessions[0].session_id, SessionId::new("session-empty"));
+                assert_eq!(list.sessions[0].title.as_deref(), Some("Empty session"));
+                assert!(!list.sessions[0].archived);
+                assert_eq!(list.sessions[0].turn_count, 0);
+            }
+            other => panic!("unexpected query result: {other:?}"),
+        }
+
+        match state
+            .query(&UiCommand::QueryArchivedSessionList)
+            .expect("archived list")
+        {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions.len(), 1);
+                assert_eq!(
+                    list.sessions[0].session_id,
+                    SessionId::new("session-archived")
+                );
+                assert!(list.sessions[0].archived);
+            }
+            other => panic!("unexpected query result: {other:?}"),
+        }
     }
 
     #[test]

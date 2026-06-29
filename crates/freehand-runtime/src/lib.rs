@@ -47,15 +47,16 @@ use freehand_provider_core::{
     ProviderSemanticOutput, ProviderToolExchange, build_semantic_request,
 };
 use freehand_reason::{
-    ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonBroadcastEvent, ReasonPersistence,
-    ReasonPersistenceError, ReasonTurnEngine, SessionHistory, TurnRecord, TurnStartInput,
+    PersistedSessionMetadataEntry, ProviderRawLedgerWrite, ProviderRawScenePosition,
+    ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError, ReasonTurnEngine,
+    SessionHistory, TurnRecord, TurnStartInput,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
     UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt, UiProtocolState,
-    UiTurnProjection, checkpoint_projection_from_runtime_summary, turn_projection_for_client,
-    turn_projection_from_events,
+    UiSessionMetadataProjection, UiTurnProjection, checkpoint_projection_from_runtime_summary,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1682,6 +1683,15 @@ impl RuntimeCommandDispatcher {
             .map_err(|err| {
                 RuntimeCommandDispatcherError::ReasonPersistenceBootstrap(err.to_string())
             })?;
+            let metadata_entries = persistence.load_session_metadata().map_err(|err| {
+                RuntimeCommandDispatcherError::ReasonPersistenceBootstrap(err.to_string())
+            })?;
+            ui_state
+                .lock()
+                .expect("lock ui state")
+                .set_session_metadata_entries(
+                    metadata_entries.into_iter().map(session_metadata_to_ui),
+                );
             match persistence.restore(&config.session_id) {
                 Ok(restored) => {
                     session_history = restored.history;
@@ -1706,7 +1716,20 @@ impl RuntimeCommandDispatcher {
             }
         }
 
-        let session_cwds = session_cwds_from_turns(&turns);
+        let mut session_cwds = session_cwds_from_turns(&turns);
+        if let Some(live) = &config.live {
+            let persistence =
+                ReasonPersistence::new(live.runtime_home.clone(), config.reason_agent_id.clone());
+            for metadata in persistence.load_session_metadata().map_err(|err| {
+                RuntimeCommandDispatcherError::ReasonPersistenceBootstrap(err.to_string())
+            })? {
+                if let Some(cwd) = metadata.cwd
+                    && let Ok(path) = fs::canonicalize(cwd)
+                {
+                    session_cwds.insert(metadata.session_id, path);
+                }
+            }
+        }
         let dispatcher = Self {
             ui_state,
             state: Mutex::new(RuntimeCommandDispatcherState {
@@ -2061,6 +2084,56 @@ impl RuntimeCommandDispatcher {
         )))
     }
 
+    fn dispatch_session_management(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let live = state.config.live.as_ref().ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "session management requires a live runtime home".to_owned(),
+            )
+        })?;
+        let persistence = ReasonPersistence::new(
+            live.runtime_home.clone(),
+            state.config.reason_agent_id.clone(),
+        );
+        let metadata = match envelope.command.clone() {
+            UiCommand::CreateSession {
+                session_id,
+                title,
+                cwd,
+            } => persistence.create_session_metadata(session_id, title, cwd),
+            UiCommand::RenameSession { session_id, title } => {
+                persistence.rename_session(&session_id, title)
+            }
+            UiCommand::ArchiveSession { session_id } => persistence.archive_session(&session_id),
+            UiCommand::RestoreSession { session_id } => persistence.restore_session(&session_id),
+            UiCommand::DeleteSession { session_id } => persistence.delete_session(&session_id),
+            _ => {
+                return Err(UiCommandDispatchPortError::Unsupported(
+                    "command is not a session management target".to_owned(),
+                ));
+            }
+        }
+        .map_err(map_session_metadata_dispatch_error)?;
+        if let Some(cwd) = metadata.cwd.as_ref()
+            && let Ok(path) = fs::canonicalize(cwd)
+        {
+            state.session_cwds.insert(metadata.session_id.clone(), path);
+        }
+        self.ui_state
+            .lock()
+            .expect("lock ui state")
+            .set_session_metadata(session_metadata_to_ui(metadata));
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: "session_metadata_updated".to_owned(),
+        })
+    }
+
     fn dispatch_direct_message(
         &self,
         state: &mut RuntimeCommandDispatcherState,
@@ -2236,6 +2309,13 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
 
         let mut state = self.state.lock().expect("lock runtime dispatcher state");
         match envelope.command.clone() {
+            UiCommand::CreateSession { .. }
+            | UiCommand::RenameSession { .. }
+            | UiCommand::ArchiveSession { .. }
+            | UiCommand::RestoreSession { .. }
+            | UiCommand::DeleteSession { .. } => {
+                self.dispatch_session_management(&mut state, envelope)
+            }
             UiCommand::CancelTurn { turn_id } => {
                 self.dispatch_cancel_turn(&mut state, envelope, turn_id)
             }
@@ -2275,6 +2355,27 @@ fn map_node_dispatch_error(err: NodeRuntimeError) -> UiCommandDispatchPortError 
         | NodeRuntimeError::EmptyPairToken => {
             UiCommandDispatchPortError::TargetNotFound(err.to_string())
         }
+    }
+}
+
+fn map_session_metadata_dispatch_error(err: ReasonPersistenceError) -> UiCommandDispatchPortError {
+    match err {
+        ReasonPersistenceError::SessionMetadataTargetNotFound(session_id) => {
+            UiCommandDispatchPortError::TargetNotFound(session_id)
+        }
+        ReasonPersistenceError::InvalidSessionMetadata(message) => {
+            UiCommandDispatchPortError::DispatchFailed(message)
+        }
+        other => UiCommandDispatchPortError::DispatchFailed(other.to_string()),
+    }
+}
+
+fn session_metadata_to_ui(entry: PersistedSessionMetadataEntry) -> UiSessionMetadataProjection {
+    UiSessionMetadataProjection {
+        session_id: entry.session_id,
+        title: entry.title,
+        archived: entry.archived,
+        cwd: entry.cwd,
     }
 }
 
@@ -3333,6 +3434,106 @@ mod tests {
             }
             other => panic!("unexpected session turns query: {other:?}"),
         }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_dispatches_session_crud_into_shared_ui_projection() {
+        let runtime_home = temp_runtime_home();
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+        let session_id = SessionId::new("session-crud-runtime");
+
+        let create = build_command_dispatch_envelope(&UiCommand::CreateSession {
+            session_id: session_id.clone(),
+            title: Some("Initial".to_owned()),
+            cwd: Some("/tmp".to_owned()),
+        })
+        .expect("create envelope");
+        let receipt = runtime.dispatch(create).expect("create dispatch");
+        assert_eq!(receipt.target_feature_id, "reason.persistence");
+        assert_eq!(receipt.dispatch_status, "session_metadata_updated");
+
+        let rename = build_command_dispatch_envelope(&UiCommand::RenameSession {
+            session_id: session_id.clone(),
+            title: "Renamed".to_owned(),
+        })
+        .expect("rename envelope");
+        runtime.dispatch(rename).expect("rename dispatch");
+
+        match runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionList)
+            .expect("session list")
+        {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions.len(), 1);
+                assert_eq!(list.sessions[0].session_id, session_id);
+                assert_eq!(list.sessions[0].title.as_deref(), Some("Renamed"));
+                assert!(!list.sessions[0].archived);
+            }
+            other => panic!("unexpected session list: {other:?}"),
+        }
+
+        let archive = build_command_dispatch_envelope(&UiCommand::ArchiveSession {
+            session_id: session_id.clone(),
+        })
+        .expect("archive envelope");
+        runtime.dispatch(archive).expect("archive dispatch");
+        match runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QueryArchivedSessionList)
+            .expect("archived list")
+        {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions.len(), 1);
+                assert_eq!(list.sessions[0].session_id, session_id);
+                assert!(list.sessions[0].archived);
+            }
+            other => panic!("unexpected archived list: {other:?}"),
+        }
+
+        let restore = build_command_dispatch_envelope(&UiCommand::RestoreSession {
+            session_id: session_id.clone(),
+        })
+        .expect("restore envelope");
+        runtime.dispatch(restore).expect("restore dispatch");
+        match runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionList)
+            .expect("active list")
+        {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions.len(), 1);
+                assert_eq!(list.sessions[0].session_id, session_id);
+                assert!(!list.sessions[0].archived);
+            }
+            other => panic!("unexpected active list: {other:?}"),
+        }
+
+        let missing = build_command_dispatch_envelope(&UiCommand::ArchiveSession {
+            session_id: SessionId::new("missing-session"),
+        })
+        .expect("missing envelope");
+        let err = runtime.dispatch(missing).expect_err("missing must fail");
+        assert_eq!(
+            err,
+            UiCommandDispatchPortError::TargetNotFound("missing-session".to_owned())
+        );
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }

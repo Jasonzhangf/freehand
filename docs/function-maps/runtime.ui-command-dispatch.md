@@ -20,6 +20,7 @@
 - submit commands may carry an optional selected session id and selected cwd so a draft or explicitly chosen cwd-bound session can receive the new turn instead of always using the default session
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
 - runtime dispatch owner reads the declared owner target from the envelope
+- session management commands route through runtime into `reason.persistence` session metadata APIs; runtime refreshes `UiProtocolState` from the persistence-owned metadata projection after mutation
 - live submit registers active turn cancellation state before provider execution and releases the runtime mutex before provider IO
 - `CancelLatestActiveTurn` resolves to the newest active live turn before falling back to latest persisted runtime turn
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
@@ -47,10 +48,12 @@
 - live bootstrap rehydrates session cwd from persisted turn records into both `UiProtocolState` and runtime session cwd inheritance state
 - live bootstrap groups persisted `runtime-turn-N` round snapshots into one UI projection when restoring session transcripts, while keeping authoritative closed-turn recovery unchanged
 - runtime-owned UI state reflects derived projections only, not authoritative turn truth
+- session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and the protocol projection has been refreshed
 
 ## Error Mainline
 
 - unsupported runtime command paths return explicit dispatch-port failures
+- unknown session metadata mutation targets return explicit target-not-found failures
 - missing turn targets for cancel/resume return explicit dispatch-port failures
 - cancelled live turns return explicit cancelled dispatch failure to the original submitter and must not overwrite cancelled UI projection with later provider success
 - live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries
@@ -91,6 +94,7 @@
 | 08 | `RuntimeCommandDispatcher::dispatch_prepared_live_submit` | `crates/freehand-runtime/src/lib.rs` | run provider-backed live turn outside runtime mutex while honoring active cancel token | prepared live submit | live receipt or cancelled dispatch failure | `RuntimeCommandDispatcher::dispatch` | `run_live_reason_turn_with_hooks` | bound |
 | 09 | `RuntimeCommandDispatcher::dispatch_cancel_turn` | `crates/freehand-runtime/src/lib.rs` | cancel active or persisted turns through reason-owned terminal semantics and UI projection | cancel command turn id | cancel receipt + cancelled projection | `RuntimeCommandDispatcher::dispatch` | reason owner / active cancel registry | bound |
 | 10 | `restore_all_persisted_sessions_into_ui` | `crates/freehand-runtime/src/lib.rs` | rehydrate UI protocol state from reason-ledger turn snapshots and group same-ordinal runtime rounds for transcript projection | persisted reason sessions | derived UI session list/transcripts with retained tool activity | runtime bootstrap | reason persistence + UI protocol | bound |
+| 11 | `RuntimeCommandDispatcher::dispatch_session_management` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned session CRUD commands into reason persistence metadata APIs and refresh UI projection | session CRUD dispatch envelope | dispatch receipt or target-not-found failure | `RuntimeCommandDispatcher::dispatch` | `ReasonPersistence` session metadata owner | bound |
 
 ## Sync Status Against Code
 
@@ -116,6 +120,7 @@
 - config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
 - config-selected live bootstrap now restores multi-round tool activity into UI session transcripts after daemon restart
 - config-selected live bootstrap now restores persisted session cwd from turn records and preserves cwd for later same-session submits
+- runtime session-management dispatch is bound as a thin route to `reason.persistence`
 - final live projection now aggregates only cross-round tool lifecycle state so earlier-round tool activity remains visible without leaking intermediate continuation text into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

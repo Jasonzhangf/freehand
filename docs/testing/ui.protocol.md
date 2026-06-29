@@ -8,6 +8,7 @@
   - command ingress accepts only mutation-intent commands and rejects query-route misuse explicitly
   - accepted command ingress is routed to declared owner feature/module before transport dispatch
   - submit command validation accepts an optional selected session id and optional selected cwd without weakening empty-text rejection
+  - session management commands are protocol-owned ingress intents: create, rename, archive, restore, and delete route to the session persistence owner instead of mutating WebUI local state
   - latest-active cancellation is accepted as mutation intent and routes to `reason.turn`
   - query returns snapshot truth
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
@@ -27,6 +28,7 @@
   - client-specific projection gating keeps slave card visible only for WebUI
   - public conversation projection preserves the user prompt while hiding reasoning, usage, debug details, raw completion schema blocks, and verbose tool term text from the main user-visible stream
   - session list and transcript queries project the cwd bound to the selected session
+  - session list queries project protocol-owned session title and archived state from owner-supplied session metadata
   - cancelled terminal status remains visible to public conversation status mapping and is not projected as completed
   - public tool summaries carry `tool_call_id` so same-tool waiting/completed updates remain one UI activity
 - white-box plan:
@@ -35,6 +37,7 @@
   - command dispatch routing mapping
   - submit command selected-session validation mapping
   - submit command selected-cwd validation and JSON roundtrip mapping
+  - session management command validation covers empty title, empty session id, and explicit owner-routing to `reason.persistence`
   - explicit cancel and latest-active cancel owner-routing mapping
   - checkpoint rewind ingress validation and owner-routing mapping
   - checkpoint projection storage and query mapping
@@ -52,6 +55,7 @@
   - command ingress accept/reject smoke
   - selected-session submit command smoke
   - selected-session cwd projection smoke
+  - session metadata projection smoke covers created empty sessions, renamed sessions, archived sessions being hidden from the active list, and restored sessions becoming visible again
   - command dispatch envelope owner-routing smoke
   - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
   - debug-state snapshot/query by `turn_id`
@@ -68,6 +72,7 @@
   - blank latest-turn subscribe waits until a turn exists instead of failing early
   - ADP command/query/subscribe frame roundtrip smoke
   - ADP query-as-command negative smoke
+  - ADP session management negative smoke proves invalid session metadata commands fail explicitly instead of becoming local-only UI state
 - project black-box impact:
   - CLI and WebUI consume one protocol truth while rendering different views
   - protocol truth can back a minimal service boundary without duplicating projection logic in apps
@@ -105,3 +110,4 @@
   - tool summaries now expose `display` from the `tool.display` owner, and public bodies prefer structured result summaries over raw detail text
   - ADP request/response frames are landed and regression-locked by JSON roundtrip coverage
   - session cwd summary/transcript projection is landed and regression-locked
+  - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, and `DeleteSession` routing through runtime to `reason.persistence`

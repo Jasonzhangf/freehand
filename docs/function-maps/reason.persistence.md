@@ -35,6 +35,7 @@
 - reason persistence can return latest per-turn snapshots from the reason ledger for derived UI restore so non-terminal tool rounds remain visible without becoming closed-turn truth
 - terminal turn persistence yields immutable per-turn truth plus updated session cursor truth
 - derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete
+- session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management; it is separate from provider-visible session history and turn transcript truth
 
 ## Error Mainline
 
@@ -44,6 +45,8 @@
 - stale duplicate ledger rows are recoverable only when a later authoritative row with the expected next sequence exists; otherwise duplicate or regressed sequence numbers still fail explicitly
 - provider raw payload availability alone must not mask missing authoritative reason truth
 - UI sidecar presence alone must not be treated as session-truth recovery evidence
+- session metadata mutations for unknown sessions fail explicitly unless they are creating a new metadata-only session
+- deleting a session through UI protocol is a non-destructive archive operation until a physical deletion design is explicitly approved
 
 ## Shared Multi-Reference Functions
 
@@ -77,6 +80,12 @@
   - allowed callers: reason persistence owner, owner-crate tests
   - related tests: atomic snapshot replace, save/load smoke
   - why shared: all persistence file writes must use one atomic replacement path instead of ad hoc writes
+- `ReasonPersistence::create_session_metadata` / `rename_session` / `archive_session` / `restore_session`
+  - owner: `crates/freehand-reason/src/persistence.rs`
+  - purpose: persist multi-UI session management metadata without mutating turn transcript truth
+  - allowed callers: runtime UI command dispatch owner
+  - related tests: session metadata create/rename/archive/restore smoke plus unknown-session rejection
+  - why shared: WebUI/Android/CLI must not each invent local session CRUD state
 
 ## Function Call Table
 
@@ -95,6 +104,7 @@
 | 11 | `ReasonPersistence::record_provider_raw_event` | `crates/freehand-reason/src/persistence.rs` | append debug-only provider raw ledger rows without mutating authoritative turn/session truth | provider family + session/turn/trace identity + raw wire body + scene provenance | durable provider raw debug evidence | runtime/live bridge | persistence owner | bound |
 | 12 | `ReasonPersistence::restore` | `crates/freehand-reason/src/persistence.rs` | rebuild authoritative state from snapshots plus reason-ledger tail, or from ledger alone | snapshot directory + reason ledger | restored in-memory session and turn truth | runtime/bootstrap/testkit/CLI smoke | persistence owner | bound |
 | 13 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | rebuild latest per-turn snapshots from reason ledger for derived UI restore without changing authoritative closed-turn recovery semantics | reason ledger | latest snapshot per turn id | runtime UI bootstrap | persistence owner | bound |
+| 14 | `ReasonPersistence::create_session_metadata` / `rename_session` / `archive_session` / `restore_session` | `crates/freehand-reason/src/persistence.rs` | persist session display metadata sidecar mutations for shared UI CRUD | session id + title/archive intent | updated session metadata sidecar | runtime UI command dispatch | persistence owner | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -102,11 +112,13 @@
 - reason-ledger rows may carry metadata-side diagnostics, but request-chain content remains separate from provider raw debug bodies
 - provider raw ledgers are separate files under `~/.freehand/ledgers/providers` and must not be reinterpreted as authoritative request or turn truth
 - derived UI sidecars and session indexes are downstream projections only and must not participate in recovery decisions
+- session display metadata is downstream UI/session-management truth and must not participate in provider-visible context recovery decisions
 
 ## Sync Status Against Code
 
 - current code baseline now binds session-history JSON/file round-trip, reason-ledger append, provider-raw debug-ledger append, active-turn refresh, terminal turn materialization, derived sidecar writes, and snapshot-plus-tail / ledger-only recovery
 - current code exposes ledger-backed per-turn snapshot restore for UI projection so multi-round tool activity can survive daemon restart without relying on UI sidecars as truth
+- session metadata sidecar CRUD is bound for create, rename, archive, restore, and delete-as-archive while staying separate from authoritative turn transcript truth
 - CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer
 - live Anthropic runtime path now records provider raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` while keeping those ledgers outside recovery truth
 - explicit owner-bound regression coverage now locks ledger sequence gaps plus provider-raw-only and UI-sidecar-only missing-recovery rejection

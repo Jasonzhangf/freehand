@@ -89,6 +89,16 @@ pub struct PersistedSessionIndexEntry {
     pub latest_terminal_summary: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersistedSessionMetadataEntry {
+    pub agent_id: AgentId,
+    pub session_id: SessionId,
+    pub title: Option<String>,
+    pub archived: bool,
+    pub cwd: Option<String>,
+    pub updated_unix_seconds: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderRawLedgerWrite {
     pub provider_family: ProviderFamily,
@@ -148,6 +158,10 @@ pub enum ReasonPersistenceError {
     LedgerSequenceGap { expected: u64, actual: u64 },
     #[error("no authoritative snapshot or reason ledger exists for session `{0}`")]
     MissingRecoveryTruth(String),
+    #[error("session metadata mutation target was not found: {0}")]
+    SessionMetadataTargetNotFound(String),
+    #[error("session metadata is invalid: {0}")]
+    InvalidSessionMetadata(String),
 }
 
 pub struct ReasonPersistence {
@@ -337,6 +351,75 @@ impl ReasonPersistence {
         &self,
     ) -> Result<Vec<PersistedSessionIndexEntry>, ReasonPersistenceError> {
         self.load_session_index()
+    }
+
+    pub fn load_session_metadata(
+        &self,
+    ) -> Result<Vec<PersistedSessionMetadataEntry>, ReasonPersistenceError> {
+        self.load_session_metadata_entries()
+    }
+
+    pub fn create_session_metadata(
+        &self,
+        session_id: SessionId,
+        title: Option<String>,
+        cwd: Option<String>,
+    ) -> Result<PersistedSessionMetadataEntry, ReasonPersistenceError> {
+        validate_session_id(&session_id)?;
+        let mut entries = self.load_session_metadata_entries()?;
+        let entry = PersistedSessionMetadataEntry {
+            agent_id: self.agent_id.clone(),
+            session_id,
+            title: normalize_optional_title(title)?,
+            archived: false,
+            cwd: normalize_optional_string(cwd),
+            updated_unix_seconds: unix_seconds_now(),
+        };
+        upsert_session_metadata_entry(&mut entries, entry.clone());
+        self.write_session_metadata_entries(&entries)?;
+        Ok(entry)
+    }
+
+    pub fn rename_session(
+        &self,
+        session_id: &SessionId,
+        title: String,
+    ) -> Result<PersistedSessionMetadataEntry, ReasonPersistenceError> {
+        validate_session_target_exists(self, session_id)?;
+        let title = normalize_title(title)?;
+        self.mutate_session_metadata(session_id, |entry| {
+            entry.title = Some(title);
+            entry.updated_unix_seconds = unix_seconds_now();
+        })
+    }
+
+    pub fn archive_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<PersistedSessionMetadataEntry, ReasonPersistenceError> {
+        validate_session_target_exists(self, session_id)?;
+        self.mutate_session_metadata(session_id, |entry| {
+            entry.archived = true;
+            entry.updated_unix_seconds = unix_seconds_now();
+        })
+    }
+
+    pub fn restore_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<PersistedSessionMetadataEntry, ReasonPersistenceError> {
+        validate_session_target_exists(self, session_id)?;
+        self.mutate_session_metadata(session_id, |entry| {
+            entry.archived = false;
+            entry.updated_unix_seconds = unix_seconds_now();
+        })
+    }
+
+    pub fn delete_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<PersistedSessionMetadataEntry, ReasonPersistenceError> {
+        self.archive_session(session_id)
     }
 
     pub fn restore_turn_snapshots_for_ui(
@@ -603,6 +686,48 @@ impl ReasonPersistence {
         read_json_file(&self.session_index_path())
     }
 
+    fn load_session_metadata_entries(
+        &self,
+    ) -> Result<Vec<PersistedSessionMetadataEntry>, ReasonPersistenceError> {
+        if !self.session_metadata_path().is_file() {
+            return Ok(Vec::new());
+        }
+        read_json_file(&self.session_metadata_path())
+    }
+
+    fn write_session_metadata_entries(
+        &self,
+        entries: &[PersistedSessionMetadataEntry],
+    ) -> Result<(), ReasonPersistenceError> {
+        write_json_atomic(&self.session_metadata_path(), &entries)
+    }
+
+    fn mutate_session_metadata(
+        &self,
+        session_id: &SessionId,
+        mutate: impl FnOnce(&mut PersistedSessionMetadataEntry),
+    ) -> Result<PersistedSessionMetadataEntry, ReasonPersistenceError> {
+        let mut entries = self.load_session_metadata_entries()?;
+        let index = entries
+            .iter()
+            .position(|entry| entry.session_id == *session_id)
+            .unwrap_or_else(|| {
+                entries.push(PersistedSessionMetadataEntry {
+                    agent_id: self.agent_id.clone(),
+                    session_id: session_id.clone(),
+                    title: None,
+                    archived: false,
+                    cwd: None,
+                    updated_unix_seconds: unix_seconds_now(),
+                });
+                entries.len() - 1
+            });
+        mutate(&mut entries[index]);
+        let updated = entries[index].clone();
+        self.write_session_metadata_entries(&entries)?;
+        Ok(updated)
+    }
+
     fn append_provider_raw_row(
         &self,
         row: &ProviderRawLedgerRow,
@@ -692,6 +817,14 @@ impl ReasonPersistence {
             .join("session-index")
             .join(format!("{}.json", self.agent_id.as_str()))
     }
+
+    fn session_metadata_path(&self) -> PathBuf {
+        self.runtime_home
+            .join("state")
+            .join("ui")
+            .join(self.agent_id.as_str())
+            .join("session-metadata.json")
+    }
 }
 
 fn validate_cursor(
@@ -737,6 +870,75 @@ fn validate_cursor(
         }
     }
     Ok(())
+}
+
+fn validate_session_id(session_id: &SessionId) -> Result<(), ReasonPersistenceError> {
+    if session_id.as_str().trim().is_empty() {
+        return Err(ReasonPersistenceError::InvalidSessionMetadata(
+            "session id must be non-empty".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_title(title: String) -> Result<String, ReasonPersistenceError> {
+    let title = title.trim().to_owned();
+    if title.is_empty() {
+        return Err(ReasonPersistenceError::InvalidSessionMetadata(
+            "session title must be non-empty".to_owned(),
+        ));
+    }
+    Ok(title)
+}
+
+fn normalize_optional_title(
+    title: Option<String>,
+) -> Result<Option<String>, ReasonPersistenceError> {
+    title.map(normalize_title).transpose()
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn unix_seconds_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn validate_session_target_exists(
+    persistence: &ReasonPersistence,
+    session_id: &SessionId,
+) -> Result<(), ReasonPersistenceError> {
+    validate_session_id(session_id)?;
+    let in_metadata = persistence
+        .load_session_metadata_entries()?
+        .iter()
+        .any(|entry| entry.session_id == *session_id);
+    let in_index = persistence
+        .load_session_index()?
+        .iter()
+        .any(|entry| entry.session_id == *session_id);
+    if in_metadata || in_index {
+        Ok(())
+    } else {
+        Err(ReasonPersistenceError::SessionMetadataTargetNotFound(
+            session_id.as_str().to_owned(),
+        ))
+    }
+}
+
+fn upsert_session_metadata_entry(
+    entries: &mut Vec<PersistedSessionMetadataEntry>,
+    entry: PersistedSessionMetadataEntry,
+) {
+    entries.retain(|existing| existing.session_id != entry.session_id);
+    entries.push(entry);
+    entries.sort_by(|left, right| left.session_id.as_str().cmp(right.session_id.as_str()));
 }
 
 fn normalize_ledger_rows(
@@ -1599,5 +1801,72 @@ mod tests {
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn session_metadata_crud_persists_without_turn_truth_mutation() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let session_id = SessionId::new("session-metadata-1");
+
+        let created = coordinator
+            .create_session_metadata(
+                session_id.clone(),
+                Some("Draft title".to_owned()),
+                Some("/tmp".to_owned()),
+            )
+            .expect("create metadata");
+        assert_eq!(created.title.as_deref(), Some("Draft title"));
+        assert!(!created.archived);
+
+        let renamed = coordinator
+            .rename_session(&session_id, "Renamed title".to_owned())
+            .expect("rename metadata");
+        assert_eq!(renamed.title.as_deref(), Some("Renamed title"));
+
+        let archived = coordinator
+            .archive_session(&session_id)
+            .expect("archive metadata");
+        assert!(archived.archived);
+
+        let restored = coordinator
+            .restore_session(&session_id)
+            .expect("restore metadata");
+        assert!(!restored.archived);
+
+        let deleted = coordinator
+            .delete_session(&session_id)
+            .expect("delete archives metadata");
+        assert!(deleted.archived);
+
+        let reloaded =
+            ReasonPersistence::new(&runtime_home, AgentId::new("agent-1")).load_session_metadata();
+        let reloaded = reloaded.expect("reload metadata");
+        assert_eq!(reloaded.len(), 1);
+        assert_eq!(reloaded[0].session_id, session_id);
+        assert_eq!(reloaded[0].title.as_deref(), Some("Renamed title"));
+        assert!(reloaded[0].archived);
+        assert_eq!(
+            coordinator
+                .restore(&SessionId::new("session-metadata-1"))
+                .expect_err("metadata must not become recovery truth"),
+            ReasonPersistenceError::MissingRecoveryTruth("session-metadata-1".to_owned())
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn session_metadata_mutation_rejects_unknown_session() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let err = coordinator
+            .rename_session(&SessionId::new("missing-session"), "Name".to_owned())
+            .expect_err("unknown session must fail");
+        assert_eq!(
+            err,
+            ReasonPersistenceError::SessionMetadataTargetNotFound("missing-session".to_owned())
+        );
+        let _ = fs::remove_dir_all(runtime_home);
     }
 }
