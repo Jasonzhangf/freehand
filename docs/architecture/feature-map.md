@@ -46,6 +46,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | provider-selected live bridge into runtime-owned live reason turn | `provider.reason-live-bridge` | `crates/freehand-runtime` | `docs/function-maps/provider.reason-live-bridge.md` | `docs/testing/provider.reason-live-bridge.md` |
 | built-in tool registry, Reasonix-aligned tool schemas, tool execution ownership | `tool.registry` | `crates/freehand-tools` | `docs/function-maps/tool.registry.md` | `docs/testing/tool.registry.md` |
 | writable-tool preview truth and preview/execute parity | `tool.preview` | `crates/freehand-tools` | `docs/function-maps/tool.preview.md` | `docs/testing/tool.preview.md` |
+| UI-visible tool semantic classification and display parsing | `tool.display` | `crates/freehand-blocks` | `docs/function-maps/tool.display.md` | `docs/testing/tool.display.md` |
 | turn truth, provider-output application, terminal schema | `reason.turn` | `crates/freehand-reason` | `docs/function-maps/reason.turn.md` | `docs/testing/reason.turn.md` |
 | session-history rewrite state and rewrite gates | `reason.session-history` | `crates/freehand-reason` | `docs/function-maps/reason.session-history.md` | `docs/testing/reason.session-history.md` |
 | reason persistence, ledgers, restore, derived sidecars | `reason.persistence` | `crates/freehand-reason` | `docs/function-maps/reason.persistence.md` | `docs/testing/reason.persistence.md` |
@@ -657,6 +658,44 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - preview and execute share one semantic transform path
   - preview truth stays tool-owned and is not recomputed in runtime or UI
   - writable tools are not live-exposed without preview support
+  - migrated mainline call source and generated wiki stay in sync with the function map
+
+### `tool.display`
+
+- owner: `crates/freehand-blocks`
+- allowed_paths: `crates/freehand-blocks/**`, `crates/freehand-ui-protocol/**`, `apps/freehand-server/assets/webui.js`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
+- forbidden_paths: `crates/freehand-tools/**` except tool-surface owner updates, `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `apps/**` except render-only consumption
+- required_checks:
+  - `cargo test -p freehand-blocks`
+  - `cargo test -p freehand-ui-protocol`
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - display kind classifier tests
+  - class-specific parser tests
+  - tool result display update tests
+- required_module_black_box_tests:
+  - UI protocol projects structured tool display from tool call and result contracts
+  - WebUI asset smoke consumes `display` fields instead of parsing tool raw text
+- required_project_black_box_tests:
+  - ADP latest-turn projection carries structured tool display usable by WebUI and other clients
+- test_design_doc: `docs/testing/tool.display.md`
+- function_map_doc: `docs/function-maps/tool.display.md`
+- mainline_call_doc: `docs/mainline-calls/tool.display.json`
+- generated_wiki_doc: `docs/wiki/tool.display.md`
+- debug_artifacts:
+  - ADP latest-turn projection fixtures
+- runtime_paths:
+  - `~/.freehand/replays/ui`
+- update_triggers:
+  - tool display category changes
+  - tool result display projection changes
+  - public conversation tool summary rules change
+- lifecycle_checks:
+  - classification standard remains a single owner file
+  - every parser stays an independent function
+  - UI consumes parser output and does not guess tool category from raw terms
   - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `ui.protocol`

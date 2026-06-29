@@ -1,5 +1,29 @@
 # note.md
 
+# 2026-06-29 tool display semantic owner
+  - user requirement:
+    - tool classification must have a standard independent file and locked owner
+    - every parser must be an independent function in an independent module
+    - UI must not guess categories; UI only consumes parsed projection
+  - implementation:
+    - added `tool.display` owner in `crates/freehand-blocks/src/tool_display.rs`
+    - added structured `ToolDisplayProjection` with kind/outcome/action/target/summary/result_summary/fields/diff
+    - added independent parser functions for read/list, file mutation, search, plan, shell, and generic tools
+    - `ui.protocol` now attaches `UiToolActivity.display` during tool call projection and updates it on tool result projection
+    - public tool summaries now prefer structured display action/summary/result over raw detail
+    - WebUI `toolSummaryBody` consumes `display` fields and does not classify raw tool text
+  - verification:
+    - `cargo fmt --check`
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-blocks`
+    - `cargo test -p freehand-ui-protocol -- --nocapture`
+    - `cargo test -p freehand-server -- --nocapture`
+    - `cargo test -p freehand-runtime -- --nocapture`
+    - `cargo test -p freehand-cli -- --nocapture`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+
 # 2026-06-29 WebUI provider-request wait state repair
   - gap found:
     - submit/dispatch waiting was local WebUI state and did not prove provider request had been built/sent

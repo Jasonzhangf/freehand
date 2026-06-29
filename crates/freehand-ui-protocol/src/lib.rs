@@ -3,7 +3,10 @@
 use std::collections::BTreeMap;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
-use freehand_blocks::strip_completion_submission_block;
+use freehand_blocks::{
+    ToolDisplayOutcome, ToolDisplayProjection, project_tool_call_display,
+    project_tool_result_display, strip_completion_submission_block,
+};
 use freehand_contracts::{
     AgentId, ErrorErr01RuntimeClassified, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
     ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent,
@@ -154,6 +157,8 @@ pub struct UiToolActivity {
     pub tool_name: String,
     pub status: UiToolActivityStatus,
     pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<ToolDisplayProjection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,6 +178,8 @@ pub struct UiConversationItem {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<ToolDisplayProjection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -525,6 +532,10 @@ impl UiProtocolState {
                 event.tool_call.tool_name.clone(),
                 UiToolActivityStatus::Waiting,
                 Some("waiting for tool execution".to_owned()),
+                Some(project_tool_call_display(
+                    &event.tool_call.tool_name,
+                    &event.tool_call.arguments,
+                )),
             );
             projection.model_request = None;
             projection.clone()
@@ -611,12 +622,19 @@ impl UiProtocolState {
                 .find(|activity| activity.tool_call_id == tool_call_id)
                 .map(|activity| activity.tool_name.clone())
                 .unwrap_or_else(|| "tool".to_owned());
+            let display = projection
+                .tool_activities
+                .iter()
+                .find(|activity| activity.tool_call_id == tool_call_id)
+                .and_then(|activity| activity.display.clone())
+                .map(|display| project_tool_result_display(display, &event.tool_result));
             upsert_tool_activity(
                 &mut projection.tool_activities,
                 tool_call_id,
                 tool_name,
                 tool_activity_status_from_result(event.tool_result.status),
                 Some(tool_activity_detail_from_result(&event.tool_result)),
+                display,
             );
             projection.model_request = None;
             projection.clone()
@@ -959,6 +977,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
             body: user_text.clone(),
             status: "submitted".to_owned(),
             tool_call_id: None,
+            display: None,
         });
     }
     for text in &projection.text {
@@ -970,13 +989,26 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
                 body: public_text,
                 status: "streaming".to_owned(),
                 tool_call_id: None,
+                display: None,
             });
         }
     }
     for activity in &projection.tool_activities {
+        let title = activity
+            .display
+            .as_ref()
+            .map(|display| display.action.clone())
+            .unwrap_or_else(|| activity.tool_name.clone());
         let body = activity
-            .detail
-            .clone()
+            .display
+            .as_ref()
+            .and_then(|display| {
+                display
+                    .result_summary
+                    .clone()
+                    .or_else(|| Some(display.summary.clone()))
+            })
+            .or_else(|| activity.detail.clone())
             .unwrap_or_else(|| match activity.status {
                 UiToolActivityStatus::Waiting => "waiting".to_owned(),
                 UiToolActivityStatus::Completed => "completed".to_owned(),
@@ -984,10 +1016,11 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
             });
         items.push(UiConversationItem {
             kind: UiConversationItemKind::ToolSummary,
-            title: activity.tool_name.clone(),
+            title,
             body,
             status: activity.status.as_str().to_owned(),
             tool_call_id: Some(activity.tool_call_id.clone()),
+            display: activity.display.clone(),
         });
     }
     if let Some(terminal_text) = &projection.terminal_text {
@@ -1007,6 +1040,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
                 body: public_text,
                 status: status.to_owned(),
                 tool_call_id: None,
+                display: None,
             });
         }
     }
@@ -1017,6 +1051,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
             body: error.clone(),
             status: "failed".to_owned(),
             tool_call_id: None,
+            display: None,
         });
     }
     items
@@ -1185,6 +1220,10 @@ fn tool_activities_from_input(
             call.tool_call.tool_name.clone(),
             UiToolActivityStatus::Waiting,
             Some("waiting for tool execution".to_owned()),
+            Some(project_tool_call_display(
+                &call.tool_call.tool_name,
+                &call.tool_call.arguments,
+            )),
         );
     }
     for result in tool_results {
@@ -1194,12 +1233,18 @@ fn tool_activities_from_input(
             .find(|call| call.tool_call.tool_call_id.as_str() == tool_call_id)
             .map(|call| call.tool_call.tool_name.clone())
             .unwrap_or_else(|| "tool".to_owned());
+        let display = activities
+            .iter()
+            .find(|activity| activity.tool_call_id == tool_call_id)
+            .and_then(|activity| activity.display.clone())
+            .map(|display| project_tool_result_display(display, &result.tool_result));
         upsert_tool_activity(
             &mut activities,
             tool_call_id,
             tool_name,
             tool_activity_status_from_result(result.tool_result.status),
             Some(tool_activity_detail_from_result(&result.tool_result)),
+            display,
         );
     }
     activities
@@ -1211,6 +1256,7 @@ fn upsert_tool_activity(
     tool_name: String,
     status: UiToolActivityStatus,
     detail: Option<String>,
+    display: Option<ToolDisplayProjection>,
 ) {
     if let Some(activity) = activities
         .iter_mut()
@@ -1227,6 +1273,9 @@ fn upsert_tool_activity(
             _ => status,
         };
         activity.detail = detail;
+        if display.is_some() {
+            activity.display = display;
+        }
         return;
     }
 
@@ -1235,6 +1284,7 @@ fn upsert_tool_activity(
         tool_name,
         status,
         detail,
+        display,
     });
 }
 
@@ -1264,6 +1314,10 @@ fn fail_waiting_tool_activities(activities: &mut [UiToolActivity], detail: Optio
         if activity.status == UiToolActivityStatus::Waiting {
             activity.status = UiToolActivityStatus::Failed;
             activity.detail = detail.clone();
+            if let Some(display) = &mut activity.display {
+                display.outcome = ToolDisplayOutcome::Failed;
+                display.result_summary = detail.clone();
+            }
         }
     }
 }
@@ -1570,8 +1624,12 @@ mod tests {
             .find(|item| item.kind == UiConversationItemKind::ToolSummary)
             .expect("tool item");
         assert_eq!(tool.status, "waiting");
-        assert_eq!(tool.title, "search");
-        assert_eq!(tool.body, "waiting for tool execution");
+        assert_eq!(tool.title, "Run tool");
+        assert_eq!(tool.body, "Run tool: search");
+        assert_eq!(
+            tool.display.as_ref().map(|display| display.kind.as_str()),
+            Some("generic")
+        );
 
         let completed = turn_projection_from_events(TurnProjectionInput {
             source_agent_id: AgentId::new("agent-1"),
@@ -1588,8 +1646,11 @@ mod tests {
                 agent_id: AgentId::new("agent-1"),
                 tool_call: freehand_contracts::ToolCallContract {
                     tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
-                    tool_name: "search".to_owned(),
-                    arguments: vec![],
+                    tool_name: "grep".to_owned(),
+                    arguments: vec![freehand_contracts::ToolArgument {
+                        name: "pattern".to_owned(),
+                        value: serde_json::json!("needle"),
+                    }],
                     arguments_complete: true,
                 },
             }],
@@ -1615,10 +1676,14 @@ mod tests {
             .find(|item| item.kind == UiConversationItemKind::ToolSummary)
             .expect("completed tool item");
         assert_eq!(completed_tool.status, "completed");
-        assert_eq!(completed_tool.title, "search");
+        assert_eq!(completed_tool.title, "Search text");
+        assert_eq!(completed_tool.body, "succeeded: needle");
         assert_eq!(
-            completed_tool.body,
-            "result: result body rendered in public summary"
+            completed_tool
+                .display
+                .as_ref()
+                .map(|display| display.kind.as_str()),
+            Some("search")
         );
     }
 
@@ -1640,7 +1705,10 @@ mod tests {
                 tool_call: freehand_contracts::ToolCallContract {
                     tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
                     tool_name: "read_file".to_owned(),
-                    arguments: vec![],
+                    arguments: vec![freehand_contracts::ToolArgument {
+                        name: "path".to_owned(),
+                        value: serde_json::json!("missing.txt"),
+                    }],
                     arguments_complete: true,
                 },
             }],
@@ -1676,11 +1744,8 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(tool_cards.len(), 1);
         assert_eq!(tool_cards[0].status, "failed");
-        assert_eq!(tool_cards[0].title, "read_file");
-        assert_eq!(
-            tool_cards[0].body,
-            "failure: failure body rendered in public summary"
-        );
+        assert_eq!(tool_cards[0].title, "Read file");
+        assert_eq!(tool_cards[0].body, "failed: missing.txt");
         assert!(
             cards
                 .iter()
@@ -1734,7 +1799,7 @@ mod tests {
             .find(|item| item.kind == UiConversationItemKind::ToolSummary)
             .expect("tool item");
         assert_eq!(tool.status, "failed");
-        assert_eq!(tool.title, "ls");
+        assert_eq!(tool.title, "List directory");
         assert_eq!(tool.body, "tool failed explicitly");
     }
 

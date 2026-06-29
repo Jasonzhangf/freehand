@@ -131,6 +131,7 @@ Use this skill for any non-trivial work in this repo.
 - if slave loses pairing, it keeps listening for later re-pairing.
 - master may send task, query progress, directly talk, and subscribe to slave turn stream.
 - UI code must consume `crates/freehand-ui-protocol`, never provider crates directly.
+- UI code must not classify tool calls from raw names, arguments, or result strings; tool display semantics belong in the `tool.display` pure parser owner and must flow through `freehand-ui-protocol`.
 - UI app boundaries must stay protocol-only: they may render `freehand-ui-protocol` truth and shared contracts, but must not import `freehand-reason`, provider crates, node semantics, or config semantics for UI behavior.
 - Any UI is an input ingress plus a read-only consumer of turn/debug state. UI may submit commands, but UI must not directly mutate reason truth, debug truth, or session truth.
 - First version UI scope is CLI plus WebUI.

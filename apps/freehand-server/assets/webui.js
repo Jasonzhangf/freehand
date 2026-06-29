@@ -391,9 +391,29 @@ function toolSummaryBody(item) {
   const endAt = timing && timing.finishedAt ? timing.finishedAt : Date.now();
   const elapsed = timing ? formatDuration(endAt - timing.startedAt) : "";
   const statusLabel = toolStatusLabel(item.status);
+  const display = item.display || null;
   const lines = [elapsed ? `${statusLabel} · ${elapsed}` : statusLabel];
-  if (item.body && item.body !== item.status) {
+  if (display && display.summary) {
+    lines.push(display.summary);
+  } else if (item.body && item.body !== item.status) {
     lines.push(item.body);
+  }
+  if (display && display.result_summary) {
+    lines.push(display.result_summary);
+  }
+  if (display && display.diff) {
+    lines.push(`diff: ${display.diff.target}`);
+    lines.push(`- ${display.diff.before}`);
+    lines.push(`+ ${display.diff.after}`);
+  }
+  if (display && Array.isArray(display.fields) && display.fields.length > 0) {
+    const compactFields = display.fields
+      .slice(0, 4)
+      .map((field) => `${field.label}: ${field.value}`)
+      .join(" · ");
+    if (compactFields) {
+      lines.push(compactFields);
+    }
   }
   return lines.join("\n");
 }
@@ -481,10 +501,11 @@ function derivePublicConversation(turn) {
     const status = `${tool.status || "waiting"}`.toLowerCase();
     items.push({
       kind: "ToolSummary",
-      title: tool.tool_name || "Tool",
+      title: tool.display && tool.display.action ? tool.display.action : tool.tool_name || "Tool",
       body: tool.detail || status,
       status,
       tool_call_id: tool.tool_call_id,
+      display: tool.display || null,
     });
   });
   if (turn.terminal_text) {

@@ -1,6 +1,7 @@
 //! Shared pure builders, parsers, validators, and projectors for Freehand.
 
 mod rewrite_policy;
+mod tool_display;
 
 use freehand_contracts::{
     ContextCachePolicy, ContextProvenance, ContextRewriteMode, ContextRole, ContextSegment,
@@ -11,6 +12,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 pub use rewrite_policy::*;
+pub use tool_display::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompletionClaim {

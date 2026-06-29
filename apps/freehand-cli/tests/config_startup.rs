@@ -432,6 +432,7 @@ fn test_turn_projection() -> UiTurnProjection {
         session_id: SessionId::new("cli-session"),
         turn_id: TurnId::new("cli-adp-turn"),
         user_text: Some("cli adp smoke".to_owned()),
+        model_request: None,
         reasoning: Vec::new(),
         text: Vec::new(),
         tool_calls: Vec::new(),
@@ -457,6 +458,7 @@ fn test_sample_turn_projection(prompt: &str, status: TerminalStatus) -> UiTurnPr
         session_id: SessionId::new("cli-session"),
         turn_id: TurnId::new("cli-adp-sample-turn"),
         user_text: Some(prompt.to_owned()),
+        model_request: None,
         reasoning: Vec::new(),
         text: if failed {
             Vec::new()
@@ -474,6 +476,7 @@ fn test_sample_turn_projection(prompt: &str, status: TerminalStatus) -> UiTurnPr
                 tool_name: "read_file".to_owned(),
                 status: UiToolActivityStatus::Failed,
                 detail: Some("tool execution returned failure result".to_owned()),
+                display: None,
             }]
         } else {
             Vec::new()

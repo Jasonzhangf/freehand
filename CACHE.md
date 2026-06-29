@@ -1,5 +1,21 @@
 # CACHE
 
+- Current verified tool display semantic slice:
+  - `tool.display` owner is `crates/freehand-blocks/src/tool_display.rs`
+  - classification/parsing functions are independent: read/list, file mutation, search, plan, shell, generic
+  - `UiToolActivity.display` carries structured action/target/summary/result/diff fields through ADP/session projection
+  - WebUI consumes `display` and does not classify tools from raw argument/result text
+  - verification:
+    - `cargo fmt --check`
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-blocks`
+    - `cargo test -p freehand-ui-protocol -- --nocapture`
+    - `cargo test -p freehand-server -- --nocapture`
+    - `cargo test -p freehand-runtime -- --nocapture`
+    - `cargo test -p freehand-cli -- --nocapture`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
 - Current verified CLI/headless ADP slice:
   - `freehand-cli adp-smoke --url ws://.../adp` connects without UI, sends ADP subscribe/query/query-as-command frames, and requires `subscription_accepted`, `subscription_event`, `query_result`, plus explicit `ingress_command_kind_mismatch`
   - `freehand-cli adp-turn-sample --url ws://.../adp --sample success|failure` generates reproducible success/failure latest-turn samples over the same ADP path and verifies terminal projection

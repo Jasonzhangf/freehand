@@ -1105,7 +1105,10 @@ mod tests {
         assert!(js_body.contains("hasModelRequestWait"));
         assert!(js_body.contains("hasModelWait"));
         assert!(js_body.contains("waitingToolStatus"));
-        assert!(js_body.contains("tool.detail || status"));
+        assert!(js_body.contains("tool.display || null"));
+        assert!(js_body.contains("display.result_summary"));
+        assert!(js_body.contains("display.diff"));
+        assert!(js_body.contains("display.fields"));
         assert!(js_body.contains("formatDuration"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("tool_call_id"));
@@ -1409,7 +1412,10 @@ mod tests {
             tool_call: ToolCallContract {
                 tool_call_id: ToolCallId::new("tool-sse-1"),
                 tool_name: "read_file".to_owned(),
-                arguments: Vec::new(),
+                arguments: vec![freehand_contracts::ToolArgument {
+                    name: "path".to_owned(),
+                    value: serde_json::json!("src/lib.rs"),
+                }],
                 arguments_complete: true,
             },
         };
@@ -1456,8 +1462,9 @@ mod tests {
 
         let completed_body = read_next_sse_event(&mut turn_sse, &mut turn_buffer).await;
         assert!(completed_body.contains("\"status\":\"completed\""));
-        assert!(completed_body.contains("\"title\":\"read_file\""));
-        assert!(completed_body.contains("\"body\":\"result: visible result body\""));
+        assert!(completed_body.contains("\"title\":\"Read file\""));
+        assert!(completed_body.contains("\"body\":\"succeeded: src/lib.rs\""));
+        assert!(completed_body.contains("\"kind\":\"ReadFile\""));
 
         drop(turn_sse);
         server.stop().await;

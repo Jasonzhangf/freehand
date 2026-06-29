@@ -1,0 +1,32 @@
+# Test Design: `tool.display`
+
+- feature_id: `tool.display`
+- owner: `crates/freehand-blocks`
+- lifecycle path under test:
+  - tool call enters pure display parser
+  - classifier selects one display kind from tool name and structured arguments
+  - class-specific parser extracts target/action/summary fields
+  - result update preserves the same display object and changes status/result fields
+  - unknown tools route to generic display projection instead of UI-local guessing
+- white-box plan:
+  - classify read-file, file-mutation, search/list, plan, shell, and generic tools
+  - parse each class through its own function
+  - shell command classification covers common read/search/list command shapes
+  - result success and result failure update structured display without changing tool truth
+- module black-box plan:
+  - `project_tool_call_display` returns low-noise display fields for read/search/write/plan/shell/generic samples
+  - `project_tool_result_display` preserves category and target while updating outcome summary
+- project black-box impact:
+  - WebUI, Android, and CLI can render semantic tool cards from `ui.protocol` without parsing raw tool arguments or result text
+  - tool execution failure remains model-visible tool result truth and is not converted into terminal system failure by display logic
+- fixtures / replay inputs / runtime evidence paths:
+  - in-memory shared contract fixtures
+  - ADP latest-turn projections carrying `UiToolActivity.display`
+- known gaps:
+  - file mutation preview diffs are only fully available when `tool.preview` or checkpoint projection is attached by a future protocol slice
+- sync status between design and implementation:
+  - parser implementation landed in `crates/freehand-blocks/src/tool_display.rs`
+  - UI protocol projection carries `ToolDisplayProjection`
+  - WebUI consumes `display` fields for tool card body/title rendering
+- mainline/wiki sync:
+  - wiki generated from mainline call must stay in sync with display owner code and function map updates

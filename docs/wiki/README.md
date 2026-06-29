@@ -24,6 +24,7 @@ Generated wiki artifacts from machine-readable mainline call source files. Do no
 - [reason.turn](./reason.turn.md) mainline call source `docs/mainline-calls/reason.turn.json`
 - [runtime.checkpoint-rewind](./runtime.checkpoint-rewind.md) mainline call source `docs/mainline-calls/runtime.checkpoint-rewind.json`
 - [runtime.ui-command-dispatch](./runtime.ui-command-dispatch.md) mainline call source `docs/mainline-calls/runtime.ui-command-dispatch.json`
+- [tool.display](./tool.display.md) mainline call source `docs/mainline-calls/tool.display.json`
 - [tool.preview](./tool.preview.md) mainline call source `docs/mainline-calls/tool.preview.json`
 - [tool.registry](./tool.registry.md) mainline call source `docs/mainline-calls/tool.registry.json`
 - [ui.protocol](./ui.protocol.md) mainline call source `docs/mainline-calls/ui.protocol.json`

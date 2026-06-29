@@ -1,0 +1,163 @@
+{
+  "feature_id": "tool.display",
+  "owner_crate": "crates/freehand-blocks",
+  "owner_module": "crates/freehand-blocks/src/tool_display.rs",
+  "function_map_doc": "docs/function-maps/tool.display.md",
+  "test_design_doc": "docs/testing/tool.display.md",
+  "mainline_call_doc": "docs/mainline-calls/tool.display.json",
+  "generated_wiki_doc": "docs/wiki/tool.display.md",
+  "request_mainline": [
+    "UI-visible tool display classification enters one pure parser owner",
+    "Parser input is shared tool contracts: tool name, arguments, status, and result text",
+    "Each display class has one independent parser function",
+    "UI clients do not infer display category from raw tool text"
+  ],
+  "response_mainline": [
+    "read-file tools project target path plus read status without exposing file contents in the main card",
+    "file-mutation tools project target path plus mutation kind and compact diff-oriented semantic payload when available",
+    "search/list tools project pattern or path target plus match/list status without dumping full output into the main card",
+    "plan tools project compact plan status and counts",
+    "shell tools project command intent and command-shaped read/search/list invocations through parser-owned classification",
+    "generic tools project low-noise name, key arguments, and status"
+  ],
+  "error_mainline": [
+    "missing or malformed arguments project explicit unknown or partial target fields",
+    "unknown tools route to generic display projection",
+    "parser output never rewrites model-visible tool payload or tool result truth"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "project_tool_call_display",
+      "owner": "crates/freehand-blocks/src/tool_display.rs",
+      "purpose": "produce a waiting-state structured display projection for a tool call",
+      "allowed_callers": [
+        "ui.protocol",
+        "tests"
+      ],
+      "related_tests": [
+        "tool display projection tests",
+        "public conversation projection tests"
+      ],
+      "why_shared": "keeps WebUI, Android, and CLI from duplicating tool display classification"
+    },
+    {
+      "symbol": "project_tool_result_display",
+      "owner": "crates/freehand-blocks/src/tool_display.rs",
+      "purpose": "update a structured display projection with completed or failed tool result semantics",
+      "allowed_callers": [
+        "ui.protocol",
+        "tests"
+      ],
+      "related_tests": [
+        "result update projection tests"
+      ],
+      "why_shared": "keeps result success/failure display semantics protocol-owned and UI-independent"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "project_tool_call_display",
+      "file_path": "crates/freehand-blocks/src/tool_display.rs",
+      "responsibility": "create structured display projection from a tool call",
+      "input_semantic": "tool name plus arguments",
+      "output_semantic": "display projection",
+      "caller": "ui.protocol",
+      "callee": "tool display owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "classify_tool_display_kind",
+      "file_path": "crates/freehand-blocks/src/tool_display.rs",
+      "responsibility": "map tool name and shell command shape to a display class",
+      "input_semantic": "tool name plus arguments",
+      "output_semantic": "display kind",
+      "caller": "display projector",
+      "callee": "classifier",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "parse_read_file_tool_display",
+      "file_path": "crates/freehand-blocks/src/tool_display.rs",
+      "responsibility": "parse read/list target fields",
+      "input_semantic": "tool arguments",
+      "output_semantic": "read/list display fields",
+      "caller": "display projector",
+      "callee": "read parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "parse_file_mutation_tool_display",
+      "file_path": "crates/freehand-blocks/src/tool_display.rs",
+      "responsibility": "parse write/edit target and diff-oriented fields",
+      "input_semantic": "tool arguments",
+      "output_semantic": "mutation display fields",
+      "caller": "display projector",
+      "callee": "mutation parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "parse_search_tool_display",
+      "file_path": "crates/freehand-blocks/src/tool_display.rs",
+      "responsibility": "parse search pattern/path fields",
+      "input_semantic": "tool arguments",
+      "output_semantic": "search display fields",
+      "caller": "display projector",
+      "callee": "search parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "parse_plan_tool_display",
+      "file_path": "crates/freehand-blocks/src/tool_display.rs",
+      "responsibility": "parse task/plan fields",
+      "input_semantic": "tool arguments",
+      "output_semantic": "plan display fields",
+      "caller": "display projector",
+      "callee": "plan parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "parse_shell_tool_display",
+      "file_path": "crates/freehand-blocks/src/tool_display.rs",
+      "responsibility": "parse shell command intent without UI guessing",
+      "input_semantic": "shell arguments",
+      "output_semantic": "shell display fields",
+      "caller": "display projector",
+      "callee": "shell parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "parse_generic_tool_display",
+      "file_path": "crates/freehand-blocks/src/tool_display.rs",
+      "responsibility": "parse unknown or miscellaneous tools into low-noise argument summary",
+      "input_semantic": "tool arguments",
+      "output_semantic": "generic display fields",
+      "caller": "display projector",
+      "callee": "generic parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "project_tool_result_display",
+      "file_path": "crates/freehand-blocks/src/tool_display.rs",
+      "responsibility": "update display projection with success/failure result state",
+      "input_semantic": "previous display plus tool result",
+      "output_semantic": "updated display projection",
+      "caller": "ui.protocol",
+      "callee": "result projector",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "implementation is bound in crates/freehand-blocks/src/tool_display.rs",
+    "ui.protocol consumes project_tool_call_display and project_tool_result_display when projecting UiToolActivity.display",
+    "WebUI consumes protocol display projection and does not classify tools locally"
+  ]
+}

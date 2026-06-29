@@ -19,6 +19,7 @@
   - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
   - provider-request-sent lifecycle projection marks a turn as waiting for model response until response/tool/usage/terminal/error projection arrives
   - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`, or failed terminal truth marks still-waiting activities `failed`
+  - tool display projection is attached to `UiToolActivity` from the `tool.display` parser owner and is preserved in public conversation tool summaries
   - terminal events preserve both terminal text and terminal status in UI projection
   - debug receiver drain ingests observation-only debug events into protocol state
   - source identity and stream kind stay explicit
@@ -41,6 +42,7 @@
   - incremental turn projection updates from shared contracts
   - model request waiting projection and response-clear behavior
   - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
+  - structured tool display projection from read/search/write/plan/shell/generic parser output
   - duplicate same-`tool_call_id` tool-call projection upserts one activity and one public tool card
   - debug-event ingestion and receiver-drain behavior
   - ADP frame serialization and failure-frame shape
@@ -57,6 +59,7 @@
   - CLI hides slave card while WebUI may render it
   - public conversation projection smoke excludes internal fields and preserves visible text/terminal/tool/error summaries plus user input
   - tool activity projection smoke covers waiting-before-result, completed-after-result, failed-result detail rendering, and failed-terminal-without-result without rendering verbose tool terms into the public summary
+  - public tool summary smoke covers `display.kind`, semantic action title, target summary, result summary, and no UI-local category guessing
   - duplicate tool-call projection smoke covers one public card per `tool_call_id`
   - cancelled/failed terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
@@ -96,4 +99,5 @@
   - terminal status is now preserved in `UiTurnProjection` and public conversation status mapping
   - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries, including failed status for still-waiting tools when terminal truth is failed
   - tool summaries now expose `tool_call_id`, duplicate same-id tool calls are regression-locked to one public card, and completed/failed public tool bodies include tool result detail
+  - tool summaries now expose `display` from the `tool.display` owner, and public bodies prefer structured result summaries over raw detail text
   - ADP request/response frames are landed and regression-locked by JSON roundtrip coverage
