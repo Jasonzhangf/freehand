@@ -49,8 +49,8 @@ use freehand_provider_core::{
 use freehand_reason::{
     PersistedSessionMetadataEntry, ProviderRawLedgerWrite, ProviderRawScenePosition,
     ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError,
-    ReasonResp04CompletionSchemaRejected, ReasonTurnEngine, SessionHistory, TurnRecord,
-    TurnStartInput,
+    ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting, ReasonTurnEngine,
+    SessionHistory, TurnRecord, TurnStartInput,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
@@ -1197,6 +1197,36 @@ where
                 });
                 tool_executions = tool_executions.saturating_add(1);
             }
+            let failed_tool_results = tool_exchanges
+                .iter()
+                .filter(|exchange| {
+                    exchange.tool_result.tool_result.status == ToolResultStatus::Failed
+                })
+                .count();
+            let detail = if failed_tool_results == 0 {
+                format!(
+                    "tool result returned: {} ok · waiting model",
+                    tool_exchanges.len()
+                )
+            } else {
+                format!(
+                    "tool result returned: {} failed / {} total · waiting model",
+                    failed_tool_results,
+                    tool_exchanges.len()
+                )
+            };
+            let wait_event = ReasonBroadcastEvent::ModelContinuationWaiting(
+                ReasonResp05ModelContinuationWaiting {
+                    session_id: turn.request.session_id.clone(),
+                    turn_id: turn.request.turn_id.clone(),
+                    trace_id: turn.request.trace_id.clone(),
+                    feature_id: turn.request.feature_id.clone(),
+                    agent_id: turn.request.agent_id.clone(),
+                    detail,
+                },
+            );
+            on_broadcast(&wait_event);
+            broadcasts.push(wait_event);
             next_prompt = "The tool result has been returned. Use it to continue the task, then provide the required Freehand completion schema when done.".to_owned();
             carryover_segments =
                 next_round_segments(&request.prompt, &collect_turn_text(&turn), None);
@@ -3047,6 +3077,16 @@ fn apply_runtime_reason_broadcast(
                 &event.turn_id,
                 event.retry_index,
                 issue_summary,
+                false,
+            );
+        }
+        ReasonBroadcastEvent::ModelContinuationWaiting(event) => {
+            ui.apply_model_request_waiting(
+                reason_agent_id.clone(),
+                master_node_id.to_owned(),
+                &event.session_id,
+                &event.turn_id,
+                Some(event.detail.clone()),
                 false,
             );
         }
@@ -4997,6 +5037,13 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     result.tool_result.tool_call_id.as_str() == "toolu_missing_read_1"
                         && result.tool_result.status == ToolResultStatus::Failed
                 })
+        }));
+        assert!(outcome.broadcasts.iter().any(|event| {
+            matches!(
+                event,
+                ReasonBroadcastEvent::ModelContinuationWaiting(waiting)
+                    if waiting.detail.contains("1 failed / 1 total")
+            )
         }));
         assert_eq!(
             latest

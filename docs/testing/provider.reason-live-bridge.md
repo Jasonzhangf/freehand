@@ -55,7 +55,7 @@
   - non-string completion fields produce explicit type feedback instead of being reported as missing
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
   - provider HTTP failure returns explicit dispatch failure and does not project a successful terminal
-  - tool execution result failure returns a paired failed tool result to the model and can still end with a successful terminal schema
+  - tool execution result failure returns a paired failed tool result to the model, emits runtime-owned model-continuation waiting status, and can still end with a successful terminal schema
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
   - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation
 - project black-box impact:

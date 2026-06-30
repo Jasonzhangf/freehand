@@ -1162,8 +1162,12 @@ mod tests {
         assert!(js_body.contains("turnIsWaitingForModelResponse"));
         assert!(js_body.contains("schema retry"));
         assert!(js_body.contains("turn.model_request.detail"));
-        assert!(js_body.contains("modelWaitStartedAt"));
-        assert!(js_body.contains("turnIsWaitingForModel"));
+        assert!(!js_body.contains("modelWaitStartedAt"));
+        assert!(!js_body.contains("turnIsWaitingForModel("));
+        assert!(js_body.contains("rememberInputHistory"));
+        assert!(js_body.contains("recallInputHistory"));
+        assert!(js_body.contains("ArrowUp"));
+        assert!(js_body.contains("ArrowDown"));
         assert!(js_body.contains("toolTimelineLine"));
         assert!(js_body.contains("running-tool-state"));
         assert!(!js_body.contains("modelRequestBody"));
@@ -1174,7 +1178,7 @@ mod tests {
         assert!(js_body.contains("succeeded: shell command"));
         assert!(js_body.contains("hasPendingSubmit"));
         assert!(js_body.contains("hasModelRequestWait"));
-        assert!(js_body.contains("hasModelWait"));
+        assert!(!js_body.contains("hasModelWait"));
         assert!(js_body.contains("waitingToolStatus"));
         assert!(js_body.contains("tool.display || null"));
         assert!(js_body.contains("display.diff"));
@@ -1198,7 +1202,7 @@ mod tests {
         assert!(js_body.contains("renderAttachmentTray"));
         assert!(js_body.contains("textWithAttachmentPlaceholders"));
         assert!(js_body.contains("clearCurrentAttachments"));
-        assert!(js_body.contains("dispatch failed; draft attachments retained for retry"));
+        assert!(js_body.contains("dispatch failed; use ↑ to recall input"));
         assert!(js_body.contains("case \"/attachments\""));
         assert!(js_body.contains("case \"/model\""));
         assert!(js_body.contains("model selector is read-only"));

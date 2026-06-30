@@ -67,6 +67,7 @@ pub enum ReasonBroadcastEvent {
     ToolResult(ReasonReq05ToolResultReentry),
     Usage(ReasonResp02UsageEvent),
     CompletionSchemaRejected(ReasonResp04CompletionSchemaRejected),
+    ModelContinuationWaiting(ReasonResp05ModelContinuationWaiting),
     Terminal(ReasonResp03TerminalEvent),
     Error(ErrorErr01RuntimeClassified),
 }
@@ -81,6 +82,16 @@ pub struct ReasonResp04CompletionSchemaRejected {
     pub retry_index: u32,
     pub rejection: CompletionSchemaRejection,
     pub feedback: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasonResp05ModelContinuationWaiting {
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub trace_id: TraceId,
+    pub feature_id: FeatureId,
+    pub agent_id: AgentId,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

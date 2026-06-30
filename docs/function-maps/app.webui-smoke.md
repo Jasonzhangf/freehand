@@ -52,7 +52,7 @@
 - WebUI success/failure scenario buttons populate the composer with the same scenario prompts used by CLI/headless ADP sample automation, then the operator can send them through the normal ADP submit path
 - WebUI composer control strip renders low-noise controls below the composer without creating a second protocol or truth source
 - WebUI attachment tray renders session-scoped draft metadata and file-handle availability; restored metadata stays visible but is not treated as rehydrated binary payload
-- WebUI sends attachment placeholders as current-send text only, clears the session draft after successful command receipt, and restores the composer text while retaining draft attachments after dispatch failure
+- WebUI sends attachment placeholders as current-send text only, clears the composer immediately after submit, and keeps submitted text recoverable through local Up/Down input history instead of refilling the composer after dispatch failure
 - WebUI checkpoint panel renders protocol checkpoint summaries from query state and keeps checkpoint files out of app-boundary truth
 - WebUI cancel path sends `CancelTurn` for the current active turn, clears pending local input only after dispatch, and refreshes protocol truth
 - WebUI cancel path uses `CancelTurn` when `turn_id` is known and `CancelLatestActiveTurn` during the submit-in-flight pre-SSE window
@@ -60,7 +60,7 @@
 - front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket without surfacing verbose tool term text in the main card
 - front-end script normalizes tool cards by `tool_call_id`, renders waiting cards with animation and local elapsed timers, and clears the composer input immediately after submit while keeping the pending user card visible
 - front-end script renders submit/dispatch waiting as an animated pending card with elapsed time until a turn projection arrives, then switches visible lifecycle status to tool executing with elapsed time when tool activity is waiting
-- front-end script renders protocol-projected model request waiting as an animated card with elapsed time, clearly showing that the request has been sent and the UI is waiting for model response
+- front-end script renders protocol-projected model request waiting as an animated card with elapsed time, including tool-result re-entry and schema-retry waits; WebUI must not infer model waiting from completed/failed tool cards
 - front-end script renders completed/failed tool lifecycle in the same execution card and keeps the status/outcome in the card status line; the card body stays semantic and target-focused instead of echoing success/failure result text as a separate user-visible item
 - front-end script renders waiting/model continuation animation only for the current live turn; historical completed or superseded turns must not keep blinking
   - front-end script renders completed/failed tool cards with color-state only and low-noise semantic lines, compressing repeated title/summary/body text and filtering generic result strings such as `succeeded: result returned`

@@ -32,7 +32,7 @@
 - every provider raw response/error/event body retained in debug mode is written through `ReasonPersistence::record_provider_raw_event` into the debug-only provider ledger
 - provider-neutral outputs are applied back into the active round through `ReasonTurnEngine::apply_provider_output`
 - every applied live semantic output is recorded through `ReasonPersistence::record_provider_output_applied`
-- tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures
+- tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures; runtime publishes a model-continuation waiting event after tool results are paired for the next provider request
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
 - retry exhaustion writes failed terminal truth through `ReasonTurnEngine::fail_turn`

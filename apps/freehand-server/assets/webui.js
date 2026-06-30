@@ -59,10 +59,11 @@ const state = {
   checkpoints: [],
   toolTimings: new Map(),
   modelRequestStartedAt: null,
-  modelWaitStartedAt: null,
   activeTurnId: null,
   pendingUserInput: null,
   pendingAttachments: [],
+  inputHistory: [],
+  inputHistoryIndex: null,
   submitStartedAt: null,
   submitInFlight: false,
   commandStatusMessage: "connecting to ADP...",
@@ -534,7 +535,7 @@ function turnStatusForRender(turn) {
   if (waitingTools.length > 0) {
     return { className: "running", label: waitingToolStatus(waitingTools), live: true };
   }
-  if (turnIsWaitingForModelResponse(turn) || turnIsWaitingForModel(turn)) {
+  if (turnIsWaitingForModelResponse(turn)) {
     return { className: "running", label: liveTurnStatus() || "waiting", live: true };
   }
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
@@ -869,32 +870,6 @@ function waitingToolStatus(tools) {
   return elapsed ? `tool executing: ${names} · ${elapsed}` : `tool executing: ${names}`;
 }
 
-function turnIsWaitingForModel(turn) {
-  if (!turn || turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
-    return false;
-  }
-  const tools = turn.tool_activities || [];
-  const hasFinishedTool = tools.some((tool) => {
-    const status = `${tool.status || ""}`.toLowerCase();
-    return status === "completed" || status === "failed";
-  });
-  const hasWaitingTool = tools.some((tool) => {
-    const status = `${tool.status || ""}`.toLowerCase();
-    return status === "waiting";
-  });
-  return hasFinishedTool && !hasWaitingTool;
-}
-
-function syncModelWaitTiming(turn) {
-  if (!turnIsWaitingForModel(turn)) {
-    state.modelWaitStartedAt = null;
-    return;
-  }
-  if (!state.modelWaitStartedAt) {
-    state.modelWaitStartedAt = Date.now();
-  }
-}
-
 function variantPayload(value, variant) {
   if (!value || typeof value !== "object" || !(variant in value)) {
     return undefined;
@@ -1139,7 +1114,6 @@ function resetLocalConversationState(sessionId) {
   state.pendingUserInput = null;
   state.pendingAttachments = [];
   state.modelRequestStartedAt = null;
-  state.modelWaitStartedAt = null;
   state.submitStartedAt = null;
   state.submitInFlight = false;
   setSelectedSessionId(sessionId);
@@ -1340,7 +1314,6 @@ function setTurnProjection(turn, options = {}) {
   state.publicConversation = derivePublicConversation(state.turn);
   syncToolTimings(state.publicConversation);
   syncModelRequestTiming(state.turn);
-  syncModelWaitTiming(state.turn);
   if (state.turn && state.pendingUserInput) {
     state.pendingUserInput = null;
     state.pendingAttachments = [];
@@ -1441,11 +1414,6 @@ function liveTurnStatus() {
         ? "schema retry"
         : "waiting for model response";
     return elapsed ? `${label}... ${elapsed}` : `${label}...`;
-  }
-
-  if (turnIsWaitingForModel(state.turn)) {
-    const elapsed = elapsedSince(state.modelWaitStartedAt);
-    return elapsed ? `waiting for model... ${elapsed}` : "waiting for model...";
   }
 
   if (state.submitInFlight) {
@@ -1718,8 +1686,6 @@ function renderTurnMeta() {
       ? waitingToolStatus(runningTools).replace("tool executing", "tool running")
       : turnIsWaitingForModelResponse(state.turn)
         ? liveTurnStatus()
-      : turnIsWaitingForModel(state.turn)
-        ? liveTurnStatus()
       : state.submitInFlight
         ? liveTurnStatus()
         : "streaming";
@@ -1744,8 +1710,7 @@ setInterval(() => {
     (item) => item.kind === "ToolSummary" && item.status === "waiting",
   );
   const hasModelRequestWait = turnIsWaitingForModelResponse(state.turn);
-  const hasModelWait = turnIsWaitingForModel(state.turn);
-  if (hasPendingSubmit || hasWaitingTool || hasModelRequestWait || hasModelWait) {
+  if (hasPendingSubmit || hasWaitingTool || hasModelRequestWait) {
     renderMessages();
     renderTurnMeta();
     renderCommandStatus();
@@ -1882,7 +1847,6 @@ async function cancelActiveTurn() {
     state.pendingUserInput = null;
     state.pendingAttachments = [];
     state.modelRequestStartedAt = null;
-    state.modelWaitStartedAt = null;
     state.submitStartedAt = null;
     setCommandStatus("no active turn; input cleared", { stickyMs: 3000 });
     renderMessages();
@@ -1902,7 +1866,6 @@ async function cancelActiveTurn() {
   state.pendingUserInput = null;
   state.pendingAttachments = [];
   state.modelRequestStartedAt = null;
-  state.modelWaitStartedAt = null;
   state.submitStartedAt = null;
   state.submitInFlight = false;
   composerInput.value = "";
@@ -1932,7 +1895,6 @@ async function runSlashCommand(rawText) {
     state.pendingUserInput = null;
     state.pendingAttachments = [];
     state.modelRequestStartedAt = null;
-    state.modelWaitStartedAt = null;
     state.submitStartedAt = null;
   }
   switch (command) {
@@ -1978,7 +1940,6 @@ async function runSlashCommand(rawText) {
       state.pendingUserInput = null;
       state.pendingAttachments = [];
       state.modelRequestStartedAt = null;
-      state.modelWaitStartedAt = null;
       state.submitStartedAt = null;
       state.submitInFlight = false;
       setCommandStatus("local composer cleared", { stickyMs: 3000 });
@@ -2001,6 +1962,45 @@ async function runSlashCommand(rawText) {
   }
 }
 
+function rememberInputHistory(text) {
+  const value = `${text || ""}`.trim();
+  if (!value) {
+    return;
+  }
+  if (state.inputHistory[state.inputHistory.length - 1] !== value) {
+    state.inputHistory.push(value);
+  }
+  if (state.inputHistory.length > 100) {
+    state.inputHistory = state.inputHistory.slice(-100);
+  }
+  state.inputHistoryIndex = null;
+}
+
+function recallInputHistory(direction) {
+  if (state.inputHistory.length === 0) {
+    return false;
+  }
+  if (state.inputHistoryIndex === null) {
+    if (direction > 0) {
+      return false;
+    }
+    state.inputHistoryIndex = state.inputHistory.length - 1;
+  } else {
+    state.inputHistoryIndex += direction;
+  }
+  if (state.inputHistoryIndex < 0) {
+    state.inputHistoryIndex = 0;
+  }
+  if (state.inputHistoryIndex >= state.inputHistory.length) {
+    state.inputHistoryIndex = null;
+    composerInput.value = "";
+    return true;
+  }
+  composerInput.value = state.inputHistory[state.inputHistoryIndex];
+  composerInput.setSelectionRange(composerInput.value.length, composerInput.value.length);
+  return true;
+}
+
 composerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = composerInput.value.trim();
@@ -2019,6 +2019,7 @@ composerForm.addEventListener("submit", async (event) => {
   setCommandStatus("dispatching...");
   const attachments = currentAttachments();
   const commandText = textWithAttachmentPlaceholders(text, attachments);
+  rememberInputHistory(text);
   state.pendingUserInput = text;
   state.pendingAttachments = attachments;
   state.submitStartedAt = Date.now();
@@ -2042,9 +2043,9 @@ composerForm.addEventListener("submit", async (event) => {
     state.pendingUserInput = null;
     state.pendingAttachments = [];
     state.submitStartedAt = null;
-    composerInput.value = text;
+    composerInput.value = "";
     renderMessages();
-    setCommandStatus(`dispatch failed; draft attachments retained for retry: ${error.message}`);
+    setCommandStatus(`dispatch failed; use ↑ to recall input. Draft attachments retained: ${error.message}`);
   }
 });
 
@@ -2141,6 +2142,12 @@ taskCwdInput.addEventListener("change", () => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (document.activeElement === composerInput && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    if (recallInputHistory(event.key === "ArrowUp" ? -1 : 1)) {
+      event.preventDefault();
+      return;
+    }
+  }
   if (event.key !== "Escape") {
     const usesModifier = event.metaKey || event.ctrlKey;
     if (usesModifier && event.key === "Enter") {
