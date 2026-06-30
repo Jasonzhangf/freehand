@@ -37,10 +37,15 @@
   - user request:
     - add a `Select all` action to the session bulk toolbar
     - small text should not use heavy bold weight
+  - user correction after screenshot:
+    - `Select all` showed `9 selected` while several visible sessions were still unchecked
+    - root cause was `isDraftSessionId(sessionId)` using `sessionId.startsWith("webui-session-")`
+    - persisted real sessions also use `webui-session-*`, so bulk select skipped them as if they were draft
   - implementation:
     - page shell now renders `session-select-all-button`
     - WebUI JS selects all non-draft session ids into the existing multi-select set
-    - bulk toolbar button grid expands to four columns
+    - draft status is now only `state.draftSessionId === sessionId`; id prefix is never used
+    - bulk toolbar is split into a summary row and a wrapping action row
     - small bulk count/button text is normal weight (`font-weight: 500`) instead of the previous heavy look
   - verification:
     - `node --check apps/freehand-server/assets/webui.js`
@@ -50,8 +55,9 @@
     - `scripts/install-launchd.sh restart`
     - `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
     - fixed-port HTML at `127.0.0.1:4041` contains `session-select-all-button`, `session-clear-selection-button`, `session-delete-selected-button`, and `session-bulk-count`
-    - fixed-port JS at `127.0.0.1:4041` contains `selectAllSessions`, `sessionSelectAllButton`, and `selectedSessionIds`
-    - fixed-port CSS at `127.0.0.1:4041` contains the four-column toolbar layout and `font-weight: 500`
+    - fixed-port JS at `127.0.0.1:4041` contains `selectAllSessions`, `sessionSelectAllButton`, `selectedSessionIds`, `draftSessionId: null`, and `state.draftSessionId === sessionId`; it no longer contains `startsWith("webui-session-")`
+    - fixed-port CSS at `127.0.0.1:4041` contains `session-bulk-summary`, `session-bulk-actions`, `session-bulk-button.select-all`, and `font-weight: 500`
+    - Chrome AppleScript DOM click verification was blocked by Chrome's "Allow JavaScript from Apple Events" setting, so no visual DOM count proof was captured in this slice
 
 # 2026-06-29 tool display semantic owner
   - user requirement:

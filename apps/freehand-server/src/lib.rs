@@ -1021,6 +1021,8 @@ mod tests {
         assert!(root_body.contains("id=\"session-list\""));
         assert!(root_body.contains("id=\"new-conversation-button\""));
         assert!(root_body.contains("id=\"new-task-button\""));
+        assert!(root_body.contains("class=\"session-bulk-summary\""));
+        assert!(root_body.contains("class=\"session-bulk-actions\""));
         assert!(root_body.contains("id=\"session-bulk-count\""));
         assert!(root_body.contains("id=\"session-select-all-button\""));
         assert!(root_body.contains("id=\"session-clear-selection-button\""));
@@ -1095,6 +1097,9 @@ mod tests {
         assert!(js_body.contains("startNewTask"));
         assert!(js_body.contains("selectedSessionIds"));
         assert!(js_body.contains("selectAllSessions"));
+        assert!(js_body.contains("draftSessionId: null"));
+        assert!(js_body.contains("state.draftSessionId === sessionId"));
+        assert!(!js_body.contains("startsWith(\"webui-session-\")"));
         assert!(js_body.contains("deleteSelectedSessions"));
         assert!(js_body.contains("DeleteSession"));
         assert!(js_body.contains("session-selector"));

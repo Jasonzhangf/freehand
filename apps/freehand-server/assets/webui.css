@@ -186,14 +186,27 @@ body.theme-dark .inspector-block {
 
 .session-bulk-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
-  gap: 7px;
-  align-items: center;
+  gap: 8px;
   margin: 0 0 10px;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid rgba(31, 108, 88, 0.14);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.38);
+}
+
+.session-bulk-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.session-bulk-label {
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .session-bulk-count {
@@ -203,15 +216,27 @@ body.theme-dark .inspector-block {
   font-weight: 500;
 }
 
+.session-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .session-bulk-button {
   border: 1px solid rgba(31, 108, 88, 0.18);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.68);
   color: var(--master);
-  padding: 5px 8px;
-  font-size: 11px;
+  padding: 6px 11px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
+}
+
+.session-bulk-button.select-all {
+  border-color: rgba(31, 108, 88, 0.32);
+  background: rgba(31, 108, 88, 0.08);
+  color: var(--master);
 }
 
 .session-bulk-button.danger {

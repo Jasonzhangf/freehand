@@ -51,9 +51,7 @@ const state = {
   selectedSessionIds: new Set(),
   selectedSessionId: initialSelectedSessionId,
   selectedCwd: initialSelectedCwd,
-  draftSessionId: initialSelectedSessionId && initialSelectedSessionId.startsWith("webui-session-")
-    ? initialSelectedSessionId
-    : null,
+  draftSessionId: null,
   sessionTurns: [],
   publicConversation: [],
   debug: null,
@@ -1424,7 +1422,7 @@ function scrollMessagesToBottom() {
 }
 
 function isDraftSessionId(sessionId) {
-  return !!sessionId && sessionId.startsWith("webui-session-");
+  return !!sessionId && state.draftSessionId === sessionId;
 }
 
 function appendSessionParts(item, label, title, meta) {
