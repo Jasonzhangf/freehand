@@ -9,7 +9,9 @@ body {
     radial-gradient(circle at top right, rgba(28, 100, 79, 0.08), transparent 28%),
     linear-gradient(180deg, var(--canvas), var(--bg));
   color: var(--text);
-  font-family: "Seravek", "Avenir Next", "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -58,7 +60,7 @@ textarea {
   border-radius: 14px;
   background: transparent;
   color: #aebeb6;
-  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
 }
 
@@ -106,7 +108,7 @@ body.theme-dark .inspector {
 .role-badge,
 .strip-label,
 .theme-button {
-  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   letter-spacing: 0.055em;
   text-transform: uppercase;
 }
@@ -125,9 +127,10 @@ body.theme-dark .inspector {
 }
 
 .page-title {
-  font-family: "DIN Condensed", "Avenir Next Condensed", "Seravek", sans-serif;
-  font-size: 30px;
-  font-weight: 800;
+  font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif;
+  font-size: 27px;
+  font-weight: 750;
+  letter-spacing: -0.035em;
 }
 
 .region-title,
