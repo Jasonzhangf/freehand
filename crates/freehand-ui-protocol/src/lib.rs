@@ -687,9 +687,7 @@ impl UiProtocolState {
         issue_summary: String,
         slave_substream_card: bool,
     ) -> UiTurnProjection {
-        let detail = format!(
-            "Completion schema validation failed on retry {retry_index}. Feedback sent to the model: {issue_summary}. Waiting for corrected final schema."
-        );
+        let detail = format!("schema retry #{retry_index}: {issue_summary}");
         self.apply_model_request_waiting(
             source_agent_id,
             source_node_id,
@@ -2299,9 +2297,9 @@ mod tests {
         let activity = waiting.model_request.expect("model request activity");
         assert_eq!(activity.status, UiModelRequestStatus::Waiting);
         let detail = activity.detail.expect("detail");
-        assert!(detail.contains("Completion schema validation failed"));
+        assert!(detail.contains("schema retry #2"));
         assert!(detail.contains("evidence must be a string"));
-        assert!(detail.contains("Waiting for corrected final schema"));
+        assert!(!detail.contains("Feedback sent to the model"));
     }
 
     #[test]

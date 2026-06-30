@@ -1438,7 +1438,7 @@ function liveTurnStatus() {
     const elapsed = elapsedSince(state.modelRequestStartedAt);
     const label =
       state.turn.model_request && state.turn.model_request.detail
-        ? "waiting for corrected final schema"
+        ? "schema retry"
         : "waiting for model response";
     return elapsed ? `${label}... ${elapsed}` : `${label}...`;
   }

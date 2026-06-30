@@ -1160,7 +1160,7 @@ mod tests {
         assert!(js_body.contains("submitStartedAt"));
         assert!(js_body.contains("modelRequestStartedAt"));
         assert!(js_body.contains("turnIsWaitingForModelResponse"));
-        assert!(js_body.contains("waiting for corrected final schema"));
+        assert!(js_body.contains("schema retry"));
         assert!(js_body.contains("turn.model_request.detail"));
         assert!(js_body.contains("modelWaitStartedAt"));
         assert!(js_body.contains("turnIsWaitingForModel"));
