@@ -22,7 +22,7 @@
 - app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets
 - app boundary keeps theme assets separate from WebUI layout assets
 - front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames
-- front-end session list can create a draft session with `/new`, persist the selected session id and selected cwd locally, and bind future ADP submit frames to the selected cwd-bound session when present
+- front-end session list can choose a workspace directory before creating a draft session with `/new` or the New session button, persist the selected session id and selected cwd locally, and bind future ADP submit frames to the selected cwd-bound session
 - front-end exposes success and failure sample prompt buttons that load reproducible ADP sample prompts into the composer without bypassing normal Send/ADP command flow
 - front-end composer control strip exposes attachment buttons, preview, selected-session refresh, cwd input, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP
 - front-end attachment drafts are scoped by selected session, persist metadata only, append placeholder lines to the current send, clear on command receipt, and remain available for retry after dispatch failure
@@ -132,7 +132,7 @@
 - theme code is split into `assets/theme.css` and `assets/theme.js`
 - WebUI layout/protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`
 - WebUI shell now advertises `data-adp-endpoint="/adp"` and the front-end opens a WebSocket to that endpoint by default
-- WebUI shell now renders a compact session rail with a draft session entry, selected-session persistence, and `/new` session creation
+- WebUI shell now renders a compact session rail with workspace-directory selection, a draft session entry, selected-session persistence, and `/new` session creation
 - app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface
 - app boundary now serves protocol-only POST command ingress dispatch-receipt/failure smoke route from that shared transport surface
 - HTTP/SSE/POST routes remain compatibility transport surfaces; WebUI JS no longer uses `fetch` or `EventSource` as its default live path
@@ -143,7 +143,7 @@
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
 - debug subscribe route now also keeps one SSE connection open when the first debug snapshot is not available yet
 - WebUI submit path still explicitly refreshes latest turn truth over ADP after a successful command receipt
-- WebUI submit path now forwards an optional selected session id and cwd through `SubmitUserInput` so a new conversation can be created from the selected draft session/workspace instead of always using the global default session
+- WebUI submit path now forwards a selected session id and selected cwd through `SubmitUserInput` for draft sessions, and draft-session submit is blocked until a workspace directory is explicitly selected
 - WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files
 - WebUI Cancel button and Escape key now send `CancelTurn` through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`

@@ -6,6 +6,8 @@ const shell = document.querySelector("[data-webui-shell]");
 const messageList = document.getElementById("message-list");
 const sessionList = document.getElementById("session-list");
 const newSessionButton = document.getElementById("new-session-button");
+const sessionCwdInput = document.getElementById("session-cwd-input");
+const useCwdButton = document.getElementById("use-cwd-button");
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
@@ -35,7 +37,7 @@ const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
 const adpRequestTimeoutMs = 8000;
 const shortcutHelp =
-  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /new /sessions /reload /success /failure /cancel /clear /attachments /model";
+  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /new /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
 const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) || "";
 
@@ -937,11 +939,31 @@ function setSelectedCwd(cwd) {
   if (cwdInput && cwdInput.value !== state.selectedCwd) {
     cwdInput.value = state.selectedCwd;
   }
+  if (sessionCwdInput && sessionCwdInput.value !== state.selectedCwd) {
+    sessionCwdInput.value = state.selectedCwd;
+  }
   if (state.selectedCwd) {
     window.localStorage.setItem(selectedCwdStorageKey, state.selectedCwd);
   } else {
     window.localStorage.removeItem(selectedCwdStorageKey);
   }
+}
+
+function selectedWorkspaceCwd() {
+  const sidebarCwd = sessionCwdInput ? normalizeCwd(sessionCwdInput.value) : "";
+  const composerCwd = cwdInput ? normalizeCwd(cwdInput.value) : "";
+  return sidebarCwd || composerCwd || normalizeCwd(state.selectedCwd);
+}
+
+function requireWorkspaceCwd(action) {
+  const cwd = selectedWorkspaceCwd();
+  if (cwd) {
+    setSelectedCwd(cwd);
+    return cwd;
+  }
+  setCommandStatus(`${action} requires a workspace directory`, { stickyMs: 6000 });
+  (sessionCwdInput || cwdInput || composerInput).focus();
+  return "";
 }
 
 function sessionSummaryForSelected() {
@@ -964,6 +986,10 @@ function newDraftSessionId() {
 }
 
 function startNewSession() {
+  const cwd = requireWorkspaceCwd("new session");
+  if (!cwd) {
+    return;
+  }
   const sessionId = newDraftSessionId();
   state.draftSessionId = sessionId;
   state.sessionTurns = [];
@@ -976,10 +1002,10 @@ function startNewSession() {
   state.submitStartedAt = null;
   state.submitInFlight = false;
   setSelectedSessionId(sessionId);
-  setSelectedCwd(state.selectedCwd);
+  setSelectedCwd(cwd);
   composerInput.value = "";
   composerInput.focus();
-  setCommandStatus("new session ready", { stickyMs: 3000 });
+  setCommandStatus(`new session ready · cwd ${cwd}`, { stickyMs: 5000 });
   renderAll();
 }
 
@@ -1692,6 +1718,14 @@ async function runSlashCommand(rawText) {
     case "/new":
       startNewSession();
       return true;
+    case "/cwd": {
+      const cwd = requireWorkspaceCwd("cwd selection");
+      if (cwd) {
+        setCommandStatus(`workspace cwd selected: ${cwd}`, { stickyMs: 5000 });
+        renderAll();
+      }
+      return true;
+    }
     case "/sessions":
       setCommandStatus("refreshing sessions...", { stickyMs: 3000 });
       await refreshSessions();
@@ -1756,6 +1790,9 @@ composerForm.addEventListener("submit", async (event) => {
     return;
   }
   setCommandStatus("dispatching...");
+  if (isDraftSessionId(state.selectedSessionId) && !requireWorkspaceCwd("draft session submit")) {
+    return;
+  }
   const attachments = currentAttachments();
   const commandText = textWithAttachmentPlaceholders(text, attachments);
   state.pendingUserInput = text;
@@ -1804,6 +1841,14 @@ function loadSamplePrompt(kind) {
 }
 
 newSessionButton.addEventListener("click", startNewSession);
+useCwdButton.addEventListener("click", () => {
+  const cwd = requireWorkspaceCwd("workspace selection");
+  if (!cwd) {
+    return;
+  }
+  setCommandStatus(`workspace cwd selected for next session: ${cwd}`, { stickyMs: 5000 });
+  renderAll();
+});
 successSampleButton.addEventListener("click", () => loadSamplePrompt("success"));
 failureSampleButton.addEventListener("click", () => loadSamplePrompt("failure"));
 attachFileButton.addEventListener("click", () => attachmentFileInput.click());
@@ -1837,9 +1882,15 @@ modelSelector.addEventListener("change", () => {
   setCommandStatus("model selector is read-only; runtime config owns active model", { stickyMs: 6000 });
 });
 cwdInput.value = state.selectedCwd;
+sessionCwdInput.value = state.selectedCwd;
 cwdInput.addEventListener("change", () => {
   setSelectedCwd(cwdInput.value);
   setCommandStatus(state.selectedCwd ? `session cwd selected: ${state.selectedCwd}` : "session cwd cleared; runtime default will be used", { stickyMs: 5000 });
+  renderAll();
+});
+sessionCwdInput.addEventListener("change", () => {
+  setSelectedCwd(sessionCwdInput.value);
+  setCommandStatus(state.selectedCwd ? `workspace cwd selected for new session: ${state.selectedCwd}` : "workspace cwd cleared", { stickyMs: 5000 });
   renderAll();
 });
 

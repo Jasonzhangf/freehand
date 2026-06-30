@@ -898,6 +898,8 @@ mod tests {
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("id=\"session-list\""));
         assert!(html.contains("id=\"new-session-button\""));
+        assert!(html.contains("id=\"session-cwd-input\""));
+        assert!(html.contains("id=\"use-cwd-button\""));
         assert!(html.contains("id=\"success-sample-button\""));
         assert!(html.contains("id=\"failure-sample-button\""));
         assert!(html.contains("composer-control-strip"));
@@ -1085,6 +1087,10 @@ mod tests {
         assert!(js_body.contains("initialSelectedSessionId"));
         assert!(js_body.contains("isDraftSessionId"));
         assert!(js_body.contains("startNewSession"));
+        assert!(js_body.contains("selectedWorkspaceCwd"));
+        assert!(js_body.contains("requireWorkspaceCwd"));
+        assert!(js_body.contains("draft session submit"));
+        assert!(js_body.contains("requires a workspace directory"));
         assert!(js_body.contains("SubmitUserInput.session_id"));
         assert!(js_body.contains("SubmitUserInput.cwd"));
         assert!(js_body.contains("freehand-webui-selected-cwd"));
@@ -1092,6 +1098,7 @@ mod tests {
         assert!(js_body.contains("scrollMessagesToBottom"));
         assert!(js_body.contains("window.scrollTo"));
         assert!(js_body.contains("case \"/new\""));
+        assert!(js_body.contains("case \"/cwd\""));
         assert!(!js_body.contains("selected session:"));
         assert!(js_body.contains("CancelTurn"));
         assert!(js_body.contains("CancelLatestActiveTurn"));
@@ -1171,6 +1178,8 @@ mod tests {
         assert!(js_body.contains("case \"/cancel\""));
         assert!(js_body.contains("case \"/clear\""));
         assert!(webui_css_body.contains("composer-control-strip"));
+        assert!(webui_css_body.contains("session-workspace-control"));
+        assert!(webui_css_body.contains("session-workspace-button"));
         assert!(webui_css_body.contains("attachment-tray"));
         assert!(webui_css_body.contains("attachment-chip"));
         assert!(!js_body.contains("Tool call requested"));

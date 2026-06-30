@@ -186,6 +186,46 @@ body.theme-dark .inspector-block {
   cursor: pointer;
 }
 
+.session-workspace-control {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 8px;
+  padding: 10px 11px;
+  border: 1px solid rgba(31, 108, 88, 0.2);
+  border-radius: 12px;
+  background: rgba(247, 251, 248, 0.82);
+}
+
+.session-workspace-control span {
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.session-workspace-control input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.session-workspace-button {
+  width: 100%;
+  margin-bottom: 8px;
+  border: 1px solid rgba(31, 108, 88, 0.22);
+  border-radius: 12px;
+  background: rgba(232, 243, 238, 0.72);
+  color: var(--accent);
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 750;
+  cursor: pointer;
+}
+
 .inspector-block {
   padding: 10px 11px;
 }

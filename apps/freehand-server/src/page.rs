@@ -30,6 +30,8 @@ pub fn render_webui_smoke() -> String {
         "<aside class=\"sidebar\">",
         "<div class=\"eyebrow\">sessions</div>",
         "<h1 class=\"page-title\">Sessions</h1>",
+        "<label class=\"session-workspace-control\" for=\"session-cwd-input\"><span>Workspace directory</span><input id=\"session-cwd-input\" type=\"text\" placeholder=\"/Volumes/extension/code/freehand\" autocomplete=\"off\" /></label>",
+        "<button class=\"session-workspace-button\" id=\"use-cwd-button\" type=\"button\">Use for new session</button>",
         "<button class=\"session-new-button\" id=\"new-session-button\" type=\"button\">New session</button>",
         "<div class=\"session-list\" id=\"session-list\">",
         "<section class=\"session-item active\"><div class=\"meta-label\">loading</div><div class=\"session-title\" id=\"session-title\">waiting for protocol state</div><div class=\"session-copy\" id=\"session-copy\">no active turn yet</div></section>",

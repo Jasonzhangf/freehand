@@ -1,6 +1,8 @@
 # CACHE
 
 - Current verified session cwd slice:
+  - WebUI session rail now has an explicit `Workspace directory` selector and `Use for new session`; New session and `/new` require cwd before creating a draft, and draft submit is blocked without cwd
+  - live page evidence: `artifacts/webui-cwd-session-e2e/20260630-new-session-workspace/01-new-session-without-cwd-blocked.png`, `02-new-session-with-cwd-draft.png`, `03-submit-success-sample-cwd-bound.png`; counts show `new session requires a workspace directory`, `strip_cwd=/Volumes/extension/code/freehand`, `strip_turn=runtime-turn-43`
   - `SubmitUserInput.cwd` is protocol-owned, rejects blank cwd, and appears in ADP JSON only when selected
   - `UiTurnProjection`, `UiSessionSummary`, and `UiSessionTranscriptProjection` expose cwd
   - runtime canonicalizes requested cwd, binds it per session, persists it on `TurnRecord.cwd`, restores session cwd after bootstrap, and inherits cwd for same-session submits without a new cwd

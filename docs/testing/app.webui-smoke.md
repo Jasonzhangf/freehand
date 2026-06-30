@@ -7,7 +7,7 @@
   - app boundary receives protocol-owned command ingress intent and returns dispatch receipt/failure only
   - app boundary renders a usable protocol-driven WebUI shell
   - app boundary serves split theme and WebUI assets
-  - app boundary renders a compact session rail with a new-session affordance plus selected-session and selected-cwd persistence
+  - app boundary renders a compact session rail with a workspace-directory selector, a new-session affordance, and selected-session plus selected-cwd persistence
   - app boundary renders protocol-owned debug query projection
   - app boundary renders slave-card visibility only for WebUI
   - CLI and WebUI divergences stay protocol-safe
@@ -15,7 +15,7 @@
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
   - WebUI default status/control path uses ADP WebSocket `/adp` for query, subscribe, command, and visible failure frames
   - WebUI exposes success/failure sample prompt buttons that fill the composer while preserving the normal ADP submit path
-  - WebUI control strip exposes session switching, `/new`, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
+  - WebUI control strip and session rail expose session switching, `/new`, explicit workspace cwd selection for new sessions, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
   - WebUI attachment lifecycle keeps draft attachments session-scoped, clears them only after successful send, and preserves them across send failure for retry
   - WebUI transcript history renders attachment placeholders rather than raw payload blobs
   - HTTP query, SSE subscribe, and POST command ingress remain compatibility transport routes rather than WebUI default truth
@@ -64,7 +64,7 @@
 - WebUI JS asset smoke locks that tool card rendering consumes protocol `display` fields, including `parameter_summary`, and does not implement category parsing from raw tool argument/result text
   - WebUI JS asset smoke locks same-execution-cycle round grouping so `runtime-turn-N` and `runtime-turn-N-rM` render as one logical transcript group instead of duplicate user/tool cards
   - WebUI JS asset smoke locks assistant-text collapse into one card per logical turn and raw completion-schema stripping while preserving Final card projection
-  - WebUI JS asset smoke locks `SubmitUserInput.cwd` forwarding and absence of the old selected-session/no-turns system chat card
+  - WebUI JS asset smoke locks explicit workspace-cwd selection before new draft sessions, `SubmitUserInput.cwd` forwarding, and absence of the old selected-session/no-turns system chat card
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
@@ -88,7 +88,7 @@
   - HTTP command ingress dispatch-receipt/failure smoke is landed
   - WebUI root shell now exposes `/adp`, and WebUI JS defaults to ADP WebSocket instead of `fetch` / `EventSource`
   - WebUI session rail now supports `/new`, compact session summaries, and selected-session draft creation without inventing a separate navigation path
-  - WebUI cwd input is landed and forwards selected cwd through ADP submit while displaying protocol-projected cwd in session/topbar metadata
+  - WebUI session rail workspace selector and composer cwd input are landed; new draft sessions require an explicit cwd and submit forwards that cwd through ADP while displaying protocol-projected cwd in session/topbar metadata
   - WebUI root shell now exposes success/failure sample buttons, and WebUI JS carries the paired sample prompts
   - WebUI JS must keep shortcuts and slash commands as input-layer affordances that call existing ADP query/command helpers instead of mutating protocol truth directly
   - WebUI session creation and selection must remain input-layer affordances over ADP/query state, not local truth writers
