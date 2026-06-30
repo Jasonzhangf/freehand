@@ -111,6 +111,7 @@ body.theme-dark .inspector {
   font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   letter-spacing: 0.055em;
   text-transform: uppercase;
+  font-weight: 500;
 }
 
 .eyebrow {
@@ -185,7 +186,7 @@ body.theme-dark .inspector-block {
 
 .session-bulk-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 7px;
   align-items: center;
   margin: 0 0 10px;
@@ -199,7 +200,7 @@ body.theme-dark .inspector-block {
   min-width: 0;
   color: var(--text-soft);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .session-bulk-button {
@@ -209,7 +210,7 @@ body.theme-dark .inspector-block {
   color: var(--master);
   padding: 5px 8px;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 500;
   cursor: pointer;
 }
 

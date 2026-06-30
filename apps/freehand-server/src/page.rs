@@ -37,6 +37,7 @@ pub fn render_webui_smoke() -> String {
         "</div>",
         "<div class=\"session-bulk-toolbar\" aria-label=\"Session management\">",
         "<span class=\"session-bulk-count\" id=\"session-bulk-count\">0 selected</span>",
+        "<button class=\"session-bulk-button\" id=\"session-select-all-button\" type=\"button\">Select all</button>",
         "<button class=\"session-bulk-button\" id=\"session-clear-selection-button\" type=\"button\">Clear</button>",
         "<button class=\"session-bulk-button danger\" id=\"session-delete-selected-button\" type=\"button\" disabled>Delete</button>",
         "</div>",

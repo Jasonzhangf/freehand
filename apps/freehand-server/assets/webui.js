@@ -9,6 +9,7 @@ const newConversationButton = document.getElementById("new-conversation-button")
 const newTaskButton = document.getElementById("new-task-button");
 const taskCwdInput = document.getElementById("task-cwd-input");
 const sessionBulkCount = document.getElementById("session-bulk-count");
+const sessionSelectAllButton = document.getElementById("session-select-all-button");
 const sessionClearSelectionButton = document.getElementById("session-clear-selection-button");
 const sessionDeleteSelectedButton = document.getElementById("session-delete-selected-button");
 const composerForm = document.getElementById("composer-form");
@@ -1073,6 +1074,16 @@ function clearSessionSelection() {
   renderSessions();
 }
 
+function selectAllSessions() {
+  state.selectedSessionIds.clear();
+  state.sessions.forEach((session) => {
+    if (session && session.session_id && !isDraftSessionId(session.session_id)) {
+      state.selectedSessionIds.add(session.session_id);
+    }
+  });
+  renderSessions();
+}
+
 async function deleteSelectedSessions() {
   const sessionIds = selectedManagedSessionIds();
   if (sessionIds.length === 0) {
@@ -1439,8 +1450,12 @@ function renderSessionBulkToolbar() {
     return;
   }
   const selectedCount = selectedManagedSessionIds().length;
+  const selectableCount = state.sessions.filter((session) => !isDraftSessionId(session.session_id)).length;
   sessionBulkCount.textContent = `${selectedCount} selected`;
   sessionDeleteSelectedButton.disabled = selectedCount === 0;
+  if (sessionSelectAllButton) {
+    sessionSelectAllButton.disabled = selectableCount === 0 || selectedCount === selectableCount;
+  }
   if (sessionClearSelectionButton) {
     sessionClearSelectionButton.disabled = selectedCount === 0;
   }
@@ -1935,6 +1950,9 @@ newTaskButton.addEventListener("click", () => {
   startNewTask().catch((error) => {
     setCommandStatus(`new task failed: ${error.message}`, { stickyMs: 8000 });
   });
+});
+sessionSelectAllButton.addEventListener("click", () => {
+  selectAllSessions();
 });
 sessionClearSelectionButton.addEventListener("click", () => {
   clearSessionSelection();

@@ -1022,6 +1022,7 @@ mod tests {
         assert!(root_body.contains("id=\"new-conversation-button\""));
         assert!(root_body.contains("id=\"new-task-button\""));
         assert!(root_body.contains("id=\"session-bulk-count\""));
+        assert!(root_body.contains("id=\"session-select-all-button\""));
         assert!(root_body.contains("id=\"session-clear-selection-button\""));
         assert!(root_body.contains("id=\"session-delete-selected-button\""));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
@@ -1093,6 +1094,7 @@ mod tests {
         assert!(js_body.contains("startNewConversation"));
         assert!(js_body.contains("startNewTask"));
         assert!(js_body.contains("selectedSessionIds"));
+        assert!(js_body.contains("selectAllSessions"));
         assert!(js_body.contains("deleteSelectedSessions"));
         assert!(js_body.contains("DeleteSession"));
         assert!(js_body.contains("session-selector"));

@@ -33,6 +33,26 @@
   - `~/.local/bin/freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action create --session webui-fixed-4041-check --title 'Fixed 4041 Check' --cwd /Volumes/extension/code/freehand` -> success
   - empty cwd create via `adp-session-manage` failed explicitly as `empty_session_cwd`
 
+# 2026-06-30 WebUI session bulk select-all and typography follow-up
+  - user request:
+    - add a `Select all` action to the session bulk toolbar
+    - small text should not use heavy bold weight
+  - implementation:
+    - page shell now renders `session-select-all-button`
+    - WebUI JS selects all non-draft session ids into the existing multi-select set
+    - bulk toolbar button grid expands to four columns
+    - small bulk count/button text is normal weight (`font-weight: 500`) instead of the previous heavy look
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo fmt --check`
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `scripts/install-global.sh`
+    - `scripts/install-launchd.sh restart`
+    - `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
+    - fixed-port HTML at `127.0.0.1:4041` contains `session-select-all-button`, `session-clear-selection-button`, `session-delete-selected-button`, and `session-bulk-count`
+    - fixed-port JS at `127.0.0.1:4041` contains `selectAllSessions`, `sessionSelectAllButton`, and `selectedSessionIds`
+    - fixed-port CSS at `127.0.0.1:4041` contains the four-column toolbar layout and `font-weight: 500`
+
 # 2026-06-29 tool display semantic owner
   - user requirement:
     - tool classification must have a standard independent file and locked owner
