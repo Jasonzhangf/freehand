@@ -34,12 +34,12 @@
 - terminal result is projected from validated completion schema, not raw provider finish reason
 - cancel requests become explicit cancelled terminal events through the reason owner rather than failed terminal events
 - completion schema is extracted from `<freehand_completion>...</freehand_completion>` tagged JSON before validation
-- invalid completion schema feedback identifies concrete invalid schema entries
+- invalid completion schema feedback identifies concrete invalid schema entries and reports non-string field types explicitly
 - provider metadata signals may influence orchestration decisions only through explicit typed fields, never by hidden prompt mutation
 
 ## Error Mainline
 
-- invalid completion schema is rejected and reprompted with field-level feedback
+- invalid completion schema is rejected and reprompted with type-aware field-level feedback
 - invalid completion schema retries are capped at 3 before a failed terminal outcome is written
 - provider `finish_reason=stop` or `finish_reason=end_turn` does not end the turn by itself
 - UI/runtime cancellation is represented as `TerminalStatus::Cancelled`, not as a failed or successful terminal outcome

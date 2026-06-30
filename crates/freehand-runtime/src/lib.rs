@@ -48,8 +48,9 @@ use freehand_provider_core::{
 };
 use freehand_reason::{
     PersistedSessionMetadataEntry, ProviderRawLedgerWrite, ProviderRawScenePosition,
-    ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError, ReasonTurnEngine,
-    SessionHistory, TurnRecord, TurnStartInput,
+    ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError,
+    ReasonResp04CompletionSchemaRejected, ReasonTurnEngine, SessionHistory, TurnRecord,
+    TurnStartInput,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
@@ -1403,6 +1404,20 @@ where
                         restored_closed_turns,
                     });
                 }
+                let retry_event = ReasonBroadcastEvent::CompletionSchemaRejected(
+                    ReasonResp04CompletionSchemaRejected {
+                        session_id: turn.request.session_id.clone(),
+                        turn_id: turn.request.turn_id.clone(),
+                        trace_id: turn.request.trace_id.clone(),
+                        feature_id: turn.request.feature_id.clone(),
+                        agent_id: turn.request.agent_id.clone(),
+                        retry_index: schema_rejections.len() as u32,
+                        rejection: rejection.clone(),
+                        feedback: feedback.clone(),
+                    },
+                );
+                on_broadcast(&retry_event);
+                broadcasts.push(retry_event);
                 next_prompt = feedback.clone();
                 carryover_segments =
                     next_round_segments(&request.prompt, &visible_text, Some(feedback.as_str()));
@@ -3014,6 +3029,24 @@ fn apply_runtime_reason_broadcast(
                 reason_agent_id.clone(),
                 master_node_id.to_owned(),
                 event,
+                false,
+            );
+        }
+        ReasonBroadcastEvent::CompletionSchemaRejected(event) => {
+            let issue_summary = event
+                .rejection
+                .issues
+                .iter()
+                .map(|issue| format!("{} {}", issue.field, issue.message))
+                .collect::<Vec<_>>()
+                .join("; ");
+            ui.apply_completion_schema_retry_waiting(
+                reason_agent_id.clone(),
+                master_node_id.to_owned(),
+                &event.session_id,
+                &event.turn_id,
+                event.retry_index,
+                issue_summary,
                 false,
             );
         }

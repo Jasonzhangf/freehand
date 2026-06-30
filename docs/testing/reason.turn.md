@@ -14,7 +14,7 @@
   - cancellation writes an explicit cancelled terminal event rather than failed/success terminal truth
   - cancel_turn on an already-terminal turn returns existing terminal without overwriting
   - completion schema is extracted from tagged JSON in model text
-  - invalid completion schema feedback identifies exact invalid entries
+- invalid completion schema feedback identifies exact invalid entries and reports non-string types explicitly
   - invalid schema retry exhaustion writes failed terminal outcome
   - start-turn request payload preserves typed context segments through provider payload contract
   - start-turn rewrite mode/version are sourced from session history truth

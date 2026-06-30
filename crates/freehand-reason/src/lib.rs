@@ -10,8 +10,8 @@ use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::{
-    CompletionDecision, CompletionSubmission, CompletionValidationError, ContextPlannerInput,
-    PlannedContext, plan_context, validate_completion_submission,
+    CompletionDecision, CompletionSchemaRejection, CompletionSubmission, CompletionValidationError,
+    ContextPlannerInput, PlannedContext, plan_context, validate_completion_submission,
 };
 use freehand_contracts::{
     AgentId, ContextProvenance, ContextSegment, ContextSegmentId, ErrorErr01RuntimeClassified,
@@ -66,8 +66,21 @@ pub enum ReasonBroadcastEvent {
     Tool(ReasonReq04ToolCall),
     ToolResult(ReasonReq05ToolResultReentry),
     Usage(ReasonResp02UsageEvent),
+    CompletionSchemaRejected(ReasonResp04CompletionSchemaRejected),
     Terminal(ReasonResp03TerminalEvent),
     Error(ErrorErr01RuntimeClassified),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasonResp04CompletionSchemaRejected {
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub trace_id: TraceId,
+    pub feature_id: FeatureId,
+    pub agent_id: AgentId,
+    pub retry_index: u32,
+    pub rejection: CompletionSchemaRejection,
+    pub feedback: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

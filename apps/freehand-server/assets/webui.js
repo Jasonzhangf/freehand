@@ -588,6 +588,16 @@ function turnExecutionCard(turn) {
     const rowBody = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
     body.appendChild(executionRow(rowKind, item.title, rowBody, rowStatus));
   });
+  if (turnIsWaitingForModelResponse(turn) && turn.model_request && turn.model_request.detail) {
+    body.appendChild(
+      executionRow(
+        "system",
+        "Schema",
+        turn.model_request.detail,
+        elapsedSince(state.modelRequestStartedAt) || "0s",
+      ),
+    );
+  }
   return article;
 }
 
@@ -1426,7 +1436,11 @@ function liveTurnStatus() {
 
   if (turnIsWaitingForModelResponse(state.turn)) {
     const elapsed = elapsedSince(state.modelRequestStartedAt);
-    return elapsed ? `waiting for model response... ${elapsed}` : "waiting for model response...";
+    const label =
+      state.turn.model_request && state.turn.model_request.detail
+        ? "waiting for corrected final schema"
+        : "waiting for model response";
+    return elapsed ? `${label}... ${elapsed}` : `${label}...`;
   }
 
   if (turnIsWaitingForModel(state.turn)) {

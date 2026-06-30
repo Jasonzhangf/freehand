@@ -12,7 +12,7 @@
   - anthropic executor runs single-shot or SSE request
   - provider-neutral outputs are written back into the active round and broadcast
   - completed implemented registry tool calls are executed, written as success or failed tool-result re-entry, persisted, and passed to the next provider request
-  - completion schema is parsed from tagged text and either accepted, rejected, or continued
+  - completion schema is parsed from tagged text and either accepted, rejected with type-aware field feedback plus UI-visible retry waiting projection, or continued
   - terminal live turns are materialized through `ReasonPersistence`
   - runtime dispatch projects the final turn into shared `UiProtocolState`
 - white-box plan:
@@ -52,6 +52,8 @@
   - one selected anthropic provider emits a writable file tool call, gets checkpointed before execute, and can be rewound by runtime owner truth
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
   - invalid completion schema retries exactly 3 times and closes failed terminal without early success
+  - non-string completion fields produce explicit type feedback instead of being reported as missing
+  - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
   - provider HTTP failure returns explicit dispatch failure and does not project a successful terminal
   - tool execution result failure returns a paired failed tool result to the model and can still end with a successful terminal schema
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`

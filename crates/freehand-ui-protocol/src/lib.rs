@@ -677,6 +677,29 @@ impl UiProtocolState {
         projection
     }
 
+    pub fn apply_completion_schema_retry_waiting(
+        &mut self,
+        source_agent_id: AgentId,
+        source_node_id: String,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        retry_index: u32,
+        issue_summary: String,
+        slave_substream_card: bool,
+    ) -> UiTurnProjection {
+        let detail = format!(
+            "Completion schema validation failed on retry {retry_index}. Feedback sent to the model: {issue_summary}. Waiting for corrected final schema."
+        );
+        self.apply_model_request_waiting(
+            source_agent_id,
+            source_node_id,
+            session_id,
+            turn_id,
+            Some(detail),
+            slave_substream_card,
+        )
+    }
+
     pub fn apply_usage_event(
         &mut self,
         source_agent_id: AgentId,
@@ -2255,6 +2278,30 @@ mod tests {
         );
         assert_eq!(responded.model_request, None);
         assert_eq!(responded.text, vec!["model response arrived".to_owned()]);
+    }
+
+    #[test]
+    fn schema_retry_projects_as_model_waiting_activity() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("session-schema-retry");
+        let turn_id = TurnId::new("turn-schema-retry");
+
+        let waiting = state.apply_completion_schema_retry_waiting(
+            AgentId::new("agent-1"),
+            "node-1".to_owned(),
+            &session_id,
+            &turn_id,
+            2,
+            "evidence must be a string, got array".to_owned(),
+            false,
+        );
+
+        let activity = waiting.model_request.expect("model request activity");
+        assert_eq!(activity.status, UiModelRequestStatus::Waiting);
+        let detail = activity.detail.expect("detail");
+        assert!(detail.contains("Completion schema validation failed"));
+        assert!(detail.contains("evidence must be a string"));
+        assert!(detail.contains("Waiting for corrected final schema"));
     }
 
     #[test]

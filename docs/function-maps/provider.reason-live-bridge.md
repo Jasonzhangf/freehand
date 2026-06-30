@@ -23,7 +23,7 @@
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
 - completed provider tool calls are executed by `freehand-tools`; writable tool calls first go through runtime checkpoint preview/snapshot/execute gating, then success or execution-failure results are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a paired tool result exchange
 - runtime emits tool execution lifecycle debug snapshots through `debug.core` without tool-result content
-- completion schema is parsed from tagged text, validated, and either accepted, rejected with field-level feedback, or used to schedule the next round
+- completion schema is parsed from tagged text, validated, and either accepted, rejected with field-level feedback plus UI-visible retry waiting projection, or used to schedule the next round
 - runtime emits terminal lifecycle debug snapshots through `debug.core` before terminal persistence
 - runtime dispatch callers may consume the same bridge through CLI or daemon command ingress without owning provider DTOs
 
@@ -44,7 +44,8 @@
 
 - unsupported provider type/protocol is rejected at the bridge boundary
 - provider execution failures are returned explicitly
-- invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times
+- invalid or missing completion schema is rejected with type-aware field-level feedback and retried up to 3 times
+- non-terminal completion-schema rejection retries publish a waiting projection so UI clients can show that repair feedback was sent to the model
 - incomplete tool calls are not executed and do not become tool-result truth
 - writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn

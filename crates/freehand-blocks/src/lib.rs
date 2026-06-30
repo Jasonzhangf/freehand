@@ -105,7 +105,8 @@ pub fn completion_schema_guidance() -> CompletionSchemaGuidance {
             "  \"blocked_reason\": \"required when claim=blocked\"\n",
             "}\n",
             "</freehand_completion>\n",
-            "Do not omit the tag. Invalid or missing schema will be rejected with field-level feedback."
+            "Do not omit the tag. Invalid or missing schema will be rejected with field-level feedback.\n",
+            "Use plain string values for required text fields; do not emit arrays or objects for those fields."
         )
         .to_owned(),
     }
@@ -173,13 +174,17 @@ pub fn parse_completion_submission_block(
 
     let submission = CompletionSubmission {
         claim,
-        completion_reason: optional_string_field(object, "completion_reason"),
-        evidence: optional_string_field(object, "evidence"),
-        summary: optional_string_field(object, "summary"),
-        learned: optional_string_field(object, "learned"),
-        next_step: optional_string_field(object, "next_step"),
-        blocked_reason: optional_string_field(object, "blocked_reason"),
+        completion_reason: optional_string_field(&mut issues, object, "completion_reason"),
+        evidence: optional_string_field(&mut issues, object, "evidence"),
+        summary: optional_string_field(&mut issues, object, "summary"),
+        learned: optional_string_field(&mut issues, object, "learned"),
+        next_step: optional_string_field(&mut issues, object, "next_step"),
+        blocked_reason: optional_string_field(&mut issues, object, "blocked_reason"),
     };
+
+    if !issues.is_empty() {
+        return Err(CompletionSchemaRejection { issues });
+    }
 
     let validation_issues = completion_submission_issues(&submission);
     if validation_issues.is_empty() {
@@ -217,8 +222,22 @@ fn extract_tagged_completion_json(text: &str) -> Option<&str> {
     Some(&text[start..end])
 }
 
-fn optional_string_field(object: &Map<String, Value>, field: &'static str) -> Option<String> {
-    string_field(object, field)
+fn optional_string_field(
+    issues: &mut Vec<CompletionSchemaIssue>,
+    object: &Map<String, Value>,
+    field: &'static str,
+) -> Option<String> {
+    match object.get(field) {
+        None => None,
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(value) => {
+            issues.push(CompletionSchemaIssue {
+                field: field.to_owned(),
+                message: format!("must be a string, got {}", schema_value_type_label(value)),
+            });
+            None
+        }
+    }
 }
 
 fn string_field(object: &Map<String, Value>, field: &'static str) -> Option<String> {
@@ -226,6 +245,17 @@ fn string_field(object: &Map<String, Value>, field: &'static str) -> Option<Stri
         .get(field)
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn schema_value_type_label(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }
 
 fn schema_rejection(
@@ -849,6 +879,28 @@ mod tests {
     }
 
     #[test]
+    fn rejects_completion_schema_with_non_string_evidence() {
+        let err = parse_completion_submission_block(
+            r#"
+<freehand_completion>
+{
+  "claim": "complete",
+  "completion_reason": "done",
+  "evidence": ["pwd", "/tmp"],
+  "summary": "ok",
+  "learned": "keep evidence compact"
+}
+</freehand_completion>
+"#,
+        )
+        .expect_err("should fail");
+        assert_eq!(err.issues.len(), 1);
+        assert_eq!(err.issues[0].field, "evidence");
+        assert!(err.issues[0].message.contains("must be a string"));
+        assert!(err.issues[0].message.contains("array"));
+    }
+
+    #[test]
     fn accepts_blocked_submission() {
         let decision = validate_completion_submission(&CompletionSubmission {
             claim: CompletionClaim::Blocked,
@@ -1271,6 +1323,74 @@ mod tests {
         .expect_err("must fail");
         assert_eq!(err.issues[0].field, "freehand_completion");
         assert!(err.issues[0].message.contains("invalid JSON"));
+    }
+
+    #[test]
+    fn completion_schema_feedback_matrix_is_type_aware() {
+        let cases = [
+            (
+                "missing tag",
+                "pong",
+                "freehand_completion",
+                "missing `<freehand_completion>...</freehand_completion>` block",
+            ),
+            (
+                "invalid json",
+                "<freehand_completion>\n{\"claim\":\"complete\"\n</freehand_completion>",
+                "freehand_completion",
+                "invalid JSON",
+            ),
+            (
+                "invalid claim",
+                "<freehand_completion>\n{\"claim\":\"done\"}\n</freehand_completion>",
+                "claim",
+                "must be one of `complete`, `continue`, or `blocked`",
+            ),
+            (
+                "missing complete field",
+                "<freehand_completion>\n{\"claim\":\"complete\",\"summary\":\"pong\"}\n</freehand_completion>",
+                "evidence",
+                "is required",
+            ),
+            (
+                "type mismatch",
+                "<freehand_completion>\n{\"claim\":\"complete\",\"completion_reason\":\"done\",\"evidence\":[\"pwd\"],\"summary\":\"pong\",\"learned\":\"keep schema strict\"}\n</freehand_completion>",
+                "evidence",
+                "must be a string, got array",
+            ),
+            (
+                "continue missing next_step",
+                "<freehand_completion>\n{\"claim\":\"continue\"}\n</freehand_completion>",
+                "next_step",
+                "is required when `claim` is `continue`",
+            ),
+            (
+                "blocked missing reason",
+                "<freehand_completion>\n{\"claim\":\"blocked\"}\n</freehand_completion>",
+                "blocked_reason",
+                "is required when `claim` is `blocked`",
+            ),
+        ];
+
+        for (label, input, field, message) in cases {
+            let err = parse_completion_submission_block(input).expect_err(label);
+            assert!(
+                err.issues
+                    .iter()
+                    .any(|issue| issue.field == field && issue.message.contains(message)),
+                "{label} feedback mismatch: {err:?}"
+            );
+
+            let feedback = completion_schema_rejection_feedback(&err);
+            assert!(
+                feedback.contains(field),
+                "{label} feedback missing field name: {feedback}"
+            );
+            assert!(
+                feedback.contains(message),
+                "{label} feedback missing guidance: {feedback}"
+            );
+        }
     }
 
     #[test]
