@@ -5,9 +5,9 @@ initializeThemeToggle(document);
 const shell = document.querySelector("[data-webui-shell]");
 const messageList = document.getElementById("message-list");
 const sessionList = document.getElementById("session-list");
-const newSessionButton = document.getElementById("new-session-button");
-const sessionCwdInput = document.getElementById("session-cwd-input");
-const useCwdButton = document.getElementById("use-cwd-button");
+const newConversationButton = document.getElementById("new-conversation-button");
+const newTaskButton = document.getElementById("new-task-button");
+const taskCwdInput = document.getElementById("task-cwd-input");
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
@@ -37,7 +37,7 @@ const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
 const adpRequestTimeoutMs = 8000;
 const shortcutHelp =
-  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /new /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
+  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /new /task /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
 const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) || "";
 
@@ -939,8 +939,8 @@ function setSelectedCwd(cwd) {
   if (cwdInput && cwdInput.value !== state.selectedCwd) {
     cwdInput.value = state.selectedCwd;
   }
-  if (sessionCwdInput && sessionCwdInput.value !== state.selectedCwd) {
-    sessionCwdInput.value = state.selectedCwd;
+  if (taskCwdInput && taskCwdInput.value !== state.selectedCwd) {
+    taskCwdInput.value = state.selectedCwd;
   }
   if (state.selectedCwd) {
     window.localStorage.setItem(selectedCwdStorageKey, state.selectedCwd);
@@ -950,19 +950,19 @@ function setSelectedCwd(cwd) {
 }
 
 function selectedWorkspaceCwd() {
-  const sidebarCwd = sessionCwdInput ? normalizeCwd(sessionCwdInput.value) : "";
+  const sidebarCwd = taskCwdInput ? normalizeCwd(taskCwdInput.value) : "";
   const composerCwd = cwdInput ? normalizeCwd(cwdInput.value) : "";
   return sidebarCwd || composerCwd || normalizeCwd(state.selectedCwd);
 }
 
-function requireWorkspaceCwd(action) {
+function requireTaskCwd(action) {
   const cwd = selectedWorkspaceCwd();
   if (cwd) {
     setSelectedCwd(cwd);
     return cwd;
   }
-  setCommandStatus(`${action} requires a workspace directory`, { stickyMs: 6000 });
-  (sessionCwdInput || cwdInput || composerInput).focus();
+  setCommandStatus(`${action} requires a task target directory`, { stickyMs: 6000 });
+  (taskCwdInput || cwdInput || composerInput).focus();
   return "";
 }
 
@@ -985,12 +985,7 @@ function newDraftSessionId() {
   return `webui-session-${stamp}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-function startNewSession() {
-  const cwd = requireWorkspaceCwd("new session");
-  if (!cwd) {
-    return;
-  }
-  const sessionId = newDraftSessionId();
+function resetLocalConversationState(sessionId) {
   state.draftSessionId = sessionId;
   state.sessionTurns = [];
   state.turn = null;
@@ -1002,11 +997,41 @@ function startNewSession() {
   state.submitStartedAt = null;
   state.submitInFlight = false;
   setSelectedSessionId(sessionId);
-  setSelectedCwd(cwd);
   composerInput.value = "";
   composerInput.focus();
-  setCommandStatus(`new session ready · cwd ${cwd}`, { stickyMs: 5000 });
   renderAll();
+}
+
+function startNewConversation() {
+  const sessionId = newDraftSessionId();
+  resetLocalConversationState(sessionId);
+  setSelectedCwd("");
+  setCommandStatus("new conversation ready", { stickyMs: 5000 });
+}
+
+async function startNewTask() {
+  const cwd = requireTaskCwd("new task");
+  if (!cwd) {
+    return;
+  }
+  const sessionId = newDraftSessionId();
+  resetLocalConversationState(sessionId);
+  setSelectedCwd(cwd);
+  setCommandStatus(`creating task session · cwd ${cwd}`, { stickyMs: 5000 });
+  try {
+    await adpCommand({
+      CreateSession: {
+        session_id: sessionId,
+        title: `Task · ${cwd}`,
+        cwd,
+      },
+    });
+    await refreshSessions();
+    await refreshSelectedSession();
+    setCommandStatus(`new task ready · cwd ${cwd}`, { stickyMs: 5000 });
+  } catch (error) {
+    setCommandStatus(`new task failed: ${error.message}`, { stickyMs: 8000 });
+  }
 }
 
 function setSessionList(projection) {
@@ -1333,7 +1358,7 @@ function renderMessages() {
     const empty = document.createElement("div");
     empty.className = "chat-empty-state";
     empty.textContent = state.selectedSessionId
-      ? "New session. Send a message to start."
+    ? "New conversation. Send a message to start."
       : "Waiting for protocol state.";
     fragments.push(empty);
   }
@@ -1716,12 +1741,15 @@ async function runSlashCommand(rawText) {
       setCommandStatus(shortcutHelp, { stickyMs: 10000 });
       return true;
     case "/new":
-      startNewSession();
+      startNewConversation();
+      return true;
+    case "/task":
+      await startNewTask();
       return true;
     case "/cwd": {
-      const cwd = requireWorkspaceCwd("cwd selection");
+      const cwd = requireTaskCwd("task cwd selection");
       if (cwd) {
-        setCommandStatus(`workspace cwd selected: ${cwd}`, { stickyMs: 5000 });
+        setCommandStatus(`task target directory selected: ${cwd}`, { stickyMs: 5000 });
         renderAll();
       }
       return true;
@@ -1790,9 +1818,6 @@ composerForm.addEventListener("submit", async (event) => {
     return;
   }
   setCommandStatus("dispatching...");
-  if (isDraftSessionId(state.selectedSessionId) && !requireWorkspaceCwd("draft session submit")) {
-    return;
-  }
   const attachments = currentAttachments();
   const commandText = textWithAttachmentPlaceholders(text, attachments);
   state.pendingUserInput = text;
@@ -1840,14 +1865,11 @@ function loadSamplePrompt(kind) {
   setCommandStatus(`${kind} sample loaded; press Send to run through ADP`, { stickyMs: 5000 });
 }
 
-newSessionButton.addEventListener("click", startNewSession);
-useCwdButton.addEventListener("click", () => {
-  const cwd = requireWorkspaceCwd("workspace selection");
-  if (!cwd) {
-    return;
-  }
-  setCommandStatus(`workspace cwd selected for next session: ${cwd}`, { stickyMs: 5000 });
-  renderAll();
+newConversationButton.addEventListener("click", startNewConversation);
+newTaskButton.addEventListener("click", () => {
+  startNewTask().catch((error) => {
+    setCommandStatus(`new task failed: ${error.message}`, { stickyMs: 8000 });
+  });
 });
 successSampleButton.addEventListener("click", () => loadSamplePrompt("success"));
 failureSampleButton.addEventListener("click", () => loadSamplePrompt("failure"));
@@ -1882,15 +1904,15 @@ modelSelector.addEventListener("change", () => {
   setCommandStatus("model selector is read-only; runtime config owns active model", { stickyMs: 6000 });
 });
 cwdInput.value = state.selectedCwd;
-sessionCwdInput.value = state.selectedCwd;
+taskCwdInput.value = state.selectedCwd;
 cwdInput.addEventListener("change", () => {
   setSelectedCwd(cwdInput.value);
   setCommandStatus(state.selectedCwd ? `session cwd selected: ${state.selectedCwd}` : "session cwd cleared; runtime default will be used", { stickyMs: 5000 });
   renderAll();
 });
-sessionCwdInput.addEventListener("change", () => {
-  setSelectedCwd(sessionCwdInput.value);
-  setCommandStatus(state.selectedCwd ? `workspace cwd selected for new session: ${state.selectedCwd}` : "workspace cwd cleared", { stickyMs: 5000 });
+taskCwdInput.addEventListener("change", () => {
+  setSelectedCwd(taskCwdInput.value);
+  setCommandStatus(state.selectedCwd ? `task target directory selected: ${state.selectedCwd}` : "task target directory cleared", { stickyMs: 5000 });
   renderAll();
 });
 

@@ -961,12 +961,17 @@ impl Default for UiProtocolState {
 pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
     match command {
         UiCommand::CreateSession {
-            session_id, title, ..
+            session_id,
+            title,
+            cwd,
         } if session_id.as_str().trim().is_empty()
-            || title.as_ref().is_some_and(|title| title.trim().is_empty()) =>
+            || title.as_ref().is_some_and(|title| title.trim().is_empty())
+            || cwd.as_ref().is_some_and(|cwd| cwd.trim().is_empty()) =>
         {
             if session_id.as_str().trim().is_empty() {
                 Err(UiProtocolError::EmptySessionId)
+            } else if cwd.as_ref().is_some_and(|cwd| cwd.trim().is_empty()) {
+                Err(UiProtocolError::EmptySessionCwd)
             } else {
                 Err(UiProtocolError::EmptySessionTitle)
             }
@@ -1858,6 +1863,27 @@ mod tests {
             cwd: Some("   ".to_owned()),
         })
         .expect_err("blank cwd must be rejected");
+        assert_eq!(err, UiProtocolError::EmptySessionCwd);
+        assert_eq!(protocol_rejection(err).code, "empty_session_cwd");
+    }
+
+    #[test]
+    fn create_session_rejects_empty_cwd() {
+        let command = UiCommand::CreateSession {
+            session_id: SessionId::new("webui-task-session"),
+            title: Some("Task".to_owned()),
+            cwd: Some("/tmp/freehand-cwd".to_owned()),
+        };
+        validate_command(&command).expect("valid task cwd command");
+        let encoded = serde_json::to_string(&command).expect("json");
+        assert!(encoded.contains("/tmp/freehand-cwd"));
+
+        let err = validate_command(&UiCommand::CreateSession {
+            session_id: SessionId::new("webui-task-empty-cwd"),
+            title: Some("Task".to_owned()),
+            cwd: Some("   ".to_owned()),
+        })
+        .expect_err("blank task cwd must be rejected");
         assert_eq!(err, UiProtocolError::EmptySessionCwd);
         assert_eq!(protocol_rejection(err).code, "empty_session_cwd");
     }

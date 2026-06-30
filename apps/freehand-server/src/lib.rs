@@ -897,9 +897,9 @@ mod tests {
         assert!(html.contains("/assets/webui.js"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("id=\"session-list\""));
-        assert!(html.contains("id=\"new-session-button\""));
-        assert!(html.contains("id=\"session-cwd-input\""));
-        assert!(html.contains("id=\"use-cwd-button\""));
+        assert!(html.contains("id=\"new-conversation-button\""));
+        assert!(html.contains("id=\"new-task-button\""));
+        assert!(html.contains("id=\"task-cwd-input\""));
         assert!(html.contains("id=\"success-sample-button\""));
         assert!(html.contains("id=\"failure-sample-button\""));
         assert!(html.contains("composer-control-strip"));
@@ -1019,7 +1019,8 @@ mod tests {
         assert!(root_body.contains("/assets/theme.css"));
         assert!(root_body.contains("data-adp-endpoint=\"/adp\""));
         assert!(root_body.contains("id=\"session-list\""));
-        assert!(root_body.contains("id=\"new-session-button\""));
+        assert!(root_body.contains("id=\"new-conversation-button\""));
+        assert!(root_body.contains("id=\"new-task-button\""));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
         assert!(root_body.contains("Success sample"));
         assert!(root_body.contains("Failure sample"));
@@ -1086,11 +1087,12 @@ mod tests {
         assert!(js_body.contains("crypto.randomUUID"));
         assert!(js_body.contains("initialSelectedSessionId"));
         assert!(js_body.contains("isDraftSessionId"));
-        assert!(js_body.contains("startNewSession"));
+        assert!(js_body.contains("startNewConversation"));
+        assert!(js_body.contains("startNewTask"));
         assert!(js_body.contains("selectedWorkspaceCwd"));
-        assert!(js_body.contains("requireWorkspaceCwd"));
-        assert!(js_body.contains("draft session submit"));
-        assert!(js_body.contains("requires a workspace directory"));
+        assert!(js_body.contains("requireTaskCwd"));
+        assert!(js_body.contains("requires a task target directory"));
+        assert!(js_body.contains("CreateSession"));
         assert!(js_body.contains("SubmitUserInput.session_id"));
         assert!(js_body.contains("SubmitUserInput.cwd"));
         assert!(js_body.contains("freehand-webui-selected-cwd"));
@@ -1098,6 +1100,7 @@ mod tests {
         assert!(js_body.contains("scrollMessagesToBottom"));
         assert!(js_body.contains("window.scrollTo"));
         assert!(js_body.contains("case \"/new\""));
+        assert!(js_body.contains("case \"/task\""));
         assert!(js_body.contains("case \"/cwd\""));
         assert!(!js_body.contains("selected session:"));
         assert!(js_body.contains("CancelTurn"));
@@ -1171,6 +1174,7 @@ mod tests {
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("case \"/help\""));
         assert!(js_body.contains("case \"/new\""));
+        assert!(js_body.contains("case \"/task\""));
         assert!(js_body.contains("case \"/sessions\""));
         assert!(js_body.contains("case \"/reload\""));
         assert!(js_body.contains("case \"/success\""));
@@ -1178,8 +1182,8 @@ mod tests {
         assert!(js_body.contains("case \"/cancel\""));
         assert!(js_body.contains("case \"/clear\""));
         assert!(webui_css_body.contains("composer-control-strip"));
-        assert!(webui_css_body.contains("session-workspace-control"));
-        assert!(webui_css_body.contains("session-workspace-button"));
+        assert!(webui_css_body.contains("session-create-actions"));
+        assert!(webui_css_body.contains("task-cwd-control"));
         assert!(webui_css_body.contains("attachment-tray"));
         assert!(webui_css_body.contains("attachment-chip"));
         assert!(!js_body.contains("Tool call requested"));

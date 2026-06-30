@@ -37,7 +37,7 @@
   - command dispatch routing mapping
   - submit command selected-session validation mapping
   - submit command selected-cwd validation and JSON roundtrip mapping
-  - session management command validation covers empty title, empty session id, and explicit owner-routing to `reason.persistence`
+  - session management command validation covers empty title, empty session id, empty cwd, and explicit owner-routing to `reason.persistence`
   - explicit cancel and latest-active cancel owner-routing mapping
   - checkpoint rewind ingress validation and owner-routing mapping
   - checkpoint projection storage and query mapping
@@ -72,7 +72,7 @@
   - blank latest-turn subscribe waits until a turn exists instead of failing early
   - ADP command/query/subscribe frame roundtrip smoke
   - ADP query-as-command negative smoke
-  - ADP session management negative smoke proves invalid session metadata commands fail explicitly instead of becoming local-only UI state
+  - ADP session management negative smoke proves invalid session metadata commands, including empty cwd, fail explicitly instead of becoming local-only UI state
 - project black-box impact:
   - CLI and WebUI consume one protocol truth while rendering different views
   - protocol truth can back a minimal service boundary without duplicating projection logic in apps
@@ -110,4 +110,4 @@
   - tool summaries now expose `display` from the `tool.display` owner, and public bodies prefer structured result summaries over raw detail text
   - ADP request/response frames are landed and regression-locked by JSON roundtrip coverage
   - session cwd summary/transcript projection is landed and regression-locked
-  - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, and `DeleteSession` routing through runtime to `reason.persistence`
+  - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, and `DeleteSession` routing through runtime to `reason.persistence`; `CreateSession.cwd` empty-string rejection is regression-locked at the protocol boundary
