@@ -1028,8 +1028,11 @@ mod tests {
         assert!(root_body.contains("id=\"session-clear-selection-button\""));
         assert!(root_body.contains("id=\"session-delete-selected-button\""));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
-        assert!(root_body.contains("Success sample"));
-        assert!(root_body.contains("Failure sample"));
+        assert!(root_body.contains("id=\"debug-details-toggle\""));
+        assert!(root_body.contains(">Success</button>"));
+        assert!(root_body.contains(">Failure</button>"));
+        assert!(!root_body.contains("Success sample"));
+        assert!(!root_body.contains("Failure sample"));
 
         let theme = client
             .get(format!("{}/assets/theme.css", server.base_url))
@@ -1060,7 +1063,10 @@ mod tests {
         assert!(webui_css_body.contains(".chat-empty-title"));
         assert!(webui_css_body.contains("width: fit-content"));
         assert!(webui_css_body.contains(".execution-block"));
+        assert!(webui_css_body.contains(".execution-block.success-state"));
+        assert!(webui_css_body.contains(".execution-block.failed-state"));
         assert!(webui_css_body.contains(".execution-row-tool"));
+        assert!(webui_css_body.contains(".debug-toggle"));
 
         let js = client
             .get(format!("{}/assets/webui.js", server.base_url))
@@ -1137,6 +1143,12 @@ mod tests {
         assert!(js_body.contains("logicalSessionTurns(state.sessionTurns)"));
         assert!(js_body.contains("assistantBodies.join(\"\\n\")"));
         assert!(js_body.contains("stripFreehandCompletionBlock"));
+        assert!(js_body.contains("terminalBodyForDisplay"));
+        assert!(js_body.contains("terminalSummaryLine"));
+        assert!(js_body.contains("stripDebugTerminalLines"));
+        assert!(js_body.contains("debugDetailsVisible"));
+        assert!(js_body.contains("debugDetailsToggle"));
+        assert!(js_body.contains("Debug off"));
         assert!(js_body.contains("<freehand_completion>"));
         assert!(js_body.contains("toolSummaryBody"));
         assert!(js_body.contains("renderToolBody"));
@@ -1170,8 +1182,9 @@ mod tests {
         assert!(js_body.contains("formatDuration"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("tool_call_id"));
-        assert!(js_body.contains("ADP success sample"));
-        assert!(js_body.contains("ADP failure sample"));
+        assert!(!js_body.contains("ADP success sample"));
+        assert!(!js_body.contains("ADP failure sample"));
+        assert!(js_body.contains("scenario loaded"));
         assert!(js_body.contains("loadSamplePrompt"));
         assert!(js_body.contains("shortcutHelp"));
         assert!(js_body.contains("runSlashCommand"));

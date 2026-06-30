@@ -23,7 +23,7 @@
 - app boundary keeps theme assets separate from WebUI layout assets
 - front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames
 - front-end session list separates `New conversation` and `New task`: `/new` and `New conversation` create a global conversation draft without requiring cwd, while `New task` requires a visible target cwd and creates a protocol-owned cwd-bound task session through ADP `CreateSession`
-- front-end exposes success and failure sample prompt buttons that load reproducible ADP sample prompts into the composer without bypassing normal Send/ADP command flow
+- front-end exposes success and failure scenario buttons that load reproducible ADP scenario prompts into the composer without bypassing normal Send/ADP command flow
 - front-end composer control strip exposes attachment buttons, preview, selected-session refresh, cwd input, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP
 - front-end attachment drafts are scoped by selected session, persist metadata only, append placeholder lines to the current send, clear on command receipt, and remain available for retry after dispatch failure
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
@@ -49,7 +49,7 @@
 - debug SSE subscribe stays open when a debug snapshot is not available yet, while debug HTTP query remains snapshot-only and returns explicit 404
 - front-end debug state distinguishes missing snapshot (`debug pending`) from debug SSE transport errors (`debug stream reconnecting`)
 - WebUI submit success path still actively re-queries latest turn truth over ADP after command receipt to cover command-complete-before-browser-subscriber timing
-- WebUI success/failure sample buttons populate the composer with the same sample prompts used by CLI/headless ADP sample automation, then the operator can send them through the normal ADP submit path
+- WebUI success/failure scenario buttons populate the composer with the same scenario prompts used by CLI/headless ADP sample automation, then the operator can send them through the normal ADP submit path
 - WebUI composer control strip renders low-noise controls below the composer without creating a second protocol or truth source
 - WebUI attachment tray renders session-scoped draft metadata and file-handle availability; restored metadata stays visible but is not treated as rehydrated binary payload
 - WebUI sends attachment placeholders as current-send text only, clears the session draft after successful command receipt, and restores the composer text while retaining draft attachments after dispatch failure
@@ -68,6 +68,7 @@
 - front-end script groups `runtime-turn-N` plus `runtime-turn-N-rM` round projections into one logical execution cycle for display so the same user input, assistant text, and same tool call are not duplicated in the selected-session transcript
 - front-end script collapses assistant text within each logical turn into one visible card, strips raw `<freehand_completion>` schema blocks from that card, and leaves user-facing completion details to the Final card
 - terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success
+- terminal cards default to summary-only display; evidence, learned notes, and completion reason remain hidden unless WebUI debug details are enabled
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
 - theme module owns white/black theme switching and is separated from WebUI layout/runtime scripts
 - CLI and WebUI divergence remains a rendering decision only, not a protocol decision
@@ -124,7 +125,7 @@
 | 12 | `handle_query_checkpoints` / `refreshCheckpoints` | `apps/freehand-server/src/lib.rs` / `apps/freehand-server/assets/webui.js` | serve compatibility checkpoint query and render read-only checkpoint summaries from ADP protocol state by default | protocol checkpoint snapshot | checkpoint snapshot + secondary inspector cards | WebUI shell | ui.protocol state | bound |
 | 13 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` or `CancelLatestActiveTurn` over ADP for the active protocol turn from button or Escape key | latest protocol turn id | ADP command receipt + refreshed projection | WebUI shell | daemon `/adp` | bound |
 | 14 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP compatibility transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
-| 15 | `loadSamplePrompt` | `apps/freehand-server/assets/webui.js` | load success/failure ADP sample prompts into the composer without inventing a second command path | sample kind | composer text + visible command status | WebUI shell | normal ADP submit path | bound |
+| 15 | `loadSamplePrompt` | `apps/freehand-server/assets/webui.js` | load success/failure ADP scenario prompts into the composer without inventing a second command path | scenario kind | composer text + visible command status | WebUI shell | normal ADP submit path | bound |
 
 ## Sync Status Against Code
 
@@ -148,7 +149,7 @@
 - WebUI Cancel button and Escape key now send `CancelTurn` through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with `CancelLatestActiveTurn`
 - WebUI tool cards now render protocol-projected waiting/completed/failed lifecycle states from ADP turn projection truth
-- WebUI success/failure sample buttons now load reproducible ADP sample prompts into the composer
+- WebUI success/failure scenario buttons now load reproducible ADP scenario prompts into the composer
 - WebUI composer control strip now exposes file/image/video attachment, preview, selected-session refresh, cwd input, and read-only model selector controls without changing ADP framing beyond the protocol-owned `SubmitUserInput.cwd`
 - WebUI attachment drafts are session-scoped in local UI metadata, render as placeholder chips, append placeholder lines to the current submitted text, clear after successful command receipt, and remain for retry after dispatch failure
 - WebUI same-tool lifecycle updates now normalize by `tool_call_id`, waiting cards animate with local elapsed timers, and submit clears the input field immediately while retaining pending state in the conversation stream

@@ -638,6 +638,15 @@ body.theme-dark .dialog-block {
   border-left: 3px solid rgba(31, 108, 88, 0.44);
 }
 
+.execution-block.success-state {
+  border-left-color: var(--ok);
+}
+
+.execution-block.failed-state {
+  border-left-width: 2px;
+  border-left-color: var(--fail);
+}
+
 .execution-head {
   padding: 9px 12px;
   border-bottom: 1px solid rgba(31, 108, 88, 0.1);
@@ -1134,6 +1143,23 @@ body.theme-dark .attachment-remove {
   color: var(--danger);
 }
 
+.debug-toggle {
+  border: 1px solid rgba(31, 108, 88, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--text-soft);
+  padding: 7px 10px;
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.debug-toggle.is-active {
+  border-color: rgba(31, 108, 88, 0.44);
+  color: var(--master);
+  background: rgba(232, 244, 238, 0.82);
+}
+
 body.theme-dark .button.secondary {
   background: rgba(255, 255, 255, 0.08);
   color: #d8e3dd;
@@ -1141,6 +1167,16 @@ body.theme-dark .button.secondary {
 
 body.theme-dark .button.sample {
   background: rgba(255, 255, 255, 0.03);
+}
+
+body.theme-dark .debug-toggle {
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(231, 239, 234, 0.66);
+}
+
+body.theme-dark .debug-toggle.is-active {
+  background: rgba(88, 176, 141, 0.12);
+  color: #9be0c0;
 }
 
 .command-status {

@@ -28,6 +28,29 @@
       - `artifacts/webui-semantic-merge/20260630-page/13-cdp-after-send-immediate.png` shows submit immediately renders one execution card with `dispatching...0s`
       - `artifacts/webui-semantic-merge/20260630-page/14-cdp-after-send-update.png` shows explicit ADP timeout failure and retained composer input for retry
     - full `scripts/install-global.sh` did not complete reliably under this Codex tool session; stale install processes were terminated by exact PID only, and no install/release/cargo residual process remained after cleanup
+
+# 2026-06-30 WebUI final summary and sample-label cleanup
+  - user correction:
+    - Final card should not render Evidence, Learned, or Completion reason by default; those are debug-only details
+    - success card border should be green, failure card border red and smaller
+    - bottom demo/sample wording should be removed
+  - implementation:
+    - WebUI adds `terminalBodyForDisplay`, `terminalSummaryLine`, and `stripDebugTerminalLines`
+    - default Final rendering extracts only `Summary:` content; full terminal text is restored only when `Debug details` is enabled
+    - topbar exposes `Debug details` toggle with `Debug off/on` state
+    - execution card success/failed border colors now follow terminal status
+    - visible buttons changed from `Success sample`/`Failure sample` to `Success`/`Failure`, and sample prompt visible prefixes were removed
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `cargo run -p xtask -- mainlines generate/check`
+    - `cargo run -p xtask -- gates check`
+    - `cargo build --release -p freehand-cli -p freehand-server -p freehand-daemon`
+    - installed host binaries to `~/.local/bin`, restarted launchd fixed `127.0.0.1:4041`
+    - fixed-port HTML has `Debug details`, `Success`, `Failure`, and no `Success sample`/`Failure sample`
+    - fixed-port JS has `terminalBodyForDisplay`, `stripDebugTerminalLines`, `scenario loaded`, `Debug off`, and no `ADP success sample`/`ADP failure sample`
+    - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` -> `adp_smoke_ok`
+    - screenshot `artifacts/webui-semantic-merge/20260630-page/15-final-filtered-current-chrome.png` shows Final only has summary, no Evidence/Learned/Completion reason, and bottom buttons read `Success`/`Failure`
     - `scripts/install-global.sh` completed full Rust/Android release regression and installed matching `~/.local/bin/freehand-daemon`
     - `scripts/install-launchd.sh restart` restarted fixed `127.0.0.1:4041`
     - fixed-port HTML contains `session-bulk-count`, `session-clear-selection-button`, `session-delete-selected-button`

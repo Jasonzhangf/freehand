@@ -17,6 +17,7 @@ const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
 const successSampleButton = document.getElementById("success-sample-button");
 const failureSampleButton = document.getElementById("failure-sample-button");
+const debugDetailsToggle = document.getElementById("debug-details-toggle");
 const attachFileButton = document.getElementById("attach-file-button");
 const attachImageButton = document.getElementById("attach-image-button");
 const attachVideoButton = document.getElementById("attach-video-button");
@@ -31,9 +32,9 @@ const attachmentTray = document.getElementById("attachment-tray");
 
 const samplePrompts = {
   success:
-    "ADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.",
+    "Answer with one short sentence and a valid Freehand completion schema. Do not call tools.",
   failure:
-    "ADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.",
+    "Call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.",
 };
 
 const selectedSessionStorageKey = "freehand-webui-selected-session";
@@ -41,7 +42,7 @@ const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
 const adpRequestTimeoutMs = 8000;
 const shortcutHelp =
-  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success sample · Cmd/Ctrl+2 failure sample. Slash: /help /new /task /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
+  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success · Cmd/Ctrl+2 failure. Slash: /help /new /task /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
 const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) || "";
 
@@ -75,6 +76,7 @@ const state = {
   requestSequence: 0,
   attachmentDrafts: loadAttachmentDrafts(),
   attachmentsPreviewOpen: true,
+  debugDetailsVisible: false,
 };
 
 function shellConfig() {
@@ -944,7 +946,7 @@ function derivePublicConversation(turn) {
     items.push({
       kind: "Terminal",
       title: "Final",
-      body: turn.terminal_text,
+      body: terminalBodyForDisplay(turn.terminal_text),
       status,
     });
   }
@@ -957,6 +959,32 @@ function derivePublicConversation(turn) {
     });
   });
   return items;
+}
+
+function terminalBodyForDisplay(text) {
+  const stripped = stripFreehandCompletionBlock(text);
+  if (state.debugDetailsVisible) {
+    return stripped;
+  }
+  const summary = terminalSummaryLine(stripped);
+  return summary || stripDebugTerminalLines(stripped);
+}
+
+function terminalSummaryLine(text) {
+  const lines = `${text || ""}`.split(/\r?\n/);
+  const summaryLine = lines.find((line) => /^summary\s*:/i.test(line.trim()));
+  if (!summaryLine) {
+    return "";
+  }
+  return summaryLine.replace(/^summary\s*:\s*/i, "").trim();
+}
+
+function stripDebugTerminalLines(text) {
+  return `${text || ""}`
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(evidence|learned|completion reason)\s*:/i.test(line))
+    .join("\n")
+    .trim();
 }
 
 function stripFreehandCompletionBlock(text) {
@@ -1712,6 +1740,7 @@ setInterval(() => {
 
 function renderAll() {
   setText("workspace-status", state.adpStatus);
+  renderDebugDetailsToggle();
   renderSessions();
   renderTurnMeta();
   renderMessages();
@@ -2018,7 +2047,16 @@ function loadSamplePrompt(kind) {
   }
   composerInput.value = prompt;
   composerInput.focus();
-  setCommandStatus(`${kind} sample loaded; press Send to run through ADP`, { stickyMs: 5000 });
+  setCommandStatus(`${kind} scenario loaded; press Send to run through ADP`, { stickyMs: 5000 });
+}
+
+function renderDebugDetailsToggle() {
+  if (!debugDetailsToggle) {
+    return;
+  }
+  debugDetailsToggle.classList.toggle("is-active", state.debugDetailsVisible);
+  debugDetailsToggle.setAttribute("aria-pressed", state.debugDetailsVisible ? "true" : "false");
+  debugDetailsToggle.textContent = state.debugDetailsVisible ? "Debug on" : "Debug off";
 }
 
 newConversationButton.addEventListener("click", startNewConversation);
@@ -2038,6 +2076,13 @@ sessionDeleteSelectedButton.addEventListener("click", () => {
 });
 successSampleButton.addEventListener("click", () => loadSamplePrompt("success"));
 failureSampleButton.addEventListener("click", () => loadSamplePrompt("failure"));
+if (debugDetailsToggle) {
+  debugDetailsToggle.addEventListener("click", () => {
+    state.debugDetailsVisible = !state.debugDetailsVisible;
+    state.publicConversation = derivePublicConversation(state.turn);
+    renderAll();
+  });
+}
 attachFileButton.addEventListener("click", () => attachmentFileInput.click());
 attachImageButton.addEventListener("click", () => attachmentImageInput.click());
 attachVideoButton.addEventListener("click", () => attachmentVideoInput.click());
