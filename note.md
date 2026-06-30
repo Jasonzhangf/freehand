@@ -2,6 +2,7 @@
 
 # 2026-06-30 WebUI session CRUD and tool card follow-up
   - user correction: WebUI still could not multi-select/delete sessions, so CRUD was not usable despite ADP/session protocol support.
+  - user correction: tool/result "merge" must be semantic, not just visual style; successful tool results should update the same execution card status instead of becoming a separate mechanical content item.
   - implementation:
     - sidebar adds visible `session-bulk-toolbar` with selected count, Clear, and Delete
     - session rows now use checkboxes for multi-select and a separate session button for navigation
@@ -11,13 +12,22 @@
     - removed old live wait helper path that could render extra waiting cards
     - tool card status bar now owns waiting/completed timing; card body only shows semantic target/result
     - `tool.display` projects `bash pwd` as `Read current working directory` without `command=pwd`
+    - `ui.protocol` public tool body now prefers semantic target/diff display for waiting/completed/failed tools; success/failure result text is status/outcome, not primary body content
+    - WebUI execution cards now render one execution-cycle card and no longer append `display.result_summary` as another success-result line
   - verification:
     - `node --check apps/freehand-server/assets/webui.js`
     - `cargo fmt --check`
     - `cargo test -p freehand-server -- --nocapture` -> 11 passed
-    - `cargo test -p freehand-blocks -- --nocapture` -> 39 passed
     - `cargo test -p freehand-ui-protocol -- --nocapture` -> 39 passed
     - `target/debug/xtask mainlines generate/check` and `target/debug/xtask gates check` -> ok
+    - `cargo build --release -p freehand-cli -p freehand-server -p freehand-daemon` -> ok, host binaries installed to `~/.local/bin`
+    - `scripts/install-launchd.sh restart` restarted fixed `127.0.0.1:4041`
+    - fixed-port `/assets/webui.js` contains `turnExecutionCard` / `pendingExecutionCard` and no longer contains `display.result_summary`
+    - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` -> `adp_smoke_ok`
+    - CDP-operated Chrome screenshots:
+      - `artifacts/webui-semantic-merge/20260630-page/13-cdp-after-send-immediate.png` shows submit immediately renders one execution card with `dispatching...0s`
+      - `artifacts/webui-semantic-merge/20260630-page/14-cdp-after-send-update.png` shows explicit ADP timeout failure and retained composer input for retry
+    - full `scripts/install-global.sh` did not complete reliably under this Codex tool session; stale install processes were terminated by exact PID only, and no install/release/cargo residual process remained after cleanup
     - `scripts/install-global.sh` completed full Rust/Android release regression and installed matching `~/.local/bin/freehand-daemon`
     - `scripts/install-launchd.sh restart` restarted fixed `127.0.0.1:4041`
     - fixed-port HTML contains `session-bulk-count`, `session-clear-selection-button`, `session-delete-selected-button`
@@ -58,6 +68,25 @@
     - fixed-port JS at `127.0.0.1:4041` contains `selectAllSessions`, `sessionSelectAllButton`, `selectedSessionIds`, `draftSessionId: null`, and `state.draftSessionId === sessionId`; it no longer contains `startsWith("webui-session-")`
     - fixed-port CSS at `127.0.0.1:4041` contains `session-bulk-summary`, `session-bulk-actions`, `session-bulk-button.select-all`, and `font-weight: 500`
     - Chrome AppleScript DOM click verification was blocked by Chrome's "Allow JavaScript from Apple Events" setting, so no visual DOM count proof was captured in this slice
+
+# 2026-06-30 WebUI new conversation state and chat visual follow-up
+  - user correction:
+    - after `New conversation`, sidebar showed both `no sessions` and a draft item, which is an incorrect state projection
+    - conversation area still looked like old card UI rather than a chat surface
+  - implementation:
+    - when `state.sessions.length === 0` and `state.draftSessionId` exists, sidebar renders only the draft row
+    - empty transcript now renders a dedicated `chat-empty-state` with title/copy instead of plain text or system-card feel
+    - dialogue cards are narrowed to fit-content bubbles, borders/headers are reduced, and title weights are reduced to avoid heavy card UI
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo fmt --check`
+    - `cargo test -p freehand-server -- --nocapture`
+    - full `scripts/install-global.sh` completed workspace tests, mainlines/gates, Android JVM, Rust release binaries, and Android release APK
+    - `scripts/install-launchd.sh restart`
+    - fixed-port `127.0.0.1:4041` CSS contains `chat-empty-title`, `width: fit-content`, and `border-bottom: 0`
+    - fixed-port `127.0.0.1:4041` JS contains `if (state.draftSessionId)` and `Send a message to start this session.`
+    - ADP smoke on `ws://127.0.0.1:4041/adp` passed
+    - screenshot evidence saved to `artifacts/webui-session-ui-fix/20260630-new-session-chat/02-chrome-after-refresh.png`, but Chrome AppleScript JS permissions still block automated click/DOM-count verification
 
 # 2026-06-29 tool display semantic owner
   - user requirement:

@@ -562,8 +562,8 @@ body.theme-dark .conversation-region {
 .message-list {
   display: grid;
   align-content: start;
-  gap: 12px;
-  width: min(940px, 100%);
+  gap: 14px;
+  width: min(980px, 100%);
   margin: 0 auto;
   padding: 8px 0 24px;
 }
@@ -572,12 +572,13 @@ body.theme-dark .conversation-region {
   --card-accent: var(--assistant);
   --card-border: rgba(47, 116, 95, 0.34);
   --card-head-bg: rgba(232, 243, 238, 0.76);
-  width: min(760px, 86%);
-  border-radius: 16px;
-  border: 1px solid var(--card-border);
-  background: rgba(255, 255, 255, 0.98);
+  width: fit-content;
+  max-width: min(760px, 82%);
+  border-radius: 18px;
+  border: 1px solid rgba(43, 66, 58, 0.12);
+  background: rgba(255, 255, 255, 0.96);
   overflow: hidden;
-  box-shadow: 0 10px 18px rgba(31, 25, 16, 0.035);
+  box-shadow: 0 8px 20px rgba(31, 25, 16, 0.04);
 }
 
 .dialog-block.running-state {
@@ -601,23 +602,24 @@ body.theme-dark .dialog-block {
 
 .assistant-block {
   justify-self: start;
-  border-left: 4px solid var(--assistant);
+  border-left: 3px solid rgba(47, 116, 95, 0.34);
 }
 
 .user-block {
   --card-accent: var(--user);
   --card-border: rgba(72, 111, 146, 0.4);
-  --card-head-bg: rgba(232, 240, 247, 0.88);
+  --card-head-bg: rgba(233, 242, 250, 0.78);
   justify-self: end;
-  border-right: 4px solid var(--user);
-  background: linear-gradient(180deg, #eff5fb, #e8f0f7);
+  border-color: rgba(72, 111, 146, 0.24);
+  border-right: 3px solid rgba(72, 111, 146, 0.55);
+  background: linear-gradient(180deg, #f3f8fc, #eaf2f9);
 }
 
 .tool-block {
   --card-accent: var(--tool);
   --card-border: rgba(138, 106, 48, 0.4);
   --card-head-bg: rgba(246, 239, 223, 0.88);
-  border-left: 4px solid var(--tool);
+  border-left: 3px solid rgba(138, 106, 48, 0.58);
   background: linear-gradient(180deg, #ffffff, #fbfaf6);
 }
 
@@ -625,8 +627,79 @@ body.theme-dark .dialog-block {
   --card-accent: var(--fail);
   --card-border: rgba(178, 67, 59, 0.42);
   --card-head-bg: rgba(251, 233, 231, 0.9);
-  border-left: 4px solid var(--fail);
+  border-left: 3px solid var(--fail);
   background: linear-gradient(180deg, #ffffff, #fff8f7);
+}
+
+.execution-block {
+  justify-self: center;
+  width: min(780px, 86%);
+  max-width: min(780px, 86%);
+  border-left: 3px solid rgba(31, 108, 88, 0.44);
+}
+
+.execution-head {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(31, 108, 88, 0.1);
+}
+
+.execution-body {
+  display: grid;
+  gap: 0;
+  padding: 0;
+}
+
+.execution-row {
+  display: grid;
+  gap: 7px;
+  padding: 11px 13px 12px;
+  border-top: 1px solid rgba(43, 66, 58, 0.08);
+}
+
+.execution-row:first-child {
+  border-top: 0;
+}
+
+.execution-row-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.execution-row-label {
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.execution-row-status {
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.execution-row-body {
+  color: #26312c;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.execution-row-user {
+  background: rgba(232, 240, 247, 0.44);
+}
+
+.execution-row-tool {
+  background: rgba(247, 241, 227, 0.52);
+}
+
+.execution-row-final {
+  background: rgba(232, 244, 238, 0.5);
+}
+
+.execution-row-error {
+  background: rgba(251, 233, 231, 0.62);
 }
 
 .empty-block {
@@ -635,9 +708,25 @@ body.theme-dark .dialog-block {
 
 .chat-empty-state {
   justify-self: center;
+  width: min(520px, 86%);
+  border: 1px dashed rgba(31, 108, 88, 0.22);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.68);
   color: var(--text-soft);
-  font-size: 12px;
-  padding: 16px 10px 28px;
+  padding: 22px 24px;
+  text-align: center;
+}
+
+.chat-empty-title {
+  color: var(--master);
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.chat-empty-copy {
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 body.theme-dark .user-block {
@@ -657,8 +746,8 @@ body.theme-dark .failure-block {
   justify-content: space-between;
   gap: 10px;
   align-items: center;
-  padding: 8px 11px;
-  border-bottom: 1px solid var(--card-border);
+  padding: 7px 11px 0;
+  border-bottom: 0;
   background: var(--card-head-bg);
 }
 
@@ -735,15 +824,15 @@ body.theme-dark .failure-block {
 }
 
 .block-body {
-  padding: 9px 11px 11px;
-  font-size: 13.5px;
-  line-height: 1.58;
+  padding: 7px 12px 12px;
+  font-size: 14px;
+  line-height: 1.62;
 }
 
 .block-title {
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 800;
+  margin-bottom: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--card-accent);
 }
 

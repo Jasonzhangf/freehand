@@ -522,6 +522,131 @@ function card(role, status, title, body, variant = "assistant", identity = null)
   return article;
 }
 
+function turnStatusForRender(turn) {
+  if (!turn) {
+    return { className: "pending", label: "idle", live: false };
+  }
+  const waitingTools = (turn.tool_activities || []).filter(
+    (tool) => tool.status === "Waiting" || tool.status === "waiting",
+  );
+  if (waitingTools.length > 0) {
+    return { className: "running", label: waitingToolStatus(waitingTools), live: true };
+  }
+  if (turnIsWaitingForModelResponse(turn) || turnIsWaitingForModel(turn)) {
+    return { className: "running", label: liveTurnStatus() || "waiting", live: true };
+  }
+  if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
+    const terminal = `${turn.terminal_status || "success"}`.toLowerCase();
+    return {
+      className: terminal === "failed" || terminal === "cancelled" ? "failed" : "success",
+      label: terminal === "failed" ? "failed" : "completed",
+      live: false,
+    };
+  }
+  return { className: "running", label: "streaming", live: true };
+}
+
+function pendingExecutionCard() {
+  const elapsed = elapsedSince(state.submitStartedAt);
+  const article = executionShell({
+    status: {
+      className: state.submitInFlight ? "running" : "pending",
+      label: elapsed ? `dispatching · ${elapsed}` : "dispatching",
+    },
+    live: state.submitInFlight,
+  });
+  const body = article.querySelector(".execution-body");
+  body.appendChild(executionRow("user", "User", textWithAttachmentPlaceholders(state.pendingUserInput, state.pendingAttachments), "submitted"));
+  body.appendChild(executionRow("system", "Client", "Request accepted by WebUI. Waiting for ADP dispatch.", elapsed || "0s"));
+  return article;
+}
+
+function turnExecutionCard(turn) {
+  const status = turnStatusForRender(turn);
+  const article = executionShell({ status, live: status.live });
+  const body = article.querySelector(".execution-body");
+  const items = conversationItemsForTurn(turn);
+  if (items.length === 0) {
+    body.appendChild(executionRow("system", "Turn", "Waiting for projection.", status.label));
+    return article;
+  }
+  items.forEach((item) => {
+    const rowKind =
+      item.kind === "UserText"
+        ? "user"
+        : item.kind === "ToolSummary"
+          ? "tool"
+          : item.kind === "Error"
+            ? "error"
+            : item.kind === "Terminal"
+              ? "final"
+              : "assistant";
+    const timing = item.tool_call_id ? state.toolTimings.get(item.tool_call_id) : null;
+    const rowStatus = item.kind === "ToolSummary" ? toolTimelineLine(item, timing) || item.status : item.status;
+    const rowBody = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
+    body.appendChild(executionRow(rowKind, item.title, rowBody, rowStatus));
+  });
+  return article;
+}
+
+function executionShell({ status, live }) {
+  const article = document.createElement("article");
+  article.className = `dialog-block execution-block ${status.className}-state`;
+  if (live) {
+    article.dataset.live = "true";
+  }
+
+  const head = document.createElement("div");
+  head.className = "block-head execution-head";
+
+  const title = document.createElement("span");
+  title.className = "role-badge assistant-badge";
+  title.textContent = "Turn";
+
+  const stateBadge = document.createElement("span");
+  stateBadge.className = `block-state ${status.className}`;
+  stateBadge.textContent = status.label;
+
+  head.append(title, stateBadge);
+
+  const body = document.createElement("div");
+  body.className = "execution-body";
+
+  article.append(head, body);
+  return article;
+}
+
+function executionRow(kind, title, body, status) {
+  const row = document.createElement("section");
+  row.className = `execution-row execution-row-${kind}`;
+
+  const meta = document.createElement("div");
+  meta.className = "execution-row-meta";
+
+  const label = document.createElement("span");
+  label.className = "execution-row-label";
+  label.textContent = title;
+  meta.appendChild(label);
+
+  if (status) {
+    const state = document.createElement("span");
+    state.className = "execution-row-status";
+    state.textContent = status;
+    meta.appendChild(state);
+  }
+
+  const content = document.createElement("div");
+  content.className = "execution-row-body";
+  if (kind === "tool") {
+    renderToolBody(content, body);
+  } else {
+    content.textContent = body || "";
+  }
+
+  row.append(meta, content);
+  return row;
+}
+
 function renderToolBody(container, body) {
   const lines = `${body || ""}`.split("\n").filter((line) => line.length > 0);
   if (lines.length === 0) {
@@ -656,7 +781,6 @@ function syncToolTimings(items) {
 
 function toolSummaryBody(item) {
   const display = item.display || null;
-  const status = `${item.status || ""}`.toLowerCase();
   const lines = [];
   if (display && display.diff) {
     lines.push(`diff: ${display.diff.target}`);
@@ -672,14 +796,8 @@ function toolSummaryBody(item) {
       .map((field) => `${field.label}: ${field.value}`)
       .join(" · ");
     pushCompactToolLine(lines, compactFields, item.title);
-  } else if (item.body && item.body !== item.status && status !== "waiting") {
+  } else if (item.body && item.body !== item.status && `${item.status || ""}`.toLowerCase() !== "waiting") {
     pushCompactToolLine(lines, item.body, item.title);
-  }
-  if (display && display.result_summary && !display.parameter_summary && !display.diff) {
-    const result = compactToolResultLine(display.result_summary, item.title);
-    if (result && !lines.some((line) => line.toLowerCase() === result.toLowerCase())) {
-      lines.push(result);
-    }
   }
   return lines.filter(Boolean).join("\n");
 }
@@ -1315,18 +1433,7 @@ function renderMessages() {
   const hasSelectedSessionTranscript = state.sessionTurns.length > 0;
 
   if (state.pendingUserInput) {
-    fragments.push(
-      card(
-        "User",
-        {
-          className: state.submitInFlight ? "running" : "pending",
-          label: state.submitInFlight ? "dispatching" : "pending",
-        },
-        state.submitInFlight ? "正在提交输入" : "待写入输入",
-        pendingSubmitBody(state.pendingUserInput, state.pendingAttachments),
-        "user",
-      ),
-    );
+    fragments.push(pendingExecutionCard());
   }
 
   if (state.selectedSessionId && !hasSelectedSessionTranscript) {
@@ -1348,43 +1455,7 @@ function renderMessages() {
         ? []
         : [state.turn];
     turns.filter(Boolean).forEach((turn) => {
-      conversationItemsForTurn(turn).forEach((item) => {
-      const variant =
-        item.kind === "UserText"
-          ? "user"
-          : item.kind === "ToolSummary"
-            ? "tool"
-            : item.kind === "Error"
-              ? "failure"
-              : "assistant";
-      const statusClass =
-        item.kind === "Error" || item.status === "failed" || item.status === "cancelled"
-          ? "failed"
-          : item.kind === "ToolSummary" && item.status === "completed"
-            ? "success"
-          : item.kind === "Terminal"
-            ? "success"
-          : item.kind === "ToolSummary"
-              ? "running"
-              : "success";
-      const identity = item.tool_call_id ? `tool:${item.tool_call_id}` : null;
-      const timing = item.tool_call_id ? state.toolTimings.get(item.tool_call_id) : null;
-      const body = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
-      const role = item.kind === "ToolSummary" ? "Tool" : item.title;
-      fragments.push(
-        card(
-          role,
-          {
-            className: statusClass,
-            label: item.kind === "ToolSummary" ? toolTimelineLine(item, timing) || item.status : item.status,
-          },
-          item.title,
-          body,
-          variant,
-          identity,
-        ),
-      );
-      });
+      fragments.push(turnExecutionCard(turn));
     });
   }
 
@@ -1403,9 +1474,15 @@ function renderMessages() {
   if (fragments.length === 0) {
     const empty = document.createElement("div");
     empty.className = "chat-empty-state";
-    empty.textContent = state.selectedSessionId
-    ? "New conversation. Send a message to start."
-      : "Waiting for protocol state.";
+    const title = document.createElement("div");
+    title.className = "chat-empty-title";
+    title.textContent = state.selectedSessionId ? "New conversation" : "Waiting for protocol state";
+    const copy = document.createElement("div");
+    copy.className = "chat-empty-copy";
+    copy.textContent = state.selectedSessionId
+      ? "Send a message to start this session."
+      : "Waiting for ADP session state.";
+    empty.append(title, copy);
     fragments.push(empty);
   }
 
@@ -1466,13 +1543,14 @@ function renderSessions() {
   sessionList.replaceChildren();
   renderSessionBulkToolbar();
   if (state.sessions.length === 0) {
+    if (state.draftSessionId) {
+      renderDraftSessionItem();
+      return;
+    }
     const empty = document.createElement("section");
     empty.className = "session-item active";
     appendSessionParts(empty, "empty", "no sessions", "waiting for first turn");
     sessionList.appendChild(empty);
-    if (state.draftSessionId && state.selectedSessionId === state.draftSessionId) {
-      renderDraftSessionItem();
-    }
     return;
   }
 

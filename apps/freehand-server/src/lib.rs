@@ -1057,6 +1057,10 @@ mod tests {
         let webui_css_body = webui_css.text().await.expect("webui css body");
         assert!(webui_css_body.contains("@keyframes waitingDot"));
         assert!(webui_css_body.contains("@keyframes toolPulse"));
+        assert!(webui_css_body.contains(".chat-empty-title"));
+        assert!(webui_css_body.contains("width: fit-content"));
+        assert!(webui_css_body.contains(".execution-block"));
+        assert!(webui_css_body.contains(".execution-row-tool"));
 
         let js = client
             .get(format!("{}/assets/webui.js", server.base_url))
@@ -1100,6 +1104,11 @@ mod tests {
         assert!(js_body.contains("draftSessionId: null"));
         assert!(js_body.contains("state.draftSessionId === sessionId"));
         assert!(!js_body.contains("startsWith(\"webui-session-\")"));
+        assert!(js_body.contains("if (state.draftSessionId)"));
+        assert!(js_body.contains("Send a message to start this session."));
+        assert!(js_body.contains("function pendingExecutionCard"));
+        assert!(js_body.contains("function turnExecutionCard"));
+        assert!(js_body.contains("fragments.push(turnExecutionCard(turn))"));
         assert!(js_body.contains("deleteSelectedSessions"));
         assert!(js_body.contains("DeleteSession"));
         assert!(js_body.contains("session-selector"));
@@ -1154,8 +1163,8 @@ mod tests {
         assert!(js_body.contains("hasModelWait"));
         assert!(js_body.contains("waitingToolStatus"));
         assert!(js_body.contains("tool.display || null"));
-        assert!(js_body.contains("display.result_summary"));
         assert!(js_body.contains("display.diff"));
+        assert!(!js_body.contains("display.result_summary"));
         assert!(js_body.contains("compact-tool-state"));
         assert!(js_body.contains("display.fields"));
         assert!(js_body.contains("formatDuration"));
@@ -1535,7 +1544,7 @@ mod tests {
         let completed_body = read_next_sse_event(&mut turn_sse, &mut turn_buffer).await;
         assert!(completed_body.contains("\"status\":\"completed\""));
         assert!(completed_body.contains("\"title\":\"Read file\""));
-        assert!(completed_body.contains("\"body\":\"succeeded: src/lib.rs\""));
+        assert!(completed_body.contains("\"body\":\"path=src/lib.rs\""));
         assert!(completed_body.contains("\"kind\":\"ReadFile\""));
 
         drop(turn_sse);

@@ -1159,21 +1159,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
             .as_ref()
             .map(|display| display.action.clone())
             .unwrap_or_else(|| activity.tool_name.clone());
-        let body = activity
-            .display
-            .as_ref()
-            .and_then(|display| {
-                display
-                    .result_summary
-                    .clone()
-                    .or_else(|| Some(display.summary.clone()))
-            })
-            .or_else(|| activity.detail.clone())
-            .unwrap_or_else(|| match activity.status {
-                UiToolActivityStatus::Waiting => "waiting".to_owned(),
-                UiToolActivityStatus::Completed => "completed".to_owned(),
-                UiToolActivityStatus::Failed => "failed".to_owned(),
-            });
+        let body = tool_public_body(activity);
         items.push(UiConversationItem {
             kind: UiConversationItemKind::ToolSummary,
             title,
@@ -1215,6 +1201,51 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
         });
     }
     items
+}
+
+fn tool_public_body(activity: &UiToolActivity) -> String {
+    let semantic_body = activity.display.as_ref().and_then(tool_display_public_body);
+    match activity.status {
+        UiToolActivityStatus::Waiting => semantic_body
+            .or_else(|| activity.detail.clone())
+            .unwrap_or_else(|| "waiting".to_owned()),
+        UiToolActivityStatus::Completed => semantic_body
+            .or_else(|| activity.detail.clone())
+            .unwrap_or_else(|| "completed".to_owned()),
+        UiToolActivityStatus::Failed => semantic_body
+            .or_else(|| activity.detail.clone())
+            .unwrap_or_else(|| "failed".to_owned()),
+    }
+}
+
+fn tool_display_public_body(display: &ToolDisplayProjection) -> Option<String> {
+    if let Some(diff) = &display.diff {
+        return Some(format!(
+            "diff: {}\n- {}\n+ {}",
+            diff.target, diff.before, diff.after
+        ));
+    }
+    if let Some(parameter_summary) = &display.parameter_summary
+        && !parameter_summary.trim().is_empty()
+    {
+        return Some(parameter_summary.clone());
+    }
+    if !display.summary.trim().is_empty() {
+        return Some(display.summary.clone());
+    }
+    if !display.fields.is_empty() {
+        let compact_fields = display
+            .fields
+            .iter()
+            .take(4)
+            .map(|field| format!("{}: {}", field.label, field.value))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        if !compact_fields.trim().is_empty() {
+            return Some(compact_fields);
+        }
+    }
+    None
 }
 
 pub fn public_turn_projection(projection: UiTurnProjection) -> UiPublicTurnProjection {
@@ -1996,7 +2027,7 @@ mod tests {
             .expect("completed tool item");
         assert_eq!(completed_tool.status, "completed");
         assert_eq!(completed_tool.title, "Search text");
-        assert_eq!(completed_tool.body, "succeeded: needle");
+        assert_eq!(completed_tool.body, "pattern=needle");
         assert_eq!(
             completed_tool
                 .display
@@ -2065,7 +2096,7 @@ mod tests {
         assert_eq!(tool_cards.len(), 1);
         assert_eq!(tool_cards[0].status, "failed");
         assert_eq!(tool_cards[0].title, "Read file");
-        assert_eq!(tool_cards[0].body, "failed: missing.txt");
+        assert_eq!(tool_cards[0].body, "path=missing.txt");
         assert!(
             cards
                 .iter()
@@ -2121,7 +2152,7 @@ mod tests {
             .expect("tool item");
         assert_eq!(tool.status, "failed");
         assert_eq!(tool.title, "List directory");
-        assert_eq!(tool.body, "tool failed explicitly");
+        assert_eq!(tool.body, "path=.");
     }
 
     #[test]

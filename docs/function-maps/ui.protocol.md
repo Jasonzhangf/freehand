@@ -64,7 +64,7 @@
 - public conversation session selection stays explicit: submit can target a selected session id, and session-level transcript queries stay separate from the global latest turn
 - session list and transcript projections expose session `cwd`, and turn projections carry `cwd` when the runtime owner has bound a session to a workspace
 - session list projections expose owner-supplied session `title` and `archived` metadata so WebUI, Android, CLI, and headless ADP clients share one CRUD truth
-- public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed tool summaries include the protocol-projected tool result detail
+- public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards; tool status/outcome is conveyed by the status field while the public body stays semantic and target-focused instead of echoing success/failure result text
 - public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/parameters/result without parsing raw tool terms
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
 - `bridge.html` in the Android APK renders the same public conversation projection as WebUI, so the live shell and browser shell share one projection truth
@@ -184,9 +184,9 @@
 - debug-state projection consumes `freehand-debug::DebugStateSnapshot` instead of a UI-owned duplicate DTO
 - UI ingress versus truth-writer separation is now locked in the function map
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in `UiProtocolState`
-- tool activity status and result detail are now preserved in `UiTurnProjection.tool_activities` and public conversation status mapping, including failed tool-result projection and failed terminal projection for still-waiting tool calls
-- tool activities now carry structured `display` projection from `tool.display`; public tool cards expose semantic action/target/parameter/result summaries instead of making UI infer categories from raw tool detail
-- public tool summaries now preserve `tool_call_id`, expose tool result detail, and duplicate tool-call projections upsert into one activity before public rendering
+- tool activity status and raw result detail are preserved in `UiTurnProjection.tool_activities`, but public conversation body prefers semantic target/diff display while outcome stays in the status mapping, including failed tool-result projection and failed terminal projection for still-waiting tool calls
+- tool activities now carry structured `display` projection from `tool.display`; public tool cards expose semantic action/target/parameter/diff summaries instead of making UI infer categories from raw tool detail or echo success/failure result text as primary content
+- public tool summaries now preserve `tool_call_id`, expose semantic tool display body, and duplicate tool-call projections upsert into one activity before public rendering
 - ADP request/response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
 - session cwd projection is landed for `UiTurnProjection`, `UiSessionSummary`, and `UiSessionTranscriptProjection`
 - session CRUD protocol routing is bound for create, rename, archive, restore, and delete-as-archive commands through `runtime.ui-command-dispatch` into `reason.persistence`

@@ -61,7 +61,7 @@
 - front-end script normalizes tool cards by `tool_call_id`, renders waiting cards with animation and local elapsed timers, and clears the composer input immediately after submit while keeping the pending user card visible
 - front-end script renders submit/dispatch waiting as an animated pending card with elapsed time until a turn projection arrives, then switches visible lifecycle status to tool executing with elapsed time when tool activity is waiting
 - front-end script renders protocol-projected model request waiting as an animated card with elapsed time, clearly showing that the request has been sent and the UI is waiting for model response
-- front-end script renders completed/failed tool result detail in the same tool card and inserts an animated waiting-model card with elapsed time after tool completion until the model produces the next terminal or update
+- front-end script renders completed/failed tool lifecycle in the same execution card and keeps the status/outcome in the card status line; the card body stays semantic and target-focused instead of echoing success/failure result text as a separate user-visible item
 - front-end script renders waiting/model continuation animation only for the current live turn; historical completed or superseded turns must not keep blinking
   - front-end script renders completed/failed tool cards with color-state only and low-noise semantic lines, compressing repeated title/summary/body text and filtering generic result strings such as `succeeded: result returned`
 - front-end script consumes `UiToolActivity.display` structured projection for tool category/action/target/result/diff fields and must not classify tools from raw argument or result strings
@@ -154,10 +154,10 @@
 - WebUI same-tool lifecycle updates now normalize by `tool_call_id`, waiting cards animate with local elapsed timers, and submit clears the input field immediately while retaining pending state in the conversation stream
 - WebUI submit/dispatch and tool-wait lifecycle states now both refresh once per second so users can see where the turn is blocked and how long it has waited
 - WebUI model-request waiting state now comes from `UiTurnProjection.model_request` and refreshes once per second with elapsed wait time
-- WebUI completed/failed tool cards now show protocol-projected result detail, and tool-complete-to-next-model waiting renders as its own timed lifecycle card
+- WebUI completed/failed tool cards now show protocol-projected semantic target/body while status/outcome stays in the status line, and tool-complete-to-next-model waiting renders as its own timed lifecycle state
 - WebUI waiting/model continuation cards are now gated to the current live turn so restored history cannot show fake animation after execution has stopped
-  - WebUI tool terminal state now uses green/red compact state dots and compresses repeated title/summary/body text instead of rendering mechanical status/result lines
-- WebUI tool cards now render `display.action`, `display.summary`, `display.parameter_summary`, `display.result_summary`, `display.fields`, and `display.diff`; category parsing stays in `tool.display`, not in JavaScript
+  - WebUI tool terminal state now uses green/red compact state dots and compresses repeated title/summary/body text instead of rendering mechanical status/result lines or separate success-result items
+- WebUI tool cards now render `display.action`, `display.summary`, `display.parameter_summary`, `display.fields`, and `display.diff`; category parsing stays in `tool.display`, not in JavaScript, and success/failure result text is not primary body content
 - WebUI selected-session transcript display now groups same execution-cycle round ids such as `runtime-turn-47` and `runtime-turn-47-r2` into one visible logical turn while preserving ADP/session truth as separate persisted turns
 - WebUI `/new` no longer renders the old selected-session/no-turns system card in the chat stream
 - WebUI assistant cards now collapse to one visible card per logical turn and strip raw `<freehand_completion>` blocks; final user-facing completion content remains in the Final card

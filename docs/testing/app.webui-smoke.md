@@ -103,10 +103,10 @@
 - WebUI tool cards now normalize by `tool_call_id`, waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
 - WebUI submit/dispatch pending state and tool waiting state now both refresh with visible elapsed time instead of static waiting text
 - WebUI model-response waiting state is driven by protocol-projected `model_request`, not local-only guessing
-- WebUI completed/failed tool cards now render protocol-projected result detail, and tool-complete-to-next-model waiting has its own elapsed timer
+- WebUI completed/failed tool cards now render protocol-projected semantic target/body while status/outcome stays in the status line, and tool-complete-to-next-model waiting has its own elapsed timer
 - WebUI current-live-turn-only wait gating is landed so historical completed/superseded turns cannot keep blinking
-- WebUI tool terminal state now uses compact color dots and compresses repeated title/summary/body text while filtering generic success strings from the primary tool body
-- WebUI tool rendering now consumes `UiToolActivity.display` for semantic action/target/parameter/result/diff rendering; parser ownership is outside the UI app
+- WebUI tool terminal state now uses compact color dots and compresses repeated title/summary/body text while filtering generic success strings and success/failure result echoes from the primary tool body
+- WebUI tool rendering now consumes `UiToolActivity.display` for semantic action/target/parameter/diff rendering; parser ownership is outside the UI app and result outcome is carried by status rather than repeated body text
 - WebUI selected-session transcript grouping is landed for same execution-cycle round ids while protocol/session truth remains unmerged
 - WebUI draft-session empty state is landed without the old selected-session/no-turns system feedback card
 - WebUI assistant-card text now collapses to one card per logical turn, and raw `<freehand_completion>` blocks do not pollute the main chat stream
