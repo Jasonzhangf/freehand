@@ -1021,6 +1021,9 @@ mod tests {
         assert!(root_body.contains("id=\"session-list\""));
         assert!(root_body.contains("id=\"new-conversation-button\""));
         assert!(root_body.contains("id=\"new-task-button\""));
+        assert!(root_body.contains("id=\"session-bulk-count\""));
+        assert!(root_body.contains("id=\"session-clear-selection-button\""));
+        assert!(root_body.contains("id=\"session-delete-selected-button\""));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
         assert!(root_body.contains("Success sample"));
         assert!(root_body.contains("Failure sample"));
@@ -1089,6 +1092,11 @@ mod tests {
         assert!(js_body.contains("isDraftSessionId"));
         assert!(js_body.contains("startNewConversation"));
         assert!(js_body.contains("startNewTask"));
+        assert!(js_body.contains("selectedSessionIds"));
+        assert!(js_body.contains("deleteSelectedSessions"));
+        assert!(js_body.contains("DeleteSession"));
+        assert!(js_body.contains("session-selector"));
+        assert!(js_body.contains("renderSessionBulkToolbar"));
         assert!(js_body.contains("selectedWorkspaceCwd"));
         assert!(js_body.contains("requireTaskCwd"));
         assert!(js_body.contains("requires a task target directory"));
@@ -1124,11 +1132,13 @@ mod tests {
         assert!(js_body.contains("submitStartedAt"));
         assert!(js_body.contains("modelRequestStartedAt"));
         assert!(js_body.contains("turnIsWaitingForModelResponse"));
-        assert!(js_body.contains("modelRequestBody"));
         assert!(js_body.contains("modelWaitStartedAt"));
         assert!(js_body.contains("turnIsWaitingForModel"));
-        assert!(js_body.contains("modelWaitBody"));
-        assert!(js_body.contains("shouldRenderLiveWaitForTurn"));
+        assert!(js_body.contains("toolTimelineLine"));
+        assert!(js_body.contains("running-tool-state"));
+        assert!(!js_body.contains("modelRequestBody"));
+        assert!(!js_body.contains("modelWaitBody"));
+        assert!(!js_body.contains("shouldRenderLiveWaitForTurn"));
         assert!(js_body.contains("compactToolResultLine"));
         assert!(js_body.contains("succeeded: result returned"));
         assert!(js_body.contains("succeeded: shell command"));

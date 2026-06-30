@@ -289,6 +289,23 @@ pub fn parse_shell_tool_display(arguments: &[ToolArgument]) -> ToolDisplayProjec
     let command =
         string_argument(arguments, "command").unwrap_or_else(|| "unknown command".to_owned());
     let kind = classify_shell_command(arguments);
+    if command == "pwd" {
+        return ToolDisplayProjection {
+            kind: ToolDisplayKind::Shell,
+            outcome: ToolDisplayOutcome::Waiting,
+            action: "Read current working directory".to_owned(),
+            target: Some("current workspace".to_owned()),
+            parameter_summary: None,
+            summary: "Read current working directory: current workspace".to_owned(),
+            result_summary: None,
+            fields: compact_fields([
+                field("tool", "bash"),
+                field("target", "current workspace"),
+                optional_field("timeout", string_argument(arguments, "timeout_seconds")),
+            ]),
+            diff: None,
+        };
+    }
     let action = match kind {
         ToolDisplayKind::ReadFile => "Run file-read command",
         ToolDisplayKind::List => "Run listing command",
@@ -296,20 +313,21 @@ pub fn parse_shell_tool_display(arguments: &[ToolArgument]) -> ToolDisplayProjec
         _ => "Run shell command",
     }
     .to_owned();
+    let target = shell_command_target(&command, kind);
     ToolDisplayProjection {
         kind,
         outcome: ToolDisplayOutcome::Waiting,
         action: action.clone(),
-        target: Some(command.clone()),
+        target: Some(target.clone()),
         parameter_summary: parameter_summary_for(vec![
-            ("command", Some(command.clone())),
+            ("target", Some(target.clone())),
             ("timeout", string_argument(arguments, "timeout_seconds")),
         ]),
-        summary: format!("{action}: {command}"),
+        summary: format!("{action}: {target}"),
         result_summary: None,
         fields: compact_fields([
             field("tool", "bash"),
-            field("command", &command),
+            field("target", &target),
             optional_field("timeout", string_argument(arguments, "timeout_seconds")),
         ]),
         diff: None,
@@ -349,6 +367,20 @@ fn classify_shell_command(arguments: &[ToolArgument]) -> ToolDisplayKind {
         "ls" | "find" => ToolDisplayKind::List,
         "rg" | "grep" => ToolDisplayKind::Search,
         _ => ToolDisplayKind::Shell,
+    }
+}
+
+fn shell_command_target(command: &str, kind: ToolDisplayKind) -> String {
+    let mut parts = command.split_whitespace();
+    let _ = parts.next();
+    match kind {
+        ToolDisplayKind::ReadFile => parts.next().unwrap_or("unknown file").to_owned(),
+        ToolDisplayKind::List => parts.next().unwrap_or(".").to_owned(),
+        ToolDisplayKind::Search => parts.next().unwrap_or("unknown query").to_owned(),
+        ToolDisplayKind::Shell
+        | ToolDisplayKind::Generic
+        | ToolDisplayKind::Plan
+        | ToolDisplayKind::FileMutation => command.trim().to_owned(),
     }
 }
 
@@ -546,6 +578,23 @@ mod tests {
     fn shell_classifier_recognizes_search_command_shape() {
         let kind = classify_tool_display_kind("bash", &[arg("command", json!("rg TODO src"))]);
         assert_eq!(kind, ToolDisplayKind::Search);
+    }
+
+    #[test]
+    fn pwd_shell_projection_hides_raw_command_argument() {
+        let display = project_tool_call_display("bash", &[arg("command", json!("pwd"))]);
+
+        assert_eq!(display.kind, ToolDisplayKind::Shell);
+        assert_eq!(display.action, "Read current working directory");
+        assert_eq!(display.target.as_deref(), Some("current workspace"));
+        assert!(display.parameter_summary.is_none());
+        assert!(!display.summary.contains("command=pwd"));
+        assert!(
+            !display
+                .fields
+                .iter()
+                .any(|field| field.label == "command" || field.value == "pwd")
+        );
     }
 
     #[test]

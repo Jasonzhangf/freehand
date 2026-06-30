@@ -8,6 +8,9 @@ const sessionList = document.getElementById("session-list");
 const newConversationButton = document.getElementById("new-conversation-button");
 const newTaskButton = document.getElementById("new-task-button");
 const taskCwdInput = document.getElementById("task-cwd-input");
+const sessionBulkCount = document.getElementById("session-bulk-count");
+const sessionClearSelectionButton = document.getElementById("session-clear-selection-button");
+const sessionDeleteSelectedButton = document.getElementById("session-delete-selected-button");
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
@@ -44,6 +47,7 @@ const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) ||
 const state = {
   turn: null,
   sessions: [],
+  selectedSessionIds: new Set(),
   selectedSessionId: initialSelectedSessionId,
   selectedCwd: initialSelectedCwd,
   draftSessionId: initialSelectedSessionId && initialSelectedSessionId.startsWith("webui-session-")
@@ -472,6 +476,9 @@ function card(role, status, title, body, variant = "assistant", identity = null)
   if (identity) {
     article.dataset.identity = identity;
   }
+  if (variant === "tool" && status.className === "running") {
+    article.dataset.live = "true";
+  }
 
   const head = document.createElement("div");
   head.className = "block-head";
@@ -487,6 +494,9 @@ function card(role, status, title, body, variant = "assistant", identity = null)
     stateBadge.textContent = "";
     stateBadge.title = status.label;
     stateBadge.setAttribute("aria-label", status.label);
+  } else if (variant === "tool" && status.className === "running") {
+    stateBadge.classList.add("running-tool-state");
+    stateBadge.textContent = status.label;
   } else {
     stateBadge.textContent = status.label;
   }
@@ -613,14 +623,6 @@ function syncModelRequestTiming(turn) {
   }
 }
 
-function modelRequestBody(turn) {
-  const elapsed = elapsedSince(state.modelRequestStartedAt);
-  const detail = turn && turn.model_request && turn.model_request.detail
-    ? turn.model_request.detail
-    : "provider request sent";
-  return elapsed ? `${detail}\n等待模型响应 ${elapsed}` : `${detail}\n等待模型响应`;
-}
-
 function syncToolTimings(items) {
   const now = Date.now();
   const seen = new Set();
@@ -654,16 +656,9 @@ function syncToolTimings(items) {
 }
 
 function toolSummaryBody(item) {
-  const timing = item.tool_call_id ? state.toolTimings.get(item.tool_call_id) : null;
-  const endAt = timing && timing.finishedAt ? timing.finishedAt : Date.now();
-  const elapsed = timing ? formatDuration(endAt - timing.startedAt) : "";
   const display = item.display || null;
   const status = `${item.status || ""}`.toLowerCase();
   const lines = [];
-  if (status === "waiting") {
-    const statusLabel = toolStatusLabel(item.status);
-    lines.push(elapsed ? `${statusLabel} · ${elapsed}` : statusLabel);
-  }
   if (display && display.diff) {
     lines.push(`diff: ${display.diff.target}`);
     lines.push(`- ${display.diff.before}`);
@@ -678,7 +673,7 @@ function toolSummaryBody(item) {
       .map((field) => `${field.label}: ${field.value}`)
       .join(" · ");
     pushCompactToolLine(lines, compactFields, item.title);
-  } else if (item.body && item.body !== item.status) {
+  } else if (item.body && item.body !== item.status && status !== "waiting") {
     pushCompactToolLine(lines, item.body, item.title);
   }
   if (display && display.result_summary && !display.parameter_summary && !display.diff) {
@@ -688,6 +683,17 @@ function toolSummaryBody(item) {
     }
   }
   return lines.filter(Boolean).join("\n");
+}
+
+function toolTimelineLine(item, timing) {
+  const status = `${item.status || ""}`.toLowerCase();
+  if (!timing && status !== "waiting") {
+    return "";
+  }
+  const label = toolStatusLabel(item.status);
+  const endAt = timing && timing.finishedAt ? timing.finishedAt : Date.now();
+  const elapsed = timing ? formatDuration(endAt - timing.startedAt) : "";
+  return elapsed ? `${label} · ${elapsed}` : label;
 }
 
 function pushCompactToolLine(lines, value, title = "") {
@@ -758,21 +764,6 @@ function syncModelWaitTiming(turn) {
   if (!state.modelWaitStartedAt) {
     state.modelWaitStartedAt = Date.now();
   }
-}
-
-function modelWaitBody() {
-  const elapsed = elapsedSince(state.modelWaitStartedAt);
-  return elapsed ? `工具结果已返回，等待模型继续推理 ${elapsed}` : "工具结果已返回，等待模型继续推理";
-}
-
-function shouldRenderLiveWaitForTurn(turn) {
-  if (!turn || !state.turn) {
-    return false;
-  }
-  if (turn.turn_id !== state.turn.turn_id) {
-    return false;
-  }
-  return !turn.terminal_text && !isTerminalStatus(turn.terminal_status);
 }
 
 function variantPayload(value, variant) {
@@ -1036,6 +1027,12 @@ async function startNewTask() {
 
 function setSessionList(projection) {
   state.sessions = (projection && projection.sessions) || [];
+  const knownSessionIds = new Set(state.sessions.map((session) => session.session_id));
+  for (const sessionId of Array.from(state.selectedSessionIds)) {
+    if (!knownSessionIds.has(sessionId)) {
+      state.selectedSessionIds.delete(sessionId);
+    }
+  }
   if (
     state.selectedSessionId &&
     !isDraftSessionId(state.selectedSessionId) &&
@@ -1050,6 +1047,55 @@ function setSessionList(projection) {
   const selected = sessionSummaryForSelected();
   if (selected) {
     syncSelectedCwdFromProjection(selected);
+  }
+}
+
+function selectedManagedSessionIds() {
+  return Array.from(state.selectedSessionIds).filter((sessionId) =>
+    state.sessions.some((session) => session.session_id === sessionId),
+  );
+}
+
+function toggleSessionSelection(sessionId, selected) {
+  if (!sessionId || isDraftSessionId(sessionId)) {
+    return;
+  }
+  if (selected) {
+    state.selectedSessionIds.add(sessionId);
+  } else {
+    state.selectedSessionIds.delete(sessionId);
+  }
+  renderSessions();
+}
+
+function clearSessionSelection() {
+  state.selectedSessionIds.clear();
+  renderSessions();
+}
+
+async function deleteSelectedSessions() {
+  const sessionIds = selectedManagedSessionIds();
+  if (sessionIds.length === 0) {
+    setCommandStatus("select sessions to delete", { stickyMs: 5000 });
+    return;
+  }
+  setCommandStatus(`deleting ${sessionIds.length} session(s)...`, { stickyMs: 8000 });
+  try {
+    for (const sessionId of sessionIds) {
+      await adpCommand({ DeleteSession: { session_id: sessionId } });
+    }
+    const deletedSelected = sessionIds.includes(state.selectedSessionId);
+    state.selectedSessionIds.clear();
+    if (deletedSelected) {
+      setSelectedSessionId(null);
+      state.sessionTurns = [];
+      setTurnProjection(null, { preserveSessionTurns: true });
+    }
+    await refreshSessions();
+    await refreshSelectedSession();
+    setCommandStatus(`deleted ${sessionIds.length} session(s)`, { stickyMs: 6000 });
+  } catch (error) {
+    setCommandStatus(`delete session failed: ${error.message}`, { stickyMs: 9000 });
   }
 }
 
@@ -1313,32 +1359,23 @@ function renderMessages() {
               ? "running"
               : "success";
       const identity = item.tool_call_id ? `tool:${item.tool_call_id}` : null;
+      const timing = item.tool_call_id ? state.toolTimings.get(item.tool_call_id) : null;
       const body = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
       const role = item.kind === "ToolSummary" ? "Tool" : item.title;
-      fragments.push(card(role, { className: statusClass, label: item.status }, item.title, body, variant, identity));
+      fragments.push(
+        card(
+          role,
+          {
+            className: statusClass,
+            label: item.kind === "ToolSummary" ? toolTimelineLine(item, timing) || item.status : item.status,
+          },
+          item.title,
+          body,
+          variant,
+          identity,
+        ),
+      );
       });
-      if (shouldRenderLiveWaitForTurn(turn) && turnIsWaitingForModelResponse(turn)) {
-        fragments.push(
-          card(
-            "Assistant",
-            { className: "running", label: "waiting" },
-            "等待模型响应",
-            modelRequestBody(turn),
-            "assistant",
-          ),
-        );
-      }
-      if (shouldRenderLiveWaitForTurn(turn) && turnIsWaitingForModel(turn)) {
-        fragments.push(
-          card(
-            "Assistant",
-            { className: "running", label: "thinking" },
-            "等待模型继续",
-            modelWaitBody(),
-            "assistant",
-          ),
-        );
-      }
     });
   }
 
@@ -1397,11 +1434,24 @@ function appendSessionParts(item, label, title, meta) {
   item.append(labelNode, titleNode, metaNode);
 }
 
+function renderSessionBulkToolbar() {
+  if (!sessionBulkCount || !sessionDeleteSelectedButton) {
+    return;
+  }
+  const selectedCount = selectedManagedSessionIds().length;
+  sessionBulkCount.textContent = `${selectedCount} selected`;
+  sessionDeleteSelectedButton.disabled = selectedCount === 0;
+  if (sessionClearSelectionButton) {
+    sessionClearSelectionButton.disabled = selectedCount === 0;
+  }
+}
+
 function renderSessions() {
   if (!sessionList) {
     return;
   }
   sessionList.replaceChildren();
+  renderSessionBulkToolbar();
   if (state.sessions.length === 0) {
     const empty = document.createElement("section");
     empty.className = "session-item active";
@@ -1418,29 +1468,44 @@ function renderSessions() {
   }
 
   state.sessions.forEach((session) => {
-    const item = document.createElement("button");
-    item.className = `session-item session-button${session.session_id === state.selectedSessionId ? " active" : ""}`;
-    item.type = "button";
+    const item = document.createElement("section");
+    item.className = `session-item session-row${session.session_id === state.selectedSessionId ? " active" : ""}`;
     item.dataset.sessionId = session.session_id;
+
+    const selector = document.createElement("input");
+    selector.className = "session-selector";
+    selector.type = "checkbox";
+    selector.checked = state.selectedSessionIds.has(session.session_id);
+    selector.setAttribute("aria-label", `Select session ${session.session_id}`);
+    selector.addEventListener("change", () => {
+      toggleSessionSelection(session.session_id, selector.checked);
+    });
+
+    const button = document.createElement("button");
+    button.className = "session-button";
+    button.type = "button";
+    button.dataset.sessionId = session.session_id;
 
     const cwd = normalizeCwd(session.cwd);
     const cwdTail = cwd ? ` · ${cwd.split("/").filter(Boolean).slice(-2).join("/") || cwd}` : "";
     const turnText = session.latest_turn_id ? `${session.latest_turn_id} · ${session.turn_count} turn(s)${cwdTail}` : `${session.turn_count} turn(s)${cwdTail}`;
     appendSessionParts(
-      item,
+      button,
       session.active_turn_id ? "active" : session.latest_status || "session",
       session.session_id,
       turnText,
     );
 
-    item.addEventListener("click", () => {
+    button.addEventListener("click", () => {
       setSelectedSessionId(session.session_id);
       refreshSelectedSession().catch((error) => {
         setCommandStatus(`session refresh failed: ${error.message}`);
       });
     });
+    item.append(selector, button);
     sessionList.appendChild(item);
   });
+  renderSessionBulkToolbar();
 }
 
 function renderDraftSessionItem() {
@@ -1870,6 +1935,12 @@ newTaskButton.addEventListener("click", () => {
   startNewTask().catch((error) => {
     setCommandStatus(`new task failed: ${error.message}`, { stickyMs: 8000 });
   });
+});
+sessionClearSelectionButton.addEventListener("click", () => {
+  clearSessionSelection();
+});
+sessionDeleteSelectedButton.addEventListener("click", () => {
+  deleteSelectedSessions();
 });
 successSampleButton.addEventListener("click", () => loadSamplePrompt("success"));
 failureSampleButton.addEventListener("click", () => loadSamplePrompt("failure"));

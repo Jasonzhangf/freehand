@@ -1,5 +1,38 @@
 # note.md
 
+# 2026-06-30 WebUI session CRUD and tool card follow-up
+  - user correction: WebUI still could not multi-select/delete sessions, so CRUD was not usable despite ADP/session protocol support.
+  - implementation:
+    - sidebar adds visible `session-bulk-toolbar` with selected count, Clear, and Delete
+    - session rows now use checkboxes for multi-select and a separate session button for navigation
+    - Delete sends ADP `DeleteSession` for every selected session, clears local selection, refreshes `QuerySessionList`/selected transcript
+    - server smoke asserts HTML/JS include multi-select/delete controls and ADP `DeleteSession`
+  - tool display follow-up:
+    - removed old live wait helper path that could render extra waiting cards
+    - tool card status bar now owns waiting/completed timing; card body only shows semantic target/result
+    - `tool.display` projects `bash pwd` as `Read current working directory` without `command=pwd`
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo fmt --check`
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `cargo test -p freehand-blocks -- --nocapture` -> 39 passed
+    - `cargo test -p freehand-ui-protocol -- --nocapture` -> 39 passed
+    - `target/debug/xtask mainlines generate/check` and `target/debug/xtask gates check` -> ok
+    - `scripts/install-global.sh` completed full Rust/Android release regression and installed matching `~/.local/bin/freehand-daemon`
+    - `scripts/install-launchd.sh restart` restarted fixed `127.0.0.1:4041`
+    - fixed-port HTML contains `session-bulk-count`, `session-clear-selection-button`, `session-delete-selected-button`
+    - fixed-port JS contains `selectedSessionIds`, `deleteSelectedSessions`, `DeleteSession`, `session-selector`, `renderSessionBulkToolbar`
+    - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` passed
+
+# 2026-06-30 fixed daemon port verification
+  - occupied launchd service `com.freehand.daemon` stopped first with `launchctl stop gui/$(id -u)/com.freehand.daemon`
+  - exact PID `49108` was terminated only after stop did not exit it
+  - `scripts/install-launchd.sh install` rebuilt/reinstalled and relaunched the daemon
+  - `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
+  - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` -> `adp_smoke_ok`
+  - `~/.local/bin/freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action create --session webui-fixed-4041-check --title 'Fixed 4041 Check' --cwd /Volumes/extension/code/freehand` -> success
+  - empty cwd create via `adp-session-manage` failed explicitly as `empty_session_cwd`
+
 # 2026-06-29 tool display semantic owner
   - user requirement:
     - tool classification must have a standard independent file and locked owner
