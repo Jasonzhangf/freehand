@@ -50,6 +50,7 @@
 - writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn
 - runtime system errors, including provider transport errors, persistence failures, metadata failures, checkpoint infrastructure failures, and provider-output apply failures, remain explicit terminal bridge errors and are not converted into tool results
+- provider executor transport failures materialize `ErrorErr01RuntimeClassified` plus failed terminal truth through the active turn before returning dispatch failure, so UI/ADP clients see a closed failed turn instead of a hanging active turn
 - provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`
 - provider raw debug-ledger write failures are returned as explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - persistence restore/write failures fail the live bridge explicitly
@@ -118,6 +119,7 @@
 | 24 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned terminal lifecycle metadata before terminal persistence | round/tool/schema-rejection counters + final terminal status | durable runtime metadata record | live bridge | metadata owner | bound |
 | 25 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned terminal lifecycle debug snapshot before terminal persistence | round/tool/schema-rejection counters + final terminal status | runtime-owned debug event | live bridge | `debug.core` | bound |
 | 26 | `ReasonPersistence::record_turn_closed` | `crates/freehand-reason/src/persistence.rs` | materialize terminal live turn | terminal turn truth | closed turn snapshot + sidecars/index | live bridge | persistence owner | bound |
+| 27 | `materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | convert provider executor/transport failure into runtime-classified error truth plus failed terminal truth before returning dispatch failure | provider executor error + active turn | persisted failed closed turn with `provider_executor_failure` error event | live bridge executor error path | reason/persistence owners | bound |
 
 ## Sync Status Against Code
 
@@ -128,6 +130,7 @@
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
 - tool execution result failures, including missing-file read failures and unknown tool names, are expected to surface as `ToolResultStatus::Failed` tool-result re-entry truth, be sent to the next Anthropic request with `is_error=true`, and must not materialize runtime error or failed terminal truth by themselves
+- provider executor/transport failures are distinct from tool execution result failures: they materialize a failed terminal turn with `provider_executor_failure` and no active turn before the dispatch error is returned
 - runtime white-box coverage now explicitly locks failed-tool-result multi-round continuation and keeps provider/metadata/persistence/checkpoint failures as system/runtime errors
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported

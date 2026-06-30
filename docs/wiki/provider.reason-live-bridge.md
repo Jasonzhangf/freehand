@@ -47,12 +47,13 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 ## Error Mainline
 
 - unsupported provider type/protocol is rejected at the bridge boundary
-- provider execution failures are returned explicitly
+- provider execution failures materialize runtime-classified failed terminal truth before the dispatch failure is returned
 - invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times
 - incomplete tool calls are not executed and do not become tool-result truth
 - writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn
 - runtime system errors, including provider transport errors, persistence failures, metadata failures, checkpoint infrastructure failures, and provider-output apply failures, remain explicit terminal bridge errors and are not converted into tool results
+- provider executor transport failures materialize ErrorErr01RuntimeClassified plus failed terminal truth through the active turn before returning dispatch failure, so UI/ADP clients see a closed failed turn instead of a hanging active turn
 - provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`
 - metadata ledger bootstrap and metadata write failures are returned as explicit `RuntimeLiveBridgeError::MetadataFailed` errors
 - provider raw debug-ledger write failures are returned as explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
@@ -124,6 +125,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 | 26 | `ReasonPersistence::record_turn_closed` | `crates/freehand-reason/src/persistence.rs` | materialize terminal live turn | terminal turn truth | closed turn snapshot plus sidecars/index | live bridge | persistence owner | bound |
 | 19 | `record_provider_error_metadata` | `crates/freehand-runtime/src/lib.rs` | write provider executor error metadata when AnthropicExecutorError is returned | executor error classification plus turn identity | durable provider error metadata record | live bridge | metadata owner | bound |
 | 20 | `emit_provider_error_debug` | `crates/freehand-runtime/src/lib.rs` | emit provider executor error debug snapshot when AnthropicExecutorError is returned | executor error summary plus turn identity | runtime-owned debug event | live bridge | debug.core | bound |
+| 27 | `materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | convert provider executor or transport failure into runtime-classified error truth plus failed terminal truth before returning dispatch failure | provider executor error plus active turn | persisted failed closed turn with provider_executor_failure error event | live bridge executor error path | reason and persistence owners | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -134,6 +136,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
 - tool execution result failures, including missing-file read failures and unknown tool names, are surfaced as `ToolResultStatus::Failed` tool-result re-entry truth, sent to Anthropic with `is_error=true`, and do not materialize runtime error or failed terminal truth by themselves
+- provider executor and transport failures are distinct from tool execution result failures: they materialize a failed terminal turn with provider_executor_failure and no active turn before the dispatch error is returned
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`

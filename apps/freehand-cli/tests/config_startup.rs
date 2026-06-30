@@ -238,14 +238,19 @@ fn spawn_adp_sample_mock_server(status: TerminalStatus) -> (String, thread::Join
                     }
                     UiAdpRequest::Command {
                         request_id,
-                        command: UiCommand::SubmitUserInput { text, .. },
+                        command:
+                            UiCommand::SubmitUserInput {
+                                text, session_id, ..
+                            },
                     } => {
-                        let turn = test_sample_turn_projection(&text, status.clone());
+                        let session_id =
+                            session_id.unwrap_or_else(|| SessionId::new("cli-session"));
+                        let turn = test_sample_turn_projection(&text, &session_id, status.clone());
                         sample_turn = Some(turn.clone());
                         let envelope =
                             build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
                                 text: text.clone(),
-                                session_id: None,
+                                session_id: Some(session_id.clone()),
                                 cwd: None,
                             })
                             .expect("sample envelope");
@@ -283,6 +288,37 @@ fn spawn_adp_sample_mock_server(status: TerminalStatus) -> (String, thread::Join
                         }
                     }
                     UiAdpRequest::Query { request_id, .. } => {
+                        if request_id.contains("-transcript") {
+                            let turn = sample_turn.clone().expect("sample turn");
+                            let turns = if status == TerminalStatus::Failed {
+                                let mut first = turn.clone();
+                                first.turn_id = TurnId::new("cli-adp-sample-turn");
+                                first.terminal_status = None;
+                                first.terminal_text = None;
+                                let mut second = turn;
+                                second.turn_id = TurnId::new("cli-adp-sample-turn-r2");
+                                vec![first, second]
+                            } else {
+                                vec![turn]
+                            };
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::SessionTurns(
+                                        UiSessionTranscriptProjection {
+                                            session_id: turns[0].session_id.clone(),
+                                            title: None,
+                                            archived: false,
+                                            cwd: Some("/tmp/cli-session".to_owned()),
+                                            turns,
+                                        },
+                                    ),
+                                },
+                            )
+                            .await;
+                            continue;
+                        }
                         send_adp_response(
                             &mut socket,
                             UiAdpResponse::QueryResult {
@@ -453,7 +489,11 @@ fn test_turn_projection() -> UiTurnProjection {
     }
 }
 
-fn test_sample_turn_projection(prompt: &str, status: TerminalStatus) -> UiTurnProjection {
+fn test_sample_turn_projection(
+    prompt: &str,
+    session_id: &SessionId,
+    status: TerminalStatus,
+) -> UiTurnProjection {
     let failed = status == TerminalStatus::Failed;
     let terminal_status = TerminalStatus::Success;
     UiTurnProjection {
@@ -463,8 +503,12 @@ fn test_sample_turn_projection(prompt: &str, status: TerminalStatus) -> UiTurnPr
             source_turn_id: Some(TurnId::new("cli-adp-sample-turn")),
             stream_kind: UiStreamKind::Turn,
         },
-        session_id: SessionId::new("cli-session"),
-        turn_id: TurnId::new("cli-adp-sample-turn"),
+        session_id: session_id.clone(),
+        turn_id: TurnId::new(if failed {
+            "cli-adp-sample-turn-r2"
+        } else {
+            "cli-adp-sample-turn"
+        }),
         cwd: Some("/tmp/cli-session".to_owned()),
         user_text: Some(prompt.to_owned()),
         model_request: None,

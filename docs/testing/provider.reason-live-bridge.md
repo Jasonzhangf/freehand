@@ -54,7 +54,7 @@
   - invalid completion schema retries exactly 3 times and closes failed terminal without early success
   - non-string completion fields produce explicit type feedback instead of being reported as missing
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
-  - provider HTTP failure returns explicit dispatch failure and does not project a successful terminal
+  - provider HTTP/executor failure returns explicit dispatch failure, materializes failed terminal/error truth, and leaves no active turn hanging
   - tool execution result failure returns a paired failed tool result to the model, emits runtime-owned model-continuation waiting status, and can still end with a successful terminal schema
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
   - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation
@@ -79,5 +79,6 @@
   - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
   - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
   - runtime white-box coverage now explicitly locks failed tool-result multi-round continuation, proving execution failures become paired `ToolResultStatus::Failed` re-entry truth and provider/system errors remain explicit bridge failures
+  - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes `provider_executor_failure`, closes the active turn as failed, and restores with no active turn
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates

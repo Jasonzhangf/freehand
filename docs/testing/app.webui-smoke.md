@@ -60,7 +60,7 @@
   - WebUI latest-turn query/SSE public projection excludes raw completion schema, internal reasoning, and detailed tool terms from public conversation while preserving user input
   - WebUI latest-turn SSE renders tool lifecycle status updates (`waiting` then `completed`) from protocol truth
   - WebUI ADP turn updates render tool lifecycle status updates (`waiting`, `completed`, and `failed`) from protocol truth
-- WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, Up/Down input history recall, submit/dispatch waiting timers, model-response waiting timers from protocol projection, absence of UI-inferred waiting-model timers, current-live-turn-only animation gating, waiting animation assets, compact terminal tool state dots, compressed tool semantic lines that remove repeated title/summary/body content, filtered generic tool results, and low-noise tool summary rendering with elapsed waiting timers
+- WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, Up/Down input history recall, submit/dispatch waiting timers, model-response waiting timers from protocol projection, absence of UI-inferred waiting-model timers, current-live-turn-only animation gating, neutral non-animated inactive waiting state, waiting animation assets, compact terminal tool state dots, compressed tool semantic lines that remove repeated title/summary/body content, filtered generic tool results, and low-noise tool summary rendering with elapsed waiting timers
 - WebUI JS asset smoke locks that tool card rendering consumes protocol `display` fields, including `parameter_summary`, and does not implement category parsing from raw tool argument/result text
   - WebUI JS asset smoke locks same-execution-cycle round grouping so `runtime-turn-N` and `runtime-turn-N-rM` render as one logical transcript group instead of duplicate user/tool cards
   - WebUI JS asset smoke locks assistant-text collapse into one card per logical turn and raw completion-schema stripping while preserving Final card projection
@@ -106,6 +106,7 @@
 - WebUI model-response waiting state is driven by protocol-projected `model_request`, not local-only guessing
 - WebUI completed/failed tool cards now render protocol-projected semantic target/body while status/outcome stays in the status line, and tool-complete-to-next-model waiting has its own elapsed timer
 - WebUI current-live-turn-only wait gating is landed so historical completed/superseded turns cannot keep blinking
+- WebUI neutral inactive waiting state is landed so text-only/restored turns cannot be mislabeled as live streaming
 - WebUI tool terminal state now uses compact color dots and compresses repeated title/summary/body text while filtering generic success strings and success/failure result echoes from the primary tool body
 - WebUI tool rendering now consumes `UiToolActivity.display` for semantic action/target/parameter/diff rendering; parser ownership is outside the UI app and result outcome is carried by status rather than repeated body text
 - WebUI selected-session transcript grouping is landed for same execution-cycle round ids while protocol/session truth remains unmerged

@@ -42,12 +42,13 @@
   ],
   "error_mainline": [
     "unsupported provider type/protocol is rejected at the bridge boundary",
-    "provider execution failures are returned explicitly",
+    "provider execution failures materialize runtime-classified failed terminal truth before the dispatch failure is returned",
     "invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times",
     "incomplete tool calls are not executed and do not become tool-result truth",
     "writable tools without preview/checkpoint support are rejected explicitly",
     "unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn",
     "runtime system errors, including provider transport errors, persistence failures, metadata failures, checkpoint infrastructure failures, and provider-output apply failures, remain explicit terminal bridge errors and are not converted into tool results",
+    "provider executor transport failures materialize ErrorErr01RuntimeClassified plus failed terminal truth through the active turn before returning dispatch failure, so UI/ADP clients see a closed failed turn instead of a hanging active turn",
     "provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`",
     "metadata ledger bootstrap and metadata write failures are returned as explicit `RuntimeLiveBridgeError::MetadataFailed` errors",
     "provider raw debug-ledger write failures are returned as explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`",
@@ -433,6 +434,17 @@
       "caller": "live bridge",
       "callee": "debug.core",
       "binding_status": "bound"
+    },
+    {
+      "step": "27",
+      "symbol_path": "materialize_provider_executor_failure",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "convert provider executor or transport failure into runtime-classified error truth plus failed terminal truth before returning dispatch failure",
+      "input_semantic": "provider executor error plus active turn",
+      "output_semantic": "persisted failed closed turn with provider_executor_failure error event",
+      "caller": "live bridge executor error path",
+      "callee": "reason and persistence owners",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -443,6 +455,7 @@
     "runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth",
     "runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence",
     "tool execution result failures, including missing-file read failures and unknown tool names, are surfaced as `ToolResultStatus::Failed` tool-result re-entry truth, sent to Anthropic with `is_error=true`, and do not materialize runtime error or failed terminal truth by themselves",
+    "provider executor and transport failures are distinct from tool execution result failures: they materialize a failed terminal turn with provider_executor_failure and no active turn before the dispatch error is returned",
     "runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation",
     "provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported",
     "CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`",

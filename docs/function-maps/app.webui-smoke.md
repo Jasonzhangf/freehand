@@ -63,6 +63,7 @@
 - front-end script renders protocol-projected model request waiting as an animated card with elapsed time, including tool-result re-entry and schema-retry waits; WebUI must not infer model waiting from completed/failed tool cards
 - front-end script renders completed/failed tool lifecycle in the same execution card and keeps the status/outcome in the card status line; the card body stays semantic and target-focused instead of echoing success/failure result text as a separate user-visible item
 - front-end script renders waiting/model continuation animation only for the current live turn; historical completed or superseded turns must not keep blinking
+- front-end script must render a neutral non-animated waiting state when a turn has no terminal status, no waiting tool activity, and no protocol-projected model request; it must not invent `streaming` from text-only or restored inactive state
   - front-end script renders completed/failed tool cards with color-state only and low-noise semantic lines, compressing repeated title/summary/body text and filtering generic result strings such as `succeeded: result returned`
 - front-end script consumes `UiToolActivity.display` structured projection for tool category/action/target/result/diff fields and must not classify tools from raw argument or result strings
 - front-end script groups `runtime-turn-N` plus `runtime-turn-N-rM` round projections into one logical execution cycle for display so the same user input, assistant text, and same tool call are not duplicated in the selected-session transcript
@@ -157,6 +158,7 @@
 - WebUI model-request waiting state now comes from `UiTurnProjection.model_request` and refreshes once per second with elapsed wait time
 - WebUI completed/failed tool cards now show protocol-projected semantic target/body while status/outcome stays in the status line, and tool-complete-to-next-model waiting renders as its own timed lifecycle state
 - WebUI waiting/model continuation cards are now gated to the current live turn so restored history cannot show fake animation after execution has stopped
+- WebUI inactive text-only or restored turns now render as neutral waiting/active state instead of fake streaming; animation requires submit-in-flight, waiting tool activity, or protocol-projected model request truth
   - WebUI tool terminal state now uses green/red compact state dots and compresses repeated title/summary/body text instead of rendering mechanical status/result lines or separate success-result items
 - WebUI tool cards now render `display.action`, `display.summary`, `display.parameter_summary`, `display.fields`, and `display.diff`; category parsing stays in `tool.display`, not in JavaScript, and success/failure result text is not primary body content
 - WebUI selected-session transcript display now groups same execution-cycle round ids such as `runtime-turn-47` and `runtime-turn-47-r2` into one visible logical turn while preserving ADP/session truth as separate persisted turns

@@ -230,6 +230,7 @@ Use this skill for any non-trivial work in this repo.
 - For state machine, stream, timeout, retry, error projection, or resource cleanup changes, add both positive and negative tests.
 - For live bridge error projection repairs, do not stop at persistence truth. Also verify runtime dispatch refreshes `UiProtocolState`, UI protocol marks user-visible activity status correctly, and fixed-port query plus SSE expose the same terminal/error state.
 - For WebUI/ADP state projection checks, use paired samples before claiming UI correctness: `freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample success` and `--sample failure`, then verify WebUI/latest-turn projection shows the expected terminal status.
+- For multi-round tool-loop claims, one-round success is invalid evidence. Use `freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample failure` and require `rounds>=2`, `tool_executions>=1`, `failed_tools>=1`, plus terminal success from ADP/session truth before claiming closure.
 - For provider recovery logic, classify errors as recoverable, unrecoverable, or periodic-recoverable. Periodic windows use provider-supplied seconds first, otherwise configured defaults.
 - For reason-turn stop logic, validate completion schema before terminal acceptance. Reject and explain invalid terminal submissions.
 - UI protocol black-box tests must cover standard user-visible flows, not only internal event wiring.

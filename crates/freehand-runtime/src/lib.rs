@@ -22,9 +22,10 @@ use freehand_config::{
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
-    ContextSegmentKind, ContextStability, FeatureId, ReasonReq04ToolCall,
-    ReasonReq05ToolResultReentry, SessionId, ToolPreviewChangeKind, ToolPreviewContract,
-    ToolResultContract, ToolResultStatus, TraceId, TurnId,
+    ContextSegmentKind, ContextStability, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified,
+    FeatureId, ReasonReq04ToolCall, ReasonReq05ToolResultReentry, RecoveryPolicy, SessionId,
+    ToolPreviewChangeKind, ToolPreviewContract, ToolResultContract, ToolResultStatus, TraceId,
+    TurnId,
 };
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
@@ -55,9 +56,10 @@ use freehand_reason::{
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
-    UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt, UiProtocolState,
-    UiSessionMetadataProjection, UiTurnProjection, checkpoint_projection_from_runtime_summary,
-    turn_projection_for_client, turn_projection_from_events,
+    UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
+    UiCompletionSchemaRetryWaiting, UiProtocolState, UiSessionMetadataProjection, UiTurnProjection,
+    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
+    turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1037,6 +1039,19 @@ where
                     &turn,
                     &mapped,
                 );
+                let mut failure_ctx = ProviderExecutorFailureContext {
+                    engine: &engine,
+                    persistence: &persistence,
+                    history: &history,
+                    receiver: &receiver,
+                    broadcasts: &mut broadcasts,
+                    on_broadcast: &mut on_broadcast,
+                    debug_receiver: &debug_receiver,
+                    on_debug: &mut on_debug,
+                    schema_rejection_count: schema_rejections.len() as u32,
+                };
+                materialize_provider_executor_failure(&mut failure_ctx, &mut turn, &mapped)?;
+                turns.push(turn);
                 return Err(mapped);
             }
         } else {
@@ -1084,6 +1099,19 @@ where
                         &turn,
                         &mapped,
                     );
+                    let mut failure_ctx = ProviderExecutorFailureContext {
+                        engine: &engine,
+                        persistence: &persistence,
+                        history: &history,
+                        receiver: &receiver,
+                        broadcasts: &mut broadcasts,
+                        on_broadcast: &mut on_broadcast,
+                        debug_receiver: &debug_receiver,
+                        on_debug: &mut on_debug,
+                        schema_rejection_count: schema_rejections.len() as u32,
+                    };
+                    materialize_provider_executor_failure(&mut failure_ctx, &mut turn, &mapped)?;
+                    turns.push(turn);
                     return Err(mapped);
                 }
             };
@@ -2670,6 +2698,55 @@ fn record_provider_error_metadata(
     )
 }
 
+struct ProviderExecutorFailureContext<'a> {
+    engine: &'a ReasonTurnEngine,
+    persistence: &'a ReasonPersistence,
+    history: &'a SessionHistory,
+    receiver: &'a Receiver<ReasonBroadcastEvent>,
+    broadcasts: &'a mut Vec<ReasonBroadcastEvent>,
+    on_broadcast: &'a mut dyn FnMut(&ReasonBroadcastEvent),
+    debug_receiver: &'a Receiver<DebugEvent>,
+    on_debug: &'a mut dyn FnMut(&DebugEvent),
+    schema_rejection_count: u32,
+}
+
+fn materialize_provider_executor_failure(
+    ctx: &mut ProviderExecutorFailureContext<'_>,
+    turn: &mut TurnRecord,
+    error: &RuntimeLiveBridgeError,
+) -> Result<(), RuntimeLiveBridgeError> {
+    let message = error.to_string();
+    let output = ProviderSemanticOutput::Error(ErrorErr01RuntimeClassified {
+        session_id: Some(turn.request.session_id.clone()),
+        turn_id: Some(turn.request.turn_id.clone()),
+        trace_id: turn.request.trace_id.clone(),
+        feature_id: turn.request.feature_id.clone(),
+        agent_id: Some(turn.request.agent_id.clone()),
+        error: ErrorContract {
+            code: "provider_executor_failure".to_owned(),
+            class: ErrorClass::Upstream,
+            recovery: RecoveryPolicy::Recoverable,
+            message: message.clone(),
+        },
+    });
+    ctx.engine
+        .apply_provider_output(turn, output.clone())
+        .map_err(|err| RuntimeLiveBridgeError::ProviderOutputApplyFailed(err.to_string()))?;
+    ctx.persistence
+        .record_provider_output_applied(ctx.history, turn, &output, ctx.schema_rejection_count)
+        .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
+    drain_broadcasts(ctx.receiver, ctx.broadcasts, ctx.on_broadcast);
+    drain_debug_events(ctx.debug_receiver, ctx.on_debug);
+
+    ctx.engine.fail_turn(turn, message);
+    drain_broadcasts(ctx.receiver, ctx.broadcasts, ctx.on_broadcast);
+    drain_debug_events(ctx.debug_receiver, ctx.on_debug);
+    ctx.persistence
+        .record_turn_closed(ctx.history, turn, ctx.schema_rejection_count)
+        .map(|_| ())
+        .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))
+}
+
 fn emit_provider_error_debug(
     debug_hub: &DebugHub,
     agent_id: &AgentId,
@@ -3005,7 +3082,7 @@ fn drain_broadcasts<F>(
     broadcasts: &mut Vec<ReasonBroadcastEvent>,
     on_broadcast: &mut F,
 ) where
-    F: FnMut(&ReasonBroadcastEvent),
+    F: FnMut(&ReasonBroadcastEvent) + ?Sized,
 {
     while let Ok(event) = receiver.try_recv() {
         on_broadcast(&event);
@@ -3070,15 +3147,15 @@ fn apply_runtime_reason_broadcast(
                 .map(|issue| format!("{} {}", issue.field, issue.message))
                 .collect::<Vec<_>>()
                 .join("; ");
-            ui.apply_completion_schema_retry_waiting(
-                reason_agent_id.clone(),
-                master_node_id.to_owned(),
-                &event.session_id,
-                &event.turn_id,
-                event.retry_index,
+            ui.apply_completion_schema_retry_waiting(UiCompletionSchemaRetryWaiting {
+                source_agent_id: reason_agent_id.clone(),
+                source_node_id: master_node_id.to_owned(),
+                session_id: event.session_id.clone(),
+                turn_id: event.turn_id.clone(),
+                retry_index: event.retry_index,
                 issue_summary,
-                false,
-            );
+                slave_substream_card: false,
+            });
         }
         ReasonBroadcastEvent::ModelContinuationWaiting(event) => {
             ui.apply_model_request_waiting(
@@ -5300,11 +5377,9 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         );
         let request = live_request(false);
         let runtime_home = request.runtime_home.clone();
-        let metadata_path = metadata_ledger_path(
-            &runtime_home,
-            &AgentId::new("agent-live"),
-            &request.session_id,
-        );
+        let session_id = request.session_id.clone();
+        let metadata_path =
+            metadata_ledger_path(&runtime_home, &AgentId::new("agent-live"), &session_id);
 
         let err = run_live_reason_turn(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
@@ -5333,6 +5408,29 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     .entries
                     .iter()
                     .any(|e| e.key == "error.kind" && e.value == json!("executor_failure"))
+        }));
+
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&session_id)
+            .expect("restore failed provider turn");
+        assert!(restored.active_turn.is_none());
+        let failed_turn = restored
+            .closed_turns
+            .last()
+            .expect("provider failure must close the turn");
+        assert_eq!(
+            failed_turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(freehand_contracts::TerminalStatus::Failed)
+        );
+        assert!(failed_turn.error_events.iter().any(|event| {
+            event.error.code == "provider_executor_failure"
+                && event
+                    .error
+                    .message
+                    .contains("anthropic live executor failed")
         }));
 
         let _ = handle.join();

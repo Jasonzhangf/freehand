@@ -1170,6 +1170,9 @@ mod tests {
         assert!(js_body.contains("ArrowDown"));
         assert!(js_body.contains("toolTimelineLine"));
         assert!(js_body.contains("running-tool-state"));
+        assert!(js_body.contains("className: \"pending\""));
+        assert!(js_body.contains("label: \"waiting\""));
+        assert!(js_body.contains("live: false"));
         assert!(!js_body.contains("modelRequestBody"));
         assert!(!js_body.contains("modelWaitBody"));
         assert!(!js_body.contains("shouldRenderLiveWaitForTurn"));

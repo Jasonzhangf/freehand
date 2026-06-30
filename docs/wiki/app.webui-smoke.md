@@ -52,6 +52,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - front-end script renders submit and dispatch waiting as an animated pending card with elapsed time, then switches to tool executing with elapsed time when a waiting tool activity is visible
 - front-end script renders protocol-projected model request waiting as an animated elapsed-time card that clearly shows the request has been sent and the UI is waiting for model response
 - front-end script renders completed or failed tool result detail in the same tool card and renders tool-complete-to-next-model waiting as an animated elapsed-time card
+- front-end script renders a neutral non-animated waiting state when a turn has no terminal status, no waiting tool activity, and no protocol-projected model request; it must not invent streaming from text-only or restored inactive state
 - front-end script groups runtime-turn-N plus runtime-turn-N-rM round projections into one logical execution cycle for display and collapses assistant text into one visible card per logical turn while preserving tool, terminal, and error cards
 - front-end script projects checkpoint summaries into a secondary inspector card and sends explicit rewind commands through command ingress
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
@@ -141,4 +142,5 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn
 - WebUI tool cards now render protocol-projected waiting/completed/failed lifecycle states from ADP turn projection truth without exposing verbose term text by default
 - WebUI same-tool lifecycle updates normalize by tool_call_id, waiting cards animate, elapsed timers render locally, and submit clears the composer immediately while retaining pending state in the conversation stream
+- WebUI inactive text-only or restored turns render as neutral waiting or active state instead of fake streaming; animation requires submit-in-flight, waiting tool activity, or protocol-projected model request truth
 - WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending

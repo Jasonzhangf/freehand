@@ -595,6 +595,19 @@ body.theme-dark .conversation-region {
   animation: toolPulse 1.35s ease-in-out infinite;
 }
 
+.dialog-block.pending-state {
+  position: relative;
+}
+
+.dialog-block.pending-state::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  border: 1px solid rgba(155, 109, 28, 0.10);
+  pointer-events: none;
+}
+
 body.theme-dark .dialog-block {
   background: rgba(22, 29, 26, 0.96);
   box-shadow: 0 16px 28px rgba(0, 0, 0, 0.22);

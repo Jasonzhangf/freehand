@@ -1,5 +1,23 @@
 # note.md
 
+# 2026-06-30 ADP multi-round sample closeout
+  - user correction: one-round success is not valid evidence; failure sample must complete a continuous multi-round tool loop before reporting success.
+  - implementation:
+    - `freehand-cli adp-turn-sample --sample failure` now creates an isolated sample session instead of using the shared runtime session.
+    - after matching the final projection, the CLI queries `QuerySessionTurns` and requires transcript evidence; failure sample requires `rounds>=2`, at least one unique tool execution, and at least one unique failed tool result.
+    - CLI de-duplicates transcript tool counts by `tool_call_id` because final round projections can aggregate earlier tool activity.
+    - CLI now fails immediately when the target sample session reaches a system/provider failed terminal instead of waiting for timeout.
+    - provider executor failures now materialize `provider_executor_failure` error truth and failed terminal truth before dispatch failure returns, preventing silent active-turn hangs.
+    - WebUI inactive text-only/restored turns now render neutral waiting/active state rather than fake streaming animation.
+  - live verification:
+    - `target/debug/freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample failure` -> `adp_turn_sample_ok ... session=cli-adp-sample-failure-1782833766680278000 turn=runtime-turn-69-r2 rounds=2 tool_executions=1 failed_tools=1 ... command_receipt ... reason_live_turn_completed rounds=2 schema_rejections=0 tool_executions=1 ... EXIT:0`
+    - ADP/latest-turn for prior run `runtime-turn-68-r4` showed full multi-round completion after schema retry: failed `read_file` tool activity plus final `terminal_status=Success`.
+    - metadata ledger for `runtime-trace-66` showed round 1 provider request, failed `read_file`, `ReasonReq05ToolResultReentry`, round 2 provider request with `tool.exchange_count=1`, and `RuntimeLive04TurnClosed` with `bridge.rounds=2`, `bridge.tool_executions=1`, `terminal.status=Success`.
+    - provider/system failure negative path observed on `runtime-turn-65-r4`: after schema retries, provider HTTP send failure surfaced as `terminal_status=Failed` with explicit error instead of hanging.
+  - verification commands:
+    - `cargo test -p freehand-cli -- --nocapture` -> 12 passed
+    - `cargo fmt --check` -> passed
+
 # 2026-06-30 WebUI session CRUD and tool card follow-up
   - user correction: WebUI still could not multi-select/delete sessions, so CRUD was not usable despite ADP/session protocol support.
   - user correction: tool/result "merge" must be semantic, not just visual style; successful tool results should update the same execution card status instead of becoming a separate mechanical content item.

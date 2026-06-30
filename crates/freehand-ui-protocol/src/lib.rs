@@ -146,6 +146,17 @@ pub struct UiModelRequestActivity {
     pub detail: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiCompletionSchemaRetryWaiting {
+    pub source_agent_id: AgentId,
+    pub source_node_id: String,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub retry_index: u32,
+    pub issue_summary: String,
+    pub slave_substream_card: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiModelRequestStatus {
     Waiting,
@@ -679,22 +690,19 @@ impl UiProtocolState {
 
     pub fn apply_completion_schema_retry_waiting(
         &mut self,
-        source_agent_id: AgentId,
-        source_node_id: String,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-        retry_index: u32,
-        issue_summary: String,
-        slave_substream_card: bool,
+        waiting: UiCompletionSchemaRetryWaiting,
     ) -> UiTurnProjection {
-        let detail = format!("schema retry #{retry_index}: {issue_summary}");
+        let detail = format!(
+            "schema retry #{}: {}",
+            waiting.retry_index, waiting.issue_summary
+        );
         self.apply_model_request_waiting(
-            source_agent_id,
-            source_node_id,
-            session_id,
-            turn_id,
+            waiting.source_agent_id,
+            waiting.source_node_id,
+            &waiting.session_id,
+            &waiting.turn_id,
             Some(detail),
-            slave_substream_card,
+            waiting.slave_substream_card,
         )
     }
 
@@ -1432,8 +1440,11 @@ fn session_latest_status(turn: &UiTurnProjection) -> String {
     {
         return "tool_running".to_owned();
     }
+    if turn.model_request.is_some() {
+        return "waiting_model".to_owned();
+    }
     if !turn.text.is_empty() || !turn.reasoning.is_empty() {
-        return "streaming".to_owned();
+        return "active".to_owned();
     }
     "submitted".to_owned()
 }
@@ -2177,6 +2188,29 @@ mod tests {
     }
 
     #[test]
+    fn session_latest_status_does_not_call_text_only_turn_streaming() {
+        let projection = UiTurnProjection {
+            source: base_source(UiStreamKind::Turn),
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            cwd: None,
+            user_text: Some("run the task".to_owned()),
+            model_request: None,
+            reasoning: vec!["thinking".to_owned()],
+            text: vec!["answer".to_owned()],
+            tool_calls: Vec::new(),
+            tool_activities: Vec::new(),
+            usage: Vec::new(),
+            terminal_status: None,
+            terminal_text: None,
+            errors: Vec::new(),
+            slave_substream_card: false,
+        };
+
+        assert_eq!(session_latest_status(&projection), "active");
+    }
+
+    #[test]
     fn duplicate_tool_call_projection_updates_one_activity_card() {
         let tool_call = ReasonReq04ToolCall {
             session_id: SessionId::new("session-1"),
@@ -2284,15 +2318,15 @@ mod tests {
         let session_id = SessionId::new("session-schema-retry");
         let turn_id = TurnId::new("turn-schema-retry");
 
-        let waiting = state.apply_completion_schema_retry_waiting(
-            AgentId::new("agent-1"),
-            "node-1".to_owned(),
-            &session_id,
-            &turn_id,
-            2,
-            "evidence must be a string, got array".to_owned(),
-            false,
-        );
+        let waiting = state.apply_completion_schema_retry_waiting(UiCompletionSchemaRetryWaiting {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id,
+            turn_id,
+            retry_index: 2,
+            issue_summary: "evidence must be a string, got array".to_owned(),
+            slave_substream_card: false,
+        });
 
         let activity = waiting.model_request.expect("model request activity");
         assert_eq!(activity.status, UiModelRequestStatus::Waiting);

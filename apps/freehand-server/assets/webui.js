@@ -546,7 +546,7 @@ function turnStatusForRender(turn) {
       live: false,
     };
   }
-  return { className: "running", label: "streaming", live: true };
+  return { className: "pending", label: "waiting", live: false, neutral: true };
 }
 
 function pendingExecutionCard() {
@@ -567,6 +567,9 @@ function pendingExecutionCard() {
 function turnExecutionCard(turn) {
   const status = turnStatusForRender(turn);
   const article = executionShell({ status, live: status.live });
+  if (status.neutral) {
+    article.classList.add("pending-state");
+  }
   const body = article.querySelector(".execution-body");
   const items = conversationItemsForTurn(turn);
   if (items.length === 0) {
@@ -1686,9 +1689,9 @@ function renderTurnMeta() {
       ? waitingToolStatus(runningTools).replace("tool executing", "tool running")
       : turnIsWaitingForModelResponse(state.turn)
         ? liveTurnStatus()
-      : state.submitInFlight
-        ? liveTurnStatus()
-        : "streaming";
+        : state.submitInFlight
+          ? liveTurnStatus()
+          : "waiting";
   setText("turn-status", turnStatus);
 
   if (state.turn.slave_substream_card) {
