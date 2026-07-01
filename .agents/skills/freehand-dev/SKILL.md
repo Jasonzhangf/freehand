@@ -213,6 +213,7 @@ Use this skill for any non-trivial work in this repo.
 - Do not add implementation without first making the test-design path inspectable in docs.
 - Before claiming completion, run the feature's required checks.
 - Before claiming completion, satisfy the feature's `lifecycle_checks`.
+- After any code/config/doc change in this repo, do not report completion from local tests alone. If the feature has a live surface, install/restart the fixed `127.0.0.1:4041` daemon when relevant and verify the changed behavior online through ADP/WebUI/browser evidence before claiming the change works.
 - Before claiming completion, run the feature's mapped test stack:
   - module white-box tests
   - module black-box tests

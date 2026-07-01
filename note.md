@@ -5,6 +5,7 @@
   - correction: clearing the composer after send is acceptable only if the submitted input is immediately preserved in the conversation transcript or pending render projection. Already-observed history must never be removed or hidden by later live status transitions.
   - investigation target: compare raw ADP session transcript with WebUI `RenderConversation` output for `webui-session-20260701131739-e31eb6cf` / `runtime-turn-65`.
   - follow-up user feedback: two real consecutive requests still disappeared. Prior proof only covered a single immediate pending render and did not cover repeated submit / dispatch failure / later refresh lifecycle.
+  - live follow-up: screenshot showed visible ADP failure `reason ledger sequence is invalid: expected 338, got 337`. Online 4041 verification found corrupted reason ledger sequence in `~/.freehand/ledgers/reason/master/webui-session-20260701131739-e31eb6cf.jsonl` line 338 and `runtime-session-master.jsonl` line 380. This is runtime persistence truth failure, not a WebUI display-only bug.
 
 # 2026-07-01 WebUI selected-session render source trace
   - user issue: continuing a previous conversation and submitting new input left the WebUI visually stale.

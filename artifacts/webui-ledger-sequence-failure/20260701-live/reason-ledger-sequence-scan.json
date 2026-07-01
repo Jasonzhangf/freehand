@@ -1,0 +1,21 @@
+{
+  "checked_at": "2026-07-01T15:44:26.353Z",
+  "failures": [
+    {
+      "file": "/Users/fanzhang/.freehand/ledgers/reason/master/webui-session-20260701131739-e31eb6cf.jsonl",
+      "line": 338,
+      "expected": 338,
+      "got": 337,
+      "session": "webui-session-20260701131739-e31eb6cf",
+      "turn": "runtime-turn-66"
+    },
+    {
+      "file": "/Users/fanzhang/.freehand/ledgers/reason/master/runtime-session-master.jsonl",
+      "line": 380,
+      "expected": 380,
+      "got": 379,
+      "session": "runtime-session-master",
+      "turn": "runtime-turn-24"
+    }
+  ]
+}
