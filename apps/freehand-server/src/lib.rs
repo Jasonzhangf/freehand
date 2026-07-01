@@ -1119,12 +1119,25 @@ mod tests {
         assert!(js_body.contains("function buildRenderRows"));
         assert!(js_body.contains("function buildToolActivityRenderRow"));
         assert!(js_body.contains("function buildModelRequestRenderRow"));
+        assert!(js_body.contains("function buildObservableLiveTurnRenderRow"));
+        assert!(js_body.contains("request accepted; waiting for protocol-visible turn details"));
+        assert!(js_body.contains("function pendingUserInputIsMaterialized"));
+        assert!(js_body.contains("function clearPendingUserInputIfMaterialized"));
+        assert!(js_body.contains("clearPendingUserInputIfMaterialized();"));
         assert!(js_body.contains("function renderModelHasLiveLifecycle"));
         assert!(js_body.contains("function turnIsCurrentLiveTurn"));
         assert!(
             js_body.contains("conversationTurns.length === 0 && turnIsCurrentLiveTurn(state.turn)")
         );
         assert!(js_body.contains("fragments.push(turnExecutionCard(renderTurn))"));
+        assert!(
+            js_body
+                .find("fragments.push(turnExecutionCard(renderTurn))")
+                .expect("turn render push")
+                < js_body
+                    .find("fragments.push(pendingExecutionCard(renderModel.pendingSubmit))")
+                    .expect("pending render push")
+        );
         assert!(js_body.contains("deleteSelectedSessions"));
         assert!(js_body.contains("DeleteSession"));
         assert!(js_body.contains("session-selector"));

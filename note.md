@@ -1,5 +1,10 @@
 # note.md
 
+# 2026-07-01 WebUI submitted input/history disappearance trace
+  - user live feedback: after submitting a request, the composer text disappeared and the conversation area showed no user-visible history while the top status still showed live model/tool-result state.
+  - correction: clearing the composer after send is acceptable only if the submitted input is immediately preserved in the conversation transcript or pending render projection. Already-observed history must never be removed or hidden by later live status transitions.
+  - investigation target: compare raw ADP session transcript with WebUI `RenderConversation` output for `webui-session-20260701131739-e31eb6cf` / `runtime-turn-65`.
+
 # 2026-07-01 WebUI selected-session render source trace
   - user issue: continuing a previous conversation and submitting new input left the WebUI visually stale.
   - diagnosis:

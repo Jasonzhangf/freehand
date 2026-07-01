@@ -760,6 +760,9 @@ function buildRenderRows(turn, lifecycle, options = {}) {
   if (modelRow) {
     rows.push(modelRow);
   }
+  if (rows.length === 0 && turnIsCurrentLiveTurn(turn)) {
+    rows.push(buildObservableLiveTurnRenderRow(turn, lifecycle));
+  }
   return rows;
 }
 
@@ -823,6 +826,17 @@ function buildModelRequestRenderRow(turn, lifecycle) {
     title: label === "schema retry" ? "Schema" : "Model",
     body: [turn.model_request.detail || "Waiting for model response."],
     status: lifecycle.elapsed || "0s",
+    identity: { turnId: turn.turn_id },
+  };
+}
+
+function buildObservableLiveTurnRenderRow(turn, lifecycle) {
+  const status = lifecycle.elapsed ? `${lifecycle.label || "working"}... ${lifecycle.elapsed}` : lifecycle.label || "working";
+  return {
+    kind: "system",
+    title: "Turn",
+    body: ["request accepted; waiting for protocol-visible turn details"],
+    status,
     identity: { turnId: turn.turn_id },
   };
 }
@@ -1213,6 +1227,45 @@ function logicalSessionTurns(turns) {
   return turns.filter(Boolean);
 }
 
+function normalizeVisibleText(text) {
+  return `${text || ""}`.replace(/\s+/g, " ").trim();
+}
+
+function turnContainsVisibleUserText(turn, expectedText) {
+  const expected = normalizeVisibleText(expectedText);
+  if (!turn || !expected || isInternalRuntimePrompt(turn)) {
+    return false;
+  }
+  const userText = normalizeVisibleText(turn.user_text);
+  if (userText && (userText === expected || userText.includes(expected))) {
+    return true;
+  }
+  return conversationItemsForTurn(turn).some((item) => {
+    if (item.kind !== "UserText") {
+      return false;
+    }
+    const body = normalizeVisibleText(item.body);
+    return body === expected || body.includes(expected);
+  });
+}
+
+function pendingUserInputIsMaterialized() {
+  if (!state.pendingUserInput) {
+    return false;
+  }
+  return conversationTurnsForRender().some((turn) =>
+    turnContainsVisibleUserText(turn, state.pendingUserInput),
+  );
+}
+
+function clearPendingUserInputIfMaterialized() {
+  if (!pendingUserInputIsMaterialized()) {
+    return;
+  }
+  state.pendingUserInput = null;
+  state.pendingAttachments = [];
+}
+
 function conversationTurnsForRender() {
   const transcriptTurns = logicalSessionTurns(state.sessionTurns);
   const latestTurn = state.turn;
@@ -1494,10 +1547,7 @@ function setTurnProjection(turn, options = {}) {
   state.publicConversation = derivePublicConversation(state.turn);
   syncToolTimings(conversationTurnsForRender());
   syncRenderLifecycleClocks();
-  if (state.turn && state.pendingUserInput) {
-    state.pendingUserInput = null;
-    state.pendingAttachments = [];
-  }
+  clearPendingUserInputIfMaterialized();
 }
 
 function applyAdpQueryResult(result) {
@@ -1624,10 +1674,6 @@ function renderMessages() {
   const renderModel = buildConversationRenderModel();
   const hasSelectedSessionTranscript = renderModel.turns.length > 0;
 
-  if (renderModel.pendingSubmit) {
-    fragments.push(pendingExecutionCard(renderModel.pendingSubmit));
-  }
-
   if (state.selectedSessionId && !hasSelectedSessionTranscript && !state.turn) {
     // A newly selected draft session should stay visually clean until the user sends.
   } else if (renderModel.turns.length === 0 && !state.turn) {
@@ -1644,6 +1690,10 @@ function renderMessages() {
     renderModel.turns.forEach((renderTurn) => {
       fragments.push(turnExecutionCard(renderTurn));
     });
+  }
+
+  if (renderModel.pendingSubmit) {
+    fragments.push(pendingExecutionCard(renderModel.pendingSubmit));
   }
 
   if (renderModel.adpFailure) {
