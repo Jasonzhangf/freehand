@@ -1,5 +1,25 @@
 # CACHE
 
+- Current verified WebUI render projection closeout:
+  - `apps/freehand-server/assets/webui.js` now renders from `RenderConversation` / `RenderTurn` / `RenderRow` before DOM construction.
+  - live animation is scoped to the current live turn only; historical turns render static.
+  - model wait clocks live in `state.lifecycleClocks` keyed by session/turn/phase/detail; old global `modelRequestStartedAt` is removed.
+  - completed/failed tool timings freeze per turn/tool identity; historical tool elapsed no longer keeps counting.
+  - selected-session rendering preserves transcript order and append/replaces the latest same-session turn; WebUI no longer sorts visible cards by `runtime-turn-*` ordinal.
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server -- --nocapture`
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `scripts/install-global.sh`
+    - `scripts/install-launchd.sh restart`
+    - fixed `127.0.0.1:4041` health `ok`
+    - served JS hash matched workspace hash `4b999956af46174a99ecc83c6d40307187121b6a7c2a24b91057acec32b52e41`
+    - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp`
+    - Playwright screenshots/JSON under `artifacts/webui-render-architecture-closeout/20260701-live/`, including `03-current-live-old-static` (`liveCount=1`, `nonLastLiveCount=0`) and `04-terminal-no-stale-animation` (`liveCount=0`)
+
 - Current verified reasoning lifecycle repair:
   - runtime schema retry is now gated by terminal-candidate finish reasons only (`stop` / `end_turn` style); `tool_use` phases and incomplete tool calls do not enter completion-schema retry
   - incomplete `tool_use` is paired back to the model as a failed tool result, preserving multi-round continuation instead of terminal failure

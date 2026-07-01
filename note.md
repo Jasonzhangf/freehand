@@ -30,6 +30,37 @@
       - screenshot `artifacts/webui-selected-session-render/20260701-continue/headless-old-session-third-turn-final.png` shows third turn in `THINKING... 17S`
       - screenshot `artifacts/webui-selected-session-render/20260701-continue/headless-old-session-third-turn-terminal.png` shows final `runtime-turn-68-r9` terminal card in the selected session
 
+# 2026-07-01 WebUI render architecture closeout plan
+  - user request: produce a complete implementation plan, land it to docs, then provide a `/goal` prompt.
+  - review correction:
+    - WebUI main control/status path is ADP WebSocket `/adp`; SSE is compatibility only and should not be treated as the primary next step.
+    - the main bug class is render/state/lifecycle coupling, not merely "missing SSE".
+    - historical turns must not keep animating after a later live turn appears.
+  - plan landed:
+    - `docs/goals/webui-render-architecture-closeout-plan.md`
+    - plan now explicitly calls for projection -> render model -> view separation, turn-scoped and tool-scoped lifecycle clocks, ADP as the unified path, and real browser + ADP transcript verification.
+  - implementation:
+    - `apps/freehand-server/assets/webui.js` now builds `RenderConversation` / `RenderTurn` / `RenderRow` before DOM rendering.
+    - model wait clocks use `lifecycleClocks` keyed by session/turn/phase/detail; removed the old global `modelRequestStartedAt` state.
+    - tool timings are keyed by turn/tool identity; completed/failed tool timings freeze at terminal observation instead of continuing to count in historical cards.
+    - `conversationTurnsForRender()` preserves transcript order and appends latest same-session turn instead of sorting by `runtime-turn-*` ordinal, because runtime turn ordinals can reset after restart.
+    - current prompt-first submit state remains live `dispatching` until model/tool projection arrives, so the conversation area no longer goes blank while the status strip says dispatching/thinking.
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `scripts/install-global.sh` -> completed release/install and installed host binaries to `~/.local/bin`
+    - `scripts/install-launchd.sh restart`
+    - fixed `127.0.0.1:4041` health returned `ok`
+    - served JS hash matched workspace hash `4b999956af46174a99ecc83c6d40307187121b6a7c2a24b91057acec32b52e41`
+    - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` -> `adp_smoke_ok`
+    - Playwright WebUI evidence under `artifacts/webui-render-architecture-closeout/20260701-live/`:
+      - `03-current-live-old-static.json/png`: `blockCount=4`, `liveCount=1`, `nonLastLiveCount=0`; only bottom `runtime-turn-65` is live dispatching, historical turns are static.
+      - `04-terminal-no-stale-animation.json/png`: `blockCount=5`, `liveCount=0`, `nonLastLiveCount=0`; terminal state has no stale animation, slow bash tool row is completed with frozen elapsed.
+
 # 2026-06-30 ADP multi-round sample closeout
   - user correction: one-round success is not valid evidence; failure sample must complete a continuous multi-round tool loop before reporting success.
   - implementation:

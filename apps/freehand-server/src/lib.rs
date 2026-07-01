@@ -1114,9 +1114,17 @@ mod tests {
         assert!(js_body.contains("Send a message to start this session."));
         assert!(js_body.contains("function pendingExecutionCard"));
         assert!(js_body.contains("function turnExecutionCard"));
-        assert!(js_body.contains(
-            "fragments.push(turnExecutionCard({ ...turn, __hideUserRow: hideUserRow }))"
-        ));
+        assert!(js_body.contains("function buildConversationRenderModel"));
+        assert!(js_body.contains("function buildRenderTurn"));
+        assert!(js_body.contains("function buildRenderRows"));
+        assert!(js_body.contains("function buildToolActivityRenderRow"));
+        assert!(js_body.contains("function buildModelRequestRenderRow"));
+        assert!(js_body.contains("function renderModelHasLiveLifecycle"));
+        assert!(js_body.contains("function turnIsCurrentLiveTurn"));
+        assert!(
+            js_body.contains("conversationTurns.length === 0 && turnIsCurrentLiveTurn(state.turn)")
+        );
+        assert!(js_body.contains("fragments.push(turnExecutionCard(renderTurn))"));
         assert!(js_body.contains("deleteSelectedSessions"));
         assert!(js_body.contains("DeleteSession"));
         assert!(js_body.contains("session-selector"));
@@ -1135,8 +1143,10 @@ mod tests {
         assert!(js_body.contains("forceScrollToBottom"));
         assert!(js_body.contains("window.scrollTo"));
         assert!(js_body.contains("function conversationTurnsForRender"));
+        assert!(js_body.contains("return turns.filter(Boolean);"));
+        assert!(!js_body.contains("function compareTurnIds"));
         assert!(js_body.contains("latestTurn.session_id !== state.selectedSessionId"));
-        assert!(js_body.contains("const visibleTurns = conversationTurnsForRender();"));
+        assert!(js_body.contains("const renderModel = buildConversationRenderModel();"));
         assert!(js_body.contains("case \"/new\""));
         assert!(js_body.contains("case \"/task\""));
         assert!(js_body.contains("case \"/cwd\""));
@@ -1147,11 +1157,11 @@ mod tests {
         assert!(js_body.contains("cancelActiveTurn"));
         assert!(js_body.contains("normalizePublicConversation"));
         assert!(js_body.contains("isInternalRuntimePrompt"));
-        assert!(js_body.contains("__hideUserRow"));
+        assert!(!js_body.contains("__hideUserRow"));
         assert!(!js_body.contains("logicalExecutionKey"));
         assert!(!js_body.contains("__supersededRound"));
         assert!(!js_body.contains("continued"));
-        assert!(js_body.contains("modelRequestStatusForTurn"));
+        assert!(!js_body.contains("modelRequestStatusForTurn"));
         assert!(!js_body.contains("function logicalTurnKey"));
         assert!(!js_body.contains("function mergeLogicalTurnGroup"));
         assert!(js_body.contains("logicalSessionTurns(state.sessionTurns)"));
@@ -1168,17 +1178,14 @@ mod tests {
         assert!(js_body.contains("pushCompactToolLine"));
         assert!(js_body.contains("escapeRegExp"));
         assert!(js_body.contains("display.parameter_summary"));
-        assert!(js_body.contains("pendingSubmitBody"));
         assert!(js_body.contains("elapsedSince"));
         assert!(js_body.contains("submitStartedAt"));
-        assert!(js_body.contains("modelRequestStartedAt"));
         assert!(js_body.contains("modelRequestTimingKey"));
         assert!(js_body.contains("modelRequestKind"));
         assert!(js_body.contains("modelRequestLabel"));
         assert!(js_body.contains("turnIsWaitingForModelResponse"));
         assert!(js_body.contains("schema retry"));
         assert!(js_body.contains("thinking after tool result"));
-        assert!(!js_body.contains("modelWaitStartedAt"));
         assert!(!js_body.contains("turnIsWaitingForModel("));
         assert!(js_body.contains("rememberInputHistory"));
         assert!(js_body.contains("recallInputHistory"));
@@ -1188,15 +1195,17 @@ mod tests {
         assert!(js_body.contains("running-tool-state"));
         assert!(js_body.contains("className: \"pending\""));
         assert!(js_body.contains("label: \"waiting\""));
-        assert!(js_body.contains("live: false"));
+        assert!(js_body.contains("RenderLifecycle"));
         assert!(!js_body.contains("modelRequestBody"));
         assert!(!js_body.contains("modelWaitBody"));
         assert!(!js_body.contains("shouldRenderLiveWaitForTurn"));
         assert!(js_body.contains("compactToolResultLine"));
         assert!(js_body.contains("succeeded: result returned"));
         assert!(js_body.contains("succeeded: shell command"));
-        assert!(js_body.contains("hasPendingSubmit"));
-        assert!(js_body.contains("hasModelRequestWait"));
+        assert!(js_body.contains("buildConversationRenderModel()"));
+        assert!(js_body.contains("renderModelHasLiveLifecycle()"));
+        assert!(!js_body.contains("hasPendingSubmit"));
+        assert!(!js_body.contains("hasModelRequestWait"));
         assert!(!js_body.contains("hasModelWait"));
         assert!(js_body.contains("waitingToolStatus"));
         assert!(js_body.contains("tool.display || null"));
@@ -1254,10 +1263,10 @@ mod tests {
         assert!(!js_body.contains("Tool result returned for"));
         assert!(!js_body.contains("Tool execution failed for"));
         let turn_render_pos = js_body
-            .find("const visibleTurns = conversationTurnsForRender();")
+            .find("const renderModel = buildConversationRenderModel();")
             .expect("turn render branch present");
         let adp_failure_pos = js_body
-            .rfind("if (state.adpFailure)")
+            .rfind("if (renderModel.adpFailure)")
             .expect("adp failure branch present");
         assert!(
             adp_failure_pos > turn_render_pos,

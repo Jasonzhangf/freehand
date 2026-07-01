@@ -58,9 +58,7 @@ const state = {
   debug: null,
   checkpoints: [],
   toolTimings: new Map(),
-  modelRequestStartedAt: null,
-  modelRequestTimingKey: null,
-  activeTurnId: null,
+  lifecycleClocks: new Map(),
   pendingUserInput: null,
   pendingAttachments: [],
   inputHistory: [],
@@ -527,94 +525,93 @@ function card(role, status, title, body, variant = "assistant", identity = null)
   return article;
 }
 
-function turnStatusForRender(turn) {
+function turnLifecycleForRender(turn) {
   if (!turn) {
-    return { className: "pending", label: "idle", live: false };
+    return { phase: "neutral", className: "pending", label: "idle", isLive: false, elapsed: "" };
   }
+  const isCurrentLiveTurn = turnIsCurrentLiveTurn(turn);
   const waitingTools = (turn.tool_activities || []).filter(
     (tool) => tool.status === "Waiting" || tool.status === "waiting",
   );
-  if (waitingTools.length > 0) {
-    return { className: "running", label: waitingToolStatus(waitingTools), live: true };
+  if (isCurrentLiveTurn && waitingTools.length > 0) {
+    return { phase: "tool_waiting", className: "running", label: waitingToolStatus(waitingTools, turn), isLive: true, elapsed: "" };
   }
-  if (turnIsWaitingForModelResponse(turn)) {
-    return { className: "running", label: modelRequestStatusForTurn(turn), live: true };
+  if (isCurrentLiveTurn && turnIsWaitingForModelResponse(turn)) {
+    const elapsed = elapsedSince(lifecycleClockStartedAt(modelRequestTimingKey(turn)));
+    const label = modelRequestLabel(turn);
+    return {
+      phase: modelRequestPhase(turn),
+      className: "running",
+      label: elapsed ? `${label}... ${elapsed}` : `${label}...`,
+      isLive: true,
+      elapsed,
+    };
+  }
+  if (isCurrentLiveTurn && state.submitInFlight) {
+    const elapsed = elapsedSince(state.submitStartedAt);
+    return {
+      phase: "dispatching",
+      className: "running",
+      label: elapsed ? `dispatching... ${elapsed}` : "dispatching...",
+      isLive: true,
+      elapsed,
+    };
   }
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
     const terminal = `${turn.terminal_status || "success"}`.toLowerCase();
+    const phase = terminal === "success" ? "completed" : terminal;
     return {
+      phase,
       className: terminal === "failed" || terminal === "cancelled" ? "failed" : "success",
       label: terminal === "failed" ? "failed" : "completed",
-      live: false,
+      isLive: false,
+      elapsed: "",
     };
   }
-  return { className: "pending", label: "waiting", live: false, neutral: true };
+  return { phase: "neutral", className: "pending", label: "waiting", isLive: false, neutral: true, elapsed: "" };
 }
 
-function modelRequestStatusForTurn(turn) {
-  const elapsed = turn && state.turn && turn.turn_id === state.turn.turn_id
-    ? elapsedSince(state.modelRequestStartedAt)
-    : "";
-  const label = modelRequestLabel(turn);
-  return elapsed ? `${label}... ${elapsed}` : `${label}...`;
-}
-
-function pendingExecutionCard() {
-  const elapsed = elapsedSince(state.submitStartedAt);
+function pendingExecutionCard(renderPending) {
+  const elapsed = renderPending.elapsed;
   const article = executionShell({
     status: {
-      className: state.submitInFlight ? "running" : "pending",
+      className: renderPending.isLive ? "running" : "pending",
       label: elapsed ? `dispatching · ${elapsed}` : "dispatching",
     },
-    live: state.submitInFlight,
+    live: renderPending.isLive,
   });
   const body = article.querySelector(".execution-body");
-  body.appendChild(executionRow("user", "User", textWithAttachmentPlaceholders(state.pendingUserInput, state.pendingAttachments), "submitted"));
-  body.appendChild(executionRow("system", "Client", "Request accepted by WebUI. Waiting for ADP dispatch.", elapsed || "0s"));
+  body.appendChild(executionRow({
+    kind: "user",
+    title: "User",
+    body: [textWithAttachmentPlaceholders(renderPending.text, renderPending.attachments)],
+    status: "submitted",
+  }));
+  body.appendChild(executionRow({
+    kind: "system",
+    title: "Client",
+    body: ["Request accepted by WebUI. Waiting for ADP dispatch."],
+    status: elapsed || "0s",
+  }));
   return article;
 }
 
-function turnExecutionCard(turn) {
-  const status = turnStatusForRender(turn);
-  const article = executionShell({ status, live: status.live });
-  if (status.neutral) {
+function turnExecutionCard(renderTurn) {
+  const lifecycle = renderTurn.lifecycle;
+  const status = { className: lifecycle.className, label: lifecycle.label };
+  const article = executionShell({ status, live: lifecycle.isLive });
+  article.dataset.turnId = renderTurn.turnId || "";
+  if (lifecycle.neutral) {
     article.classList.add("pending-state");
   }
   const body = article.querySelector(".execution-body");
-  const items = conversationItemsForTurn(turn, { hideUser: !!turn.__hideUserRow });
-  if (items.length === 0) {
-    body.appendChild(executionRow("system", "Turn", "Waiting for projection.", status.label));
+  if (renderTurn.rows.length === 0) {
+    body.appendChild(executionRow({ kind: "system", title: "Turn", body: ["Waiting for projection."], status: lifecycle.label }));
     return article;
   }
-  items.forEach((item) => {
-    const rowKind =
-      item.kind === "UserText"
-        ? "user"
-        : item.kind === "ToolSummary"
-          ? "tool"
-          : item.kind === "Error"
-            ? "error"
-            : item.kind === "Terminal"
-              ? "final"
-              : "assistant";
-    const timing = item.tool_call_id ? state.toolTimings.get(item.tool_call_id) : null;
-    const rowStatus = item.kind === "ToolSummary" ? toolTimelineLine(item, timing) || item.status : item.status;
-    const rowBody = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
-    body.appendChild(executionRow(rowKind, item.title, rowBody, rowStatus));
+  renderTurn.rows.forEach((row) => {
+    body.appendChild(executionRow(row));
   });
-  if (turnIsWaitingForModelResponse(turn) && turn.model_request) {
-    const elapsed = elapsedSince(state.modelRequestStartedAt) || "0s";
-    const label = modelRequestLabel(turn);
-    const requestBody = turn.model_request.detail || "Waiting for model response.";
-    body.appendChild(
-      executionRow(
-        "system",
-        label === "schema retry" ? "Schema" : "Model",
-        requestBody,
-        elapsed,
-      ),
-    );
-  }
   return article;
 }
 
@@ -645,31 +642,37 @@ function executionShell({ status, live }) {
   return article;
 }
 
-function executionRow(kind, title, body, status) {
+function executionRow(renderRow) {
   const row = document.createElement("section");
-  row.className = `execution-row execution-row-${kind}`;
+  row.className = `execution-row execution-row-${renderRow.kind}`;
+  if (renderRow.identity && renderRow.identity.turnId) {
+    row.dataset.turnId = renderRow.identity.turnId;
+  }
+  if (renderRow.identity && renderRow.identity.toolCallId) {
+    row.dataset.toolCallId = renderRow.identity.toolCallId;
+  }
 
   const meta = document.createElement("div");
   meta.className = "execution-row-meta";
 
   const label = document.createElement("span");
   label.className = "execution-row-label";
-  label.textContent = title;
+  label.textContent = renderRow.title;
   meta.appendChild(label);
 
-  if (status) {
+  if (renderRow.status) {
     const state = document.createElement("span");
     state.className = "execution-row-status";
-    state.textContent = status;
+    state.textContent = renderRow.status;
     meta.appendChild(state);
   }
 
   const content = document.createElement("div");
   content.className = "execution-row-body";
-  if (kind === "tool") {
-    renderToolBody(content, body);
+  if (renderRow.kind === "tool") {
+    renderToolBody(content, renderRow.body);
   } else {
-    content.textContent = body || "";
+    content.textContent = (renderRow.body || []).join("\n");
   }
 
   row.append(meta, content);
@@ -677,7 +680,9 @@ function executionRow(kind, title, body, status) {
 }
 
 function renderToolBody(container, body) {
-  const lines = `${body || ""}`.split("\n").filter((line) => line.length > 0);
+  const lines = Array.isArray(body)
+    ? body.filter((line) => `${line || ""}`.length > 0)
+    : `${body || ""}`.split("\n").filter((line) => line.length > 0);
   if (lines.length === 0) {
     container.textContent = "";
     return;
@@ -711,6 +716,135 @@ function normalizePublicConversation(items) {
   });
 
   return normalized;
+}
+
+function buildConversationRenderModel() {
+  const conversationTurns = conversationTurnsForRender();
+  const turnsForRender =
+    conversationTurns.length === 0 && turnIsCurrentLiveTurn(state.turn)
+      ? [state.turn]
+      : conversationTurns;
+  return {
+    selectedSessionId: state.selectedSessionId,
+    turns: turnsForRender.map((turn) =>
+      buildRenderTurn(turn, { hideUser: turnOrderKey(turn.turn_id).round > 1 }),
+    ),
+    pendingSubmit: state.pendingUserInput
+      ? {
+          text: state.pendingUserInput,
+          attachments: state.pendingAttachments,
+          isLive: state.submitInFlight,
+          elapsed: elapsedSince(state.submitStartedAt),
+        }
+      : null,
+    adpFailure: state.adpFailure ? { message: state.adpFailure } : null,
+  };
+}
+
+function buildRenderTurn(turn, options = {}) {
+  const lifecycle = turnLifecycleForRender(turn);
+  return {
+    turnId: turn.turn_id || "",
+    sessionId: turn.session_id || "",
+    orderKey: turnOrderKey(turn.turn_id),
+    lifecycle,
+    rows: buildRenderRows(turn, lifecycle, options),
+  };
+}
+
+function buildRenderRows(turn, lifecycle, options = {}) {
+  const rows = conversationItemsForTurn(turn, { hideUser: !!options.hideUser }).map((item) =>
+    buildRenderRowFromConversationItem(turn, item),
+  );
+  const modelRow = buildModelRequestRenderRow(turn, lifecycle);
+  if (modelRow) {
+    rows.push(modelRow);
+  }
+  return rows;
+}
+
+function buildRenderRowFromConversationItem(turn, item) {
+  if (item.kind === "ToolSummary") {
+    return buildToolActivityRenderRow(turn, item);
+  }
+  if (item.kind === "UserText") {
+    return {
+      kind: "user",
+      title: item.title,
+      body: [item.body],
+      status: item.status,
+      identity: { turnId: turn.turn_id },
+    };
+  }
+  if (item.kind === "Terminal") {
+    return buildTerminalRenderRow(turn, item);
+  }
+  if (item.kind === "Error") {
+    return {
+      kind: "error",
+      title: item.title,
+      body: [item.body],
+      status: item.status,
+      identity: { turnId: turn.turn_id },
+    };
+  }
+  return {
+    kind: "assistant",
+    title: item.title,
+    body: [item.body],
+    status: assistantRowStatus(turn, item.status),
+    identity: { turnId: turn.turn_id },
+  };
+}
+
+function buildToolActivityRenderRow(turn, item) {
+  const status = `${item.status || ""}`.toLowerCase();
+  const canShowTiming =
+    status === "completed" || status === "failed" || (status === "waiting" && turnIsCurrentLiveTurn(turn));
+  const timing = item.tool_call_id && canShowTiming
+    ? state.toolTimings.get(toolTimingKey(turn, item.tool_call_id))
+    : null;
+  return {
+    kind: "tool",
+    title: item.title,
+    body: toolSummaryBodyLines(item),
+    status: toolTimelineLine(item, timing) || item.status,
+    identity: { turnId: turn.turn_id, toolCallId: item.tool_call_id },
+  };
+}
+
+function buildModelRequestRenderRow(turn, lifecycle) {
+  if (!lifecycle.isLive || !turnIsWaitingForModelResponse(turn) || !turn.model_request) {
+    return null;
+  }
+  const label = modelRequestLabel(turn);
+  return {
+    kind: "system",
+    title: label === "schema retry" ? "Schema" : "Model",
+    body: [turn.model_request.detail || "Waiting for model response."],
+    status: lifecycle.elapsed || "0s",
+    identity: { turnId: turn.turn_id },
+  };
+}
+
+function buildTerminalRenderRow(turn, item) {
+  return {
+    kind: "final",
+    title: item.title,
+    body: [item.body],
+    status: item.status,
+    identity: { turnId: turn.turn_id },
+  };
+}
+
+function assistantRowStatus(turn, status) {
+  if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
+    return "completed";
+  }
+  if (turnIsCurrentLiveTurn(turn)) {
+    return status || "streaming";
+  }
+  return status === "streaming" ? "received" : status;
 }
 
 function toolStatusLabel(status) {
@@ -756,14 +890,19 @@ function elapsedSince(startedAt) {
   return formatDuration(Date.now() - startedAt);
 }
 
-function pendingSubmitBody(text, attachments = []) {
-  const elapsed = elapsedSince(state.submitStartedAt);
-  const body = textWithAttachmentPlaceholders(text, attachments);
-  return elapsed ? `${body}\n等待调度 ${elapsed}` : body;
-}
-
 function turnIsWaitingForModelResponse(turn) {
   return !!(turn && turn.model_request && !turn.terminal_text && !isTerminalStatus(turn.terminal_status));
+}
+
+function turnIsCurrentLiveTurn(turn) {
+  return !!(
+    turn &&
+    state.turn &&
+    turn.turn_id === state.turn.turn_id &&
+    turn.session_id === state.turn.session_id &&
+    !turn.terminal_text &&
+    !isTerminalStatus(turn.terminal_status)
+  );
 }
 
 function modelRequestKind(turn) {
@@ -775,7 +914,7 @@ function modelRequestTimingKey(turn) {
     return null;
   }
   const request = turn.model_request || {};
-  return [turn.turn_id || "", modelRequestKind(turn), request.detail || ""].join("|");
+  return [turn.session_id || "", turn.turn_id || "", modelRequestKind(turn), request.detail || ""].join("|");
 }
 
 function modelRequestLabel(turn) {
@@ -789,56 +928,77 @@ function modelRequestLabel(turn) {
   return "thinking";
 }
 
-function syncModelRequestTiming(turn) {
-  if (!turnIsWaitingForModelResponse(turn)) {
-    state.modelRequestStartedAt = null;
-    state.modelRequestTimingKey = null;
-    return;
-  }
-  const key = modelRequestTimingKey(turn);
-  if (state.modelRequestTimingKey !== key) {
-    state.modelRequestTimingKey = key;
-    state.modelRequestStartedAt = Date.now();
-    return;
-  }
-  if (!state.modelRequestStartedAt) {
-    state.modelRequestStartedAt = Date.now();
+function lifecycleClockStartedAt(key) {
+  const clock = key ? state.lifecycleClocks.get(key) : null;
+  return clock ? clock.startedAt : null;
+}
+
+function pruneLifecycleClocks(activeKeys) {
+  const keep = new Set(activeKeys.filter(Boolean));
+  for (const key of Array.from(state.lifecycleClocks.keys())) {
+    if (!keep.has(key)) {
+      state.lifecycleClocks.delete(key);
+    }
   }
 }
 
-function syncToolTimings(items) {
+function syncRenderLifecycleClocks() {
+  const activeKeys = [];
+  conversationTurnsForRender().forEach((turn) => {
+    if (turnIsCurrentLiveTurn(turn) && turnIsWaitingForModelResponse(turn)) {
+      const key = modelRequestTimingKey(turn);
+      activeKeys.push(key);
+      if (!state.lifecycleClocks.has(key)) {
+        state.lifecycleClocks.set(key, { startedAt: Date.now() });
+      }
+    }
+  });
+  pruneLifecycleClocks(activeKeys);
+}
+
+function syncToolTimings(turns) {
   const now = Date.now();
   const seen = new Set();
 
-  items.forEach((item) => {
-    if (item.kind !== "ToolSummary" || !item.tool_call_id) {
-      return;
-    }
-    seen.add(item.tool_call_id);
-    const previous = state.toolTimings.get(item.tool_call_id);
-    if (!previous) {
-      state.toolTimings.set(item.tool_call_id, {
-        startedAt: now,
-        finishedAt: null,
-        status: item.status,
-      });
-      return;
-    }
-    const next = { ...previous, status: item.status };
-    if (previous.status !== item.status && (item.status === "completed" || item.status === "failed")) {
-      next.finishedAt = now;
-    }
-    state.toolTimings.set(item.tool_call_id, next);
+  turns.filter(Boolean).forEach((turn) => {
+    const items = normalizePublicConversation(derivePublicConversation(turn));
+    items.forEach((item) => {
+      if (item.kind !== "ToolSummary" || !item.tool_call_id) {
+        return;
+      }
+      const key = toolTimingKey(turn, item.tool_call_id);
+      seen.add(key);
+      const previous = state.toolTimings.get(key);
+      const status = `${item.status || ""}`.toLowerCase();
+      const isTerminalTool = status === "completed" || status === "failed";
+      if (!previous) {
+        state.toolTimings.set(key, {
+          startedAt: now,
+          finishedAt: isTerminalTool ? now : null,
+          status: item.status,
+        });
+        return;
+      }
+      const next = { ...previous, status: item.status };
+      if ((previous.status !== item.status || !previous.finishedAt) && isTerminalTool) {
+        next.finishedAt = now;
+      }
+      state.toolTimings.set(key, next);
+    });
   });
 
-  for (const toolCallId of Array.from(state.toolTimings.keys())) {
-    if (!seen.has(toolCallId)) {
-      state.toolTimings.delete(toolCallId);
+  for (const toolKey of Array.from(state.toolTimings.keys())) {
+    if (!seen.has(toolKey)) {
+      state.toolTimings.delete(toolKey);
     }
   }
 }
 
 function toolSummaryBody(item) {
+  return toolSummaryBodyLines(item).join("\n");
+}
+
+function toolSummaryBodyLines(item) {
   const display = item.display || null;
   const lines = [];
   if (display && display.diff) {
@@ -858,7 +1018,7 @@ function toolSummaryBody(item) {
   } else if (item.body && item.body !== item.status && `${item.status || ""}`.toLowerCase() !== "waiting") {
     pushCompactToolLine(lines, item.body, item.title);
   }
-  return lines.filter(Boolean).join("\n");
+  return lines.filter(Boolean);
 }
 
 function toolTimelineLine(item, timing) {
@@ -903,17 +1063,21 @@ function escapeRegExp(value) {
   return `${value || ""}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function waitingToolStatus(tools) {
+function waitingToolStatus(tools, turn = state.turn) {
   const names = tools.map((tool) => tool.tool_name).join(", ");
   const elapsedValues = tools
     .map((tool) => {
-      const timing = tool.tool_call_id ? state.toolTimings.get(tool.tool_call_id) : null;
+      const timing = tool.tool_call_id ? state.toolTimings.get(toolTimingKey(turn, tool.tool_call_id)) : null;
       return timing ? Date.now() - timing.startedAt : null;
     })
     .filter((elapsed) => Number.isFinite(elapsed));
   const longestElapsed = elapsedValues.length > 0 ? Math.max(...elapsedValues) : null;
   const elapsed = longestElapsed === null ? "" : formatDuration(longestElapsed);
   return elapsed ? `tool executing: ${names} · ${elapsed}` : `tool executing: ${names}`;
+}
+
+function toolTimingKey(turn, toolCallId) {
+  return `${turn && turn.turn_id ? turn.turn_id : "unknown"}|${toolCallId || "unknown"}`;
 }
 
 function variantPayload(value, variant) {
@@ -1046,7 +1210,7 @@ function isInternalRuntimePrompt(turn) {
 }
 
 function logicalSessionTurns(turns) {
-  return turns.filter(Boolean).sort((left, right) => compareTurnIds(left.turn_id, right.turn_id));
+  return turns.filter(Boolean);
 }
 
 function conversationTurnsForRender() {
@@ -1149,8 +1313,8 @@ function resetLocalConversationState(sessionId) {
   state.publicConversation = [];
   state.pendingUserInput = null;
   state.pendingAttachments = [];
-  state.modelRequestStartedAt = null;
-  state.modelRequestTimingKey = null;
+  state.lifecycleClocks.clear();
+  state.toolTimings.clear();
   state.submitStartedAt = null;
   state.submitInFlight = false;
   setSelectedSessionId(sessionId);
@@ -1311,27 +1475,7 @@ function turnOrderKey(turnId) {
   };
 }
 
-function compareTurnIds(leftTurnId, rightTurnId) {
-  const left = turnOrderKey(leftTurnId);
-  const right = turnOrderKey(rightTurnId);
-  if (left.prefix !== right.prefix) {
-    return left.prefix.localeCompare(right.prefix);
-  }
-  if (left.ordinal !== right.ordinal) {
-    return left.ordinal - right.ordinal;
-  }
-  if (left.round !== right.round) {
-    return left.round - right.round;
-  }
-  return left.raw.localeCompare(right.raw);
-}
-
 function setTurnProjection(turn, options = {}) {
-  const nextTurnId = turn && turn.turn_id ? turn.turn_id : null;
-  if (state.activeTurnId !== nextTurnId) {
-    state.toolTimings.clear();
-  }
-  state.activeTurnId = nextTurnId;
   state.turn = turn || null;
   if (state.turn && !state.selectedSessionId) {
     setSelectedSessionId(state.turn.session_id);
@@ -1346,11 +1490,10 @@ function setTurnProjection(turn, options = {}) {
     } else if (!state.selectedSessionId || state.turn.session_id === state.selectedSessionId) {
       state.sessionTurns.push(state.turn);
     }
-    state.sessionTurns.sort((left, right) => compareTurnIds(left.turn_id, right.turn_id));
   }
   state.publicConversation = derivePublicConversation(state.turn);
-  syncToolTimings(state.publicConversation);
-  syncModelRequestTiming(state.turn);
+  syncToolTimings(conversationTurnsForRender());
+  syncRenderLifecycleClocks();
   if (state.turn && state.pendingUserInput) {
     state.pendingUserInput = null;
     state.pendingAttachments = [];
@@ -1445,7 +1588,7 @@ function liveTurnStatus() {
   }
 
   if (turnIsWaitingForModelResponse(state.turn)) {
-    const elapsed = elapsedSince(state.modelRequestStartedAt);
+    const elapsed = elapsedSince(lifecycleClockStartedAt(modelRequestTimingKey(state.turn)));
     const label = modelRequestLabel(state.turn);
     return elapsed ? `${label}... ${elapsed}` : `${label}...`;
   }
@@ -1476,16 +1619,18 @@ function renderMessages() {
   state.forceScrollToBottom = false;
   messageList.replaceChildren();
   const fragments = [];
-  const visibleTurns = conversationTurnsForRender();
-  const hasSelectedSessionTranscript = visibleTurns.length > 0;
+  syncToolTimings(conversationTurnsForRender());
+  syncRenderLifecycleClocks();
+  const renderModel = buildConversationRenderModel();
+  const hasSelectedSessionTranscript = renderModel.turns.length > 0;
 
-  if (state.pendingUserInput) {
-    fragments.push(pendingExecutionCard());
+  if (renderModel.pendingSubmit) {
+    fragments.push(pendingExecutionCard(renderModel.pendingSubmit));
   }
 
   if (state.selectedSessionId && !hasSelectedSessionTranscript && !state.turn) {
     // A newly selected draft session should stay visually clean until the user sends.
-  } else if (visibleTurns.length === 0 && !state.turn) {
+  } else if (renderModel.turns.length === 0 && !state.turn) {
     fragments.push(
       card(
         "Assistant",
@@ -1496,20 +1641,18 @@ function renderMessages() {
       ),
     );
   } else {
-    visibleTurns.forEach((turn) => {
-      const round = turnOrderKey(turn.turn_id).round;
-      const hideUserRow = round > 1;
-      fragments.push(turnExecutionCard({ ...turn, __hideUserRow: hideUserRow }));
+    renderModel.turns.forEach((renderTurn) => {
+      fragments.push(turnExecutionCard(renderTurn));
     });
   }
 
-  if (state.adpFailure) {
+  if (renderModel.adpFailure) {
     fragments.push(
       card(
         "ADP",
         { className: "failed", label: "failed" },
         "ADP failure",
-        state.adpFailure,
+        renderModel.adpFailure.message,
         "failure",
       ),
     );
@@ -1751,17 +1894,19 @@ function renderTurnMeta() {
 }
 
 setInterval(() => {
-  const hasPendingSubmit = state.submitInFlight || !!state.pendingUserInput;
-  const hasWaitingTool = (state.publicConversation || []).some(
-    (item) => item.kind === "ToolSummary" && item.status === "waiting",
-  );
-  const hasModelRequestWait = turnIsWaitingForModelResponse(state.turn);
-  if (hasPendingSubmit || hasWaitingTool || hasModelRequestWait) {
+  if (renderModelHasLiveLifecycle()) {
     renderMessages();
     renderTurnMeta();
     renderCommandStatus();
   }
 }, 1000);
+
+function renderModelHasLiveLifecycle() {
+  if (state.submitInFlight || !!state.pendingUserInput) {
+    return true;
+  }
+  return buildConversationRenderModel().turns.some((turn) => turn.lifecycle.isLive);
+}
 
 function renderAll() {
   setText("workspace-status", state.adpStatus);
@@ -1892,7 +2037,7 @@ async function cancelActiveTurn() {
     composerInput.value = "";
     state.pendingUserInput = null;
     state.pendingAttachments = [];
-    state.modelRequestStartedAt = null;
+    state.lifecycleClocks.clear();
     state.submitStartedAt = null;
     setCommandStatus("no active turn; input cleared", { stickyMs: 3000 });
     renderMessages();
@@ -1911,7 +2056,7 @@ async function cancelActiveTurn() {
   }
   state.pendingUserInput = null;
   state.pendingAttachments = [];
-  state.modelRequestStartedAt = null;
+  state.lifecycleClocks.clear();
   state.submitStartedAt = null;
   state.submitInFlight = false;
   composerInput.value = "";
@@ -1940,7 +2085,7 @@ async function runSlashCommand(rawText) {
     composerInput.value = "";
     state.pendingUserInput = null;
     state.pendingAttachments = [];
-    state.modelRequestStartedAt = null;
+    state.lifecycleClocks.clear();
     state.submitStartedAt = null;
   }
   switch (command) {
@@ -1985,7 +2130,7 @@ async function runSlashCommand(rawText) {
       composerInput.value = "";
       state.pendingUserInput = null;
       state.pendingAttachments = [];
-      state.modelRequestStartedAt = null;
+      state.lifecycleClocks.clear();
       state.submitStartedAt = null;
       state.submitInFlight = false;
       setCommandStatus("local composer cleared", { stickyMs: 3000 });

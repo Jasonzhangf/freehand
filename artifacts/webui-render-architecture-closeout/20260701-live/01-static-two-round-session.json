@@ -1,0 +1,63 @@
+{
+  "title": "Freehand WebUI",
+  "selected": "cli-adp-sample-failure-1782903206134830000",
+  "commandStatus": "turn completed",
+  "turnStatus": "completed",
+  "blockCount": 3,
+  "liveCount": 0,
+  "nonLastLiveCount": 0,
+  "blocks": [
+    {
+      "index": 0,
+      "turnId": "runtime-turn-67-r2",
+      "live": false,
+      "state": "completed",
+      "rows": [
+        {
+          "kind": "execution-row-final",
+          "turnId": "runtime-turn-67-r2",
+          "toolCallId": "",
+          "status": "completed",
+          "text": "FinalcompletedCompleted the ADP failure sample by attempting to read a definitely-missing file and capturing the expected failure result."
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "turnId": "runtime-turn-69",
+      "live": false,
+      "state": "waiting",
+      "rows": [
+        {
+          "kind": "execution-row-user",
+          "turnId": "runtime-turn-69",
+          "toolCallId": "",
+          "status": "submitted",
+          "text": "UsersubmittedCall the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema."
+        },
+        {
+          "kind": "execution-row-tool",
+          "turnId": "runtime-turn-69",
+          "toolCallId": "chatcmpl-tool-90c260ea496b6a61",
+          "status": "执行失败 · 0s",
+          "text": "Read file执行失败 · 0spath=definitely-missing-freehand-file.txt"
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "turnId": "runtime-turn-69-r2",
+      "live": false,
+      "state": "completed",
+      "rows": [
+        {
+          "kind": "execution-row-final",
+          "turnId": "runtime-turn-69-r2",
+          "toolCallId": "",
+          "status": "completed",
+          "text": "FinalcompletedCompleted the task by calling read_file on a non-existent file, receiving the expected failure response, and successfully reporting the outcome through the completion schema."
+        }
+      ]
+    }
+  ]
+}
