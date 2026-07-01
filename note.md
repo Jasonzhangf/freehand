@@ -803,3 +803,26 @@ Current real root cause split:
 2026-06-30: Completion schema retry transparency repair. Root cause: schema rejection/retry was only runtime/ledger truth, so WebUI showed generic waiting rather than schema retry state. Fix: runtime publishes `CompletionSchemaRejected`, `ui.protocol` projects it through `apply_completion_schema_retry_waiting`, and WebUI renders compact `schema retry #N: <field issue>` detail in the same turn card with elapsed timing. Verification: `cargo test -p freehand-blocks`, `cargo test -p freehand-reason`, `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-runtime`, `cargo test -p freehand-server`, `node --check apps/freehand-server/assets/webui.js`, `xtask mainlines generate/check`, `xtask gates check`, fixed-port `/health`, ADP smoke, and live ADP subscription captured schema retry detail.
 
 2026-06-30: Tool-result continuation wait and composer history repair. Root cause: WebUI inferred waiting-for-model from completed/failed tool cards, so the animation was fake and disappeared when projections changed; dispatch failure also refilled composer text. Fix: runtime publishes `ModelContinuationWaiting` after tool results are paired for the next provider request, WebUI renders only protocol `model_request` waits, the fake `turnIsWaitingForModel` path is removed, composer stays cleared after submit/failure, and Up/Down recalls local input history.
+
+# 2026-07-01 live reasoning state/UI round rendering repair
+  - user live feedback: schema retry state sticks and can override later tool/model phases; timers should start from submit/client dispatch and every real phase must animate/time.
+  - user live feedback: runtime appears to schema-reject during tool-use/incomplete-tool phases; schema retry must only run when provider normalized finish reason is stop/end_turn, and consecutive stop/end_turn rejections count only across terminal candidates.
+  - user UI correction: WebUI must not merge the whole user request, all rounds, all tools, and final summary into one card. Each provider round/tool execution lifecycle should render as its own chronological card that grows downward; final summary belongs at the end, not visually above execution history.
+  - implementation:
+    - runtime now selects latest unexecuted tool calls per id and returns incomplete tool_use as a failed tool result re-entry instead of schema retry
+    - completion schema parse/retry is gated by terminal-candidate finish reason (`stop` / `end_turn` style)
+    - consecutive schema retry counter resets on tool execution / non-schema continuation
+    - `UiModelRequestActivity.kind` distinguishes `Thinking`, `SchemaRetry`, and `ToolResultContinuation`
+    - WebUI model wait timing is keyed by turn + typed phase + detail, so schema retry cannot stick after phase changes
+    - WebUI renders chronological per-round cards; later/superseded rounds hide duplicate user prompt and show `continued`; final summary stays in the final row at the bottom
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-ui-protocol -- --nocapture` -> 41 passed
+    - `cargo test -p freehand-runtime -- --nocapture` -> 52 passed
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate/check`
+    - `cargo run -p xtask -- gates check`
+    - fixed-port install/restart: release build, install to `~/.local/bin`, `scripts/install-launchd.sh restart`, `curl http://127.0.0.1:4041/health` -> ok
+    - live ADP sample: `~/.local/bin/freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample failure` -> `rounds=2 tool_executions=1 failed_tools=1 schema_rejections=0`
+    - screenshot: `artifacts/webui-reasoning-state/20260701-round-cards/04-fixed-4041-round-sequence-tall.png`

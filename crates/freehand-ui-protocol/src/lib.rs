@@ -143,6 +143,8 @@ pub struct UiTurnProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiModelRequestActivity {
     pub status: UiModelRequestStatus,
+    #[serde(default)]
+    pub kind: UiModelRequestKind,
     pub detail: Option<String>,
 }
 
@@ -160,6 +162,24 @@ pub struct UiCompletionSchemaRetryWaiting {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiModelRequestStatus {
     Waiting,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum UiModelRequestKind {
+    #[default]
+    Thinking,
+    SchemaRetry,
+    ToolResultContinuation,
+}
+
+impl UiModelRequestKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UiModelRequestKind::Thinking => "thinking",
+            UiModelRequestKind::SchemaRetry => "schema_retry",
+            UiModelRequestKind::ToolResultContinuation => "tool_result_continuation",
+        }
+    }
 }
 
 impl UiModelRequestStatus {
@@ -669,6 +689,27 @@ impl UiProtocolState {
         detail: Option<String>,
         slave_substream_card: bool,
     ) -> UiTurnProjection {
+        self.apply_model_request_waiting_kind(
+            source_agent_id,
+            source_node_id,
+            session_id,
+            turn_id,
+            UiModelRequestKind::Thinking,
+            detail,
+            slave_substream_card,
+        )
+    }
+
+    pub fn apply_model_request_waiting_kind(
+        &mut self,
+        source_agent_id: AgentId,
+        source_node_id: String,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        kind: UiModelRequestKind,
+        detail: Option<String>,
+        slave_substream_card: bool,
+    ) -> UiTurnProjection {
         let projection = {
             let projection = self.ensure_turn_projection(
                 source_agent_id,
@@ -679,6 +720,7 @@ impl UiProtocolState {
             );
             projection.model_request = Some(UiModelRequestActivity {
                 status: UiModelRequestStatus::Waiting,
+                kind,
                 detail,
             });
             projection.clone()
@@ -696,11 +738,12 @@ impl UiProtocolState {
             "schema retry #{}: {}",
             waiting.retry_index, waiting.issue_summary
         );
-        self.apply_model_request_waiting(
+        self.apply_model_request_waiting_kind(
             waiting.source_agent_id,
             waiting.source_node_id,
             &waiting.session_id,
             &waiting.turn_id,
+            UiModelRequestKind::SchemaRetry,
             Some(detail),
             waiting.slave_substream_card,
         )
@@ -2287,6 +2330,10 @@ mod tests {
             Some(UiModelRequestStatus::Waiting)
         );
         assert_eq!(
+            waiting.model_request.as_ref().map(|activity| activity.kind),
+            Some(UiModelRequestKind::Thinking)
+        );
+        assert_eq!(
             waiting
                 .model_request
                 .as_ref()
@@ -2330,6 +2377,7 @@ mod tests {
 
         let activity = waiting.model_request.expect("model request activity");
         assert_eq!(activity.status, UiModelRequestStatus::Waiting);
+        assert_eq!(activity.kind, UiModelRequestKind::SchemaRetry);
         let detail = activity.detail.expect("detail");
         assert!(detail.contains("schema retry #2"));
         assert!(detail.contains("evidence must be a string"));

@@ -12,7 +12,7 @@
   - anthropic executor runs single-shot or SSE request
   - provider-neutral outputs are written back into the active round and broadcast
   - completed implemented registry tool calls are executed, written as success or failed tool-result re-entry, persisted, and passed to the next provider request
-  - completion schema is parsed from tagged text and either accepted, rejected with type-aware field feedback plus UI-visible retry waiting projection, or continued
+  - completion schema is parsed from tagged text only after a terminal-candidate finish reason such as `stop` or `end_turn`, then either accepted, rejected with type-aware field feedback plus UI-visible retry waiting projection, or continued
   - terminal live turns are materialized through `ReasonPersistence`
   - runtime dispatch projects the final turn into shared `UiProtocolState`
 - white-box plan:
@@ -29,6 +29,7 @@
   - cancellation before tool execution path
   - cancellation before terminal persistence path
   - invalid-schema rejection then success path
+  - terminal-candidate-only schema parsing path proving `tool_use` responses do not trigger schema retry
   - `claim=continue` next-round path
   - retry-exhausted failed terminal path
   - restore-before-turn path
@@ -39,6 +40,7 @@
   - registry-backed tool schema fingerprint reaches planner diagnostics
   - implemented registry read-only tool execution path
   - implemented registry read-only tool execution failure path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and lets the model continue to a later terminal schema
+  - incomplete `tool_use` path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, keeps `schema_rejections=0`, and lets the model continue to a later terminal schema
   - unknown tool-name execution path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and does not materialize failed terminal/error truth by itself
   - registered but unimplemented tool-name execution path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and does not materialize failed terminal/error truth by itself
   - writable tool checkpoint creation and rewind-safe manifest/ledger path
@@ -51,7 +53,7 @@
   - one selected anthropic provider emits an implemented registered tool call, receives tool result, then closes via accepted completion schema
   - one selected anthropic provider emits a writable file tool call, gets checkpointed before execute, and can be rewound by runtime owner truth
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
-  - invalid completion schema retries exactly 3 times and closes failed terminal without early success
+  - invalid completion schema retries exactly 3 consecutive terminal-candidate responses and closes failed terminal without early success
   - non-string completion fields produce explicit type feedback instead of being reported as missing
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
   - provider HTTP/executor failure returns explicit dispatch failure, materializes failed terminal/error truth, and leaves no active turn hanging
@@ -78,7 +80,7 @@
   - runtime live bridge now writes restore/request/tool/terminal lifecycle metadata through `metadata.core` and fails explicitly on metadata write errors
   - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
   - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
-  - runtime white-box coverage now explicitly locks failed tool-result multi-round continuation, proving execution failures become paired `ToolResultStatus::Failed` re-entry truth and provider/system errors remain explicit bridge failures
+  - runtime white-box coverage now explicitly locks failed tool-result multi-round continuation, including incomplete `tool_use` as paired failed tool-result truth with zero schema retries, proving execution failures become paired `ToolResultStatus::Failed` re-entry truth and provider/system errors remain explicit bridge failures
   - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes `provider_executor_failure`, closes the active turn as failed, and restores with no active turn
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates

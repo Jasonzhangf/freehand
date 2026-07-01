@@ -57,9 +57,9 @@ use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
     UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
-    UiCompletionSchemaRetryWaiting, UiProtocolState, UiSessionMetadataProjection, UiTurnProjection,
-    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
-    turn_projection_from_events,
+    UiCompletionSchemaRetryWaiting, UiModelRequestKind, UiProtocolState,
+    UiSessionMetadataProjection, UiTurnProjection, checkpoint_projection_from_runtime_summary,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -839,6 +839,7 @@ where
 
     let mut broadcasts = Vec::new();
     let mut schema_rejections = Vec::new();
+    let mut consecutive_schema_rejections = 0usize;
     let mut turns = Vec::new();
     let mut round = 0usize;
     let mut tool_executions = 0usize;
@@ -1136,9 +1137,10 @@ where
         ensure_live_not_cancelled(&request)?;
         drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
 
-        let completed_tool_calls = pending_completed_tool_calls(&turn, &executed_tool_call_ids);
-        if !completed_tool_calls.is_empty() {
-            for tool_call in completed_tool_calls {
+        let pending_tool_calls = pending_tool_calls_for_execution(&turn, &executed_tool_call_ids);
+        if !pending_tool_calls.is_empty() {
+            consecutive_schema_rejections = 0;
+            for tool_call in pending_tool_calls {
                 ensure_live_not_cancelled(&request)?;
                 let tool_result = execute_registry_tool_call(
                     &tool_registry,
@@ -1263,6 +1265,33 @@ where
         }
 
         ensure_live_not_cancelled(&request)?;
+        if !turn_has_completion_candidate_finish_reason(&turn) {
+            let reason = latest_finish_reason(&turn)
+                .unwrap_or("missing_finish_reason")
+                .to_owned();
+            engine.fail_turn(
+                &mut turn,
+                format!("Provider ended without a completion-schema candidate: {reason}"),
+            );
+            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+            drain_debug_events(&debug_receiver, &mut on_debug);
+            ensure_live_not_cancelled(&request)?;
+            persistence
+                .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
+            turns.push(turn.clone());
+            return Ok(LiveReasonTurnOutcome {
+                turn,
+                turns,
+                broadcasts,
+                rounds: round,
+                schema_rejections,
+                tool_executions,
+                restore_status,
+                restored_closed_turns,
+            });
+        }
+
         let provider_text = collect_turn_text(&turn);
         let visible_text = strip_completion_submission_block(&provider_text);
         match parse_completion_submission_block(&provider_text) {
@@ -1355,6 +1384,7 @@ where
                     });
                 }
                 CompletionDecision::ContinueWithNextStep { next_step } => {
+                    consecutive_schema_rejections = 0;
                     next_prompt = next_step;
                     carryover_segments = next_round_segments(&request.prompt, &visible_text, None);
                     turns.push(turn);
@@ -1364,17 +1394,18 @@ where
                 ensure_live_not_cancelled(&request)?;
                 let feedback = completion_schema_rejection_feedback(&rejection);
                 schema_rejections.push(rejection.clone());
+                consecutive_schema_rejections = consecutive_schema_rejections.saturating_add(1);
                 persistence
                     .record_completion_rejected(
                         &history,
                         &turn,
                         &rejection,
-                        schema_rejections.len() as u32,
+                        consecutive_schema_rejections as u32,
                     )
                     .map_err(|err| {
                         RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                     })?;
-                if schema_rejections.len() >= 3 {
+                if consecutive_schema_rejections >= 3 {
                     engine.fail_turn(
                         &mut turn,
                         format!(
@@ -1469,7 +1500,7 @@ where
                         trace_id: turn.request.trace_id.clone(),
                         feature_id: turn.request.feature_id.clone(),
                         agent_id: turn.request.agent_id.clone(),
-                        retry_index: schema_rejections.len() as u32,
+                        retry_index: consecutive_schema_rejections as u32,
                         rejection: rejection.clone(),
                         feedback: feedback.clone(),
                     },
@@ -2920,20 +2951,54 @@ fn collect_turn_text(turn: &TurnRecord) -> String {
         .join("")
 }
 
-fn pending_completed_tool_calls(
+fn pending_tool_calls_for_execution(
     turn: &TurnRecord,
     executed_tool_call_ids: &[String],
 ) -> Vec<ReasonReq04ToolCall> {
+    let mut ordered_ids = Vec::<String>::new();
+    let mut latest_by_id = BTreeMap::<String, ReasonReq04ToolCall>::new();
     turn.tool_calls
         .iter()
         .filter(|call| {
-            call.tool_call.arguments_complete
-                && !executed_tool_call_ids
-                    .iter()
-                    .any(|id| id == call.tool_call.tool_call_id.as_str())
+            !executed_tool_call_ids
+                .iter()
+                .any(|id| id == call.tool_call.tool_call_id.as_str())
         })
-        .cloned()
+        .for_each(|call| {
+            let id = call.tool_call.tool_call_id.as_str().to_owned();
+            if !latest_by_id.contains_key(&id) {
+                ordered_ids.push(id.clone());
+            }
+            let replace = latest_by_id
+                .get(&id)
+                .map(|existing| {
+                    !existing.tool_call.arguments_complete || call.tool_call.arguments_complete
+                })
+                .unwrap_or(true);
+            if replace {
+                latest_by_id.insert(id, call.clone());
+            }
+        });
+    ordered_ids
+        .into_iter()
+        .filter_map(|id| latest_by_id.remove(&id))
         .collect()
+}
+
+fn latest_finish_reason(turn: &TurnRecord) -> Option<&str> {
+    turn.usage_events
+        .iter()
+        .rev()
+        .find_map(|event| event.usage.finish_reason.as_deref())
+}
+
+fn turn_has_completion_candidate_finish_reason(turn: &TurnRecord) -> bool {
+    latest_finish_reason(turn).is_some_and(|reason| {
+        matches!(
+            reason,
+            "stop" | "end_turn" | "completed" | "complete" | "success"
+        )
+    })
 }
 
 fn execute_registry_tool_call(
@@ -3158,11 +3223,12 @@ fn apply_runtime_reason_broadcast(
             });
         }
         ReasonBroadcastEvent::ModelContinuationWaiting(event) => {
-            ui.apply_model_request_waiting(
+            ui.apply_model_request_waiting_kind(
                 reason_agent_id.clone(),
                 master_node_id.to_owned(),
                 &event.session_id,
                 &event.turn_id,
+                UiModelRequestKind::ToolResultContinuation,
                 Some(event.detail.clone()),
                 false,
             );
@@ -3195,11 +3261,12 @@ fn apply_runtime_debug_event(
     let mut ui = ui_state.lock().expect("lock ui state");
     if event.envelope.semantic.pipeline_node.as_deref() == Some("RuntimeLive02ProviderRequestBuilt")
     {
-        ui.apply_model_request_waiting(
+        ui.apply_model_request_waiting_kind(
             reason_agent_id.clone(),
             master_node_id.to_owned(),
             &event.envelope.semantic.session_id,
             &event.envelope.semantic.turn_id,
+            UiModelRequestKind::Thinking,
             event
                 .snapshot
                 .as_ref()
@@ -3813,6 +3880,10 @@ mod tests {
                         .as_ref()
                         .and_then(|activity| activity.detail.as_deref()),
                     Some("provider request built")
+                );
+                assert_eq!(
+                    turn.model_request.as_ref().map(|activity| activity.kind),
+                    Some(UiModelRequestKind::Thinking)
                 );
             }
             other => panic!("unexpected query result: {other:?}"),
@@ -4432,6 +4503,18 @@ mod tests {
             "read_file",
             json!({"path":"Cargo.toml","offset":0,"limit":2}),
         )
+    }
+
+    fn incomplete_tool_use_stream_response() -> String {
+        concat!(
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_incomplete_1\",\"name\":\"read_file\",\"input\":{}}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"input_tokens\":20,\"output_tokens\":8}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        )
+        .to_owned()
     }
 
     fn tool_use_missing_read_response() -> String {
@@ -5055,6 +5138,57 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 .detail_lines
                 .iter()
                 .any(|line| line == "tool_call_id=toolu_read_1")
+        );
+    }
+
+    #[test]
+    fn live_bridge_returns_incomplete_tool_use_as_failed_tool_result_without_schema_retry() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "text/event-stream",
+            vec![
+                incomplete_tool_use_stream_response(),
+                complete_stream_response("tool recovered"),
+            ],
+        );
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            live_request(true),
+        )
+        .expect("live bridge");
+        let first_request = rx.recv().expect("first request");
+        let second_request = rx.recv().expect("second request");
+        handle.join().expect("join");
+
+        assert!(first_request.contains("\"stream\":true"));
+        assert!(
+            second_request.contains("\"type\":\"tool_result\""),
+            "incomplete tool_use must be paired back to the model"
+        );
+        assert!(second_request.contains("toolu_incomplete_1"));
+        assert!(second_request.contains("is_error"));
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(outcome.schema_rejections.len(), 0);
+        assert_eq!(outcome.tool_executions, 1);
+        assert!(outcome.turns.iter().any(|turn| {
+            turn.tool_results.iter().any(|result| {
+                result.tool_result.status == ToolResultStatus::Failed
+                    && result
+                        .tool_result
+                        .output
+                        .contains("cannot execute incomplete tool arguments")
+            })
+        }));
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
         );
     }
 

@@ -1,5 +1,23 @@
 # CACHE
 
+- Current verified reasoning lifecycle repair:
+  - runtime schema retry is now gated by terminal-candidate finish reasons only (`stop` / `end_turn` style); `tool_use` phases and incomplete tool calls do not enter completion-schema retry
+  - incomplete `tool_use` is paired back to the model as a failed tool result, preserving multi-round continuation instead of terminal failure
+  - `UiTurnProjection.model_request.kind` now distinguishes `Thinking`, `SchemaRetry`, and `ToolResultContinuation`; WebUI uses typed phase and timing keys instead of treating any detail text as schema retry
+  - WebUI selected-session transcript now renders chronological per-round lifecycle cards for `runtime-turn-N` / `runtime-turn-N-rM`; later rounds hide duplicate/internal user prompts, superseded rounds show `continued`, and final summary appears at the bottom terminal row
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-ui-protocol -- --nocapture`
+    - `cargo test -p freehand-runtime -- --nocapture`
+    - `cargo test -p freehand-server -- --nocapture`
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - release build/install to `~/.local/bin`, `scripts/install-launchd.sh restart`, `curl -4fsS http://127.0.0.1:4041/health`
+    - `~/.local/bin/freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample failure` -> `rounds=2 tool_executions=1 failed_tools=1 schema_rejections=0`
+    - screenshot: `artifacts/webui-reasoning-state/20260701-round-cards/04-fixed-4041-round-sequence-tall.png`
+
 - Current verified session cwd slice:
   - WebUI session rail now has an explicit `Workspace directory` selector and `Use for new session`; New session and `/new` require cwd before creating a draft, and draft submit is blocked without cwd
   - live page evidence: `artifacts/webui-cwd-session-e2e/20260630-new-session-workspace/01-new-session-without-cwd-blocked.png`, `02-new-session-with-cwd-draft.png`, `03-submit-success-sample-cwd-bound.png`; counts show `new session requires a workspace directory`, `strip_cwd=/Volumes/extension/code/freehand`, `strip_turn=runtime-turn-43`

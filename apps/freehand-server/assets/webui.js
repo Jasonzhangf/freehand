@@ -59,6 +59,7 @@ const state = {
   checkpoints: [],
   toolTimings: new Map(),
   modelRequestStartedAt: null,
+  modelRequestTimingKey: null,
   activeTurnId: null,
   pendingUserInput: null,
   pendingAttachments: [],
@@ -536,7 +537,10 @@ function turnStatusForRender(turn) {
     return { className: "running", label: waitingToolStatus(waitingTools), live: true };
   }
   if (turnIsWaitingForModelResponse(turn)) {
-    return { className: "running", label: liveTurnStatus() || "waiting", live: true };
+    if (turn.__supersededRound) {
+      return { className: "success", label: "continued", live: false };
+    }
+    return { className: "running", label: modelRequestStatusForTurn(turn), live: true };
   }
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
     const terminal = `${turn.terminal_status || "success"}`.toLowerCase();
@@ -547,6 +551,14 @@ function turnStatusForRender(turn) {
     };
   }
   return { className: "pending", label: "waiting", live: false, neutral: true };
+}
+
+function modelRequestStatusForTurn(turn) {
+  const elapsed = turn && state.turn && turn.turn_id === state.turn.turn_id
+    ? elapsedSince(state.modelRequestStartedAt)
+    : "";
+  const label = modelRequestLabel(turn);
+  return elapsed ? `${label}... ${elapsed}` : `${label}...`;
 }
 
 function pendingExecutionCard() {
@@ -571,7 +583,7 @@ function turnExecutionCard(turn) {
     article.classList.add("pending-state");
   }
   const body = article.querySelector(".execution-body");
-  const items = conversationItemsForTurn(turn);
+  const items = conversationItemsForTurn(turn, { hideUser: !!turn.__hideUserRow });
   if (items.length === 0) {
     body.appendChild(executionRow("system", "Turn", "Waiting for projection.", status.label));
     return article;
@@ -592,13 +604,16 @@ function turnExecutionCard(turn) {
     const rowBody = item.kind === "ToolSummary" ? toolSummaryBody(item) : item.body;
     body.appendChild(executionRow(rowKind, item.title, rowBody, rowStatus));
   });
-  if (turnIsWaitingForModelResponse(turn) && turn.model_request && turn.model_request.detail) {
+  if (turnIsWaitingForModelResponse(turn) && turn.model_request) {
+    const elapsed = turn.__supersededRound ? "continued" : elapsedSince(state.modelRequestStartedAt) || "0s";
+    const label = modelRequestLabel(turn);
+    const requestBody = turn.model_request.detail || "Waiting for model response.";
     body.appendChild(
       executionRow(
         "system",
-        "Schema",
-        turn.model_request.detail,
-        elapsedSince(state.modelRequestStartedAt) || "0s",
+        label === "schema retry" ? "Schema" : "Model",
+        requestBody,
+        elapsed,
       ),
     );
   }
@@ -753,9 +768,39 @@ function turnIsWaitingForModelResponse(turn) {
   return !!(turn && turn.model_request && !turn.terminal_text && !isTerminalStatus(turn.terminal_status));
 }
 
+function modelRequestKind(turn) {
+  return `${turn && turn.model_request && turn.model_request.kind ? turn.model_request.kind : "Thinking"}`.toLowerCase();
+}
+
+function modelRequestTimingKey(turn) {
+  if (!turnIsWaitingForModelResponse(turn)) {
+    return null;
+  }
+  const request = turn.model_request || {};
+  return [turn.turn_id || "", modelRequestKind(turn), request.detail || ""].join("|");
+}
+
+function modelRequestLabel(turn) {
+  const kind = modelRequestKind(turn);
+  if (kind === "schemaretry" || kind === "schema_retry") {
+    return "schema retry";
+  }
+  if (kind === "toolresultcontinuation" || kind === "tool_result_continuation") {
+    return "thinking after tool result";
+  }
+  return "thinking";
+}
+
 function syncModelRequestTiming(turn) {
   if (!turnIsWaitingForModelResponse(turn)) {
     state.modelRequestStartedAt = null;
+    state.modelRequestTimingKey = null;
+    return;
+  }
+  const key = modelRequestTimingKey(turn);
+  if (state.modelRequestTimingKey !== key) {
+    state.modelRequestTimingKey = key;
+    state.modelRequestStartedAt = Date.now();
     return;
   }
   if (!state.modelRequestStartedAt) {
@@ -885,7 +930,7 @@ function derivePublicConversation(turn) {
     return [];
   }
   const items = [];
-  if (turn.user_text) {
+  if (turn.user_text && !isInternalRuntimePrompt(turn)) {
     items.push({
       kind: "UserText",
       title: "User",
@@ -982,67 +1027,34 @@ function stripFreehandCompletionBlock(text) {
   return stripped;
 }
 
-function conversationItemsForTurn(turn) {
-  return normalizePublicConversation(derivePublicConversation(turn));
-}
-
-function logicalTurnKey(turnId) {
-  const raw = `${turnId || ""}`;
-  const runtimeMatch = raw.match(/^(runtime-turn-\d+)(?:-r\d+)?$/);
-  return runtimeMatch ? runtimeMatch[1] : raw;
-}
-
-function mergeLogicalTurnGroup(turns) {
-  const group = turns.filter(Boolean);
-  if (group.length === 0) {
-    return null;
+function conversationItemsForTurn(turn, options = {}) {
+  const items = normalizePublicConversation(derivePublicConversation(turn));
+  if (options.hideUser) {
+    return items.filter((item) => item.kind !== "UserText");
   }
-  const latest = group[group.length - 1];
-  const first = group[0];
-  const merged = {
-    ...latest,
-    turn_id: latest.turn_id,
-    user_text: first.user_text || latest.user_text,
-    text: [],
-    tool_activities: [],
-    errors: [],
-  };
-  const toolById = new Map();
-  const assistantBodies = [];
-  group.forEach((turn) => {
-    (turn.text || []).forEach((text) => {
-      const visibleText = stripFreehandCompletionBlock(text);
-      if (visibleText) {
-        assistantBodies.push(visibleText);
-      }
-    });
-    (turn.tool_activities || []).forEach((tool) => {
-      const key = tool.tool_call_id || `${tool.tool_name}:${tool.status}`;
-      toolById.set(key, tool);
-    });
-    (turn.errors || []).forEach((error) => {
-      if (error && !merged.errors.includes(error)) {
-        merged.errors.push(error);
-      }
-    });
-  });
-  merged.text = assistantBodies.length > 0 ? [assistantBodies.join("\n")] : [];
-  merged.tool_activities = Array.from(toolById.values());
-  return merged;
+  return items;
+}
+
+function isInternalRuntimePrompt(turn) {
+  const text = `${turn && turn.user_text ? turn.user_text : ""}`.trim();
+  if (!text) {
+    return false;
+  }
+  return (
+    turnOrderKey(turn.turn_id).round > 1 &&
+    (text.startsWith("The tool result has been returned.") ||
+      text.startsWith("Your Freehand completion schema was rejected."))
+  );
 }
 
 function logicalSessionTurns(turns) {
-  const groups = new Map();
-  const order = [];
-  turns.filter(Boolean).forEach((turn) => {
-    const key = logicalTurnKey(turn.turn_id);
-    if (!groups.has(key)) {
-      groups.set(key, []);
-      order.push(key);
-    }
-    groups.get(key).push(turn);
-  });
-  return order.map((key) => mergeLogicalTurnGroup(groups.get(key))).filter(Boolean);
+  return turns.filter(Boolean).sort((left, right) => compareTurnIds(left.turn_id, right.turn_id));
+}
+
+function logicalExecutionKey(turnId) {
+  const raw = `${turnId || ""}`;
+  const runtimeMatch = raw.match(/^(runtime-turn-\d+)(?:-r\d+)?$/);
+  return runtimeMatch ? runtimeMatch[1] : raw;
 }
 
 function setSelectedSessionId(sessionId) {
@@ -1117,6 +1129,7 @@ function resetLocalConversationState(sessionId) {
   state.pendingUserInput = null;
   state.pendingAttachments = [];
   state.modelRequestStartedAt = null;
+  state.modelRequestTimingKey = null;
   state.submitStartedAt = null;
   state.submitInFlight = false;
   setSelectedSessionId(sessionId);
@@ -1412,10 +1425,7 @@ function liveTurnStatus() {
 
   if (turnIsWaitingForModelResponse(state.turn)) {
     const elapsed = elapsedSince(state.modelRequestStartedAt);
-    const label =
-      state.turn.model_request && state.turn.model_request.detail
-        ? "schema retry"
-        : "waiting for model response";
+    const label = modelRequestLabel(state.turn);
     return elapsed ? `${label}... ${elapsed}` : `${label}...`;
   }
 
@@ -1467,8 +1477,19 @@ function renderMessages() {
       : state.selectedSessionId
         ? []
         : [state.turn];
-    turns.filter(Boolean).forEach((turn) => {
-      fragments.push(turnExecutionCard(turn));
+    const visibleTurns = turns.filter(Boolean);
+    const lastIndexByExecutionKey = new Map();
+    visibleTurns.forEach((turn, index) => {
+      lastIndexByExecutionKey.set(logicalExecutionKey(turn.turn_id), index);
+    });
+    const seenExecutionKeys = new Set();
+    visibleTurns.forEach((turn, index) => {
+      const executionKey = logicalExecutionKey(turn.turn_id);
+      const round = turnOrderKey(turn.turn_id).round;
+      const hideUserRow = round > 1 || seenExecutionKeys.has(executionKey);
+      const supersededRound = index < (lastIndexByExecutionKey.get(executionKey) ?? index);
+      seenExecutionKeys.add(executionKey);
+      fragments.push(turnExecutionCard({ ...turn, __hideUserRow: hideUserRow, __supersededRound: supersededRound }));
     });
   }
 
