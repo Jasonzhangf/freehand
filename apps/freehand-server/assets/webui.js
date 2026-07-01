@@ -721,7 +721,7 @@ function normalizePublicConversation(items) {
 function buildConversationRenderModel() {
   const conversationTurns = conversationTurnsForRender();
   const turnsForRender =
-    conversationTurns.length === 0 && turnIsCurrentLiveTurn(state.turn)
+    conversationTurns.length === 0 && state.turn
       ? [state.turn]
       : conversationTurns;
   return {
@@ -1266,6 +1266,13 @@ function clearPendingUserInputIfMaterialized() {
   state.pendingAttachments = [];
 }
 
+function sameRenderableTurn(left, right) {
+  if (!left || !right || left.turn_id !== right.turn_id) {
+    return false;
+  }
+  return normalizeVisibleText(left.user_text) === normalizeVisibleText(right.user_text);
+}
+
 function conversationTurnsForRender() {
   const transcriptTurns = logicalSessionTurns(state.sessionTurns);
   const latestTurn = state.turn;
@@ -1274,10 +1281,10 @@ function conversationTurnsForRender() {
   }
   if (!state.selectedSessionId) {
     const merged = transcriptTurns.length > 0 ? transcriptTurns.slice() : [latestTurn];
-    const index = merged.findIndex((turn) => turn.turn_id === latestTurn.turn_id);
+    const index = merged.findIndex((turn) => sameRenderableTurn(turn, latestTurn));
     if (index >= 0) {
       merged[index] = latestTurn;
-    } else if (merged.length === 0 || merged[merged.length - 1]?.turn_id !== latestTurn.turn_id) {
+    } else if (merged.length === 0 || !sameRenderableTurn(merged[merged.length - 1], latestTurn)) {
       merged.push(latestTurn);
     }
     return logicalSessionTurns(merged);
@@ -1286,7 +1293,7 @@ function conversationTurnsForRender() {
     return transcriptTurns;
   }
   const merged = transcriptTurns.slice();
-  const index = merged.findIndex((turn) => turn.turn_id === latestTurn.turn_id);
+  const index = merged.findIndex((turn) => sameRenderableTurn(turn, latestTurn));
   if (index >= 0) {
     merged[index] = latestTurn;
   } else {
@@ -1536,7 +1543,7 @@ function setTurnProjection(turn, options = {}) {
   syncSelectedCwdFromProjection(state.turn);
   if (state.turn && !options.preserveSessionTurns) {
     const existingIndex = state.sessionTurns.findIndex(
-      (existing) => existing.turn_id === state.turn.turn_id,
+      (existing) => sameRenderableTurn(existing, state.turn),
     );
     if (existingIndex >= 0) {
       state.sessionTurns[existingIndex] = state.turn;

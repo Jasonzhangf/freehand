@@ -1124,10 +1124,16 @@ mod tests {
         assert!(js_body.contains("function pendingUserInputIsMaterialized"));
         assert!(js_body.contains("function clearPendingUserInputIfMaterialized"));
         assert!(js_body.contains("clearPendingUserInputIfMaterialized();"));
+        assert!(js_body.contains("function sameRenderableTurn"));
+        assert!(js_body.contains("sameRenderableTurn(existing, state.turn)"));
+        assert!(js_body.contains("sameRenderableTurn(turn, latestTurn)"));
+        assert!(!js_body.contains("existing.turn_id === state.turn.turn_id"));
         assert!(js_body.contains("function renderModelHasLiveLifecycle"));
         assert!(js_body.contains("function turnIsCurrentLiveTurn"));
+        assert!(js_body.contains("conversationTurns.length === 0 && state.turn"));
         assert!(
-            js_body.contains("conversationTurns.length === 0 && turnIsCurrentLiveTurn(state.turn)")
+            !js_body
+                .contains("conversationTurns.length === 0 && turnIsCurrentLiveTurn(state.turn)")
         );
         assert!(js_body.contains("fragments.push(turnExecutionCard(renderTurn))"));
         assert!(
