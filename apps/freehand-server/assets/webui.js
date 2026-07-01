@@ -79,6 +79,7 @@ const state = {
   attachmentDrafts: loadAttachmentDrafts(),
   attachmentsPreviewOpen: true,
   debugDetailsVisible: false,
+  forceScrollToBottom: false,
 };
 
 function shellConfig() {
@@ -537,9 +538,6 @@ function turnStatusForRender(turn) {
     return { className: "running", label: waitingToolStatus(waitingTools), live: true };
   }
   if (turnIsWaitingForModelResponse(turn)) {
-    if (turn.__supersededRound) {
-      return { className: "success", label: "continued", live: false };
-    }
     return { className: "running", label: modelRequestStatusForTurn(turn), live: true };
   }
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
@@ -605,7 +603,7 @@ function turnExecutionCard(turn) {
     body.appendChild(executionRow(rowKind, item.title, rowBody, rowStatus));
   });
   if (turnIsWaitingForModelResponse(turn) && turn.model_request) {
-    const elapsed = turn.__supersededRound ? "continued" : elapsedSince(state.modelRequestStartedAt) || "0s";
+    const elapsed = elapsedSince(state.modelRequestStartedAt) || "0s";
     const label = modelRequestLabel(turn);
     const requestBody = turn.model_request.detail || "Waiting for model response.";
     body.appendChild(
@@ -1051,10 +1049,33 @@ function logicalSessionTurns(turns) {
   return turns.filter(Boolean).sort((left, right) => compareTurnIds(left.turn_id, right.turn_id));
 }
 
-function logicalExecutionKey(turnId) {
-  const raw = `${turnId || ""}`;
-  const runtimeMatch = raw.match(/^(runtime-turn-\d+)(?:-r\d+)?$/);
-  return runtimeMatch ? runtimeMatch[1] : raw;
+function conversationTurnsForRender() {
+  const transcriptTurns = logicalSessionTurns(state.sessionTurns);
+  const latestTurn = state.turn;
+  if (!latestTurn) {
+    return transcriptTurns;
+  }
+  if (!state.selectedSessionId) {
+    const merged = transcriptTurns.length > 0 ? transcriptTurns.slice() : [latestTurn];
+    const index = merged.findIndex((turn) => turn.turn_id === latestTurn.turn_id);
+    if (index >= 0) {
+      merged[index] = latestTurn;
+    } else if (merged.length === 0 || merged[merged.length - 1]?.turn_id !== latestTurn.turn_id) {
+      merged.push(latestTurn);
+    }
+    return logicalSessionTurns(merged);
+  }
+  if (latestTurn.session_id !== state.selectedSessionId) {
+    return transcriptTurns;
+  }
+  const merged = transcriptTurns.slice();
+  const index = merged.findIndex((turn) => turn.turn_id === latestTurn.turn_id);
+  if (index >= 0) {
+    merged[index] = latestTurn;
+  } else {
+    merged.push(latestTurn);
+  }
+  return logicalSessionTurns(merged);
 }
 
 function setSelectedSessionId(sessionId) {
@@ -1451,17 +1472,20 @@ function renderCommandStatus() {
 }
 
 function renderMessages() {
+  const shouldStickToBottom = state.forceScrollToBottom || messageListIsNearBottom();
+  state.forceScrollToBottom = false;
   messageList.replaceChildren();
   const fragments = [];
-  const hasSelectedSessionTranscript = state.sessionTurns.length > 0;
+  const visibleTurns = conversationTurnsForRender();
+  const hasSelectedSessionTranscript = visibleTurns.length > 0;
 
   if (state.pendingUserInput) {
     fragments.push(pendingExecutionCard());
   }
 
-  if (state.selectedSessionId && !hasSelectedSessionTranscript) {
+  if (state.selectedSessionId && !hasSelectedSessionTranscript && !state.turn) {
     // A newly selected draft session should stay visually clean until the user sends.
-  } else if (state.sessionTurns.length === 0 && !state.turn) {
+  } else if (visibleTurns.length === 0 && !state.turn) {
     fragments.push(
       card(
         "Assistant",
@@ -1472,24 +1496,10 @@ function renderMessages() {
       ),
     );
   } else {
-    const turns = state.sessionTurns.length > 0
-      ? logicalSessionTurns(state.sessionTurns)
-      : state.selectedSessionId
-        ? []
-        : [state.turn];
-    const visibleTurns = turns.filter(Boolean);
-    const lastIndexByExecutionKey = new Map();
-    visibleTurns.forEach((turn, index) => {
-      lastIndexByExecutionKey.set(logicalExecutionKey(turn.turn_id), index);
-    });
-    const seenExecutionKeys = new Set();
-    visibleTurns.forEach((turn, index) => {
-      const executionKey = logicalExecutionKey(turn.turn_id);
+    visibleTurns.forEach((turn) => {
       const round = turnOrderKey(turn.turn_id).round;
-      const hideUserRow = round > 1 || seenExecutionKeys.has(executionKey);
-      const supersededRound = index < (lastIndexByExecutionKey.get(executionKey) ?? index);
-      seenExecutionKeys.add(executionKey);
-      fragments.push(turnExecutionCard({ ...turn, __hideUserRow: hideUserRow, __supersededRound: supersededRound }));
+      const hideUserRow = round > 1;
+      fragments.push(turnExecutionCard({ ...turn, __hideUserRow: hideUserRow }));
     });
   }
 
@@ -1521,7 +1531,19 @@ function renderMessages() {
   }
 
   fragments.forEach((fragment) => messageList.appendChild(fragment));
-  scrollMessagesToBottom();
+  if (shouldStickToBottom) {
+    scrollMessagesToBottom();
+  }
+}
+
+function messageListIsNearBottom() {
+  const listRemaining = messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight;
+  if (messageList.scrollHeight > messageList.clientHeight + 2 && listRemaining >= 96) {
+    return false;
+  }
+  const pageRemaining =
+    document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+  return pageRemaining < 160;
 }
 
 function scrollMessagesToBottom() {
@@ -2049,6 +2071,7 @@ composerForm.addEventListener("submit", async (event) => {
   state.submitStartedAt = Date.now();
   state.submitInFlight = true;
   composerInput.value = "";
+  state.forceScrollToBottom = true;
   renderMessages();
   try {
     const receipt = await submitUserInput(commandText);

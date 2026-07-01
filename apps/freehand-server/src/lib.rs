@@ -1114,7 +1114,9 @@ mod tests {
         assert!(js_body.contains("Send a message to start this session."));
         assert!(js_body.contains("function pendingExecutionCard"));
         assert!(js_body.contains("function turnExecutionCard"));
-        assert!(js_body.contains("fragments.push(turnExecutionCard({ ...turn, __hideUserRow: hideUserRow, __supersededRound: supersededRound }))"));
+        assert!(js_body.contains(
+            "fragments.push(turnExecutionCard({ ...turn, __hideUserRow: hideUserRow }))"
+        ));
         assert!(js_body.contains("deleteSelectedSessions"));
         assert!(js_body.contains("DeleteSession"));
         assert!(js_body.contains("session-selector"));
@@ -1128,7 +1130,13 @@ mod tests {
         assert!(js_body.contains("freehand-webui-selected-cwd"));
         assert!(js_body.contains("turn.session_id !== state.selectedSessionId"));
         assert!(js_body.contains("scrollMessagesToBottom"));
+        assert!(js_body.contains("messageListIsNearBottom"));
+        assert!(js_body.contains("window.scrollY"));
+        assert!(js_body.contains("forceScrollToBottom"));
         assert!(js_body.contains("window.scrollTo"));
+        assert!(js_body.contains("function conversationTurnsForRender"));
+        assert!(js_body.contains("latestTurn.session_id !== state.selectedSessionId"));
+        assert!(js_body.contains("const visibleTurns = conversationTurnsForRender();"));
         assert!(js_body.contains("case \"/new\""));
         assert!(js_body.contains("case \"/task\""));
         assert!(js_body.contains("case \"/cwd\""));
@@ -1139,9 +1147,10 @@ mod tests {
         assert!(js_body.contains("cancelActiveTurn"));
         assert!(js_body.contains("normalizePublicConversation"));
         assert!(js_body.contains("isInternalRuntimePrompt"));
-        assert!(js_body.contains("logicalExecutionKey"));
         assert!(js_body.contains("__hideUserRow"));
-        assert!(js_body.contains("__supersededRound"));
+        assert!(!js_body.contains("logicalExecutionKey"));
+        assert!(!js_body.contains("__supersededRound"));
+        assert!(!js_body.contains("continued"));
         assert!(js_body.contains("modelRequestStatusForTurn"));
         assert!(!js_body.contains("function logicalTurnKey"));
         assert!(!js_body.contains("function mergeLogicalTurnGroup"));
@@ -1245,7 +1254,7 @@ mod tests {
         assert!(!js_body.contains("Tool result returned for"));
         assert!(!js_body.contains("Tool execution failed for"));
         let turn_render_pos = js_body
-            .find("state.sessionTurns.length === 0")
+            .find("const visibleTurns = conversationTurnsForRender();")
             .expect("turn render branch present");
         let adp_failure_pos = js_body
             .rfind("if (state.adpFailure)")

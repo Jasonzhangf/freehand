@@ -1,5 +1,35 @@
 # note.md
 
+# 2026-07-01 WebUI selected-session render source trace
+  - user issue: continuing a previous conversation and submitting new input left the WebUI visually stale.
+  - diagnosis:
+    - `renderMessages()` used `state.sessionTurns.length > 0` as a hard switch and ignored `state.turn` whenever a selected session transcript existed.
+    - ADP subscription/query updates can deliver the latest same-session turn before the selected transcript is refreshed, so stale `sessionTurns` can hide the new in-flight/completed turn.
+    - render state was split across transcript truth and latest-turn truth without one view selector.
+  - implementation:
+    - added `conversationTurnsForRender()` in `apps/freehand-server/assets/webui.js`.
+    - render now merges selected-session transcript with the latest same-session turn before drawing chronological cards.
+    - draft empty state remains clean only when there is no latest turn.
+  - pending verification:
+    - completed
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `scripts/install-global.sh` -> full release/install completed
+    - `scripts/install-launchd.sh restart`
+    - fixed `127.0.0.1:4041` health returned `ok`
+    - served WebUI JS hash matched workspace hash `95b46401c605d0adaf78a4a3f85d765f99ce7ebceb92b6623c05c9acaf2fa07a`
+    - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` -> `adp_smoke_ok`
+    - controlled same-session ADP continuation: `webui-render-e2e-1782893413637890000` first query count 1, second query count 2, new turn `runtime-turn-67`
+    - real headless Chrome/CDP WebUI continuation on the same session:
+      - screenshot `artifacts/webui-selected-session-render/20260701-continue/headless-old-session-third-turn.png` shows immediate third-turn pending card and cleared input
+      - screenshot `artifacts/webui-selected-session-render/20260701-continue/headless-old-session-third-turn-final.png` shows third turn in `THINKING... 17S`
+      - screenshot `artifacts/webui-selected-session-render/20260701-continue/headless-old-session-third-turn-terminal.png` shows final `runtime-turn-68-r9` terminal card in the selected session
+
 # 2026-06-30 ADP multi-round sample closeout
   - user correction: one-round success is not valid evidence; failure sample must complete a continuous multi-round tool loop before reporting success.
   - implementation:
@@ -826,3 +856,9 @@ Current real root cause split:
     - fixed-port install/restart: release build, install to `~/.local/bin`, `scripts/install-launchd.sh restart`, `curl http://127.0.0.1:4041/health` -> ok
     - live ADP sample: `~/.local/bin/freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample failure` -> `rounds=2 tool_executions=1 failed_tools=1 schema_rejections=0`
     - screenshot: `artifacts/webui-reasoning-state/20260701-round-cards/04-fixed-4041-round-sequence-tall.png`
+
+2026-07-01 latest WebUI/live regression trace:
+- Latest user session `webui-session-20260701041619-de431b82` did not actually terminal-fail through schema rejection; reason ledger showed `runtime-turn-66-r10` ended with provider `finish_reason=max_tokens`, `schema_rejections=0`, and runtime incorrectly closed it as failed with `Provider ended without a completion-schema candidate: max_tokens`.
+- Last-card merge root cause is runtime projection, not CSS: `project_runtime_turn_history` aggregated all same-ordinal round tool calls/results into the final round projection, and restore grouped runtime rounds by ordinal before applying one UI projection. This violates one-round/one-card.
+- Forward fix direction: schema retry exhaustion must not be `Failed`; use non-failed terminal truth (`Blocked`). Provider interruption/non-candidate such as `max_tokens` must be `Interrupted`. Runtime/UI projection must keep each `runtime-turn-N[-rM]` as its own chronological card and remove WebUI `logicalExecutionKey` / `__supersededRound` grouping.
+- Follow-up lock: schema repair must close both sides, not just status labels. Runtime now tests that invalid completion schema feedback is sent back to the model in the next provider request with concrete missing fields (`completion_reason`, `evidence`, `learned`), and runtime dispatch UI-state tests prove clients can query `SchemaRetry` with retry index plus missing field summaries before the repair round completes.
