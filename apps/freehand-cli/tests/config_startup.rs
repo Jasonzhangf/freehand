@@ -4,6 +4,7 @@ use std::net::TcpListener;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -196,6 +197,7 @@ fn spawn_adp_mock_server() -> (String, thread::JoinHandle<()>) {
 fn spawn_adp_sample_mock_server(status: TerminalStatus) -> (String, thread::JoinHandle<()>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind adp sample mock");
     let url = format!("ws://{}/adp", listener.local_addr().expect("addr"));
+    let sample_turn = Arc::new(Mutex::new(None::<UiTurnProjection>));
     listener
         .set_nonblocking(true)
         .expect("set adp sample mock nonblocking");
@@ -207,140 +209,146 @@ fn spawn_adp_sample_mock_server(status: TerminalStatus) -> (String, thread::Join
             .expect("tokio runtime");
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
-            let (stream, _) = listener.accept().await.expect("accept adp");
-            let mut socket = tokio_tungstenite::accept_async(stream)
-                .await
-                .expect("accept websocket");
-            let mut sample_turn = None::<UiTurnProjection>;
-            let mut subscription_id = None::<String>;
-            while let Some(message) = socket.next().await {
-                let text = match message {
-                    Ok(Message::Text(text)) => text,
-                    Ok(_) => continue,
-                    Err(_) => break,
-                };
-                let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
-                match request {
-                    UiAdpRequest::Subscribe { request_id, .. } => {
-                        subscription_id = Some(request_id.clone());
-                        send_adp_response(
-                            &mut socket,
-                            UiAdpResponse::SubscriptionAccepted {
-                                request_id,
-                                selector: SubscriptionSelector {
-                                    client: UiClientKind::Cli,
-                                    stream_kind: UiStreamKind::Turn,
-                                    target_turn_id: None,
-                                },
-                            },
-                        )
-                        .await;
-                    }
-                    UiAdpRequest::Command {
-                        request_id,
-                        command:
-                            UiCommand::SubmitUserInput {
-                                text, session_id, ..
-                            },
-                    } => {
-                        let session_id =
-                            session_id.unwrap_or_else(|| SessionId::new("cli-session"));
-                        let turn = test_sample_turn_projection(&text, &session_id, status.clone());
-                        sample_turn = Some(turn.clone());
-                        let envelope =
-                            build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
-                                text: text.clone(),
-                                session_id: Some(session_id.clone()),
-                                cwd: None,
-                            })
-                            .expect("sample envelope");
-                        send_adp_response(
-                            &mut socket,
-                            UiAdpResponse::CommandReceipt {
-                                request_id,
-                                receipt: UiCommandDispatchReceipt {
-                                    ingress: envelope.ingress,
-                                    target_feature_id: envelope.target_feature_id,
-                                    target_owner_module: envelope.target_owner_module,
-                                    dispatch_status: if status == TerminalStatus::Success {
-                                        "sample_success".to_owned()
-                                    } else {
-                                        "sample_tool_failure_recovered".to_owned()
-                                    },
-                                },
-                            },
-                        )
-                        .await;
-                        if let Some(sub_id) = subscription_id.clone() {
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.expect("accept adp");
+                let mut socket = tokio_tungstenite::accept_async(stream)
+                    .await
+                    .expect("accept websocket");
+                let mut subscription_id = None::<String>;
+                while let Some(message) = socket.next().await {
+                    let text = match message {
+                        Ok(Message::Text(text)) => text,
+                        Ok(_) => continue,
+                        Err(_) => break,
+                    };
+                    let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
+                    match request {
+                        UiAdpRequest::Subscribe { request_id, .. } => {
+                            subscription_id = Some(request_id.clone());
                             send_adp_response(
                                 &mut socket,
-                                UiAdpResponse::SubscriptionEvent {
-                                    request_id: sub_id,
-                                    event: UiSubscriptionEvent {
-                                        projection: UiProjection::Turn(turn),
-                                        latest_active_turn_id: Some(TurnId::new(
-                                            "cli-adp-sample-turn",
-                                        )),
+                                UiAdpResponse::SubscriptionAccepted {
+                                    request_id,
+                                    selector: SubscriptionSelector {
+                                        client: UiClientKind::Cli,
+                                        stream_kind: UiStreamKind::Turn,
+                                        target_turn_id: None,
                                     },
                                 },
                             )
                             .await;
                         }
-                    }
-                    UiAdpRequest::Query { request_id, .. } => {
-                        if request_id.contains("-transcript") {
-                            let turn = sample_turn.clone().expect("sample turn");
-                            let turns = if status == TerminalStatus::Failed {
-                                let mut first = turn.clone();
-                                first.turn_id = TurnId::new("cli-adp-sample-turn");
-                                first.terminal_status = None;
-                                first.terminal_text = None;
-                                let mut second = turn;
-                                second.turn_id = TurnId::new("cli-adp-sample-turn-r2");
-                                vec![first, second]
-                            } else {
-                                vec![turn]
-                            };
+                        UiAdpRequest::Command {
+                            request_id,
+                            command:
+                                UiCommand::SubmitUserInput {
+                                    text, session_id, ..
+                                },
+                        } => {
+                            let session_id =
+                                session_id.unwrap_or_else(|| SessionId::new("cli-session"));
+                            let turn =
+                                test_sample_turn_projection(&text, &session_id, status.clone());
+                            *sample_turn.lock().expect("sample turn lock") = Some(turn.clone());
+                            let envelope =
+                                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                                    text: text.clone(),
+                                    session_id: Some(session_id.clone()),
+                                    cwd: None,
+                                })
+                                .expect("sample envelope");
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::CommandReceipt {
+                                    request_id,
+                                    receipt: UiCommandDispatchReceipt {
+                                        ingress: envelope.ingress,
+                                        target_feature_id: envelope.target_feature_id,
+                                        target_owner_module: envelope.target_owner_module,
+                                        dispatch_status: if status == TerminalStatus::Success {
+                                            "sample_success".to_owned()
+                                        } else {
+                                            "sample_tool_failure_recovered".to_owned()
+                                        },
+                                    },
+                                },
+                            )
+                            .await;
+                            if let Some(sub_id) = subscription_id.clone() {
+                                send_adp_response(
+                                    &mut socket,
+                                    UiAdpResponse::SubscriptionEvent {
+                                        request_id: sub_id,
+                                        event: UiSubscriptionEvent {
+                                            projection: UiProjection::Turn(turn),
+                                            latest_active_turn_id: Some(TurnId::new(
+                                                "cli-adp-sample-turn",
+                                            )),
+                                        },
+                                    },
+                                )
+                                .await;
+                            }
+                        }
+                        UiAdpRequest::Query { request_id, .. } => {
+                            let turn = sample_turn
+                                .lock()
+                                .expect("sample turn lock")
+                                .clone()
+                                .expect("sample turn");
+                            if request_id.contains("-transcript") {
+                                let turns = if status == TerminalStatus::Failed {
+                                    let mut first = turn.clone();
+                                    first.turn_id = TurnId::new("cli-adp-sample-turn");
+                                    first.terminal_status = None;
+                                    first.terminal_text = None;
+                                    let mut second = turn;
+                                    second.turn_id = TurnId::new("cli-adp-sample-turn-r2");
+                                    vec![first, second]
+                                } else {
+                                    vec![turn]
+                                };
+                                send_adp_response(
+                                    &mut socket,
+                                    UiAdpResponse::QueryResult {
+                                        request_id,
+                                        result: UiQueryResult::SessionTurns(
+                                            UiSessionTranscriptProjection {
+                                                session_id: turns[0].session_id.clone(),
+                                                title: None,
+                                                archived: false,
+                                                cwd: Some("/tmp/cli-session".to_owned()),
+                                                turns,
+                                            },
+                                        ),
+                                    },
+                                )
+                                .await;
+                                continue;
+                            }
                             send_adp_response(
                                 &mut socket,
                                 UiAdpResponse::QueryResult {
                                     request_id,
-                                    result: UiQueryResult::SessionTurns(
-                                        UiSessionTranscriptProjection {
-                                            session_id: turns[0].session_id.clone(),
-                                            title: None,
-                                            archived: false,
-                                            cwd: Some("/tmp/cli-session".to_owned()),
-                                            turns,
-                                        },
-                                    ),
+                                    result: UiQueryResult::Turn(Some(turn)),
                                 },
                             )
                             .await;
-                            continue;
                         }
-                        send_adp_response(
-                            &mut socket,
-                            UiAdpResponse::QueryResult {
-                                request_id,
-                                result: UiQueryResult::Turn(sample_turn.clone()),
-                            },
-                        )
-                        .await;
-                    }
-                    UiAdpRequest::Command { request_id, .. } => {
-                        send_adp_response(
-                            &mut socket,
-                            UiAdpResponse::Failure {
-                                request_id,
-                                failure: UiAdpFailure {
-                                    code: "unexpected_command".to_owned(),
-                                    message: "unexpected sample command".to_owned(),
-                                    retryable: false,
+                        UiAdpRequest::Command { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::Failure {
+                                    request_id,
+                                    failure: UiAdpFailure {
+                                        code: "unexpected_command".to_owned(),
+                                        message: "unexpected sample command".to_owned(),
+                                        retryable: false,
+                                    },
                                 },
-                            },
-                        )
-                        .await;
+                            )
+                            .await;
+                        }
                     }
                 }
             }
@@ -727,7 +735,7 @@ fn cli_runs_adp_success_turn_sample_against_mock_websocket() {
     assert!(stdout.contains("sample=success"));
     assert!(stdout.contains("subscription_accepted:cli-sample-success-sub"));
     assert!(stdout.contains("command_receipt:cli-sample-success-cmd:sample_success"));
-    assert!(stdout.contains("subscription_event:cli-sample-success-sub"));
+    assert!(stdout.contains("rounds=1"));
 
     handle.join().expect("adp success sample mock join");
 }
@@ -757,7 +765,9 @@ fn cli_runs_adp_failure_turn_sample_against_mock_websocket() {
     assert!(
         stdout.contains("command_receipt:cli-sample-failure-cmd:sample_tool_failure_recovered")
     );
-    assert!(stdout.contains("subscription_event:cli-sample-failure-sub"));
+    assert!(stdout.contains("rounds=2"));
+    assert!(stdout.contains("tool_executions=1"));
+    assert!(stdout.contains("failed_tools=1"));
 
     handle.join().expect("adp failure sample mock join");
 }

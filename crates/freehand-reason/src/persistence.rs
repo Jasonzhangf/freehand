@@ -460,6 +460,38 @@ impl ReasonPersistence {
         active_turn: Option<ActiveTurnSnapshot>,
         closed_turn: Option<TurnRecord>,
     ) -> Result<ReasonPersistenceCursor, ReasonPersistenceError> {
+        let lock_path = self.reason_persistence_lock_path(history.session_id());
+        ensure_parent_dir(&lock_path)?;
+        let lock_file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(lock_path)
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
+        lock_file
+            .lock_exclusive()
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
+        let result =
+            self.persist_row_locked(history, latest_turn_id, payload, active_turn, closed_turn);
+        let unlock_result = lock_file
+            .unlock()
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()));
+        match (result, unlock_result) {
+            (Ok(cursor), Ok(())) => Ok(cursor),
+            (Err(err), _) => Err(err),
+            (Ok(_), Err(err)) => Err(err),
+        }
+    }
+
+    fn persist_row_locked(
+        &self,
+        history: &SessionHistory,
+        latest_turn_id: Option<TurnId>,
+        payload: ReasonLedgerPayload,
+        active_turn: Option<ActiveTurnSnapshot>,
+        closed_turn: Option<TurnRecord>,
+    ) -> Result<ReasonPersistenceCursor, ReasonPersistenceError> {
         let current = self.load_authoritative_state(history.session_id())?;
         let current_cursor = current
             .as_ref()
@@ -782,6 +814,14 @@ impl ReasonPersistence {
             .join("reason")
             .join(self.agent_id.as_str())
             .join(format!("{}.jsonl", session_id.as_str()))
+    }
+
+    fn reason_persistence_lock_path(&self, session_id: &SessionId) -> PathBuf {
+        self.runtime_home
+            .join("locks")
+            .join("reason")
+            .join(self.agent_id.as_str())
+            .join(format!("{}.lock", session_id.as_str()))
     }
 
     fn provider_raw_ledger_path(
@@ -1113,7 +1153,10 @@ mod tests {
         ContextSegmentKind, ContextStability, ReasonResp01SemanticEvent, SemanticEventKind,
         TerminalStatus,
     };
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{
+        Arc, Barrier,
+        atomic::{AtomicU64, Ordering},
+    };
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1173,13 +1216,21 @@ mod tests {
     }
 
     fn started_turn(history: &mut SessionHistory) -> TurnRecord {
+        started_turn_with_id(history, "turn-1", "trace-1")
+    }
+
+    fn started_turn_with_id(
+        history: &mut SessionHistory,
+        turn_id: &str,
+        trace_id: &str,
+    ) -> TurnRecord {
         ReasonTurnEngine::new()
             .start_turn(
                 history,
                 TurnStartInput {
                     session_id: SessionId::new("session-1"),
-                    turn_id: TurnId::new("turn-1"),
-                    trace_id: TraceId::new("trace-1"),
+                    turn_id: TurnId::new(turn_id),
+                    trace_id: TraceId::new(trace_id),
                     feature_id: FeatureId::new("reason.persistence"),
                     agent_id: AgentId::new("agent-1"),
                     user_text: "persist this".to_owned(),
@@ -1189,6 +1240,56 @@ mod tests {
                 },
             )
             .expect("turn")
+    }
+
+    #[test]
+    fn concurrent_same_session_writes_allocate_monotonic_sequences() {
+        let runtime_home = temp_runtime_home();
+        let writer_count = 8;
+        let barrier = Arc::new(Barrier::new(writer_count));
+        let mut handles = Vec::new();
+
+        for index in 0..writer_count {
+            let runtime_home = runtime_home.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+                let mut history = session_history();
+                let turn = started_turn_with_id(
+                    &mut history,
+                    &format!("turn-{index}"),
+                    &format!("trace-{index}"),
+                );
+                barrier.wait();
+                coordinator
+                    .record_turn_started(&history, &turn, 0)
+                    .expect("concurrent persist")
+            }));
+        }
+
+        let mut cursors = Vec::new();
+        for handle in handles {
+            cursors.push(handle.join().expect("writer thread"));
+        }
+        cursors.sort_by_key(|cursor| cursor.last_applied_reason_seq);
+        assert_eq!(
+            cursors
+                .iter()
+                .map(|cursor| cursor.last_applied_reason_seq)
+                .collect::<Vec<_>>(),
+            (1..=writer_count as u64).collect::<Vec<_>>()
+        );
+
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let rows = coordinator
+            .load_reason_ledger(&SessionId::new("session-1"))
+            .expect("ledger rows");
+        assert_eq!(
+            rows.iter().map(|row| row.seq).collect::<Vec<_>>(),
+            (1..=writer_count as u64).collect::<Vec<_>>()
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
     }
 
     #[test]

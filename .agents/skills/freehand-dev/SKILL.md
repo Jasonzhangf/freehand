@@ -214,6 +214,16 @@ Use this skill for any non-trivial work in this repo.
 - Before claiming completion, run the feature's required checks.
 - Before claiming completion, satisfy the feature's `lifecycle_checks`.
 - After any code/config/doc change in this repo, do not report completion from local tests alone. If the feature has a live surface, install/restart the fixed `127.0.0.1:4041` daemon when relevant and verify the changed behavior online through ADP/WebUI/browser evidence before claiming the change works.
+- For any WebUI, ADP, reasoning, stream, turn lifecycle, session, tool rendering, schema retry, composer, or status/progress change, online verification is mandatory before reporting success. The minimum proof is:
+  - start or restart the real daemon on fixed port `127.0.0.1:4041`
+  - drive the real WebUI in a browser, not only unit tests or static DOM inspection
+  - submit at least one real request through the UI path that was changed
+  - query ADP state for the same session/turn and compare it with visible UI state
+  - save screenshot evidence under `artifacts/webui-online/` or another explicit repo artifact path
+  - report the exact commands, ADP sample/query result summary, and screenshot path in the final answer
+- Do not say WebUI behavior is fixed, verified, or passing unless browser-visible evidence and ADP/session truth both prove the changed behavior. If online verification cannot run, state that explicitly and treat the work as unverified.
+- For WebUI lifecycle/helper edits, `node --check` is only syntax coverage. Capture browser console/page errors during a real fixed-port WebUI submit, because undefined runtime helpers such as lifecycle phase functions can pass syntax checks and fail only in browser execution.
+- UI validation must prove the user's submitted text remains observable after send and after refresh, live lifecycle animation stops when the underlying ADP turn is terminal, and no historical turn keeps fake streaming/timer state after a newer turn starts.
 - Before claiming completion, run the feature's mapped test stack:
   - module white-box tests
   - module black-box tests

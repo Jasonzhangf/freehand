@@ -136,7 +136,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun connectToDaemon(host: HostConfig) {
         adp?.stop()
+        projector.clearAccumulatedTurns()
         var newAdp: AdpEventStream? = null
+        // Disable input until ADP signals ready — prevents submit before stream is live.
+        inputBar.setEnabledState(false)
         ingress = CommandIngress(
             client = null,
             onResult = { ok, reason ->
@@ -174,6 +177,8 @@ class MainActivity : AppCompatActivity() {
                     projector.setConnectionState("open")
                     statusBanner.hide()
                     topBar.setAgent("${host.host}:${host.port}", "connected")
+                    // ADP live: enable input so user can submit.
+                    inputBar.setEnabledState(true)
                 }
             },
             onClosed = {
@@ -194,21 +199,41 @@ class MainActivity : AppCompatActivity() {
             name = (snapshot["agent_name"] as? String)?.ifBlank { "agent" } ?: "agent",
             status = snapshot["connection"] as? String ?: "idle",
         )
+
+        // Sync turn lifecycle state to input bar: disable while agent is working,
+        // re-enable on terminal states or error. Connection-down also locks out.
+        val connectionState = snapshot["connection"] as? String ?: "idle"
+        val turnState = snapshot["turn_state"] as? String ?: "idle"
+        val shouldEnableInput = connectionState == "open" && when (turnState) {
+            "done", "error", "blocked", "cancelled", "idle", "waiting" -> true
+            else -> false  // running / thinking / streaming → disable
+        }
+        inputBar.setEnabledState(shouldEnableInput)
+
+        // Surface turn-level progress on the status banner. Hides automatically
+        // when state is terminal/idle so we don't leave stale text hanging.
+        if (connectionState == "open") {
+            statusBanner.showTurnProgress(turnState)
+        } else {
+            statusBanner.hide()
+        }
+
         val slaves = (snapshot["slaves"] as? Map<*, *>)?.entries?.mapNotNull { entry ->
             val id = entry.key as? String ?: return@mapNotNull null
             val v = entry.value as? Map<*, *> ?: return@mapNotNull null
             id to SlaveState(v["node_id"] as? String ?: id, v["pairing_state"] as? String ?: "unknown")
         } ?: emptyList()
         slaveStrip.render(slaves.map { it.first to it.second.pairingState })
-        // The bridge expects the canonical UiPublicTurnProjection shape
-        // { turn: UiTurnProjection, public_conversation: [...] } emitted by
-        // the daemon ADP turn projection. Projector.snapshot() exposes it under
-        // `latest_turn`; fall back to the legacy flat `turns` list so the
-        // bridge still has something to render before the first `turn` event
-        // arrives.
-        val json = projector.latestTurnProjectionJson() ?: projector.fallbackTurnsJson()
+
+        // Build bridge snapshot with all accumulated turns for multi-turn rendering.
+        // Preferred shape: { all_turns: [ UiPublicTurnProjection, ... ] }.
+        // Falls back to latest single turn or legacy flat list if no projections yet.
+        val allTurnsJson = projector.allTurnsProjectionJson()
+            ?: projector.latestTurnProjectionJson()
+            ?: projector.fallbackTurnsJson()
+
         webView.evaluateJavascript(
-            "if(window.__freehand&&window.__freehand.applySnapshot){window.__freehand.applySnapshot($json);}else{window.__freehandPending=$json;}",
+            "if(window.__freehand&&window.__freehand.applySnapshot){window.__freehand.applySnapshot($allTurnsJson);}else{window.__freehandPending=$allTurnsJson;}",
             null,
         )
     }

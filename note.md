@@ -6,6 +6,9 @@
   - investigation target: compare raw ADP session transcript with WebUI `RenderConversation` output for `webui-session-20260701131739-e31eb6cf` / `runtime-turn-65`.
   - follow-up user feedback: two real consecutive requests still disappeared. Prior proof only covered a single immediate pending render and did not cover repeated submit / dispatch failure / later refresh lifecycle.
   - live follow-up: screenshot showed visible ADP failure `reason ledger sequence is invalid: expected 338, got 337`. Online 4041 verification found corrupted reason ledger sequence in `~/.freehand/ledgers/reason/master/webui-session-20260701131739-e31eb6cf.jsonl` line 338 and `runtime-session-master.jsonl` line 380. This is runtime persistence truth failure, not a WebUI display-only bug.
+  - root cause in code: `ReasonPersistence::persist_row` computed `next_seq` from authoritative cursor before acquiring any session-wide lock, while `append_row_only` only locked the file append. Concurrent same-session writers could both allocate the same next seq, append duplicate/regressed rows, and later block projection/recovery.
+  - implementation: added session-scoped reason persistence lock around cursor read -> seq allocation -> ledger append -> snapshot/sidecar refresh; added `concurrent_same_session_writes_allocate_monotonic_sequences` regression.
+  - online verification gap: installing this fix caused 4041 bootstrap to fail because the already-corrupted production ledger still blocks restore. Data repair/quarantine of `~/.freehand/ledgers/reason/master/webui-session-20260701131739-e31eb6cf.jsonl` requires explicit authorization.
 
 # 2026-07-01 WebUI selected-session render source trace
   - user issue: continuing a previous conversation and submitting new input left the WebUI visually stale.
@@ -900,3 +903,55 @@ Current real root cause split:
 - Last-card merge root cause is runtime projection, not CSS: `project_runtime_turn_history` aggregated all same-ordinal round tool calls/results into the final round projection, and restore grouped runtime rounds by ordinal before applying one UI projection. This violates one-round/one-card.
 - Forward fix direction: schema retry exhaustion must not be `Failed`; use non-failed terminal truth (`Blocked`). Provider interruption/non-candidate such as `max_tokens` must be `Interrupted`. Runtime/UI projection must keep each `runtime-turn-N[-rM]` as its own chronological card and remove WebUI `logicalExecutionKey` / `__supersededRound` grouping.
 - Follow-up lock: schema repair must close both sides, not just status labels. Runtime now tests that invalid completion schema feedback is sent back to the model in the next provider request with concrete missing fields (`completion_reason`, `evidence`, `learned`), and runtime dispatch UI-state tests prove clients can query `SchemaRetry` with retry index plus missing field summaries before the repair round completes.
+
+# 2026-07-03 WebUI online validation after Android bridge review
+  - user direction: skip Android tests; verify WebUI first.
+  - fixed-port service was already healthy on `127.0.0.1:4041`; workspace WebUI asset hash initially matched served asset.
+  - browser automation against real WebUI found runtime JS error after submit: `modelRequestPhase is not defined`. `node --check apps/freehand-server/assets/webui.js` did not catch this because the symbol was syntactically valid but undefined at runtime.
+  - implementation: added `modelRequestPhase(turn)` beside `modelRequestKind` / `modelRequestLabel`, mapping typed `model_request.kind` to `thinking`, `schema_retry`, or `tool_result_continuation`; added server asset smoke assertions for the helper definition and call site.
+  - verification:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `cargo build --release -p freehand-server -p freehand-daemon -p freehand-cli`
+    - installed release binaries to `~/.local/bin`
+    - `scripts/install-launchd.sh restart`
+    - `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
+    - served JS hash matched workspace hash `faab159c8376736ea66fd64c9041298aca9ff0a11e13c5cda4c948ea2135b00f`
+    - Playwright real WebUI submit evidence under `artifacts/webui-online/20260703-webui-after-model-phase-fix/`
+    - DOM after submit had two completed execution blocks, zero live/running blocks, composer cleared, submitted prompt visible, and no `modelRequestPhase` error; remaining console error was favicon 404 only
+    - `~/.local/bin/freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp --session cli-adp-sample-success-1782953474447457000` -> `turns=2`, `turn_ids=runtime-turn-1,runtime-turn-6`, session status success
+  - reusable validation rule: WebUI lifecycle/helper edits need browser console capture in addition to `node --check`; syntax check alone cannot prove runtime helper binding.
+
+# 2026-07-04 dirty-tree closeout verification
+  - resumed from dirty tree containing Android bridge multi-turn projection, runtime/reason terminal status and persistence sequence-lock repairs, CLI ADP transcript evidence repair, WebUI `modelRequestPhase` helper, docs/mainline/test-design updates, skill and memory updates.
+  - mapped owners touched: `app.android-client`, `app.webui-smoke`, `provider.reason-live-bridge`, `reason.persistence`, `runtime.ui-command-dispatch`, `ui.protocol`, `reason.turn`.
+  - local verification passed:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `cargo test -p freehand-reason -- --nocapture` -> 57 passed
+    - `cargo test -p freehand-runtime -- --nocapture` -> 56 passed
+    - `cargo test -p freehand-ui-protocol -- --nocapture` -> 41 passed
+    - `cargo test -p freehand-cli -- --nocapture` -> 12 passed
+    - `cd apps/freehand-android && ./gradlew testDebugUnitTest` -> build successful
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`
+  - fixed-port install/online verification passed:
+    - `scripts/install-global.sh`
+    - `scripts/install-launchd.sh restart`
+    - `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
+    - `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp`
+    - `~/.local/bin/freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample success` -> `session=cli-adp-sample-success-1783100519808659000`, `turn=runtime-turn-1`, `rounds=1`, `tool_executions=0`, `failed_tools=0`
+    - `~/.local/bin/freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample failure` -> `session=cli-adp-sample-failure-1783100523482624000`, `turn=runtime-turn-2-r2`, `rounds=2`, `tool_executions=1`, `failed_tools=1`
+  - browser evidence:
+    - live submit path saved `artifacts/webui-online/20260704-closeout-live-submit/01-before-submit.png`, `02-after-submit.png`, `03-after-wait.png`, `04-terminal-after-wait.png`, `browser-state.json`, `terminal-browser-state.json`
+    - live browser submit proved prompt `webui closeout browser proof 1783101772921` became visible, composer cleared, and no page errors occurred; favicon 404 was the only console error.
+    - same live browser prompt remained `waiting_model` after later ADP query, so it is not terminal proof and must not be used as completion evidence.
+    - terminal sample proof saved `artifacts/webui-online/20260704-closeout-terminal-samples/cli-adp-sample-success-1783100519808659000.png`, `cli-adp-sample-failure-1783043566126808000.png`, and `terminal-samples-browser-state.json`
+    - terminal sample browser states showed both selected sessions visible, composer cleared, `liveCount=0`, and completed final cards.
+    - ADP query confirmed terminal sample sessions: success `cli-adp-sample-success-1783100519808659000` had `turns=1`, `turn_ids=runtime-turn-1`; failure `cli-adp-sample-failure-1783043566126808000` had `turns=1`, `turn_ids=runtime-turn-1-r2`.
+  - remaining risk:
+    - live freeform browser prompt `cli-adp-sample-failure-1783100523482624000` stayed `waiting_model`; not part of the passed terminal sample proof.
+    - Android live APK/WebView was unit/release-built but not device-installed in this closeout.

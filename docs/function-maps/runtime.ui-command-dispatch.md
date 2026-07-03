@@ -37,8 +37,8 @@
 - active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion
 - latest-active cancellation supports Esc during the short window before WebUI has received a concrete `turn_id`
 - live provider-backed multi-round turns keep the original operator prompt in public UI projection instead of exposing internal continuation prompts
-- final live multi-round UI projection preserves final-round visible text, usage, errors, and terminal status while aggregating tool-call/tool-result lifecycle activity across runtime rounds
-- live bootstrap restores multi-round UI projections from reason-ledger snapshots so earlier-round tool activity remains visible after daemon restart
+- final live multi-round UI projection preserves final-round visible text, usage, errors, and terminal status without aggregating tool-call/tool-result lifecycle activity from earlier runtime rounds
+- live bootstrap restores multi-round UI projections from reason-ledger snapshots as chronological per-round cards so earlier-round tool activity remains on its own turn after daemon restart
 - live provider-backed submit refreshes `UiProtocolState` from authoritative persistence before returning dispatch failure when the live bridge materializes failed turn truth
 - node-backed direct-message commands return dispatch receipts after owner validation
 - runtime-backed rewind commands restore checkpointed workspace state without mutating reason/session/UI truth directly
@@ -121,6 +121,6 @@
 - config-selected live bootstrap now restores multi-round tool activity into UI session transcripts after daemon restart
 - config-selected live bootstrap now restores persisted session cwd from turn records and preserves cwd for later same-session submits
 - runtime session-management dispatch is bound as a thin route to `reason.persistence`
-- final live projection now aggregates only cross-round tool lifecycle state so earlier-round tool activity remains visible without leaking intermediate continuation text into the final latest turn
+- final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

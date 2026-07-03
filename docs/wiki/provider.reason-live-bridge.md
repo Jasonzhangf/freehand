@@ -39,7 +39,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
-- retry exhaustion writes failed terminal truth through `ReasonTurnEngine::fail_turn`
+- schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`; provider interruption without a completion-schema candidate writes interrupted terminal truth through `ReasonTurnEngine::interrupt_turn`
 - runtime drains both reason-owned and runtime-owned debug snapshots through one shared `DebugHub` hook path
 - bridge returns final turn truth, all round turns, captured broadcast events, schema rejection ledger, tool execution count, restore status, and live-output summary without leaking wire DTOs
 - runtime callers project the final turn into `UiProtocolState` from one shared runtime owner path
@@ -48,7 +48,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 
 - unsupported provider type/protocol is rejected at the bridge boundary
 - provider execution failures materialize runtime-classified failed terminal truth before the dispatch failure is returned
-- invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times
+- invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times before blocked terminal truth, not failed terminal truth
 - incomplete tool calls are not executed and do not become tool-result truth
 - writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn
@@ -119,7 +119,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 | 20 | `parse_completion_submission_block` | `crates/freehand-blocks/src/lib.rs` | parse tagged completion schema from model text | model text | typed submission or schema rejection list | live bridge | blocks owner | bound |
 | 21 | `ReasonPersistence::record_completion_rejected` | `crates/freehand-reason/src/persistence.rs` | persist schema rejection evidence | schema rejection plus active turn | reason ledger row plus active-turn snapshot | live bridge | persistence owner | bound |
 | 22 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | write accepted completed/blocked terminal truth | validated completion submission | terminal event | live bridge | reason owner | bound |
-| 23 | `ReasonTurnEngine::fail_turn` | `crates/freehand-reason/src/lib.rs` | write failed terminal truth after schema retry exhaustion | retry-exhausted failure summary | terminal event | live bridge | reason owner | bound |
+| 23 | `ReasonTurnEngine::block_turn / ReasonTurnEngine::interrupt_turn` | `crates/freehand-reason/src/lib.rs` | write non-failed terminal truth after schema retry exhaustion or provider interruption | retry-exhausted or interrupted summary | blocked or interrupted terminal event | live bridge | reason owner | bound |
 | 24 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned terminal lifecycle metadata before terminal persistence | round/tool/schema-rejection counters plus final terminal status | durable runtime metadata record | live bridge | metadata owner | bound |
 | 25 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned terminal lifecycle debug snapshot before terminal persistence | round/tool/schema-rejection counters plus final terminal status | runtime-owned debug event | live bridge | debug.core | bound |
 | 26 | `ReasonPersistence::record_turn_closed` | `crates/freehand-reason/src/persistence.rs` | materialize terminal live turn | terminal turn truth | closed turn snapshot plus sidecars/index | live bridge | persistence owner | bound |

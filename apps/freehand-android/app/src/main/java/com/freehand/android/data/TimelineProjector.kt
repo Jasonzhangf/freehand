@@ -52,6 +52,10 @@ class TimelineProjector {
     // that bridge.html renders directly, so the bridge receives the same wire
     // JSON the daemon published without any re-serialisation round-trip.
     private var latestRawTurnProjection: JsonObject? = null
+    // Per-turn accumulated public projections for multi-turn bridge rendering.
+    // Each entry is the canonical { turn, public_conversation } shape rebuilt
+    // from projector state whenever applyTurnProjection / applyError / applyTerminal mutate a turn.
+    private val rawProjectionsByTurn: LinkedHashMap<String, JsonObject> = LinkedHashMap()
 
     /** Stable iteration order of turns. */
     val orderedTurns: List<TurnCard> get() = turnOrder.mapNotNull { turns[it] }
@@ -125,6 +129,26 @@ class TimelineProjector {
     private fun applyAdpProjection(projection: JsonObject?) {
         val turn = projection?.objectField("Turn")
         if (turn != null) {
+            // Canonical ADP Turn projection carries full public_conversation; capture it per-turn.
+            if (projection.has("latest_active_turn_id")) {
+                val turnId = turn.get("turn_id")?.asStringSafe()
+                    ?: turn.getAsJsonObject("source")?.get("source_turn_id")?.asStringSafe()
+                if (turnId != null) {
+                    rawProjectionsByTurn[turnId] = JsonObject().apply {
+                        add("turn", turn.deepCopy())
+                        add("public_conversation", buildPublicConversationFromTurn(turn))
+                    }
+                }
+            } else {
+                // Legacy ADP shape without latest_active_turn_id wrapper; derive from Turn payload.
+                val turnId = turn.get("turn_id")?.asStringSafe()
+                if (turnId != null) {
+                    rawProjectionsByTurn[turnId] = JsonObject().apply {
+                        add("turn", turn.deepCopy())
+                        add("public_conversation", buildPublicConversationFromTurn(turn))
+                    }
+                }
+            }
             applyTurnProjection(turn)
             return
         }
@@ -153,6 +177,11 @@ class TimelineProjector {
         // exact public_conversation ordering without re-serialisation artifacts.
         if (data.has("turn") && data.has("public_conversation")) {
             latestRawTurnProjection = data.deepCopy()
+            val turnJson = data.getAsJsonObject("turn")
+            val turnId = turnJson?.get("turn_id")?.asStringSafe()
+            if (turnId != null) {
+                rawProjectionsByTurn[turnId] = data.deepCopy()
+            }
         }
         val turnJson = if (data.has("turn") && data.get("turn").isJsonObject) {
             data.getAsJsonObject("turn")
@@ -165,6 +194,10 @@ class TimelineProjector {
     private fun applyTurnProjection(turnJson: JsonObject, canonicalPublicProjection: JsonObject? = null) {
         val turn = parseTurnProjection(turnJson) ?: return
         latestRawTurnProjection = canonicalPublicProjection?.deepCopy() ?: publicProjectionFromTurn(turnJson)
+        // Non-canonical ADP Turn shape (no top-level public_conversation): rebuild per-turn.
+        if (canonicalPublicProjection == null) {
+            rawProjectionsByTurn[turn.turnId] = latestRawTurnProjection!!.deepCopy()
+        }
         turns[turn.turnId] = turn
         if (!turnOrder.contains(turn.turnId)) turnOrder.add(turn.turnId)
         currentAgentId = turn.sourceAgentId
@@ -173,7 +206,12 @@ class TimelineProjector {
 
     private fun applyProgress(data: JsonObject) {
         val statusText = data.get("status_text").asStringSafe()
-        if (!statusText.isNullOrBlank()) turnState = statusText
+        if (!statusText.isNullOrBlank()) {
+            turnState = statusText
+            // Progress events target the latest active turn; surface as a system card
+            // on any tracked turn projection so streaming state is visible.
+            rebuildRawProjectionForLatest(statusText)
+        }
     }
 
     private fun applyNodeStatus(data: JsonObject) {
@@ -196,6 +234,7 @@ class TimelineProjector {
             terminalText = message,
             toolCalls = prev.toolCalls + "ERR: $message",
         )
+        rebuildRawProjection(turnId)
         turnState = "error"
     }
 
@@ -208,6 +247,7 @@ class TimelineProjector {
             terminalStatus = status,
             terminalText = summary.ifBlank { prev.terminalText },
         )
+        rebuildRawProjection(turnId)
         turnState = status
     }
 
@@ -218,6 +258,17 @@ class TimelineProjector {
     fun setCurrentAgent(agentId: String, agentName: String) {
         currentAgentId = agentId
         currentAgentName = agentName.ifBlank { agentId }
+    }
+
+    /** Clear all accumulated turn state. Used before a fresh ADP connection so stale
+     *  turns from a previous session do not mix with live subscription events. */
+    fun clearAccumulatedTurns() {
+        turnOrder.clear()
+        turns.clear()
+        rawProjectionsByTurn.clear()
+        slaves.clear()
+        latestRawTurnProjection = null
+        // Preserve connection and agent identity; they are set explicitly by caller.
     }
 
     private fun parseTurnProjection(json: JsonObject): TurnCard? {
@@ -298,6 +349,106 @@ class TimelineProjector {
         val value = get(name) ?: return null
         if (value.isJsonNull || !value.isJsonObject) return null
         return value.asJsonObject
+    }
+
+
+    /** Build a canonical public_conversation JsonArray from a raw Turn payload (no public_conversation). */
+    private fun buildPublicConversationFromTurn(turnJson: JsonObject): JsonArray {
+        val pc = JsonArray()
+        turnJson.get("user_text").asStringSafe()?.takeIf { it.isNotBlank() }?.let { text ->
+            pc.add(conversationItem("UserText", "User", text, "submitted"))
+        }
+        turnJson.getAsJsonArrayOrEmpty("text").mapNotNull { it.asStringSafe() }.forEach { text ->
+            if (text.isNotBlank()) pc.add(conversationItem("AssistantText", "Assistant", text, "streaming"))
+        }
+        turnJson.getAsJsonArrayOrEmpty("tool_activities").forEach { element ->
+            val tool = element.asJsonObject
+            val status = tool.get("status").asStringSafe()?.lowercase() ?: "waiting"
+            val toolName = tool.get("tool_name").asStringSafe() ?: "tool"
+            pc.add(conversationItem("ToolSummary", toolName, status, status).apply {
+                tool.get("tool_call_id").asStringSafe()?.let { addProperty("tool_call_id", it) }
+            })
+        }
+        turnJson.get("terminal_text").asStringSafe()?.takeIf { it.isNotBlank() }?.let { text ->
+            pc.add(conversationItem("Terminal", "Final", text, terminalStatusClass(turnJson.get("terminal_status").asStringSafe())))
+        }
+        turnJson.getAsJsonArrayOrEmpty("errors").mapNotNull { it.asStringSafe() }.forEach { error ->
+            pc.add(conversationItem("Error", "Error", error, "failed"))
+        }
+        return pc
+    }
+
+    /** Rebuild per-turn raw projection from stored TurnCard state after mutation. */
+    private fun rebuildRawProjection(turnId: String) {
+        val card = turns[turnId] ?: return
+        // Start from existing projection if available, otherwise build fresh.
+        val base = rawProjectionsByTurn[turnId]?.deepCopy()
+            ?: JsonObject().apply { add("turn", JsonObject()); add("public_conversation", JsonArray()) }
+
+        val turnNode = base.getAsJsonObject("turn") ?: JsonObject().also { base.add("turn", it) }
+        if (card.userText.isNotBlank()) turnNode.addProperty("user_text", card.userText)
+        if (card.terminalStatus != null) turnNode.addProperty("terminal_status", card.terminalStatus)
+        if (card.terminalText != null) turnNode.addProperty("terminal_text", card.terminalText)
+
+        val pc = base.getAsJsonArray("public_conversation") ?: JsonArray().also { base.add("public_conversation", it) }
+        // Replace existing Error/Terminal items for this turn, keep User/Assistant/Tool intact.
+        val filtered = JsonArray()
+        for (i in 0 until pc.size()) {
+            val item = pc[i].asJsonObject
+            when (item.get("kind")?.asString) {
+                "Error", "Terminal" -> { /* drop stale terminal/error; will re-add below */ }
+                else -> filtered.add(item.deepCopy())
+            }
+        }
+
+        if (card.terminalStatus != null && card.terminalText?.isNotBlank() == true) {
+            filtered.add(conversationItem("Terminal", "Final", card.terminalText, terminalStatusClass(card.terminalStatus)))
+        } else if (card.terminalStatus == "error" || card.toolCalls.any { it.startsWith("ERR:") }) {
+            val errMsg = card.toolCalls.firstOrNull { it.startsWith("ERR:") }?.removePrefix("ERR: ") ?: card.terminalText ?: "error"
+            filtered.add(conversationItem("Error", "Error", errMsg, "failed"))
+        }
+
+        base.remove("public_conversation")
+        base.add("public_conversation", filtered)
+        rawProjectionsByTurn[turnId] = base
+    }
+
+    /** Append a progress system card to the latest tracked turn's raw projection. */
+    private fun rebuildRawProjectionForLatest(statusText: String) {
+        val latestTurnId = turnOrder.lastOrNull() ?: return
+        val base = rawProjectionsByTurn[latestTurnId]?.deepCopy()
+            ?: JsonObject().apply { add("turn", JsonObject()); add("public_conversation", JsonArray()) }
+
+        val pc = base.getAsJsonArray("public_conversation") ?: JsonArray().also { base.add("public_conversation", it) }
+        // Replace any prior System/Progress item to avoid duplicates.
+        val filtered = JsonArray()
+        for (i in 0 until pc.size()) {
+            val item = pc[i].asJsonObject
+            if (item.get("kind")?.asString != "System") filtered.add(item.deepCopy())
+        }
+        filtered.add(conversationItem("System", "Status", statusText, "running"))
+
+        base.remove("public_conversation")
+        base.add("public_conversation", filtered)
+        rawProjectionsByTurn[latestTurnId] = base
+    }
+
+    private fun terminalStatusClass(status: String?): String = when (status?.lowercase()) {
+        "failed" -> "failed"
+        "cancelled" -> "cancelled"
+        "blocked" -> "blocked"
+        "interrupted" -> "interrupted"
+        else -> "completed"
+    }
+
+    /** Emit all accumulated turns as a JSON array of UiPublicTurnProjection shapes for the bridge. */
+    fun allTurnsProjectionJson(): String? {
+        if (rawProjectionsByTurn.isEmpty()) return null
+        val arr = JsonArray()
+        for ((_, proj) in rawProjectionsByTurn) {
+            arr.add(proj.deepCopy())
+        }
+        return JsonObject().apply { add("all_turns", arr) }.toString()
     }
 
     fun snapshot(): Map<String, Any?> {

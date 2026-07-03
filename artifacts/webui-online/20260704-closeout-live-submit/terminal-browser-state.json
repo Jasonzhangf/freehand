@@ -1,0 +1,18 @@
+{
+  "state": {
+    "selectedSession": "",
+    "selectedTurn": "",
+    "composer": "",
+    "liveCount": 1,
+    "completedCount": 12,
+    "runningTextCount": 3,
+    "bodySample": "FH\nWS\nND\nRP\nDG\nSESSIONS\nSessions\nTASK TARGET DIRECTORY\nNew conversation\nNew task\nBULK\n0 selected\nSelect all\nClear\nDelete\nACTIVE\ncli-adp-sample-failure-1782953022111919000\nruntime-turn-3-r3 · 2 turn(s) · code/freehand\nSUCCESS\ncli-adp-sample-failure-1782953474436814000\nruntime-turn-5-r3 · 3 turn(s) · code/freehand\nSUCCESS\ncli-adp-sample-failure-1783043566126808000\nruntime-turn-1-r2 · 1 turn(s) · code/freehand\nWAITING_MODEL\ncli-adp-sample-failure-1783100523482624000\nruntime-turn-3 · 3 turn(s) · code/freehand\nSUCCESS\ncli-adp-sample-success-1782953022117861000\nruntime-turn-4 · 1 turn(s) · code/freehand\nSUCCESS\ncli-adp-sample-success-1782953474447457000\nruntime-turn-6 · 1 turn(s) · code/freehand\nSUCCESS\ncli-adp-sample-success-1783100519808659000\nruntime-turn-1 · 1 turn(s) · code/freehand\nCONVERSATION\nFreehand\nWHITE\nBLACK\nDEBUG OFF\nCONNECTED\nSESSION\ncli-adp-sample-failure-1782953022111919000\nTURN\nruntime-turn-3-r2\nCWD\n/Volumes/extension/code/freehand\nSLAVE\nidle\nSlave Agents\nIDLE\nSELECTED SESSION\nruntime-turn-3-r2\nTOOL RUNNING: GLOB · 24S\nTURN\nTOOL EXECUTING: GLOB · 24S\nAssistant\nstreaming\nThe `read_file` tool call failed as expected with the error \"No such file or directory (os error 2)\" for the file `definitely-missing-freehand-file.txt`. This confirms the file does not exist.\nThe shell command timed out. Let me try a simpler exploration.\nFind files\n等待中 · 24s\npattern=*\nModel\n0s\nprovider request built\nTURN\nCOMPLETED\nFinal\ncompleted\nThe ADP failure sample task has been completed. The read_file tool was called exactly once with the specified non-existent file path, and it failed with the expected 'No such file or directory' error (os error 2). This confirms the file does not exist.\nSend\nCancel\nSuccess\nFailure\nAttach file\nAttach image\nAttach video\nPreview files\nRefresh session\nCWD\nMODEL\nRuntime config\nno draft attachments\ntool executing: glob · 24s\nDETAIL REGION\nSelected Turn Debug\n\n右侧只展示当前 turn 的调试摘要，不抢主消息流焦点。\n\nDEBUG STATUS\nprovider terminal observed but not accepted\nterminal_waits_for_completion_schema=true\nCHECKPOINTS\n0 checkpoint(s)\n-"
+  },
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "pageErrors": []
+}

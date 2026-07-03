@@ -50,6 +50,26 @@ class StatusBannerController(
         banner.visibility = View.VISIBLE
     }
 
+    /** Show turn-level progress (thinking / tool execution / streaming).
+     *  Auto-hides when state is terminal or idle. */
+    fun showTurnProgress(turnState: String) {
+        val message = when (turnState) {
+            "idle", "waiting" -> null
+            "done", "error", "blocked", "cancelled" -> null
+            "thinking", "reasoning" -> "agent is thinking…"
+            "running tools", "tool_executing" -> "using tool…"
+            "streaming", "writing response" -> "writing response…"
+            else -> turnState.takeIf { it.isNotBlank() }
+        }
+        if (message == null) {
+            hide()
+            return
+        }
+        banner.text = message
+        banner.setBackgroundColor(Color.parseColor("#1F2937"))
+        banner.visibility = View.VISIBLE
+    }
+
     fun hide() {
         banner.visibility = View.GONE
     }

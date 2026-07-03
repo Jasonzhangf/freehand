@@ -10,7 +10,7 @@
   - runtime dispatch routes to the declared owner module
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
   - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
-  - live bootstrap restores multi-round tool activity from reason-ledger snapshots into derived UI session transcripts after daemon restart
+  - live bootstrap restores multi-round turn snapshots as separate derived UI session transcript cards after daemon restart
   - reason-backed submit/cancel update derived UI state
   - reason-backed submit with a selected session id keeps the session transcript queryable under that session
   - reason-backed submit with selected cwd projects cwd into session transcript and later same-session submits inherit it
@@ -21,12 +21,13 @@
 - live provider submit incrementally updates derived UI turn/debug state before terminal receipt
 - live provider submit maps tool-result broadcasts into derived UI state so tool activity can transition to completed over SSE
 - live provider submit maps provider-request-built debug events into derived UI state so model-response waiting is visible before provider response arrives
+- live provider submit maps completion-schema rejection broadcasts into derived UI state so clients can query `SchemaRetry` plus either missing tag guidance or concrete invalid-schema fields before the model repair completes
 - live provider submit maps bridge-materialized tool execution failure into derived UI state before returning dispatch failure, so query/SSE do not stay waiting
   - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately
   - live provider submit keeps the selected session id attached to the derived UI truth when one is supplied
   - live provider submit keeps the selected cwd attached to derived UI truth and tool execution workspace when one is supplied
   - live provider multi-round continuation prompts must not replace the public user prompt projection
-  - final live multi-round projection aggregates tool activity from earlier rounds instead of showing only the final round, while excluding intermediate continuation text from the final public conversation
+  - final live multi-round projection keeps only the final round's own content while earlier rounds remain separate cards with their own tool activity
   - node-backed direct message returns owner-backed receipt
   - unsupported resume path fails explicitly
   - unknown session metadata mutation targets fail explicitly as target-not-found
@@ -51,11 +52,12 @@
   - checkpoint rewind missing-manifest target-not-found coverage
 - live reason hook-to-ui-state coverage
 - live provider-request-built debug-to-model-waiting UI coverage
+- live completion-schema rejection feedback-to-client coverage, including no-schema missing tag feedback, invalid-schema missing field names, and retry index
 - live reason tool-result hook-to-ui-state coverage
   - live reason prompt-first projection coverage
   - live reason final projection keeps original user prompt after tool-result continuation
-  - live reason final projection keeps earlier-round tool activity visible after tool-result continuation
-  - live bootstrap projection keeps earlier-round tool activity visible after restart
+  - live reason projection keeps earlier-round tool activity visible on the earlier round after tool-result continuation
+  - live bootstrap projection keeps earlier-round tool activity on its original round after restart
   - live reason final projection negative coverage proves intermediate continuation text is not exposed in the final public conversation
   - live reason dispatch failure projection coverage proves bridge-materialized failed turns update `UiProtocolState` before the dispatch error is returned
   - node direct-message dispatch coverage
@@ -92,9 +94,10 @@
 - session metadata dispatch coverage is implemented through runtime dispatch into `reason.persistence` and shared UI projection queries
 - live provider submit now streams incremental UI state updates through runtime-owned hooks
 - live provider submit now projects provider-request-built lifecycle state into UI before model response arrives
-- live provider submit now streams tool-result UI updates and final projection keeps earlier-round tool activity visible without exposing intermediate continuation text
+- live provider submit now projects both missing-schema and invalid-schema retry lifecycle feedback into UI before the repair response completes
+- live provider submit now streams tool-result UI updates and final projection does not merge earlier-round tool activity into the final turn
   - live provider submit now executes registry tools against the requested session cwd and projects that cwd into UI state
-  - live bootstrap now restores earlier-round tool activity into UI transcripts after restart without changing closed-turn recovery truth
+  - live bootstrap now restores earlier-round tool activity on its original UI turn after restart without changing closed-turn recovery truth
   - live bootstrap now restores persisted session cwd from turn records for UI projection and same-session inheritance
   - live provider submit now refreshes failed bridge truth from persistence before returning dispatch failure, preventing silent waiting UI state
   - reason-backed cancel dispatch is covered

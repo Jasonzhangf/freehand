@@ -28,7 +28,10 @@
   - incremental stream apply path proving broadcast can happen before stream completion
   - cancellation before tool execution path
   - cancellation before terminal persistence path
-  - invalid-schema rejection then success path
+  - missing completion-schema rejection then success path
+  - invalid completion-schema rejection then success path
+  - missing completion-schema feedback must be sent to the next provider request with the missing `<freehand_completion>` tag requirement
+  - invalid-schema rejection feedback must be sent to the next provider request with concrete missing field names, not only a generic retry prompt
   - terminal-candidate-only schema parsing path proving `tool_use` responses do not trigger schema retry
   - `claim=continue` next-round path
   - retry-exhausted failed terminal path
@@ -53,7 +56,9 @@
   - one selected anthropic provider emits an implemented registered tool call, receives tool result, then closes via accepted completion schema
   - one selected anthropic provider emits a writable file tool call, gets checkpointed before execute, and can be rewound by runtime owner truth
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
-  - invalid completion schema retries exactly 3 consecutive terminal-candidate responses and closes failed terminal without early success
+  - invalid completion schema retries exactly 3 consecutive terminal-candidate responses and closes blocked terminal without early success or failed status
+  - missing completion schema repair request includes the required tag guidance needed by the model for self-repair
+  - invalid completion schema repair request includes the missing schema fields required by the model for self-repair
   - non-string completion fields produce explicit type feedback instead of being reported as missing
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
   - provider HTTP/executor failure returns explicit dispatch failure, materializes failed terminal/error truth, and leaves no active turn hanging

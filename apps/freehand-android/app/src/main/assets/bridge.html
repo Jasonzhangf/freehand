@@ -5,21 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Freehand</title>
 <style>
-/* Android WebView bridge — uses mobile-mock design tokens via CSS import.
-   The server's mobile-mock.html IS NOT loaded here; this page lives in the
-   Android APK assets and receives live turn data from the native SSE consumer.
-   Design tokens (--bg, --text, --line, --master, --user, --assistant,
-   --tool, --success, --fail, --running, --shadow) are imported from the
-   same CSS that the server-side design preview uses. */
+/* Android WebView bridge — uses mobile-mock design tokens via CSS import. */
 @import url("mobile-mock.css");
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { min-height: 100vh; }
+body { min-height: 100vh; overflow-x: hidden; }
 
-#conv { padding: 12px 14px 80px; display: flex; flex-direction: column; gap: 10px; }
+#conv { padding: 12px 14px 80px; display: flex; flex-direction: column; gap: 6px; }
+
+/* Scroll anchor sentinel — stays at the bottom of the conversation flow. */
+#scroll-anchor { height: 1px; width: 1px; overflow: hidden; }
 
 .day-sep {
   font-size: 11px; color: #9fb0a7;
-  text-align: center; padding: 10px 0 4px;
+  text-align: center; padding: 8px 0 2px;
   letter-spacing: .04em; text-transform: uppercase;
 }
 
@@ -43,12 +41,12 @@ article.turn.completed                      { border-left-color: var(--success, 
 article.turn.submitted                      { border-left-color: var(--user, #7db0dd); }
 
 .turn-meta {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
-  font-size: 11px; color: #9fb0a7;
+  display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+  font-size: 12px; color: #9fb0a7;
 }
 .pill {
-  font-size: 10px; padding: 1px 6px; border-radius: 20px;
-  font-weight: 600; letter-spacing: .03em;
+  font-size: 10px; padding: 3px 8px; border-radius: 20px;
+  font-weight: 600; letter-spacing: .04em;
 }
 .pill.done, .pill.completed { background: #78c9a033; color: #78c9a0; }
 .pill.running, .pill.submitted { background: #efbb6633; color: #efbb66; }
@@ -61,24 +59,36 @@ article.turn.submitted                      { border-left-color: var(--user, #7d
 .pill.system { background: #9fb0a733; color: #9fb0a7; }
 
 .turn-body {
-  font-size: 13.5px; line-height: 1.55; color: var(--text, #eef4f0);
+  font-size: 14px; line-height: 1.6; color: var(--text, #eef4f0);
   white-space: pre-wrap; word-break: break-word;
 }
 
 .tool.ok {
-  margin-top: 6px; padding: 6px 8px; border-radius: 8px;
+  margin-top: 8px; padding: 8px 10px; border-radius: 9px;
   background: #d1a35c22; border: 1px solid #d1a35c44;
 }
 .tool.ok .tool-head { display: flex; align-items: center; gap: 6px; }
 .tool-icon { font-size: 10px; }
 .tool-head span:last-child { font-size: 12px; color: #d1a35c; word-break: break-all; }
+
+/* Streaming cursor animation for running turns */
+article.turn.running .turn-body::after {
+  content: '▋';
+  color: var(--running, #efbb66);
+  font-weight: bold;
+}
 </style>
 </head>
 <body>
 <div id="conv"></div>
+
 <script>
 (function () {
   var conv = document.getElementById('conv');
+
+  // ── rendered-turn registry (id → article element) for incremental updates ──
+  var renderedTurns = {};   // turnId -> HTMLElement (the <article> card)
+  var renderedItems = [];   // ordered list of top-level articles in #conv
 
   // Escape HTML entities
   function esc(s) {
@@ -86,12 +96,7 @@ article.turn.submitted                      { border-left-color: var(--user, #7d
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  // Map UiConversationItem.kind -> CSS class (user/tool/terminal/system).
-  // The wire format from crates/freehand-ui-protocol::UiConversationItem is
-  // { kind: "UserText"|"ToolSummary"|"Terminal"|"Reasoning"|"AssistantText"|"System",
-  //   title: String, body: String, status: String }.
-  // Keep this list aligned with the protocol enum; any unknown kind falls back
-  // to "assistant" so the bridge never silently drops content.
+  // Map UiConversationItem.kind -> CSS class
   function kindToClass(kind) {
     switch (kind) {
       case 'UserText':     return 'user';
@@ -111,80 +116,202 @@ article.turn.submitted                      { border-left-color: var(--user, #7d
     var k = item.kind || 'AssistantText';
     var cls = kindToClass(k);
     var status = item.status || (k === 'Terminal' ? 'completed' : 'running');
+
+    // For turn-level grouping, derive a stable id from the parent turn's
+    // turn_id + index so we can update individual items incrementally.
     el.className = 'turn ' + cls + ' ' + status;
+    var titleText = item.title || k;
     var meta = '<div class="turn-meta">' +
-      '<span>' + esc(item.title || k) + '</span>' +
+      '<span>' + esc(titleText) + '</span>' +
       '<span class="pill ' + status + '">' + esc(status) + '</span>' +
       '</div>';
-    el.innerHTML = meta + '<div class="turn-body">' + esc(item.body || '') + '</div>';
+
+    // The actual content body. For System items show live progress text;
+    // for others render the body verbatim (pre-wrap).
+    var bodyEl = document.createElement('div');
+    bodyEl.className = 'turn-body';
+    bodyEl.textContent = item.body || '';
+    el.innerHTML = meta;
+    el.appendChild(bodyEl);
+
     return el;
   }
 
-  // Render a UiTurnProjection as one or more cards. Uses the canonical
-  // public_conversation array when present (it carries the per-item kind /
-  // title / status), and falls back to the raw text fields for legacy shapes.
-  function buildTurnCard(s) {
-    var status = s.terminal_status || s.terminalStatus || 'running';
-    var items = s.public_conversation || [];
-    if (items.length) {
-      return items.map(buildItemCard);
+  // Build a group container for one turn (holds multiple item cards).
+  function buildTurnGroup(turnId) {
+    var group = document.createElement('div');
+    group.className = 'turn-group';
+    group.setAttribute('data-turn-id', turnId);
+    return group;
+  }
+
+  // ── Incremental diff: given new public_conversation items for a turn, ──
+  // update or append item cards inside the turn's group container.
+  function updateTurnItems(turnId, items) {
+    var group = document.querySelector('.turn-group[data-turn-id="' + esc(turnId) + '"]');
+    if (!group) return;
+
+    // Build fresh item elements for the new conversation list.
+    var newEls = items.map(function (item) { return buildItemCard(item); });
+
+    // Replace all children in this turn's group. We do NOT reuse DOM nodes
+    // across snapshots because status strings may change and reusing by index
+    // is simpler than keyed reconciliation for the expected card counts (<20).
+    while (group.firstChild) group.removeChild(group.firstChild);
+    newEls.forEach(function (el) { group.appendChild(el); });
+
+    renderedTurns[turnId] = group;
+  }
+
+  // ── Render entry point: applySnapshot(json) from native. ──
+  // Expected shapes:
+  //   { all_turns: [ UiPublicTurnProjection, ... ] }      ← multi-turn (new default)
+  //   { turn: UiTurnProjection, public_conversation: [] }  ← single canonical turn
+  //   { turns: [...] }                                     ← legacy flat list
+  //   null / empty                                         ← blank state
+
+  function render(s) {
+    if (!conv) return;
+
+    // ── Case 1: multi-turn array (preferred path) ───────────────────
+    if (s && s.all_turns && s.all_turns.length > 0) {
+      var existingIds = Object.keys(renderedTurns);
+      var seenIds = [];
+
+      for (var i = 0; i < s.all_turns.length; i++) {
+        var turnProj = s.all_turns[i];
+        if (!turnProj || !turnProj.turn) continue;
+        var turnId = turnProj.turn.turn_id || '';
+        if (!turnId) continue;
+
+        seenIds.push(turnId);
+        var items = turnProj.public_conversation || [];
+
+        // If this turn already has a rendered group, do an in-place update.
+        if (renderedTurns[turnId]) {
+          updateTurnItems(turnId, items);
+        } else {
+          // New turn: create a group and append to conv.
+          var group = buildTurnGroup(turnId);
+          var hasUserItem = items.some(function (item) { return item && item.kind === 'UserText'; });
+
+          // Legacy/non-canonical projections may not include UserText in
+          // public_conversation. Canonical projections already include it.
+          if (turnProj.turn.user_text && !hasUserItem) {
+            var userItem = { kind: 'UserText', title: 'User', body: turnProj.turn.user_text, status: 'submitted' };
+            group.appendChild(buildItemCard(userItem));
+          }
+
+          // Append all public_conversation items (assistant text, tool calls, terminal).
+          items.forEach(function (item) { group.appendChild(buildItemCard(item)); });
+
+          conv.appendChild(group);
+          renderedTurns[turnId] = group;
+        }
+      }
+
+      // Remove stale turn groups that are no longer in the snapshot.
+      for (var j = 0; j < existingIds.length; j++) {
+        if (seenIds.indexOf(existingIds[j]) === -1) {
+          var stale = renderedTurns[existingIds[j]];
+          if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+          delete renderedTurns[existingIds[j]];
+        }
+      }
+
+      scrollIfNeeded();
+      return;
     }
-    // Legacy fallback: build a single assistant card from raw text fields.
+
+    // ── Case 2: legacy single canonical turn shape ───────────────────
+    if (s && s.turn) {
+      var turn = s.turn;
+      var items = s.public_conversation || turn.public_conversation || [];
+      var turnId = turn.turn_id || 'single';
+      seenIds = [turnId];
+
+      if (renderedTurns[turnId]) {
+        updateTurnItems(turnId, items);
+      } else {
+        // First render: clear existing content and start fresh.
+        while (conv.firstChild) conv.removeChild(conv.firstChild);
+        renderedTurns = {};
+        var group = buildTurnGroup(turnId);
+
+        var singleHasUserItem = items.some(function (item) { return item && item.kind === 'UserText'; });
+        if (turn.user_text && !singleHasUserItem) {
+          var userItem2 = { kind: 'UserText', title: 'User', body: turn.user_text, status: 'submitted' };
+          group.appendChild(buildItemCard(userItem2));
+        }
+        items.forEach(function (item) { group.appendChild(buildItemCard(item)); });
+
+        conv.appendChild(group);
+        renderedTurns[turnId] = group;
+      }
+
+      scrollIfNeeded();
+      return;
+    }
+
+    // ── Case 3: legacy flat turns list ───────────────────────────────
+    if (s && s.turns && s.turns.length) {
+      while (conv.firstChild) conv.removeChild(conv.firstChild);
+      renderedTurns = {};
+
+      for (var i2 = 0; i2 < s.turns.length; i2++) {
+        var t = s.turns[i2];
+        renderLegacyTurn(t);
+      }
+      scrollIfNeeded();
+      return;
+    }
+
+    // ── Blank state ──────────────────────────────────────────────────
+    if (!conv.firstChild) {
+      var d = document.createElement('div');
+      d.className = 'day-sep';
+      d.textContent = 'waiting for first turn';
+      conv.appendChild(d);
+    }
+  }
+
+  // Render a legacy flat-turn object (no public_conversation).
+  function renderLegacyTurn(t) {
+    var status = t.terminal_status || 'running';
     var body = '';
-    if (s.user_text) body += esc(s.user_text) + '\n';
-    if (s.text && s.text.length) body += esc(s.text.join('\n')) + '\n';
-    if (s.terminal_text) body += esc(s.terminal_text);
+    if (t.user_text) body += esc(t.user_text) + '\n';
+    if (t.text && t.text.length) body += esc(t.text.join('\n')) + '\n';
+    if (t.terminal_text) body += esc(t.terminal_text);
+
     var el = document.createElement('article');
     el.className = 'turn assistant ' + status;
     el.innerHTML = '<div class="turn-meta"><span>assistant</span>' +
       '<span class="pill ' + status + '">' + esc(status) + '</span></div>' +
       '<div class="turn-body">' + body + '</div>';
-    return [el];
+
+    var turnId = t.id || ('legacy-' + Math.random().toString(36).slice(2, 8));
+    var group = buildTurnGroup(turnId);
+    group.appendChild(el);
+    conv.appendChild(group);
+    renderedTurns[turnId] = group;
   }
 
-  // Render a snapshot pushed from native.
-  // Accepted shapes:
-  //   { turn: UiTurnProjection, public_conversation: [] }  ← daemon wire shape
-  //   { turns: [...] }                                    ← legacy flat
-  //   null / empty                                        ← blank state
-  function render(s) {
-    if (!conv) return;
-    conv.innerHTML = '';
+  // Scroll to bottom only when the user was already near the bottom.
+  function scrollIfNeeded() {
+    var threshold = 120;
+    var scrollTop = document.documentElement.scrollTop || document.body.scrollTop;
+    var scrollHeight = document.documentElement.scrollHeight || document.body.scrollHeight;
+    var clientHeight = document.documentElement.clientHeight || window.innerHeight;
 
-    if (!s) {
-      var d = document.createElement('div');
-      d.className = 'day-sep';
-      d.textContent = 'waiting for first turn';
-      conv.appendChild(d);
-      return;
-    }
-
-    // Legacy flat shape: { turns: [...] }
-    if (s.turns && s.turns.length) {
-      s.turns.forEach(function (t) {
-        buildTurnCard(t).forEach(function (card) { conv.appendChild(card); });
+    if (scrollHeight - scrollTop - clientHeight < threshold) {
+      // Use requestAnimationFrame for smooth scroll after DOM mutation.
+      window.requestAnimationFrame(function () {
+        window.scrollTo(0, scrollHeight);
       });
-      conv.scrollTop = conv.scrollHeight;
-      return;
-    }
-
-    // Canonical UiPublicTurnProjection shape from daemon.
-    // The full { turn, public_conversation } shape is pushed as `s.turn`
-    // and `s.public_conversation` at the top level of the snapshot.
-    if (s.turn) {
-      var turn = s.turn;
-      var items = turn.public_conversation || [];
-      if (items.length) {
-        items.forEach(function (item) { conv.appendChild(buildItemCard(item)); });
-      } else {
-        buildTurnCard(turn).forEach(function (card) { conv.appendChild(card); });
-      }
-      conv.scrollTop = conv.scrollHeight;
-      return;
     }
   }
 
-  // Native pushes live snapshots here. Shape: UiSubscriptionEvent JSON.
+  // ── Native bridge entry point ──
   window.__freehand = {
     applySnapshot: function (s) {
       try { render(s); } catch (e) { console.error('[freehand] snapshot err', e); }

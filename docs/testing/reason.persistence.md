@@ -17,6 +17,7 @@
   - invalid snapshot coherence rejection tests
   - persistence cursor serialization tests
   - reason-ledger sequence monotonicity tests
+  - same-session concurrent writer monotonic sequence allocation test
   - reason-ledger sequence gap rejection tests
   - duplicate reason-ledger sequence rejection tests
   - stale duplicate reason-ledger row skip test gated by presence of a later authoritative expected-sequence row

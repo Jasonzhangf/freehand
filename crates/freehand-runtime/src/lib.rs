@@ -57,7 +57,7 @@ use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
     UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
-    UiCompletionSchemaRetryWaiting, UiModelRequestKind, UiProtocolState,
+    UiCompletionSchemaRetryWaiting, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
     UiSessionMetadataProjection, UiTurnProjection, checkpoint_projection_from_runtime_summary,
     turn_projection_for_client, turn_projection_from_events,
 };
@@ -1269,9 +1269,9 @@ where
             let reason = latest_finish_reason(&turn)
                 .unwrap_or("missing_finish_reason")
                 .to_owned();
-            engine.fail_turn(
+            engine.interrupt_turn(
                 &mut turn,
-                format!("Provider ended without a completion-schema candidate: {reason}"),
+                format!("Provider ended before completion schema was available: {reason}"),
             );
             drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
             drain_debug_events(&debug_receiver, &mut on_debug);
@@ -1406,10 +1406,10 @@ where
                         RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                     })?;
                 if consecutive_schema_rejections >= 3 {
-                    engine.fail_turn(
+                    engine.block_turn(
                         &mut turn,
                         format!(
-                            "Failed after 3 invalid completion schema retries.\n{}",
+                            "Completion schema still invalid after 3 repair attempts.\n{}",
                             feedback
                         ),
                     );
@@ -2040,7 +2040,7 @@ impl RuntimeCommandDispatcher {
                 let projection = project_runtime_turn_history(
                     &state.config.reason_agent_id,
                     &state.config.master_node_id,
-                    &outcome.turns,
+                    std::slice::from_ref(&outcome.turn),
                     Some(prepared.cwd.to_string_lossy().into_owned()),
                 );
                 state.turns.extend(outcome.turns.clone());
@@ -2079,12 +2079,12 @@ impl RuntimeCommandDispatcher {
                     .turns
                     .sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
                 state.session_cwds = session_cwds_from_turns(&state.turns);
-                let current_turns =
-                    current_runtime_turns_for_projection(&state.turns, &prepared.turn_id)?;
+                let current_turn =
+                    current_runtime_turn_for_projection(&state.turns, &prepared.turn_id)?;
                 let projection = project_runtime_turn_history(
                     &state.config.reason_agent_id,
                     &state.config.master_node_id,
-                    &current_turns,
+                    std::slice::from_ref(&current_turn),
                     Some(prepared.cwd.to_string_lossy().into_owned()),
                 );
                 self.ui_state
@@ -3223,15 +3223,15 @@ fn apply_runtime_reason_broadcast(
             });
         }
         ReasonBroadcastEvent::ModelContinuationWaiting(event) => {
-            ui.apply_model_request_waiting_kind(
-                reason_agent_id.clone(),
-                master_node_id.to_owned(),
-                &event.session_id,
-                &event.turn_id,
-                UiModelRequestKind::ToolResultContinuation,
-                Some(event.detail.clone()),
-                false,
-            );
+            ui.apply_model_request_waiting_kind(UiModelRequestWaiting {
+                source_agent_id: reason_agent_id.clone(),
+                source_node_id: master_node_id.to_owned(),
+                session_id: event.session_id.clone(),
+                turn_id: event.turn_id.clone(),
+                kind: UiModelRequestKind::ToolResultContinuation,
+                detail: Some(event.detail.clone()),
+                slave_substream_card: false,
+            });
         }
         ReasonBroadcastEvent::Terminal(event) => {
             ui.apply_terminal_event(
@@ -3261,18 +3261,18 @@ fn apply_runtime_debug_event(
     let mut ui = ui_state.lock().expect("lock ui state");
     if event.envelope.semantic.pipeline_node.as_deref() == Some("RuntimeLive02ProviderRequestBuilt")
     {
-        ui.apply_model_request_waiting_kind(
-            reason_agent_id.clone(),
-            master_node_id.to_owned(),
-            &event.envelope.semantic.session_id,
-            &event.envelope.semantic.turn_id,
-            UiModelRequestKind::Thinking,
-            event
+        ui.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: reason_agent_id.clone(),
+            source_node_id: master_node_id.to_owned(),
+            session_id: event.envelope.semantic.session_id.clone(),
+            turn_id: event.envelope.semantic.turn_id.clone(),
+            kind: UiModelRequestKind::Thinking,
+            detail: event
                 .snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.status_text.clone()),
-            false,
-        );
+            slave_substream_card: false,
+        });
     }
     let _ = ui.apply_debug_event(event);
 }
@@ -3355,12 +3355,6 @@ fn project_runtime_turn_history(
     let turn = turns
         .last()
         .expect("runtime turn history projection requires at least one turn");
-    let mut tool_calls = Vec::new();
-    let mut tool_results = Vec::new();
-    for turn in turns {
-        tool_calls.extend(turn.tool_calls.clone());
-        tool_results.extend(turn.tool_results.clone());
-    }
     turn_projection_for_client(
         turn_projection_from_events(TurnProjectionInput {
             source_agent_id: reason_agent_id.clone(),
@@ -3370,8 +3364,8 @@ fn project_runtime_turn_history(
             cwd: cwd.or_else(|| turn.cwd.clone()),
             user_text: Some(ui_user_text_for_turn(turn)),
             semantic_events: turn.semantic_events.clone(),
-            tool_calls,
-            tool_results,
+            tool_calls: turn.tool_calls.clone(),
+            tool_results: turn.tool_results.clone(),
             usage_events: turn.usage_events.clone(),
             terminal_event: turn.terminal_event.clone(),
             error_events: turn.error_events.clone(),
@@ -3381,23 +3375,23 @@ fn project_runtime_turn_history(
     )
 }
 
-fn current_runtime_turns_for_projection(
+fn current_runtime_turn_for_projection(
     turns: &[TurnRecord],
     base_turn_id: &TurnId,
-) -> Result<Vec<TurnRecord>, UiCommandDispatchPortError> {
+) -> Result<TurnRecord, UiCommandDispatchPortError> {
     let target_ordinal = runtime_turn_position(base_turn_id).0;
-    let current_turns = turns
+    let current_turn = turns
         .iter()
         .filter(|turn| runtime_turn_position(&turn.request.turn_id).0 == target_ordinal)
+        .max_by_key(|turn| runtime_turn_position(&turn.request.turn_id))
         .cloned()
-        .collect::<Vec<_>>();
-    if current_turns.is_empty() {
-        return Err(UiCommandDispatchPortError::DispatchFailed(format!(
-            "failed to project live error turn `{}` from persistence",
-            base_turn_id.as_str()
-        )));
-    }
-    Ok(current_turns)
+        .ok_or_else(|| {
+            UiCommandDispatchPortError::DispatchFailed(format!(
+                "failed to project live error turn `{}` from persistence",
+                base_turn_id.as_str()
+            ))
+        })?;
+    Ok(current_turn)
 }
 
 fn project_runtime_turn(
@@ -3425,25 +3419,13 @@ fn restore_all_persisted_sessions_into_ui(
     for session in sessions {
         let mut turns = persistence.restore_turn_snapshots_for_ui(&session.session_id)?;
         turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
-        let mut index = 0usize;
-        while index < turns.len() {
-            let ordinal = runtime_turn_position(&turns[index].request.turn_id).0;
-            let end = if ordinal == 0 {
-                index + 1
-            } else {
-                turns[index..]
-                    .iter()
-                    .position(|turn| runtime_turn_position(&turn.request.turn_id).0 != ordinal)
-                    .map(|offset| index + offset)
-                    .unwrap_or(turns.len())
-            };
+        for turn in turns {
             ui.apply_turn_projection(project_runtime_turn_history(
                 reason_agent_id,
                 master_node_id,
-                &turns[index..end],
+                std::slice::from_ref(&turn),
                 None,
             ));
-            index = end;
         }
     }
     Ok(())
@@ -3516,7 +3498,7 @@ mod tests {
     }
 
     #[test]
-    fn live_bridge_final_projection_keeps_final_round_text_and_aggregates_tool_activity_only() {
+    fn live_bridge_projection_keeps_each_round_as_its_own_card() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -3546,17 +3528,45 @@ mod tests {
         assert_eq!(outcome.rounds, 3);
         assert_eq!(outcome.tool_executions, 1);
 
-        let projection = project_runtime_turn_history(
+        let first_round_projection = project_runtime_turn_history(
             &AgentId::new("agent-live"),
             "agent-live-node",
-            &outcome.turns,
+            std::slice::from_ref(&outcome.turns[1]),
             None,
         );
-        let public = freehand_ui_protocol::public_turn_projection(projection);
+        let first_round_public =
+            freehand_ui_protocol::public_turn_projection(first_round_projection);
+        assert_eq!(
+            first_round_public.public_conversation[0].body,
+            "reply exactly pong"
+        );
+        assert!(
+            first_round_public
+                .public_conversation
+                .iter()
+                .any(
+                    |item| item.kind == freehand_ui_protocol::UiConversationItemKind::ToolSummary
+                        && item.status == "completed"
+                )
+        );
+        assert!(
+            first_round_public
+                .public_conversation
+                .iter()
+                .all(|item| !item.body.contains("final round done"))
+        );
+
+        let final_projection = project_runtime_turn_history(
+            &AgentId::new("agent-live"),
+            "agent-live-node",
+            std::slice::from_ref(&outcome.turn),
+            None,
+        );
+        let public = freehand_ui_protocol::public_turn_projection(final_projection);
         assert_eq!(public.public_conversation[0].body, "reply exactly pong");
-        assert!(public.public_conversation.iter().any(|item| item.kind
-            == freehand_ui_protocol::UiConversationItemKind::ToolSummary
-            && item.status == "completed"));
+        assert!(public.public_conversation.iter().all(|item| {
+            item.kind != freehand_ui_protocol::UiConversationItemKind::ToolSummary
+        }));
         assert!(
             public
                 .public_conversation
@@ -3756,7 +3766,7 @@ mod tests {
     }
 
     #[test]
-    fn live_bootstrap_restores_multiround_tool_activity_into_ui_state() {
+    fn live_bootstrap_restores_multiround_turns_as_separate_ui_cards() {
         let runtime_home = temp_runtime_home();
         with_temp_workspace(|_| {
             let (base_url, rx, handle) = spawn_sequence_server(
@@ -3795,24 +3805,38 @@ mod tests {
                 .expect("session turns query");
             match transcript {
                 UiQueryResult::SessionTurns(transcript) => {
-                    assert_eq!(transcript.turns.len(), 1);
-                    let turn = &transcript.turns[0];
-                    assert_eq!(turn.turn_id, TurnId::new("runtime-turn-9-r2"));
+                    assert_eq!(transcript.turns.len(), 2);
+                    let tool_turn = &transcript.turns[0];
+                    assert_eq!(tool_turn.turn_id, TurnId::new("runtime-turn-9"));
                     assert_eq!(
-                        turn.user_text.as_deref(),
+                        tool_turn.user_text.as_deref(),
                         Some("prompt for runtime-session-tool-restore")
                     );
                     assert!(
-                        turn.tool_activities.iter().any(|tool| {
+                        tool_turn.tool_activities.iter().any(|tool| {
                             tool.tool_name == "bash"
                                 && tool.status
                                     == freehand_ui_protocol::UiToolActivityStatus::Completed
                         }),
-                        "restored transcript must retain earlier-round bash activity: {:?}",
-                        turn.tool_activities
+                        "restored first round must retain its own bash activity: {:?}",
+                        tool_turn.tool_activities
+                    );
+                    assert!(tool_turn.terminal_text.is_none());
+
+                    let final_turn = &transcript.turns[1];
+                    assert_eq!(final_turn.turn_id, TurnId::new("runtime-turn-9-r2"));
+                    assert_eq!(
+                        final_turn.user_text.as_deref(),
+                        Some("prompt for runtime-session-tool-restore")
                     );
                     assert!(
-                        turn.terminal_text
+                        final_turn.tool_activities.is_empty(),
+                        "final round must not aggregate earlier-round tool activity: {:?}",
+                        final_turn.tool_activities
+                    );
+                    assert!(
+                        final_turn
+                            .terminal_text
                             .as_deref()
                             .is_some_and(|text| text.contains("final after tool"))
                     );
@@ -3888,6 +3912,162 @@ mod tests {
             }
             other => panic!("unexpected query result: {other:?}"),
         }
+    }
+
+    #[test]
+    fn live_dispatch_projects_schema_retry_feedback_to_client_before_repair_completes() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                invalid_complete_response(),
+                complete_single_response("schema repaired"),
+            ],
+        );
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+
+        let receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "trigger schema repair".to_owned(),
+                    session_id: None,
+                    cwd: None,
+                })
+                .expect("envelope"),
+            )
+            .expect("submit should complete after schema repair");
+        assert!(
+            receipt
+                .dispatch_status
+                .contains("reason_live_turn_completed")
+        );
+        let _first_request = rx.recv().expect("first provider request");
+        let second_request = rx.recv().expect("schema repair provider request");
+        handle.join().expect("join provider");
+
+        assert!(second_request.contains("`completion_reason`: is required"));
+        assert!(second_request.contains("`evidence`: is required"));
+        assert!(second_request.contains("`learned`: is required"));
+
+        let transcript = runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: SessionId::new("runtime-session-agent-live"),
+            })
+            .expect("query transcript");
+        match transcript {
+            UiQueryResult::SessionTurns(transcript) => {
+                let retry_round = transcript
+                    .turns
+                    .iter()
+                    .find(|turn| turn.turn_id == TurnId::new("runtime-turn-1"))
+                    .expect("schema retry round");
+                let activity = retry_round
+                    .model_request
+                    .as_ref()
+                    .expect("schema retry must be client-visible");
+                assert_eq!(activity.kind, UiModelRequestKind::SchemaRetry);
+                let detail = activity.detail.as_deref().expect("schema detail");
+                assert!(detail.contains("schema retry #1"));
+                assert!(detail.contains("completion_reason is required"));
+                assert!(detail.contains("evidence is required"));
+                assert!(detail.contains("learned is required"));
+
+                let final_round = transcript
+                    .turns
+                    .iter()
+                    .find(|turn| turn.turn_id == TurnId::new("runtime-turn-1-r2"))
+                    .expect("repair final round");
+                assert_eq!(final_round.terminal_status, Some(TerminalStatus::Success));
+                assert!(final_round.model_request.is_none());
+            }
+            other => panic!("unexpected transcript query: {other:?}"),
+        }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_dispatch_projects_missing_schema_retry_feedback_to_client() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                missing_completion_schema_response(),
+                complete_single_response("schema repaired"),
+            ],
+        );
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+
+        let receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "trigger missing schema repair".to_owned(),
+                    session_id: None,
+                    cwd: None,
+                })
+                .expect("envelope"),
+            )
+            .expect("submit should complete after missing schema repair");
+        assert!(
+            receipt
+                .dispatch_status
+                .contains("reason_live_turn_completed")
+        );
+        let _first_request = rx.recv().expect("first provider request");
+        let second_request = rx.recv().expect("schema repair provider request");
+        handle.join().expect("join provider");
+
+        assert!(second_request.contains("`freehand_completion`: missing"));
+        assert!(second_request.contains("<freehand_completion>"));
+
+        let transcript = runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: SessionId::new("runtime-session-agent-live"),
+            })
+            .expect("query transcript");
+        match transcript {
+            UiQueryResult::SessionTurns(transcript) => {
+                let retry_round = transcript
+                    .turns
+                    .iter()
+                    .find(|turn| turn.turn_id == TurnId::new("runtime-turn-1"))
+                    .expect("schema retry round");
+                let activity = retry_round
+                    .model_request
+                    .as_ref()
+                    .expect("schema retry must be client-visible");
+                assert_eq!(activity.kind, UiModelRequestKind::SchemaRetry);
+                let detail = activity.detail.as_deref().expect("schema detail");
+                assert!(detail.contains("schema retry #1"));
+                assert!(detail.contains("freehand_completion missing"));
+                assert!(detail.contains("<freehand_completion>"));
+            }
+            other => panic!("unexpected transcript query: {other:?}"),
+        }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
 
     #[test]
@@ -4483,6 +4663,30 @@ mod tests {
         )
     }
 
+    fn missing_completion_schema_response() -> String {
+        json!({
+            "content": [{
+                "type": "text",
+                "text": "draft without the required Freehand completion block"
+            }],
+            "usage": {"input_tokens": 14, "output_tokens": 40},
+            "stop_reason": "end_turn"
+        })
+        .to_string()
+    }
+
+    fn max_tokens_text_response() -> String {
+        json!({
+            "content": [{
+                "type": "text",
+                "text": "partial response without a completion schema"
+            }],
+            "usage": {"input_tokens": 14, "output_tokens": 512},
+            "stop_reason": "max_tokens"
+        })
+        .to_string()
+    }
+
     fn tool_use_named_response(tool_call_id: &str, tool_name: &str, input: Value) -> String {
         json!({
             "content": [{
@@ -5003,8 +5207,64 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
         assert!(first_request.contains("reply exactly pong"));
         assert!(second_request.contains("Fix these schema entries"));
+        assert!(second_request.contains("`completion_reason`: is required"));
+        assert!(second_request.contains("`evidence`: is required"));
+        assert!(second_request.contains("`learned`: is required"));
+        assert!(second_request.contains("Use plain string values for required text fields"));
         assert_eq!(outcome.rounds, 2);
         assert_eq!(outcome.schema_rejections.len(), 1);
+        assert!(outcome.broadcasts.iter().any(|event| {
+            matches!(
+                event,
+                ReasonBroadcastEvent::CompletionSchemaRejected(rejection)
+                    if rejection.feedback.contains("`evidence`: is required")
+                        && rejection.feedback.contains("`completion_reason`: is required")
+            )
+        }));
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+    }
+
+    #[test]
+    fn live_bridge_retries_missing_completion_schema_then_completes() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                missing_completion_schema_response(),
+                complete_single_response("pong"),
+            ],
+        );
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            live_request(false),
+        )
+        .expect("live bridge");
+        let _first_request = rx.recv().expect("first request");
+        let second_request = rx.recv().expect("second request");
+        handle.join().expect("join");
+
+        assert!(second_request.contains("Fix these schema entries"));
+        assert!(second_request.contains("`freehand_completion`: missing"));
+        assert!(second_request.contains("<freehand_completion>"));
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(outcome.schema_rejections.len(), 1);
+        assert!(outcome.broadcasts.iter().any(|event| {
+            matches!(
+                event,
+                ReasonBroadcastEvent::CompletionSchemaRejected(rejection)
+                    if rejection.feedback.contains("`freehand_completion`: missing")
+            )
+        }));
         assert_eq!(
             outcome
                 .turn
@@ -5375,8 +5635,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         match latest {
             UiQueryResult::Turn(Some(turn)) => {
                 assert_eq!(turn.turn_id, TurnId::new("runtime-turn-2-r2"));
-                assert_eq!(turn.tool_activities.len(), 1);
-                assert_eq!(turn.tool_activities[0].status.as_str(), "failed");
+                assert!(
+                    turn.tool_activities.is_empty(),
+                    "final round must not aggregate failed tool activity from the previous round"
+                );
                 assert_eq!(turn.terminal_status, Some(TerminalStatus::Success));
                 assert!(
                     turn.terminal_text.as_deref().is_some_and(
@@ -5386,6 +5648,30 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 assert!(turn.errors.is_empty());
             }
             other => panic!("unexpected failed latest turn: {other:?}"),
+        }
+        let transcript = runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui state")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: SessionId::new("runtime-session-agent-live"),
+            })
+            .expect("query transcript");
+        match transcript {
+            UiQueryResult::SessionTurns(transcript) => {
+                let failed_tool_round = transcript
+                    .turns
+                    .iter()
+                    .find(|turn| turn.turn_id == TurnId::new("runtime-turn-2"))
+                    .expect("second request first round");
+                assert_eq!(failed_tool_round.tool_activities.len(), 1);
+                assert_eq!(
+                    failed_tool_round.tool_activities[0].status.as_str(),
+                    "failed"
+                );
+                assert!(failed_tool_round.terminal_status.is_none());
+            }
+            other => panic!("unexpected transcript query: {other:?}"),
         }
     }
 
@@ -5446,7 +5732,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
-    fn live_bridge_fails_after_three_invalid_schema_retries() {
+    fn live_bridge_blocks_after_three_invalid_schema_retries_without_failed_status() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -5474,7 +5760,37 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 .terminal_event
                 .as_ref()
                 .map(|event| event.status.clone()),
-            Some(TerminalStatus::Failed)
+            Some(TerminalStatus::Blocked)
+        );
+    }
+
+    #[test]
+    fn live_bridge_interrupts_non_candidate_max_tokens_without_failed_status() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, _rx, handle) =
+            spawn_mock_server(200, "application/json", max_tokens_text_response());
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            live_request(false),
+        )
+        .expect("live bridge should materialize interrupted turn");
+        handle.join().expect("join");
+
+        assert_eq!(outcome.rounds, 1);
+        assert_eq!(outcome.schema_rejections.len(), 0);
+        let terminal = outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .expect("terminal event");
+        assert_eq!(terminal.status, TerminalStatus::Interrupted);
+        assert!(
+            terminal
+                .summary
+                .contains("Provider ended before completion schema was available: max_tokens")
         );
     }
 

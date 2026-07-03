@@ -455,6 +455,48 @@ impl ReasonTurnEngine {
         event
     }
 
+    pub fn interrupt_turn(
+        &self,
+        turn: &mut TurnRecord,
+        summary: impl Into<String>,
+    ) -> ReasonResp03TerminalEvent {
+        self.close_turn_with_status(turn, TerminalStatus::Interrupted, summary)
+    }
+
+    pub fn block_turn(
+        &self,
+        turn: &mut TurnRecord,
+        summary: impl Into<String>,
+    ) -> ReasonResp03TerminalEvent {
+        self.close_turn_with_status(turn, TerminalStatus::Blocked, summary)
+    }
+
+    fn close_turn_with_status(
+        &self,
+        turn: &mut TurnRecord,
+        status: TerminalStatus,
+        summary: impl Into<String>,
+    ) -> ReasonResp03TerminalEvent {
+        let event = ReasonResp03TerminalEvent {
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+            agent_id: turn.request.agent_id.clone(),
+            status,
+            summary: summary.into(),
+        };
+        turn.terminal_event = Some(event.clone());
+        self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
+        self.emit_debug(
+            turn,
+            "ReasonTurnEngine::close_turn_with_status",
+            format!("turn closed as {:?}", event.status),
+            vec![event.summary.clone()],
+        );
+        event
+    }
+
     pub fn cancel_turn(
         &self,
         turn: &mut TurnRecord,

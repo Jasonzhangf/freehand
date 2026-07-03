@@ -467,17 +467,11 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
 
     let mut accepted = false;
     let mut command_observed = false;
-    let mut matching_turn = None::<String>;
     let mut query_sent = false;
-    let mut transcript_query_sent = false;
-    let mut transcript_evidence = None::<AdpTurnSampleEvidence>;
     let mut seen = Vec::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
 
-    while matching_turn.is_none()
-        || !command_observed
-        || !sample_evidence_complete(sample, transcript_evidence.as_ref())
-    {
+    while !command_observed {
         let now = tokio::time::Instant::now();
         if now >= deadline {
             return Err(format!(
@@ -547,11 +541,6 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
             }
             UiAdpResponse::SubscriptionEvent { request_id, event } => {
                 seen.push(format!("subscription_event:{request_id}"));
-                if let Some(turn_id) =
-                    matching_sample_projection_turn_id(sample, &session_id, &event.projection)
-                {
-                    matching_turn = Some(turn_id);
-                }
                 if let Some(reason) =
                     sample_terminal_failure_reason(sample, &session_id, &event.projection)
                 {
@@ -564,13 +553,6 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
             }
             UiAdpResponse::QueryResult { request_id, result } => {
                 seen.push(format!("query_result:{request_id}"));
-                if request_id == transcript_query_id {
-                    transcript_evidence = sample_transcript_evidence(sample, &session_id, &result);
-                    continue;
-                }
-                if let Some(turn_id) = matching_sample_query_turn_id(sample, &session_id, &result) {
-                    matching_turn = Some(turn_id);
-                }
                 if let Some(reason) =
                     sample_query_terminal_failure_reason(sample, &session_id, &result)
                 {
@@ -581,19 +563,6 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
                     ));
                 }
             }
-        }
-        if matching_turn.is_some() && command_observed && !transcript_query_sent {
-            send_adp(
-                &mut socket,
-                UiAdpRequest::Query {
-                    request_id: transcript_query_id.clone(),
-                    query: UiCommand::QuerySessionTurns {
-                        session_id: session_id.clone(),
-                    },
-                },
-            )
-            .await?;
-            transcript_query_sent = true;
         }
     }
 
@@ -610,13 +579,25 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
         ));
     }
     let _ = socket.close(None).await;
-    let evidence = transcript_evidence.expect("sample evidence");
+    let evidence =
+        query_adp_sample_transcript_evidence(&url, sample, &session_id, &transcript_query_id)
+            .await?;
+    if !sample_evidence_complete(sample, Some(&evidence)) {
+        return Err(format!(
+            "ADP {} sample transcript incomplete rounds={} tool_executions={} failed_tools={} seen={}",
+            sample.label(),
+            evidence.rounds,
+            evidence.tool_executions,
+            evidence.failed_tools,
+            seen.join(",")
+        ));
+    }
     Ok(format!(
         "adp_turn_sample_ok sample={} url={} session={} turn={} rounds={} tool_executions={} failed_tools={} seen={}",
         sample.label(),
         url,
         session_id.as_str(),
-        matching_turn.expect("matching turn"),
+        evidence.terminal_turn_id,
         evidence.rounds,
         evidence.tool_executions,
         evidence.failed_tools,
@@ -624,55 +605,63 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
     ))
 }
 
-fn matching_sample_query_turn_id(
+async fn query_adp_sample_transcript_evidence(
+    url: &str,
     sample: AdpTurnSample,
     session_id: &SessionId,
-    result: &freehand_ui_protocol::UiQueryResult,
-) -> Option<String> {
-    match result {
-        freehand_ui_protocol::UiQueryResult::Turn(Some(turn)) => {
-            matching_sample_turn_id(sample, session_id, turn)
+    request_id: &str,
+) -> Result<AdpTurnSampleEvidence, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
+        .await
+        .map_err(|_| format!("ADP transcript connect timeout: {url}"))?
+        .map_err(|err| format!("ADP transcript connect failed: {err}"))?;
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Query {
+            request_id: request_id.to_owned(),
+            query: UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            },
+        },
+    )
+    .await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let _ = socket.close(None).await;
+            return Err(format!("ADP {} sample transcript timeout", sample.label()));
         }
-        _ => None,
-    }
-}
-
-fn matching_sample_turn_id(
-    sample: AdpTurnSample,
-    session_id: &SessionId,
-    turn: &freehand_ui_protocol::UiTurnProjection,
-) -> Option<String> {
-    if &turn.session_id != session_id {
-        return None;
-    }
-    let expected_status = sample.expected_status();
-    if turn.user_text.as_deref() != Some(sample.prompt()) {
-        return None;
-    }
-    if turn.terminal_status.as_ref() != Some(&expected_status) {
-        return None;
-    }
-    if sample == AdpTurnSample::Failure
-        && !(turn
-            .tool_activities
-            .iter()
-            .any(|tool| tool.status.as_str() == "failed"))
-    {
-        return None;
-    }
-    Some(turn.turn_id.as_str().to_owned())
-}
-
-fn matching_sample_projection_turn_id(
-    sample: AdpTurnSample,
-    session_id: &SessionId,
-    projection: &freehand_ui_protocol::UiProjection,
-) -> Option<String> {
-    match projection {
-        freehand_ui_protocol::UiProjection::Turn(turn) => {
-            matching_sample_turn_id(sample, session_id, turn)
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| format!("ADP {} sample transcript timeout", sample.label()))??;
+        match response {
+            UiAdpResponse::QueryResult {
+                request_id: response_id,
+                result,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return sample_transcript_evidence(sample, session_id, &result).ok_or_else(|| {
+                    format!(
+                        "ADP {} sample transcript missing expected evidence",
+                        sample.label()
+                    )
+                });
+            }
+            UiAdpResponse::Failure {
+                request_id: response_id,
+                failure,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Err(format!(
+                    "ADP {} sample transcript failure {}: {}",
+                    sample.label(),
+                    failure.code,
+                    failure.message
+                ));
+            }
+            _ => {}
         }
-        _ => None,
     }
 }
 
@@ -732,6 +721,7 @@ fn sample_turn_terminal_failure_reason(
 
 #[derive(Debug, Clone)]
 struct AdpTurnSampleEvidence {
+    terminal_turn_id: String,
     rounds: usize,
     tool_executions: usize,
     failed_tools: usize,
@@ -764,7 +754,7 @@ fn sample_transcript_evidence(
         return None;
     }
     let rounds = transcript.turns.len();
-    let mut terminal_ok = false;
+    let mut terminal_turn_id = None::<String>;
     let mut tool_executions = BTreeSet::new();
     let mut failed_tools = BTreeSet::new();
     for turn in &transcript.turns {
@@ -777,7 +767,7 @@ fn sample_transcript_evidence(
         if turn.user_text.as_deref() == Some(sample.prompt())
             && turn.terminal_status.as_ref() == Some(&sample.expected_status())
         {
-            terminal_ok = true;
+            terminal_turn_id = Some(turn.turn_id.as_str().to_owned());
         }
         if sample == AdpTurnSample::Failure
             && turn
@@ -788,13 +778,19 @@ fn sample_transcript_evidence(
                 .is_some_and(|round| round >= 2)
             && turn.terminal_status.as_ref() == Some(&sample.expected_status())
         {
-            terminal_ok = true;
+            terminal_turn_id = Some(turn.turn_id.as_str().to_owned());
         }
     }
-    if !terminal_ok {
+    let terminal_turn_id = terminal_turn_id?;
+    if transcript
+        .turns
+        .iter()
+        .any(|turn| sample_turn_terminal_failure_reason(sample, session_id, turn).is_some())
+    {
         return None;
     }
     Some(AdpTurnSampleEvidence {
+        terminal_turn_id,
         rounds,
         tool_executions: tool_executions.len(),
         failed_tools: failed_tools.len(),

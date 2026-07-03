@@ -159,6 +159,17 @@ pub struct UiCompletionSchemaRetryWaiting {
     pub slave_substream_card: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiModelRequestWaiting {
+    pub source_agent_id: AgentId,
+    pub source_node_id: String,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub kind: UiModelRequestKind,
+    pub detail: Option<String>,
+    pub slave_substream_card: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiModelRequestStatus {
     Waiting,
@@ -689,43 +700,37 @@ impl UiProtocolState {
         detail: Option<String>,
         slave_substream_card: bool,
     ) -> UiTurnProjection {
-        self.apply_model_request_waiting_kind(
+        self.apply_model_request_waiting_kind(UiModelRequestWaiting {
             source_agent_id,
             source_node_id,
-            session_id,
-            turn_id,
-            UiModelRequestKind::Thinking,
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            kind: UiModelRequestKind::Thinking,
             detail,
             slave_substream_card,
-        )
+        })
     }
 
     pub fn apply_model_request_waiting_kind(
         &mut self,
-        source_agent_id: AgentId,
-        source_node_id: String,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-        kind: UiModelRequestKind,
-        detail: Option<String>,
-        slave_substream_card: bool,
+        waiting: UiModelRequestWaiting,
     ) -> UiTurnProjection {
         let projection = {
             let projection = self.ensure_turn_projection(
-                source_agent_id,
-                source_node_id,
-                session_id,
-                turn_id,
-                slave_substream_card,
+                waiting.source_agent_id,
+                waiting.source_node_id,
+                &waiting.session_id,
+                &waiting.turn_id,
+                waiting.slave_substream_card,
             );
             projection.model_request = Some(UiModelRequestActivity {
                 status: UiModelRequestStatus::Waiting,
-                kind,
-                detail,
+                kind: waiting.kind,
+                detail: waiting.detail,
             });
             projection.clone()
         };
-        self.latest_active_turn_id = Some(turn_id.clone());
+        self.latest_active_turn_id = Some(waiting.turn_id.clone());
         self.publish_projection(UiProjection::Turn(projection.clone()));
         projection
     }
@@ -738,15 +743,15 @@ impl UiProtocolState {
             "schema retry #{}: {}",
             waiting.retry_index, waiting.issue_summary
         );
-        self.apply_model_request_waiting_kind(
-            waiting.source_agent_id,
-            waiting.source_node_id,
-            &waiting.session_id,
-            &waiting.turn_id,
-            UiModelRequestKind::SchemaRetry,
-            Some(detail),
-            waiting.slave_substream_card,
-        )
+        self.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: waiting.source_agent_id,
+            source_node_id: waiting.source_node_id,
+            session_id: waiting.session_id,
+            turn_id: waiting.turn_id,
+            kind: UiModelRequestKind::SchemaRetry,
+            detail: Some(detail),
+            slave_substream_card: waiting.slave_substream_card,
+        })
     }
 
     pub fn apply_usage_event(

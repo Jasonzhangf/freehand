@@ -22,7 +22,7 @@
 - runtime opens `~/.freehand/state/turns/<agent_id>/<session_id>/` as the authoritative reason state directory
 - session-owned rewrite truth is restored from `SessionHistory` snapshots
 - turn execution consumes restored session truth through `ReasonTurnEngine::start_turn`
-- runtime persistence appends semantic reason-ledger rows before advancing durable snapshot cursors
+- runtime persistence holds a session-scoped persistence lock while reading cursor truth, allocating the next reason-ledger sequence, appending semantic reason-ledger rows, and advancing durable snapshot cursors
 - terminal turn close materializes immutable turn truth files and only then updates derived UI and index sidecars
 - provider raw ledgers may be appended for debug, but they are not part of the authoritative request or recovery chain
 
@@ -30,6 +30,7 @@
 
 - `SessionHistory` JSON/file helpers render and restore authoritative session rewrite truth
 - reason persistence appends a reason-ledger row together with current session-history truth, then refreshes authoritative snapshots and derived sidecars
+- same-session concurrent writers allocate strictly monotonic reason-ledger sequences because seq allocation and durable snapshot refresh are in the same session lock
 - reason persistence appends provider raw debug-ledger rows under `~/.freehand/ledgers/providers/<family>/<agent>/<session>/<turn>.jsonl` without mutating authoritative session truth
 - reason persistence returns deterministic restore state from snapshot plus reason-ledger tail replay, or from reason-ledger-only rebuild when snapshots are missing or invalid
 - reason persistence can return latest per-turn snapshots from the reason ledger for derived UI restore so non-terminal tool rounds remain visible without becoming closed-turn truth

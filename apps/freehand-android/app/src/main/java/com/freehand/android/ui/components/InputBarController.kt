@@ -78,7 +78,23 @@ class InputBarController(
         )
     }
 
+    private var enabled = true
+
+    /** Enable or disable the input bar. When disabled, text entry is blocked and
+     *  the send button appears dimmed to signal that submission is not accepted. */
+    fun setEnabledState(isEnabled: Boolean) {
+        if (enabled == isEnabled) return
+        enabled = isEnabled
+        input.isEnabled = isEnabled
+        input.alpha = if (isEnabled) 1.0f else 0.45f
+        send.alpha = if (isEnabled) 1.0f else 0.35f
+        send.isClickable = isEnabled
+    }
+
+    fun isInputEnabled(): Boolean = enabled
+
     private fun submit() {
+        if (!enabled) return
         val text = input.text.toString().trim()
         if (text.isEmpty()) return
         onSubmit(text)
@@ -86,10 +102,13 @@ class InputBarController(
 
     fun clear() {
         input.setText("")
+        setEnabledState(true)
     }
 
     fun markSendError(reason: String) {
         input.error = reason
+        // Keep bar enabled after send error so the user can edit and retry.
+        setEnabledState(true)
     }
 
     fun root(): View = bar

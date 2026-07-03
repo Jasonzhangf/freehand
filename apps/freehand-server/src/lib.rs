@@ -1201,6 +1201,8 @@ mod tests {
         assert!(js_body.contains("submitStartedAt"));
         assert!(js_body.contains("modelRequestTimingKey"));
         assert!(js_body.contains("modelRequestKind"));
+        assert!(js_body.contains("function modelRequestPhase"));
+        assert!(js_body.contains("phase: modelRequestPhase(turn)"));
         assert!(js_body.contains("modelRequestLabel"));
         assert!(js_body.contains("turnIsWaitingForModelResponse"));
         assert!(js_body.contains("schema retry"));

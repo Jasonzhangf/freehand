@@ -35,7 +35,7 @@
 - tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures; runtime publishes a model-continuation waiting event after tool results are paired for the next provider request
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
-- retry exhaustion writes failed terminal truth through `ReasonTurnEngine::fail_turn`
+- schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`
 - runtime drains both reason-owned and runtime-owned debug snapshots through one shared `DebugHub` hook path
 - bridge returns final turn truth, all round turns, captured broadcast events, schema rejection ledger, tool execution count, restore status, and live-output summary without leaking wire DTOs
 - runtime callers project the final turn into `UiProtocolState` from one shared runtime owner path
@@ -116,7 +116,7 @@
 | 20 | `turn_has_completion_candidate_finish_reason` / `parse_completion_submission_block` | `crates/freehand-runtime/src/lib.rs` / `crates/freehand-blocks/src/lib.rs` | gate completion parsing on terminal-candidate finish reason before parsing tagged completion schema from model text | provider finish reason + model text | typed submission or schema rejection list | live bridge | runtime + blocks owner | bound |
 | 21 | `ReasonPersistence::record_completion_rejected` | `crates/freehand-reason/src/persistence.rs` | persist schema rejection evidence | schema rejection + active turn | reason ledger row plus active-turn snapshot | live bridge | persistence owner | bound |
 | 22 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | write accepted completed/blocked terminal truth | validated completion submission | terminal event | live bridge | reason owner | bound |
-| 23 | `ReasonTurnEngine::fail_turn` | `crates/freehand-reason/src/lib.rs` | write failed terminal truth after schema retry exhaustion | retry-exhausted failure summary | terminal event | live bridge | reason owner | bound |
+| 23 | `ReasonTurnEngine::block_turn` / `ReasonTurnEngine::interrupt_turn` | `crates/freehand-reason/src/lib.rs` | write non-failed terminal truth for schema retry exhaustion or provider interruption without a completion-schema candidate | retry-exhausted or interrupted summary | blocked or interrupted terminal event | live bridge | reason owner | bound |
 | 24 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned terminal lifecycle metadata before terminal persistence | round/tool/schema-rejection counters + final terminal status | durable runtime metadata record | live bridge | metadata owner | bound |
 | 25 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned terminal lifecycle debug snapshot before terminal persistence | round/tool/schema-rejection counters + final terminal status | runtime-owned debug event | live bridge | `debug.core` | bound |
 | 26 | `ReasonPersistence::record_turn_closed` | `crates/freehand-reason/src/persistence.rs` | materialize terminal live turn | terminal turn truth | closed turn snapshot + sidecars/index | live bridge | persistence owner | bound |

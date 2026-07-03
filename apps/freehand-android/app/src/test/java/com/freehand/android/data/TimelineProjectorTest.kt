@@ -218,6 +218,120 @@ class TimelineProjectorTest {
         assertTrue(json.contains("turns"))
     }
 
+
+    // ── multi-turn accumulation + allTurnsProjectionJson ───────────────
+
+    @Test
+    fun `multiple turn events accumulate and are exposed via allTurnsProjectionJson`() {
+        projector.apply(sseEvent("turn", "{\"turn\":{\"source_agent_id\":\"master\",\"source_node_id\":\"n\"," +
+            "\"session_id\":\"s1\",\"turn_id\":\"t1\",\"user_text\":\"hello\",\"reasoning\":[],\"text\":[]," +
+            "\"tool_calls\":[],\"usage\":[],\"terminal_status\":null,\"terminal_text\":null," +
+            "\"errors\":[],\"slave_substream_card\":false}," +
+            "\"public_conversation\":[{\"kind\":\"UserText\",\"title\":\"User\",\"body\":\"hello\",\"status\":\"submitted\"}]}"))
+
+        projector.apply(sseEvent("turn", "{\"turn\":{\"source_agent_id\":\"master\",\"source_node_id\":\"n\"," +
+            "\"session_id\":\"s1\",\"turn_id\":\"t2\",\"user_text\":\"second message\",\"reasoning\":[],\"text\":[\"hi there\"]," +
+            "\"tool_calls\":[],\"usage\":[],\"terminal_status\":null,\"terminal_text\":null," +
+            "\"errors\":[],\"slave_substream_card\":false}," +
+            "\"public_conversation\":[{\"kind\":\"UserText\",\"title\":\"User\",\"body\":\"second message\",\"status\":\"submitted\"}," +
+            "{\"kind\":\"AssistantText\",\"title\":\"Assistant\",\"body\":\"hi there\",\"status\":\"streaming\"}]}"))
+
+        val snap = projector.snapshot()
+        assertEquals(2, (snap["turns"] as List<*>).size)
+
+        val allJson = projector.allTurnsProjectionJson()
+        assertNotNull(allJson)
+        assertTrue(allJson!!.contains("t1"))
+        assertTrue(allJson.contains("t2"))
+        assertTrue(allJson.contains("hello"))
+        assertTrue(allJson.contains("second message"))
+        val wrapped = JsonParser.parseString(allJson).asJsonObject
+        assertTrue(wrapped.has("all_turns"))
+        assertEquals(2, wrapped.getAsJsonArray("all_turns").size())
+    }
+
+    @Test
+    fun `allTurnsProjectionJson returns null when no turns received`() {
+        assertNull(projector.allTurnsProjectionJson())
+    }
+
+    @Test
+    fun `clearAccumulatedTurns removes only accumulated render state`() {
+        projector.setConnectionState("open")
+        projector.setCurrentAgent("master", "Master")
+        projector.apply(sseEvent("turn", "{\"turn\":{\"source_agent_id\":\"master\",\"source_node_id\":\"n\"," +
+            "\"session_id\":\"s\",\"turn_id\":\"t1\",\"user_text\":\"x\",\"reasoning\":[],\"text\":[]," +
+            "\"tool_calls\":[],\"usage\":[],\"terminal_status\":null,\"terminal_text\":null," +
+            "\"errors\":[],\"slave_substream_card\":false}," +
+            "\"public_conversation\":[{\"kind\":\"UserText\",\"title\":\"User\",\"body\":\"x\",\"status\":\"submitted\"}]}"))
+
+        projector.clearAccumulatedTurns()
+
+        assertNull(projector.allTurnsProjectionJson())
+        assertEquals("open", projector.snapshot()["connection"])
+        assertEquals("master", projector.snapshot()["agent_id"])
+        assertEquals("Master", projector.snapshot()["agent_name"])
+        assertEquals(0, (projector.snapshot()["turns"] as List<*>).size)
+    }
+
+    @Test
+    fun `terminal event on existing turn updates its all-turns projection`() {
+        projector.apply(sseEvent("turn", "{\"turn\":{\"source_agent_id\":\"master\",\"source_node_id\":\"n\"," +
+            "\"session_id\":\"s\",\"turn_id\":\"t1\",\"user_text\":\"x\",\"reasoning\":[],\"text\":[]," +
+            "\"tool_calls\":[],\"usage\":[],\"terminal_status\":null,\"terminal_text\":null," +
+            "\"errors\":[],\"slave_substream_card\":false}," +
+            "\"public_conversation\":[{\"kind\":\"UserText\",\"title\":\"User\",\"body\":\"x\",\"status\":\"submitted\"}]}"))
+
+        projector.apply(sseEvent("terminal", "{\"turn_id\":\"t1\",\"status\":\"done\",\"summary\":\"finished\"}"))
+
+        val allJson = projector.allTurnsProjectionJson()
+        assertNotNull(allJson)
+        assertTrue(allJson!!.contains("\"terminal_status\":\"done\""))
+    }
+
+    @Test
+    fun `error event on existing turn updates its all-turns projection`() {
+        projector.apply(sseEvent("turn", "{\"turn\":{\"source_agent_id\":\"master\",\"source_node_id\":\"n\"," +
+            "\"session_id\":\"s\",\"turn_id\":\"t1\",\"user_text\":\"x\",\"reasoning\":[],\"text\":[]," +
+            "\"tool_calls\":[],\"usage\":[],\"terminal_status\":null,\"terminal_text\":null," +
+            "\"errors\":[],\"slave_substream_card\":false}," +
+            "\"public_conversation\":[{\"kind\":\"UserText\",\"title\":\"User\",\"body\":\"x\",\"status\":\"submitted\"}]}"))
+
+        projector.apply(sseEvent("error", "{\"turn_id\":\"t1\",\"message\":\"provider timeout\"}"))
+
+        val allJson = projector.allTurnsProjectionJson()
+        assertNotNull(allJson)
+        assertTrue(allJson!!.contains("provider timeout"))
+    }
+
+    @Test
+    fun `ADP subscription_event accumulates turns across multiple events`() {
+        val turn1 = "{\"kind\":\"subscription_event\",\"request_id\":\"sub-1\"," +
+            "\"event\":{\"projection\":{\"Turn\":{\"source\":{\"source_agent_id\":\"master\",\"source_node_id\":\"n\",\"source_turn_id\":\"t-adp-1\",\"stream_kind\":\"Turn\"}," +
+            "\"session_id\":\"s\",\"turn_id\":\"t-adp-1\",\"user_text\":\"first\",\"reasoning\":[],\"text\":[]," +
+            "\"tool_calls\":[],\"tool_activities\":[],\"usage\":[],\"terminal_status\":null,\"terminal_text\":null," +
+            "\"errors\":[],\"slave_substream_card\":false}}," +
+            "\"latest_active_turn_id\":\"t-adp-1\"}}"
+
+        val turn2 = "{\"kind\":\"subscription_event\",\"request_id\":\"sub-2\"," +
+            "\"event\":{\"projection\":{\"Turn\":{\"source\":{\"source_agent_id\":\"master\",\"source_node_id\":\"n\",\"source_turn_id\":\"t-adp-2\",\"stream_kind\":\"Turn\"}," +
+            "\"session_id\":\"s\",\"turn_id\":\"t-adp-2\",\"user_text\":\"second\",\"reasoning\":[],\"text\":[\"response\"]," +
+            "\"tool_calls\":[],\"tool_activities\":[],\"usage\":[],\"terminal_status\":null,\"terminal_text\":null," +
+            "\"errors\":[],\"slave_substream_card\":false}}," +
+            "\"latest_active_turn_id\":\"t-adp-2\"}}"
+
+        projector.applyAdp(adpEvent("subscription_event", turn1))
+        projector.applyAdp(adpEvent("subscription_event", turn2))
+
+        val snap = projector.snapshot()
+        assertEquals(2, (snap["turns"] as List<*>).size)
+
+        val allJson = projector.allTurnsProjectionJson()
+        assertNotNull(allJson)
+        assertTrue(allJson!!.contains("t-adp-1"))
+        assertTrue(allJson.contains("t-adp-2"))
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────
 
     private fun sseEvent(eventName: String, data: String): SseEventStream.Event {

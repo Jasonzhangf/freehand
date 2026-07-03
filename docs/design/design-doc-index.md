@@ -97,3 +97,13 @@ Use this directory family for durable design truth.
   - provider scope, unified provider semantics, capabilities, error recovery, raw-vs-semantic event policy
 - `provider-adapter-design.md`
   - OpenAI responses/chat-completions and Anthropic messages adapter boundaries, request renderers, and stream parsers
+
+## WebUI Architecture Review (2026-07-01)
+
+| Field | Value |
+|-------|-------|
+| Title | WebUI 架构审核与改造建议 |
+| Source | `docs/design/webui-architecture-review.md` |
+| Author | Reasonix v2 codebase comparison |
+| Scope | `webui.js` / `webui.css` / `page.rs` |
+| Status | Review only; not yet planned |

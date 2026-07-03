@@ -1,0 +1,19 @@
+{
+  "root": "/Users/fanzhang/.freehand/ledgers/reason/master",
+  "files": 2,
+  "failures": [],
+  "summaries": [
+    {
+      "file": "/Users/fanzhang/.freehand/ledgers/reason/master/cli-adp-sample-failure-1782951881629207000.jsonl",
+      "rows": 13,
+      "last_seq": 13,
+      "last_turn": "runtime-turn-2-r2"
+    },
+    {
+      "file": "/Users/fanzhang/.freehand/ledgers/reason/master/cli-adp-sample-success-1782951881615272000.jsonl",
+      "rows": 6,
+      "last_seq": 6,
+      "last_turn": "runtime-turn-1"
+    }
+  ]
+}

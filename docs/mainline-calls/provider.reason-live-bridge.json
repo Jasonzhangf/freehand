@@ -35,7 +35,7 @@
     "tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures",
     "completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`",
     "terminal turns are materialized through `ReasonPersistence::record_turn_closed`",
-    "retry exhaustion writes failed terminal truth through `ReasonTurnEngine::fail_turn`",
+    "schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`; provider interruption without a completion-schema candidate writes interrupted terminal truth through `ReasonTurnEngine::interrupt_turn`",
     "runtime drains both reason-owned and runtime-owned debug snapshots through one shared `DebugHub` hook path",
     "bridge returns final turn truth, all round turns, captured broadcast events, schema rejection ledger, tool execution count, restore status, and live-output summary without leaking wire DTOs",
     "runtime callers project the final turn into `UiProtocolState` from one shared runtime owner path"
@@ -43,7 +43,7 @@
   "error_mainline": [
     "unsupported provider type/protocol is rejected at the bridge boundary",
     "provider execution failures materialize runtime-classified failed terminal truth before the dispatch failure is returned",
-    "invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times",
+    "invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times before blocked terminal truth, not failed terminal truth",
     "incomplete tool calls are not executed and do not become tool-result truth",
     "writable tools without preview/checkpoint support are rejected explicitly",
     "unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn",
@@ -371,11 +371,11 @@
     },
     {
       "step": "23",
-      "symbol_path": "ReasonTurnEngine::fail_turn",
+      "symbol_path": "ReasonTurnEngine::block_turn / ReasonTurnEngine::interrupt_turn",
       "file_path": "crates/freehand-reason/src/lib.rs",
-      "responsibility": "write failed terminal truth after schema retry exhaustion",
-      "input_semantic": "retry-exhausted failure summary",
-      "output_semantic": "terminal event",
+      "responsibility": "write non-failed terminal truth after schema retry exhaustion or provider interruption",
+      "input_semantic": "retry-exhausted or interrupted summary",
+      "output_semantic": "blocked or interrupted terminal event",
       "caller": "live bridge",
       "callee": "reason owner",
       "binding_status": "bound"

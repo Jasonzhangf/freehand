@@ -923,6 +923,17 @@ function modelRequestKind(turn) {
   return `${turn && turn.model_request && turn.model_request.kind ? turn.model_request.kind : "Thinking"}`.toLowerCase();
 }
 
+function modelRequestPhase(turn) {
+  const kind = modelRequestKind(turn);
+  if (kind === "schemaretry" || kind === "schema_retry") {
+    return "schema_retry";
+  }
+  if (kind === "toolresultcontinuation" || kind === "tool_result_continuation") {
+    return "tool_result_continuation";
+  }
+  return "thinking";
+}
+
 function modelRequestTimingKey(turn) {
   if (!turnIsWaitingForModelResponse(turn)) {
     return null;
