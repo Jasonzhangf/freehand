@@ -5,7 +5,7 @@
 - status: `L1 report-only run verified`
 - kill_switch_state: `inactive`
 - owner_feature: `foundation.workspace`
-- last_baseline: `2026-07-04T20:49:39+08:00 L1 report-only run; kill switch inactive; mainlines check and gates check passed`
+- last_baseline: `2026-07-04T21:03:21+08:00 L1 report-only run; kill switch inactive; mainlines check and gates check passed`
 
 ## Watchlist
 
@@ -40,9 +40,9 @@ cargo fmt --check
 
 ## Last Run Summary
 
-- run_id: `2026-07-04T20:49:39+08:00-l1-report`
+- run_id: `2026-07-04T21:03:21+08:00-l1-run-01`
 - mode: `L1`
-- outcome: `report-only`
+- outcome: `no-op`
 - checks:
   - `cargo run -p xtask -- mainlines check` passed
   - `cargo run -p xtask -- gates check` passed
