@@ -2,10 +2,10 @@
 
 - loop_id: `freehand-framework-loop`
 - current_mode: `L1`
-- status: `L1 baseline verified`
+- status: `L1 report-only run verified`
 - kill_switch_state: `inactive`
 - owner_feature: `foundation.workspace`
-- last_baseline: `2026-07-04 loop docs initialized; mainlines check and gates check passed`
+- last_baseline: `2026-07-04T20:49:39+08:00 L1 report-only run; kill switch inactive; mainlines check and gates check passed`
 
 ## Watchlist
 
@@ -40,15 +40,14 @@ cargo fmt --check
 
 ## Last Run Summary
 
-- run_id: `2026-07-04T00:00:00+08:00-init-check`
+- run_id: `2026-07-04T20:49:39+08:00-l1-report`
 - mode: `L1`
 - outcome: `report-only`
 - checks:
-  - `cargo test -p xtask -- --nocapture` passed
-  - `cargo fmt --check` passed
-  - `cargo run -p xtask -- mainlines generate` passed
   - `cargo run -p xtask -- mainlines check` passed
   - `cargo run -p xtask -- gates check` passed
 - findings:
-  - first gate attempt rejected a docs-only call-table row as an invalid source symbol binding; fixed by removing the docs-only row from call table and keeping loop docs in mainline prose.
-  - no code action was taken.
+  - kill switch was inactive.
+  - workspace still contains existing untracked Android backup and artifact directories; L1 constraints say not to clean or include them.
+  - no mainline or gate drift found.
+  - no product code action was taken.
