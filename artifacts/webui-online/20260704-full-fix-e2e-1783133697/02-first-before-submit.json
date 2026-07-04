@@ -1,0 +1,38 @@
+{
+  "name": "02-first-before-submit",
+  "file": "artifacts/webui-online/20260704-full-fix-e2e-1783133697/02-first-before-submit.png",
+  "extra": {
+    "marker": "fh-fix-1783133697681",
+    "sessionId": "webui-session-20260704025459-e136d862",
+    "missingPath": "definitely-missing-freehand-fh-fix-1783133697681.txt"
+  },
+  "state": {
+    "stripSession": "webui-session-20260704025459-e136d862",
+    "stripTurn": "-",
+    "status": "connected",
+    "composer": "Remember marker fh-fix-1783133697681. Reply with one short sentence and a valid Freehand completion schema. Do not call tools.",
+    "cardCount": 0,
+    "successCards": 0,
+    "failedCards": 0,
+    "pendingCards": 0,
+    "runningCards": 0,
+    "liveCount": 0,
+    "cssVars": {
+      "success": "#176b55",
+      "fail": "#b2483e"
+    },
+    "hasMarker": false,
+    "hasSecond": false,
+    "hasMissingPath": false,
+    "hasPwdSemantic": false,
+    "allText": "",
+    "cards": []
+  },
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "pageErrors": []
+}

@@ -44,7 +44,7 @@
 - runtime-backed rewind commands restore checkpointed workspace state without mutating reason/session/UI truth directly
 - config-selected runtime bootstrap returns one dispatcher for the requested agent
 - config-selected live bootstrap may materialize node-owned bootstrap and pairing metadata into the shared metadata ledger before the first command runs
-- live bootstrap rehydrates `UiProtocolState` from persisted turn truth and resumes runtime turn-id allocation from persisted ordinals
+- live bootstrap rehydrates `UiProtocolState` from persisted turn truth and resumes runtime turn-id allocation from the maximum persisted ordinal across all sessions, including WebUI-created non-default sessions
 - live bootstrap rehydrates session cwd from persisted turn records into both `UiProtocolState` and runtime session cwd inheritance state
 - live bootstrap groups persisted `runtime-turn-N` round snapshots into one UI projection when restoring session transcripts, while keeping authoritative closed-turn recovery unchanged
 - runtime-owned UI state reflects derived projections only, not authoritative turn truth
@@ -117,7 +117,7 @@
 - config-selected runtime bootstrap uses explicit peer-topology config instead of synthetic paired node ids
 - config-selected live bootstrap now seeds a shared metadata ledger path into `node.master-slave` before the first command runs
 - unwritable shared node metadata ledgers are now regression-locked as explicit bootstrap failures
-- config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
+- config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal from all persisted sessions when recovery truth exists
 - config-selected live bootstrap now restores multi-round tool activity into UI session transcripts after daemon restart
 - config-selected live bootstrap now restores persisted session cwd from turn records and preserves cwd for later same-session submits
 - runtime session-management dispatch is bound as a thin route to `reason.persistence`

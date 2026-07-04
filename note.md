@@ -955,3 +955,73 @@ Current real root cause split:
   - remaining risk:
     - live freeform browser prompt `cli-adp-sample-failure-1783100523482624000` stayed `waiting_model`; not part of the passed terminal sample proof.
     - Android live APK/WebView was unit/release-built but not device-installed in this closeout.
+
+# 2026-07-04 new-session lifecycle E2E test
+  - user acceptance focus: input history recall + append, full transcript, client/provider/tool lifecycle timing and animation, semantic tool result projection, one turn card per lifecycle, no merge, and color semantics where success is green, failed is red, running is blue.
+  - route/owner surface: `app.webui-smoke`, `runtime.ui-command-dispatch`, `provider.reason-live-bridge`, `reason.persistence`, `ui.protocol`, `tool.display`.
+  - setup:
+    - service-scoped restart via `scripts/install-launchd.sh restart`
+    - fixed health `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
+    - browser artifacts: `artifacts/webui-online/20260704-new-session-lifecycle-e2e-1783130843077/`
+  - new WebUI session: `webui-session-20260704020727-d1b9081f`
+  - marker: `fh-e2e-1783130848405`
+  - flow evidence:
+    - `01-new-conversation-clicked`: new draft session visible.
+    - `03-first-after-submit`: first prompt immediately visible, composer cleared, `runtime-turn-1`, `liveCount=1`, dispatching timer visible.
+    - `05-first-terminal`: first turn completed, marker visible, `liveCount=0`.
+    - `06-second-recalled-and-appended`: ArrowUp recalled first input and composer appended `SECOND_LAYER_CONTEXT`.
+    - `07-second-after-submit`: second prompt visible as a separate turn, first turn still visible, `liveCount=1`.
+    - `09-second-terminal`: second turn completed, both marker and appended phrase visible.
+    - `11-tool-after-submit` / `12-tool-running-00`: tool turn submitted and running state captured.
+    - `13-tool-terminal`: bash/pwd tool result projected semantically as `Read current working directory` and `current workspace`, not raw JSON.
+    - `15-failure-after-submit` / `16-failure-tool-state-00` / `17-failure-continuation-01`: missing-file read tool failure projected semantically with path, then `thinking after tool result... 0s` continuation captured.
+    - `18-failure-terminal`: final continuation turn completed successfully; tool failure did not become command failure.
+    - `19-after-refresh`: browser refresh preserved 6 cards and full history.
+    - `20-after-daemon-restart-restore`: daemon restart + browser restore preserved `cardCount=6`, `liveCount=0`, marker, second-layer text, and missing path.
+  - ADP evidence:
+    - `~/.local/bin/freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp --session webui-session-20260704020727-d1b9081f`
+    - returned `selected_session=webui-session-20260704020727-d1b9081f`, `turns=6`, `turn_ids=runtime-turn-1,runtime-turn-2,runtime-turn-3,runtime-turn-3-r2,runtime-turn-4,runtime-turn-4-r2`, session status `success`.
+  - passed:
+    - new session was independent.
+    - input history recall + append worked.
+    - first and second user inputs stayed visible in order.
+    - refresh and daemon restart restored same 6-turn transcript.
+    - tool result projection was semantic for pwd and missing read_file.
+    - tool failure returned to model and final state succeeded.
+    - no browser `pageerror`; only favicon 404 console error observed.
+  - failed acceptance:
+    - running card color is not blue. Captured running cards have `className=dialog-block execution-block running-state` but `borderLeftColor=rgba(31, 108, 88, 0.44)` and pulse CSS is amber, not blue.
+    - completed success card computed `borderLeftColor=rgb(31, 33, 30)`, not a green frame in computed CSS.
+    - tool-execution precursor turns (`runtime-turn-3`, `runtime-turn-4`) restore as `pending-state` / `WAITING` after continuation terminal, leaving 2 pending cards in a fully terminal transcript (`20-after-daemon-restart-restore`: `successCards=4`, `pendingCards=2`, `failedCards=0`, `runningCards=0`).
+    - no red turn card was produced for tool-failure precursor card; the failed tool row was visible, but the owning turn card stayed pending/waiting and final continuation card was success.
+  - conclusion: lifecycle/content/history proof is mostly closed, but color semantics and non-terminal precursor-card lifecycle projection do not meet the user's acceptance.
+
+# 2026-07-04 lifecycle color + restart continuation repair
+  - implementation:
+    - WebUI inactive tool precursor cards now derive lifecycle from protocol tool status: completed/success tools render as success cards, failed tools render as failed cards.
+    - WebUI execution cards now have explicit state borders: running blue `rgb(47, 111, 237)`, success green `rgb(23, 107, 85)`, failed red `rgb(178, 72, 62)`.
+    - Runtime live bootstrap now initializes `next_turn_ordinal` from the maximum persisted `runtime-turn-N` ordinal across all sessions, not only the default runtime session.
+  - regression lock:
+    - `live_restore_resumes_turn_ordinal_from_selected_non_default_session` creates a non-default WebUI-style session, restarts runtime dispatch, submits again to that session, and requires `runtime-turn-1`, `runtime-turn-1-r2`, `runtime-turn-2`, `runtime-turn-2-r2` without ID reuse.
+  - validation:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-runtime live_restore_resumes_turn_ordinal_from_selected_non_default_session -- --nocapture`
+    - `cargo test -p freehand-runtime -- --nocapture`
+    - `cargo test -p freehand-server -- --nocapture`
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `make ci`
+    - `scripts/install-global.sh`
+    - `scripts/install-launchd.sh restart`
+    - `curl -4fsS http://127.0.0.1:4041/health` -> `ok`
+  - online evidence:
+    - initial color restore proof: `artifacts/webui-online/20260704-lifecycle-color-fix-1783132581/summary.json`
+    - full clean-session proof: `artifacts/webui-online/20260704-full-fix-e2e-1783133697/summary.json`
+    - full proof session: `webui-session-20260704025459-e136d862`, marker `fh-fix-1783133697681`
+    - refresh after 4 logical requests: `cardCount=6`, `successCards=5`, `failedCards=1`, `pendingCards=0`, `liveCount=0`, marker/SECOND_LAYER_CONTEXT/missing path/pwd semantic all present.
+    - daemon restart restore: same `cardCount=6`, `successCards=5`, `failedCards=1`, `pendingCards=0`, `liveCount=0`; failed `read_file` precursor card red `rgb(178, 72, 62)`, completed `pwd` precursor card green `rgb(23, 107, 85)`.
+    - running captures for second, pwd, and failed-tool submits all blue `rgb(47, 111, 237)` with live animation.
+    - post-restart continuation plus second restart: final restore `cardCount=7`, `successCards=6`, `failedCards=1`, `pendingCards=0`, `liveCount=0`, latest `runtime-turn-11`.
+    - ADP truth: `webui-session-20260704025459-e136d862:7:success`, `turn_ids=runtime-turn-7,runtime-turn-8,runtime-turn-9,runtime-turn-9-r2,runtime-turn-10,runtime-turn-10-r2,runtime-turn-11`.

@@ -1778,7 +1778,7 @@ impl RuntimeCommandDispatcher {
         if let Some(live) = &config.live {
             let persistence =
                 ReasonPersistence::new(live.runtime_home.clone(), config.reason_agent_id.clone());
-            restore_all_persisted_sessions_into_ui(
+            next_turn_ordinal = restore_all_persisted_sessions_into_ui(
                 &persistence,
                 &ui_state,
                 &config.reason_agent_id,
@@ -1804,12 +1804,14 @@ impl RuntimeCommandDispatcher {
                         turns.push(active.turn);
                     }
                     turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
-                    next_turn_ordinal = turns
-                        .iter()
-                        .map(|turn| runtime_turn_position(&turn.request.turn_id))
-                        .map(|(ordinal, _round, _raw)| ordinal)
-                        .max()
-                        .unwrap_or(0);
+                    next_turn_ordinal = next_turn_ordinal.max(
+                        turns
+                            .iter()
+                            .map(|turn| runtime_turn_position(&turn.request.turn_id))
+                            .map(|(ordinal, _round, _raw)| ordinal)
+                            .max()
+                            .unwrap_or(0),
+                    );
                 }
                 Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => {}
                 Err(err) => {
@@ -3413,13 +3415,15 @@ fn restore_all_persisted_sessions_into_ui(
     ui_state: &Arc<Mutex<UiProtocolState>>,
     reason_agent_id: &AgentId,
     master_node_id: &str,
-) -> Result<(), ReasonPersistenceError> {
+) -> Result<u64, ReasonPersistenceError> {
     let sessions = persistence.list_persisted_sessions()?;
     let mut ui = ui_state.lock().expect("lock ui state");
+    let mut max_turn_ordinal = 0_u64;
     for session in sessions {
         let mut turns = persistence.restore_turn_snapshots_for_ui(&session.session_id)?;
         turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
         for turn in turns {
+            max_turn_ordinal = max_turn_ordinal.max(runtime_turn_position(&turn.request.turn_id).0);
             ui.apply_turn_projection(project_runtime_turn_history(
                 reason_agent_id,
                 master_node_id,
@@ -3428,7 +3432,7 @@ fn restore_all_persisted_sessions_into_ui(
             ));
         }
     }
-    Ok(())
+    Ok(max_turn_ordinal)
 }
 
 fn ui_user_text_for_turn(turn: &TurnRecord) -> String {
@@ -6279,6 +6283,108 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 );
             }
             other => panic!("unexpected latest turn after restart submit: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn live_restore_resumes_turn_ordinal_from_selected_non_default_session() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let selected_session_id = SessionId::new("webui-session-selected-ordinal");
+        let (first_url, first_rx, first_handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_single_response(),
+                complete_single_response("selected first done"),
+            ],
+        );
+        let selected = live_selected_agent(first_url, freehand_config::ProviderType::Anthropic);
+        let first_outcome = run_live_reason_turn(
+            &selected,
+            LiveReasonTurnRequest {
+                runtime_home: runtime_home.clone(),
+                session_id: selected_session_id.clone(),
+                turn_id: TurnId::new("runtime-turn-1"),
+                trace_id: TraceId::new("runtime-trace-1"),
+                prompt: "selected first request".to_owned(),
+                cwd: None,
+                stream: false,
+                cancel_token: None,
+            },
+        )
+        .expect("first selected live turn");
+        let _ = first_rx.recv().expect("first selected provider request");
+        let _ = first_rx.recv().expect("first selected tool-result request");
+        first_handle.join().expect("join first selected provider");
+        assert_eq!(
+            first_outcome.turn.request.turn_id,
+            TurnId::new("runtime-turn-1-r2")
+        );
+
+        let (second_url, second_rx, second_handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_single_response(),
+                complete_single_response("selected second done"),
+            ],
+        );
+        let mut restored_selected = selected.clone();
+        restored_selected.provider.base_url = second_url;
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &restored_selected,
+            runtime_home.clone(),
+            false,
+        )
+        .expect("restored runtime");
+
+        let receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "selected second request".to_owned(),
+                    session_id: Some(selected_session_id.clone()),
+                    cwd: None,
+                })
+                .expect("envelope"),
+            )
+            .expect("second selected receipt");
+        assert_eq!(
+            receipt.dispatch_status,
+            "reason_live_turn_completed rounds=2 schema_rejections=0 tool_executions=1 restored_closed_turns=1"
+        );
+        let _ = second_rx.recv().expect("second selected provider request");
+        let _ = second_rx
+            .recv()
+            .expect("second selected tool-result request");
+        second_handle.join().expect("join second selected provider");
+
+        let latest = runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui state")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: selected_session_id,
+            })
+            .expect("query selected session");
+        match latest {
+            UiQueryResult::SessionTurns(transcript) => {
+                let turn_ids = transcript
+                    .turns
+                    .iter()
+                    .map(|turn| turn.turn_id.as_str())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    turn_ids,
+                    vec![
+                        "runtime-turn-1",
+                        "runtime-turn-1-r2",
+                        "runtime-turn-2",
+                        "runtime-turn-2-r2"
+                    ]
+                );
+            }
+            other => panic!("unexpected selected session turns after restart submit: {other:?}"),
         }
     }
 

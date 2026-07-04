@@ -1,0 +1,49 @@
+{
+  "name": "02-first-running",
+  "file": "artifacts/webui-online/20260704-full-fix-e2e-1783133697/02-first-running.png",
+  "extra": {
+    "marker": "fh-fix-1783133697681",
+    "sessionId": "webui-session-20260704025459-e136d862",
+    "missingPath": "definitely-missing-freehand-fh-fix-1783133697681.txt"
+  },
+  "state": {
+    "stripSession": "webui-session-20260704025459-e136d862",
+    "stripTurn": "runtime-turn-7",
+    "status": "connected",
+    "composer": "",
+    "cardCount": 1,
+    "successCards": 0,
+    "failedCards": 0,
+    "pendingCards": 0,
+    "runningCards": 1,
+    "liveCount": 1,
+    "cssVars": {
+      "success": "#176b55",
+      "fail": "#b2483e"
+    },
+    "hasMarker": true,
+    "hasSecond": false,
+    "hasMissingPath": false,
+    "hasPwdSemantic": false,
+    "allText": "Turndispatching... 0sUsersubmittedRemember marker fh-fix-1783133697681. Reply with one short sentence and a valid Freehand completion schema. Do not call tools.",
+    "cards": [
+      {
+        "index": 0,
+        "className": "dialog-block execution-block running-state",
+        "text": "Turndispatching... 0sUsersubmittedRemember marker fh-fix-1783133697681. Reply with one short sentence and a valid Freehand completion schema. Do not call tools.",
+        "borderLeftColor": "rgb(47, 111, 237)",
+        "borderColor": "rgba(47, 111, 237, 0.3) rgba(47, 111, 237, 0.3) rgba(47, 111, 237, 0.3) rgb(47, 111, 237)",
+        "borderLeftWidth": "4px",
+        "animationName": "toolCardGlow",
+        "live": "true"
+      }
+    ]
+  },
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "pageErrors": []
+}

@@ -1065,6 +1065,11 @@ mod tests {
         assert!(webui_css_body.contains(".execution-block"));
         assert!(webui_css_body.contains(".execution-block.success-state"));
         assert!(webui_css_body.contains(".execution-block.failed-state"));
+        assert!(webui_css_body.contains(".execution-block.running-state"));
+        assert!(webui_css_body.contains("border-left-color: var(--success)"));
+        assert!(webui_css_body.contains("border-left-color: var(--fail)"));
+        assert!(webui_css_body.contains("border-left-color: #2f6fed"));
+        assert!(!webui_css_body.contains("var(--ok)"));
         assert!(webui_css_body.contains(".execution-row-tool"));
         assert!(webui_css_body.contains(".debug-toggle"));
 
@@ -1120,6 +1125,12 @@ mod tests {
         assert!(js_body.contains("function buildToolActivityRenderRow"));
         assert!(js_body.contains("function buildModelRequestRenderRow"));
         assert!(js_body.contains("function buildObservableLiveTurnRenderRow"));
+        assert!(js_body.contains("function inactiveToolLifecycleForRender"));
+        assert!(js_body.contains("phase: \"tool_failed\""));
+        assert!(js_body.contains("phase: \"tool_completed\""));
+        assert!(
+            js_body.contains("const inactiveToolLifecycle = inactiveToolLifecycleForRender(turn);")
+        );
         assert!(js_body.contains("request accepted; waiting for protocol-visible turn details"));
         assert!(js_body.contains("function pendingUserInputIsMaterialized"));
         assert!(js_body.contains("function clearPendingUserInputIfMaterialized"));

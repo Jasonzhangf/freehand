@@ -1,0 +1,49 @@
+{
+  "name": "02-first-terminal",
+  "file": "artifacts/webui-online/20260704-full-fix-e2e-1783133697/02-first-terminal.png",
+  "extra": {
+    "marker": "fh-fix-1783133697681",
+    "sessionId": "webui-session-20260704025459-e136d862",
+    "missingPath": "definitely-missing-freehand-fh-fix-1783133697681.txt"
+  },
+  "state": {
+    "stripSession": "webui-session-20260704025459-e136d862",
+    "stripTurn": "runtime-turn-7",
+    "status": "connected",
+    "composer": "",
+    "cardCount": 1,
+    "successCards": 1,
+    "failedCards": 0,
+    "pendingCards": 0,
+    "runningCards": 0,
+    "liveCount": 0,
+    "cssVars": {
+      "success": "#176b55",
+      "fail": "#b2483e"
+    },
+    "hasMarker": true,
+    "hasSecond": false,
+    "hasMissingPath": false,
+    "hasPwdSemantic": false,
+    "allText": "TurncompletedUsersubmittedRemember marker fh-fix-1783133697681. Reply with one short sentence and a valid Freehand completion schema. Do not call tools.AssistantcompletedMarker fh-fix-1783133697681 is noted, and I'm closing the loop without any tool calls in this turn.FinalcompletedAcknowledged marker fh-fix-1783133697681 and produced a valid Freehand completion schema.",
+    "cards": [
+      {
+        "index": 0,
+        "className": "dialog-block execution-block success-state",
+        "text": "TurncompletedUsersubmittedRemember marker fh-fix-1783133697681. Reply with one short sentence and a valid Freehand completion schema. Do not call tools.AssistantcompletedMarker fh-fix-1783133697681 is noted, and I'm closing the loop without any tool calls in this turn.FinalcompletedAcknowledged marker fh-fix-1783133697681 and produced a valid Freehand completion schema.",
+        "borderLeftColor": "rgb(23, 107, 85)",
+        "borderColor": "rgba(23, 107, 85, 0.26) rgba(23, 107, 85, 0.26) rgba(23, 107, 85, 0.26) rgb(23, 107, 85)",
+        "borderLeftWidth": "4px",
+        "animationName": "none",
+        "live": ""
+      }
+    ]
+  },
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "pageErrors": []
+}

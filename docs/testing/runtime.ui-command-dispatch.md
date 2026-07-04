@@ -9,7 +9,7 @@
   - submit commands may carry an optional selected session id and selected cwd and must create or continue that cwd-bound session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
-  - live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists
+  - live bootstrap restores persisted turn projection and next runtime turn ordinal from all persisted sessions when recovery truth exists
   - live bootstrap restores multi-round turn snapshots as separate derived UI session transcript cards after daemon restart
   - reason-backed submit/cancel update derived UI state
   - reason-backed submit with a selected session id keeps the session transcript queryable under that session
@@ -42,7 +42,7 @@
   - session metadata negative coverage for unknown session id and empty title rejection before runtime dispatch
   - live tool execution with requested session cwd coverage
   - persisted latest-turn restore coverage
-  - next runtime turn ordinal restore coverage
+  - next runtime turn ordinal restore coverage, including selected non-default sessions created by WebUI
   - submit/cancel reason dispatch coverage
   - active live cancel immediate receipt coverage
   - latest-active cancel coverage
@@ -90,6 +90,7 @@
   - config-selected live bootstrap now seeds node-owned metadata records into the shared metadata ledger before first command ingress
   - config-selected live bootstrap now rejects unwritable shared node metadata ledgers explicitly before a dispatcher can materialize
   - provider-backed submit dispatch plus persisted restore/bootstrap is covered
+  - selected non-default session restore now has regression coverage proving the next live submit does not reuse an existing `runtime-turn-N` after daemon restart
 - selected-session cwd projection and inheritance are covered
 - session metadata dispatch coverage is implemented through runtime dispatch into `reason.persistence` and shared UI projection queries
 - live provider submit now streams incremental UI state updates through runtime-owned hooks

@@ -557,6 +557,10 @@ function turnLifecycleForRender(turn) {
       elapsed,
     };
   }
+  const inactiveToolLifecycle = inactiveToolLifecycleForRender(turn);
+  if (inactiveToolLifecycle) {
+    return inactiveToolLifecycle;
+  }
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
     const terminal = `${turn.terminal_status || "success"}`.toLowerCase();
     const phase = terminal === "success" ? "completed" : terminal;
@@ -569,6 +573,33 @@ function turnLifecycleForRender(turn) {
     };
   }
   return { phase: "neutral", className: "pending", label: "waiting", isLive: false, neutral: true, elapsed: "" };
+}
+
+function inactiveToolLifecycleForRender(turn) {
+  const tools = (turn && turn.tool_activities) || [];
+  if (tools.length === 0) {
+    return null;
+  }
+  const statuses = tools.map((tool) => `${tool.status || ""}`.toLowerCase());
+  if (statuses.some((status) => status === "failed")) {
+    return {
+      phase: "tool_failed",
+      className: "failed",
+      label: "failed",
+      isLive: false,
+      elapsed: "",
+    };
+  }
+  if (statuses.every((status) => status === "completed" || status === "success")) {
+    return {
+      phase: "tool_completed",
+      className: "success",
+      label: "completed",
+      isLive: false,
+      elapsed: "",
+    };
+  }
+  return null;
 }
 
 function pendingExecutionCard(renderPending) {

@@ -590,7 +590,7 @@ body.theme-dark .conversation-region {
   position: absolute;
   inset: 0;
   border-radius: 18px;
-  border: 1px solid rgba(155, 109, 28, 0.28);
+  border: 1px solid rgba(47, 111, 237, 0.30);
   pointer-events: none;
   animation: toolPulse 1.35s ease-in-out infinite;
 }
@@ -648,16 +648,24 @@ body.theme-dark .dialog-block {
   justify-self: center;
   width: min(780px, 86%);
   max-width: min(780px, 86%);
-  border-left: 3px solid rgba(31, 108, 88, 0.44);
+  border: 1px solid rgba(43, 66, 58, 0.12);
+  border-left: 4px solid rgba(31, 108, 88, 0.44);
 }
 
 .execution-block.success-state {
-  border-left-color: var(--ok);
+  border-color: rgba(23, 107, 85, 0.26);
+  border-left-color: var(--success);
 }
 
 .execution-block.failed-state {
-  border-left-width: 2px;
+  border-color: rgba(178, 72, 62, 0.30);
+  border-left-width: 4px;
   border-left-color: var(--fail);
+}
+
+.execution-block.running-state {
+  border-color: rgba(47, 111, 237, 0.30);
+  border-left-color: #2f6fed;
 }
 
 .execution-head {
