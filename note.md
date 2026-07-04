@@ -1092,3 +1092,15 @@ Current real root cause split:
 - follow-up gap for user item 3:
   - current framework has session cwd binding and `SendDirectMessageToSlave`, plus `LocalNodeRuntime::delegate_task` status projection, but no protocol-owned "create task and dispatch to subagent for outside-workspace target" command/lifecycle.
   - current cross-workspace path failure therefore reaches provider/tool blocked/error semantics instead of a framework routing decision.
+
+# 2026-07-04 agent-framework task-control correction
+
+- user correction: Freehand is an agent framework, so the framework must remain passive. It defines control fields, prompt instructions, schemas, tags, retry policy, and state transitions; the model returns explicit schema fields; the framework starts/stops/switches flows only from those fields, not from guessed request semantics.
+- design correction:
+  - cross-workspace/task/subagent routing must be model-schema-driven, not runtime NLP/path guessing.
+  - control schema should live inside a hard invisible block such as `<<<freehand>>>...<<<\/freehand>>>`.
+  - UI/public projection strips the control block from display.
+  - incomplete/bad model schema triggers repair/retry through schema feedback; framework may structurally normalize compatible formats but must not infer missing task semantics.
+  - task tools become schema-controlled framework affordances: model requests `create_task`/`dispatch_task`/`stop_task` via fields; framework executes validated control action and reports status back through protocol truth.
+- follow-up correction: task/subagent control signals are metadata/control truth, not data payload. Parsed control blocks must write to `metadata.core` / control center with explicit watermark provenance before any task lifecycle mutation. Control signals must not be passed through request/user-visible data chains or embedded into task input. Every write needs writer owner, pipeline node, schema version, control action, source model/agent/turn, timestamp, validation status, and error/retry trace so bad control decisions can be audited and replayed.
+- follow-up correction: flow rhythm and errors need explicit centers. New design doc `docs/design/control-error-center-refactor.md` and architecture gap entry define planned `control.center`, `error.center`, and `task.orchestration`; local runtime/provider/tool retry/fail/block decisions must move behind a centralized metadata-watermarked error policy before the task/subagent refactor.

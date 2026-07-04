@@ -19,6 +19,22 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 | priority | 低 — provider error 已覆盖，成功路径依赖 raw capture 已有可观测性，不阻塞任何 E2E 流程 |
 | closure path | 1) 按需在 `RuntimeLive02ProviderRequestBuilt` 之前补充请求构造前验证 metadata（如 adapter 配置校验） 2) OpenAI executor 接入时复用 `RuntimeLive05ProviderError` 模式 3) 同步 function map + test design |
 
+## Gap 3: `control.center` / `error.center` — 流程控制和错误处理未中心化
+
+| Field | Value |
+|---|---|
+| feature_id | planned `control.center`, planned `error.center`, planned `task.orchestration` |
+| owner crate | planned `crates/freehand-control`; current related owners are `metadata.core`, `reason.turn`, `runtime.ui-command-dispatch`, `node.master-slave` |
+| gap kind | agent-framework control and error policy are still distributed; completion schema retry, provider/tool error decisions, task/subagent control, and runtime flow rhythm are not admitted through one metadata-watermarked control/error center |
+| why not violation | existing landed behavior still has explicit owners and metadata/request isolation gates; this is a next refactor scope, not a claimed implemented feature |
+| risk | runtime/provider/tool paths can make local retry/fail/block decisions without one auditable control/error policy; future task/subagent routing could accidentally pass control fields as data |
+| gate | no current gate requires control/error center admission before flow decisions |
+| current producers | `reason.turn` and runtime live bridge write some metadata; provider/tool/runtime errors can materialize shared `ErrorErr01RuntimeClassified` but not through a central error policy owner |
+| missing coverage | `<<<freehand>>>` control block parser, control schema validator, control repair loop, error-center classifier, recovery decision owner, control/error watermark schema, task state transitions linked to accepted control metadata |
+| design doc | `docs/design/control-error-center-refactor.md` |
+| priority | high — required before task/subagent orchestration refactor |
+| closure path | 1) add feature-map/function-map/test-design entries for `control.center`, `error.center`, `task.orchestration` 2) implement pure parsers/validators in blocks/contracts 3) extend metadata center with control/error watermark helpers 4) route runtime/reason/provider/tool failures through error center 5) gate owner state transitions on accepted control metadata |
+
 ## 管理规则
 
 1. 本文件只记录 **非违规欠账**。违规必须改或删。

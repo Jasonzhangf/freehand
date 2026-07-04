@@ -15,6 +15,7 @@ Use this directory family for durable design truth.
 - `docs/design/debug-and-observability-design.md`
 - `docs/design/debug-core-design.md`
 - `docs/design/metadata-core-design.md`
+- `docs/design/control-error-center-refactor.md`
 - `docs/design/ui-and-runtime-topology.md`
 - `docs/design/config-core-design.md`
 - `docs/design/contracts-core-design.md`
@@ -87,6 +88,8 @@ Use this directory family for durable design truth.
   - debug module ownership, trace envelope, debug snapshot, and read-only observation boundaries
 - `metadata-core-design.md`
   - internal metadata center, writer owner, write-node provenance, and metadata/request isolation boundary
+- `control-error-center-refactor.md`
+  - next refactor design for passive schema-driven control, centralized error policy, metadata watermarks, task orchestration, and control/data isolation
 - `ui-and-runtime-topology.md`
   - multi-UI access, runtime home, master/slave shape, UI protocol boundaries
 - `config-core-design.md`
