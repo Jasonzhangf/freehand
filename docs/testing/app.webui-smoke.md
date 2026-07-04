@@ -13,12 +13,12 @@
   - CLI and WebUI divergences stay protocol-safe
   - app boundary remains decoupled from reason/provider/node/config semantics
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
-  - WebUI default status/control path uses ADP WebSocket `/adp` for query, subscribe, command, and visible failure frames
+  - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes success/failure scenario buttons that fill the composer while preserving the normal ADP submit path
   - WebUI control strip and session rail expose session switching, `/new` global conversation creation, `/task` cwd-bound task creation, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
   - WebUI attachment lifecycle keeps draft attachments session-scoped, clears them only after successful send, and preserves them across send failure for retry
   - WebUI transcript history renders attachment placeholders rather than raw payload blobs
-  - HTTP query, SSE subscribe, and POST command ingress remain compatibility transport routes rather than WebUI default truth
+  - HTTP query and POST command ingress remain compatibility transport routes; latest-turn SSE subscribe refreshes visible turn display without owning command dispatch
   - WebUI Cancel button and Escape key send `CancelTurn` through command ingress when a turn is active
   - WebUI Escape sends latest-active cancellation during submit-in-flight before a concrete `turn_id` is known
   - latest-turn subscribe should wait for the first turn instead of failing on blank state
@@ -31,7 +31,7 @@
   - WebUI root shell smoke
   - WebUI theme asset smoke
   - WebUI JS asset smoke
-  - WebUI JS asset smoke locks default ADP WebSocket usage and rejects `fetch` / `EventSource` as the default live path
+  - WebUI JS asset smoke locks ADP WebSocket command/query usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
   - WebUI ADP subscription accepted/waiting status rendering smoke
   - WebUI ADP failure frame visible-card/status smoke
   - WebUI ADP request timeout visible-failure smoke
@@ -61,9 +61,10 @@
   - WebUI latest-turn SSE renders tool lifecycle status updates (`waiting` then `completed`) from protocol truth
   - WebUI ADP turn updates render tool lifecycle status updates (`waiting`, `completed`, and `failed`) from protocol truth
 - WebUI JS/CSS asset smoke locks same-tool card normalization, immediate composer clearing on submit, Up/Down input history recall, submit/dispatch waiting timers, typed model-response waiting timers from protocol projection, phase-key timer reset, absence of UI-inferred waiting-model timers, current-live-turn-only animation gating, neutral non-animated inactive waiting state, waiting animation assets, compact terminal tool state dots, compressed tool semantic lines that remove repeated title/summary/body content, filtered generic tool results, and low-noise tool summary rendering with elapsed waiting timers
-- WebUI JS/CSS asset smoke locks execution-card lifecycle colors and inactive tool precursor projection: running cards must use blue status borders, success/completed cards green borders, failed cards red borders, completed tool precursor rounds must not restore as neutral waiting cards, and failed tool precursor rounds must not hide as neutral waiting cards
+- WebUI JS/CSS asset smoke locks chat transcript layout, execution lifecycle colors, and inactive tool precursor projection: user bubbles must be right-aligned and user-colored, assistant bubbles left-aligned, tool activity embedded as a semantic tool block inside the assistant bubble, model/retry continuation rows italicized as reasoning, running cards must use blue status borders, success/completed cards green borders, failed cards red borders, completed tool precursor rounds must not restore as neutral waiting cards, and failed tool precursor rounds must not hide as neutral waiting cards
 - WebUI JS asset smoke locks the render projection boundary: `buildConversationRenderModel`, `buildRenderTurn`, `buildRenderRows`, `buildToolActivityRenderRow`, `buildModelRequestRenderRow`, `turnIsCurrentLiveTurn`, and `renderModelHasLiveLifecycle` must exist, while old global model-request status helpers must not return.
 - WebUI JS asset smoke locks that visible turns come from one selector preserving transcript order and merging selected-session transcript with the latest same-session turn by replace-or-append, then render through `RenderConversation` / `RenderTurn` / `RenderRow`, so stale transcript state cannot hide an in-flight or newly completed continuation after submit, historical turns cannot inherit current live lifecycle animation, and restarted/runtime-reused turn ordinals do not move new cards above older transcript rows
+- WebUI selected-session black-box coverage must prove a manually clicked completed session remains selected even when a different latest active/interrupted session exists; latest active turn may render only when no selected session is pinned
 - WebUI JS asset smoke locks that submitted input remains observable after composer clear: pending submit cards render after existing history, pending input is cleared only after the same user text is materialized in visible turn rows, a live protocol turn with no public rows renders an explicit observable waiting row, and a latest terminal/interrupted turn still renders when selected-session transcript state is empty instead of producing a blank transcript
 - WebUI JS asset smoke locks that latest-turn merging must not key only on `turn_id`; because runtime ordinals may be reused after restart, WebUI replacement requires the same `turn_id` and same visible `user_text`, otherwise the latest turn is appended rather than overwriting historical rows
 - WebUI JS asset smoke locks that tool card rendering consumes protocol `display` fields, including `parameter_summary`, and does not implement category parsing from raw tool argument/result text
@@ -91,7 +92,7 @@
   - split theme/WebUI static assets are landed
   - HTTP query and continuous SSE subscribe transport smoke is landed
   - HTTP command ingress dispatch-receipt/failure smoke is landed
-  - WebUI root shell now exposes `/adp`, and WebUI JS defaults to ADP WebSocket instead of `fetch` / `EventSource`
+  - WebUI root shell now exposes `/adp`, and WebUI JS uses ADP WebSocket for command/query/subscription truth plus EventSource for latest-turn SSE display refresh
   - WebUI session rail now supports `/new` as global conversation creation, compact session summaries, and selected-session draft creation without inventing a separate navigation path
   - WebUI session rail task cwd selector and composer cwd input are landed; new task requires an explicit visible cwd and creates a cwd-bound session through ADP `CreateSession`, while new conversation can submit without cwd and rely on runtime default cwd
   - WebUI root shell now exposes success/failure scenario buttons, and WebUI JS carries the paired scenario prompts
@@ -102,9 +103,9 @@
   - submit-success path now refreshes latest turn truth after command receipt
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input
   - submit-in-flight cancel path uses `CancelLatestActiveTurn` before a concrete `turn_id` arrives
-  - ADP query/subscription now drive the default WebUI cards, while HTTP query/SSE compatibility routes still expose public projection smoke coverage
+  - ADP query/subscription now drive WebUI command/query truth, while latest-turn SSE also refreshes visible chat bubbles and HTTP query remains compatibility coverage
   - debug query remains snapshot-only, while ADP debug subscriptions wait for late debug snapshots so turn/debug timing races are not user-visible failures; ADP failure frames render visible status/cards instead of stale pending
-  - latest-turn SSE compatibility and WebUI ADP asset checks now have regression coverage for tool waiting/completed status updates and default ADP routing
+  - latest-turn SSE compatibility and WebUI ADP asset checks now have regression coverage for tool waiting/completed status updates, default ADP routing, and EventSource display refresh wiring
   - attachment placeholder and draft-retention semantics are now part of the design contract and must stay session-scoped
 - WebUI tool cards now normalize by `tool_call_id`, waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
 - WebUI submit/dispatch pending state and tool waiting state now both refresh with visible elapsed time instead of static waiting text
@@ -115,7 +116,9 @@
 - WebUI tool terminal state now uses compact color dots and compresses repeated title/summary/body text while filtering generic success strings and success/failure result echoes from the primary tool body
 - WebUI tool rendering now consumes `UiToolActivity.display` for semantic action/target/parameter/diff rendering; parser ownership is outside the UI app and result outcome is carried by status rather than repeated body text
 - WebUI selected-session transcript now preserves per-round lifecycle cards for same execution-cycle round ids while hiding internal continuation prompts from user rows
+- WebUI transcript now renders per-round chat bubbles instead of one large turn execution card; user input is right-aligned, assistant/final text is left-aligned, and tool activity stays inside the assistant bubble as a semantic tool block
 - WebUI selected-session transcript now folds latest same-session turn updates into the render view before drawing cards, avoiding stale transcript/latest-turn source competition
+- WebUI selected-session startup/manual-click priority is landed: `refreshAllProtocolState` queries latest active turn only when no selected session exists, while ADP/SSE latest-turn updates from other sessions are ignored for the selected transcript
 - WebUI draft-session empty state is landed without the old selected-session/no-turns system feedback card
 - WebUI assistant text stays in its owning round card, and raw `<freehand_completion>` blocks do not pollute the main chat stream
   - protocol-only transport library reuse is landed

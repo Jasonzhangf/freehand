@@ -32,6 +32,7 @@
 - search/list tools project pattern or path target plus match/list status without dumping full output into the main card.
 - plan tools project compact plan status and counts.
 - shell tools project command intent; command-shaped read/search/list invocations are classified semantically by the parser owner, not by UI code.
+- ordinary shell tools expose a structured `command` display field for UI truncation/display; the special `pwd` projection continues to hide raw `command=pwd` and renders as current-workspace reading.
 - generic tools project low-noise name, key arguments, and status.
 - result failure remains a tool execution result and does not become a system terminal failure.
 
@@ -75,4 +76,5 @@
 - implementation is bound in `crates/freehand-blocks/src/tool_display.rs`
 - `ui.protocol` consumes `project_tool_call_display` and `project_tool_result_display` when projecting `UiToolActivity.display`
 - WebUI consumes the protocol `display` projection, including `parameter_summary`, and does not classify tools locally
+- WebUI consumes ordinary shell `command` display fields for truncated command display while keeping shell classification in `tool.display`
 - generated wiki must be regenerated from `docs/mainline-calls/tool.display.json` when this function-map truth changes

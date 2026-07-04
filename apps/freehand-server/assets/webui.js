@@ -73,6 +73,7 @@ const state = {
   adpOpened: null,
   adpRequests: new Map(),
   adpSubscriptions: new Set(),
+  sseTurnStream: null,
   requestSequence: 0,
   attachmentDrafts: loadAttachmentDrafts(),
   attachmentsPreviewOpen: true,
@@ -627,6 +628,46 @@ function pendingExecutionCard(renderPending) {
   return article;
 }
 
+function pendingChatCards(renderPending) {
+  const elapsed = renderPending.elapsed;
+  const userRow = {
+    kind: "user",
+    title: "User",
+    body: [textWithAttachmentPlaceholders(renderPending.text, renderPending.attachments)],
+    status: "submitted",
+  };
+  const assistantRows = [{
+    kind: "system",
+    title: "Client",
+    body: ["Request accepted by WebUI. Waiting for ADP dispatch."],
+    status: elapsed || "0s",
+  }];
+  const renderTurn = {
+    turnId: "pending-submit",
+    lifecycle: {
+      className: renderPending.isLive ? "running" : "pending",
+      label: elapsed ? `dispatching... ${elapsed}` : "dispatching",
+      isLive: renderPending.isLive,
+    },
+  };
+  return [userChatBubble(renderTurn, userRow), assistantChatBubble(renderTurn, assistantRows)];
+}
+
+function failureChatBubble(message) {
+  return assistantChatBubble(
+    {
+      turnId: "adp-failure",
+      lifecycle: { className: "failed", label: "failed", isLive: false },
+    },
+    [{
+      kind: "error",
+      title: "ADP",
+      body: [message],
+      status: "failed",
+    }],
+  );
+}
+
 function turnExecutionCard(renderTurn) {
   const lifecycle = renderTurn.lifecycle;
   const status = { className: lifecycle.className, label: lifecycle.label };
@@ -644,6 +685,264 @@ function turnExecutionCard(renderTurn) {
     body.appendChild(executionRow(row));
   });
   return article;
+}
+
+function turnChatCards(renderTurn) {
+  const cards = [];
+  let assistantRows = [];
+  const flushAssistant = () => {
+    if (assistantRows.length === 0) {
+      return;
+    }
+    cards.push(assistantChatBubble(renderTurn, assistantRows));
+    assistantRows = [];
+  };
+
+  renderTurn.rows.forEach((row) => {
+    if (row.kind === "user") {
+      flushAssistant();
+      cards.push(userChatBubble(renderTurn, row));
+      return;
+    }
+    assistantRows.push(row);
+  });
+  flushAssistant();
+
+  if (cards.length === 0) {
+    cards.push(assistantChatBubble(renderTurn, [{
+      kind: "system",
+      title: "Turn",
+      body: ["Waiting for projection."],
+      status: renderTurn.lifecycle.label,
+      identity: { turnId: renderTurn.turnId },
+    }]));
+  }
+  return cards;
+}
+
+function userChatBubble(renderTurn, row) {
+  const article = document.createElement("article");
+  article.className = `chat-message chat-message-user ${renderTurn.lifecycle.className}-state`;
+  article.dataset.turnId = renderTurn.turnId || "";
+
+  const meta = document.createElement("div");
+  meta.className = "chat-message-meta";
+  const label = document.createElement("span");
+  label.className = "chat-role-label";
+  label.textContent = "User";
+  const status = document.createElement("span");
+  status.className = "chat-row-status";
+  status.textContent = row.status || "";
+  meta.append(label, status);
+
+  const body = document.createElement("div");
+  body.className = "chat-message-body";
+  renderTextLines(body, row.body || []);
+
+  article.append(meta, body);
+  return article;
+}
+
+function assistantChatBubble(renderTurn, rows) {
+  const lifecycle = renderTurn.lifecycle;
+  const className = chatAssistantStateClass(lifecycle, rows);
+  const article = document.createElement("article");
+  article.className = `chat-message chat-message-assistant ${className}-state`;
+  article.dataset.turnId = renderTurn.turnId || "";
+  if (lifecycle.isLive) {
+    article.dataset.live = "true";
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "chat-message-meta";
+  const label = document.createElement("span");
+  label.className = "chat-role-label";
+  label.textContent = "Assistant";
+  const status = document.createElement("span");
+  status.className = `chat-state-pill ${className}`;
+  status.textContent = chatAssistantStatusLabel(lifecycle, rows);
+  meta.append(label, status);
+  article.appendChild(meta);
+
+  rows.forEach((row) => {
+    article.appendChild(chatAssistantSection(row));
+  });
+  return article;
+}
+
+function chatAssistantStateClass(lifecycle, rows) {
+  if (rows.some((row) => row.kind === "error")) {
+    return "failed";
+  }
+  if (rows.some((row) => row.kind === "tool" && `${row.status || ""}`.toLowerCase().includes("失败"))) {
+    return "failed";
+  }
+  if (lifecycle.className === "failed") {
+    return "failed";
+  }
+  if (lifecycle.className === "running") {
+    return "running";
+  }
+  if (lifecycle.className === "success") {
+    return "success";
+  }
+  return "pending";
+}
+
+function chatAssistantStatusLabel(lifecycle, rows) {
+  const failedTool = rows.find((row) => row.kind === "tool" && `${row.status || ""}`.toLowerCase().includes("失败"));
+  if (failedTool) {
+    return "tool failed";
+  }
+  if (lifecycle.isLive) {
+    return lifecycle.label || "running";
+  }
+  if (rows.some((row) => row.kind === "final")) {
+    return "completed";
+  }
+  return lifecycle.label || "received";
+}
+
+function chatAssistantSection(row) {
+  const section = document.createElement("section");
+  section.className = `chat-section chat-section-${row.kind}`;
+  if (row.identity && row.identity.turnId) {
+    section.dataset.turnId = row.identity.turnId;
+  }
+  if (row.identity && row.identity.toolCallId) {
+    section.dataset.toolCallId = row.identity.toolCallId;
+  }
+
+  if (row.kind === "tool") {
+    renderToolSection(section, row);
+    return section;
+  }
+
+  if (row.kind === "system") {
+    section.classList.add("chat-section-reasoning");
+  }
+
+  const heading = document.createElement("div");
+  heading.className = "chat-section-heading";
+  heading.textContent = row.kind === "final" ? "Final" : row.title || "Assistant";
+  if (row.status) {
+    const status = document.createElement("span");
+    status.className = "chat-row-status";
+    status.textContent = row.status;
+    heading.appendChild(status);
+  }
+  const body = document.createElement("div");
+  body.className = row.kind === "system" ? "chat-reasoning-body" : "chat-message-body";
+  renderTextLines(body, row.body || []);
+  section.append(heading, body);
+  return section;
+}
+
+function renderTextLines(container, lines) {
+  const text = Array.isArray(lines) ? lines.join("\n") : `${lines || ""}`;
+  const chunks = text.split(/\n{2,}/).map((chunk) => chunk.trim()).filter(Boolean);
+  if (chunks.length === 0) {
+    container.textContent = "";
+    return;
+  }
+  chunks.forEach((chunk) => {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = chunk;
+    container.appendChild(paragraph);
+  });
+}
+
+function renderToolSection(section, row) {
+  section.classList.add(toolStateClass(row.status));
+  const display = row.display || null;
+  const head = document.createElement("div");
+  head.className = "tool-chat-head";
+  const title = document.createElement("span");
+  title.className = "tool-chat-title";
+  title.textContent = row.title || (display && display.action) || "Tool";
+  const state = document.createElement("span");
+  state.className = `tool-chat-state ${toolStateClass(row.status)}`;
+  state.textContent = row.status || "";
+  head.append(title, state);
+
+  const body = document.createElement("div");
+  body.className = "tool-chat-body";
+  toolSemanticLines(row).forEach((line) => {
+    const item = document.createElement("div");
+    item.className = line.kind === "command" ? "tool-command-line" : "tool-chat-line";
+    item.textContent = line.text;
+    item.title = line.fullText || line.text;
+    body.appendChild(item);
+  });
+  section.append(head, body);
+}
+
+function toolStateClass(status) {
+  const normalized = `${status || ""}`.toLowerCase();
+  if (normalized.includes("失败") || normalized === "failed") {
+    return "failed";
+  }
+  if (normalized.includes("等待") || normalized === "waiting") {
+    return "running";
+  }
+  return "success";
+}
+
+function toolSemanticLines(row) {
+  const display = row.display || null;
+  const lines = [];
+  if (display && display.kind) {
+    lines.push({ text: `type: ${toolKindLabel(display.kind)}` });
+  }
+  if (display && display.target) {
+    lines.push({ text: `target: ${display.target}` });
+  }
+  const command = toolDisplayField(display, "command");
+  if (command) {
+    lines.push({
+      kind: "command",
+      text: `command: ${truncateForChat(command, 180)}`,
+      fullText: command,
+    });
+  }
+  if (display && Array.isArray(display.fields)) {
+    display.fields
+      .filter((field) => !["tool", "target", "command"].includes(`${field.label || ""}`))
+      .slice(0, 4)
+      .forEach((field) => lines.push({ text: `${field.label}: ${field.value}` }));
+  }
+  (row.body || []).forEach((bodyLine) => {
+    if (command && `${bodyLine || ""}`.startsWith("command=")) {
+      return;
+    }
+    if (bodyLine && !lines.some((line) => line.text.endsWith(bodyLine))) {
+      lines.push({ text: bodyLine });
+    }
+  });
+  return lines.length > 0 ? lines : [{ text: row.status || "tool activity" }];
+}
+
+function toolDisplayField(display, label) {
+  if (!display || !Array.isArray(display.fields)) {
+    return "";
+  }
+  const field = display.fields.find((candidate) => candidate.label === label);
+  return field ? `${field.value || ""}` : "";
+}
+
+function toolKindLabel(kind) {
+  return `${kind || "tool"}`
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .toLowerCase();
+}
+
+function truncateForChat(value, maxLength) {
+  const text = `${value || ""}`.replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 function executionShell({ status, live }) {
@@ -755,10 +1054,14 @@ function buildConversationRenderModel() {
     conversationTurns.length === 0 && state.turn
       ? [state.turn]
       : conversationTurns;
+  const successorBaseTurns = successorBaseTurnIds(turnsForRender);
   return {
     selectedSessionId: state.selectedSessionId,
     turns: turnsForRender.map((turn) =>
-      buildRenderTurn(turn, { hideUser: turnOrderKey(turn.turn_id).round > 1 }),
+      buildRenderTurn(turn, {
+        hideUser: turnOrderKey(turn.turn_id).round > 1,
+        hideTerminal: successorBaseTurns.has(turn.turn_id || ""),
+      }),
     ),
     pendingSubmit: state.pendingUserInput
       ? {
@@ -770,6 +1073,28 @@ function buildConversationRenderModel() {
       : null,
     adpFailure: state.adpFailure ? { message: state.adpFailure } : null,
   };
+}
+
+function successorBaseTurnIds(turns) {
+  const baseIds = new Set(
+    turns
+      .filter((turn) => turnOrderKey(turn && turn.turn_id).round > 1)
+      .map((turn) => baseTurnId(turn.turn_id))
+      .filter(Boolean),
+  );
+  return new Set(
+    turns
+      .filter((turn) => baseIds.has(turn && turn.turn_id))
+      .map((turn) => turn.turn_id),
+  );
+}
+
+function baseTurnId(turnId) {
+  const parsed = turnOrderKey(turnId);
+  if (parsed.round <= 1) {
+    return parsed.raw;
+  }
+  return `${parsed.prefix}${parsed.ordinal}`;
 }
 
 function buildRenderTurn(turn, options = {}) {
@@ -786,7 +1111,7 @@ function buildRenderTurn(turn, options = {}) {
 function buildRenderRows(turn, lifecycle, options = {}) {
   const rows = conversationItemsForTurn(turn, { hideUser: !!options.hideUser }).map((item) =>
     buildRenderRowFromConversationItem(turn, item),
-  );
+  ).filter((row) => !(options.hideTerminal && row.kind === "final"));
   const modelRow = buildModelRequestRenderRow(turn, lifecycle);
   if (modelRow) {
     rows.push(modelRow);
@@ -843,6 +1168,7 @@ function buildToolActivityRenderRow(turn, item) {
     title: item.title,
     body: toolSummaryBodyLines(item),
     status: toolTimelineLine(item, timing) || item.status,
+    display: item.display || null,
     identity: { turnId: turn.turn_id, toolCallId: item.tool_call_id },
   };
 }
@@ -1242,6 +1568,9 @@ function stripFreehandCompletionBlock(text) {
   const stripped = `${text || ""}`
     .replace(/<freehand_completion>[\s\S]*?<\/freehand_completion>/g, "")
     .trim();
+  if (stripped.includes("</freehand_completion>")) {
+    return "";
+  }
   return stripped;
 }
 
@@ -1266,7 +1595,16 @@ function isInternalRuntimePrompt(turn) {
 }
 
 function logicalSessionTurns(turns) {
-  return turns.filter(Boolean);
+  const merged = [];
+  turns.filter(Boolean).forEach((turn) => {
+    const index = merged.findIndex((existing) => sameRenderableTurn(existing, turn));
+    if (index >= 0) {
+      merged[index] = turn;
+    } else {
+      merged.push(turn);
+    }
+  });
+  return merged;
 }
 
 function normalizeVisibleText(text) {
@@ -1311,6 +1649,14 @@ function clearPendingUserInputIfMaterialized() {
 function sameRenderableTurn(left, right) {
   if (!left || !right || left.turn_id !== right.turn_id) {
     return false;
+  }
+  if (
+    left.session_id &&
+    right.session_id &&
+    left.session_id === right.session_id &&
+    (isInternalRuntimePrompt(left) || isInternalRuntimePrompt(right))
+  ) {
+    return true;
   }
   return normalizeVisibleText(left.user_text) === normalizeVisibleText(right.user_text);
 }
@@ -1542,7 +1888,7 @@ async function deleteSelectedSessions() {
 }
 
 function setSessionTranscript(projection) {
-  state.sessionTurns = (projection && projection.turns) || [];
+  state.sessionTurns = logicalSessionTurns((projection && projection.turns) || []);
   syncSelectedCwdFromProjection(projection);
   if (projection && projection.session_id && state.sessionTurns.length > 0) {
     setSelectedSessionId(projection.session_id);
@@ -1592,6 +1938,7 @@ function setTurnProjection(turn, options = {}) {
     } else if (!state.selectedSessionId || state.turn.session_id === state.selectedSessionId) {
       state.sessionTurns.push(state.turn);
     }
+    state.sessionTurns = logicalSessionTurns(state.sessionTurns);
   }
   state.publicConversation = derivePublicConversation(state.turn);
   syncToolTimings(conversationTurnsForRender());
@@ -1737,24 +2084,16 @@ function renderMessages() {
     );
   } else {
     renderModel.turns.forEach((renderTurn) => {
-      fragments.push(turnExecutionCard(renderTurn));
+      fragments.push(...turnChatCards(renderTurn));
     });
   }
 
   if (renderModel.pendingSubmit) {
-    fragments.push(pendingExecutionCard(renderModel.pendingSubmit));
+    fragments.push(...pendingChatCards(renderModel.pendingSubmit));
   }
 
   if (renderModel.adpFailure) {
-    fragments.push(
-      card(
-        "ADP",
-        { className: "failed", label: "failed" },
-        "ADP failure",
-        renderModel.adpFailure.message,
-        "failure",
-      ),
-    );
+    fragments.push(failureChatBubble(renderModel.adpFailure.message));
   }
 
   if (fragments.length === 0) {
@@ -1772,10 +2111,25 @@ function renderMessages() {
     fragments.push(empty);
   }
 
-  fragments.forEach((fragment) => messageList.appendChild(fragment));
+  uniqueChatFragments(fragments).forEach((fragment) => messageList.appendChild(fragment));
   if (shouldStickToBottom) {
     scrollMessagesToBottom();
   }
+}
+
+function uniqueChatFragments(fragments) {
+  const seen = new Set();
+  return fragments.filter((fragment) => {
+    if (!fragment || !fragment.classList || !fragment.classList.contains("chat-message")) {
+      return true;
+    }
+    const key = `${fragment.dataset.turnId || ""}:${normalizeVisibleText(fragment.innerText)}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function messageListIsNearBottom() {
@@ -2067,7 +2421,9 @@ async function refreshCheckpoints() {
 async function refreshAllProtocolState() {
   await refreshSessions();
   await refreshSelectedSession();
-  await refreshTurn();
+  if (!state.selectedSessionId) {
+    await refreshTurn();
+  }
   await refreshCheckpoints();
 }
 
@@ -2081,6 +2437,38 @@ function ensureTurnSubscription() {
     "sub-turn",
   ).catch((error) => {
     setCommandStatus(`ADP turn subscribe failed: ${error.message}`);
+  });
+}
+
+function ensureSseTurnSubscription() {
+  if (state.sseTurnStream || typeof EventSource === "undefined") {
+    return;
+  }
+  const endpoint = shellConfig().turnSubscribe;
+  if (!endpoint) {
+    return;
+  }
+  const stream = new EventSource(endpoint);
+  state.sseTurnStream = stream;
+  stream.addEventListener("open", () => {
+    setBackgroundCommandStatus("SSE turn refresh connected");
+  });
+  stream.addEventListener("turn", (event) => {
+    try {
+      const turn = JSON.parse(event.data);
+      if (state.selectedSessionId && turn.session_id !== state.selectedSessionId) {
+        renderCommandStatus();
+        return;
+      }
+      setTurnProjection(turn);
+      setBackgroundCommandStatus("SSE turn refresh received");
+      renderAll();
+    } catch (error) {
+      setCommandStatus(`SSE turn refresh decode failed: ${error.message}`, { stickyMs: 8000 });
+    }
+  });
+  stream.addEventListener("error", () => {
+    setBackgroundCommandStatus("SSE turn refresh reconnecting...");
   });
 }
 
@@ -2485,6 +2873,7 @@ document.addEventListener("keydown", (event) => {
 ensureAdpSocket()
   .then(async () => {
     ensureTurnSubscription();
+    ensureSseTurnSubscription();
     await refreshAllProtocolState();
   })
   .catch((error) => {

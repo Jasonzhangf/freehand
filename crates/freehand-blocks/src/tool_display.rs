@@ -320,6 +320,7 @@ pub fn parse_shell_tool_display(arguments: &[ToolArgument]) -> ToolDisplayProjec
         action: action.clone(),
         target: Some(target.clone()),
         parameter_summary: parameter_summary_for(vec![
+            ("command", Some(command.clone())),
             ("target", Some(target.clone())),
             ("timeout", string_argument(arguments, "timeout_seconds")),
         ]),
@@ -327,6 +328,7 @@ pub fn parse_shell_tool_display(arguments: &[ToolArgument]) -> ToolDisplayProjec
         result_summary: None,
         fields: compact_fields([
             field("tool", "bash"),
+            field("command", &command),
             field("target", &target),
             optional_field("timeout", string_argument(arguments, "timeout_seconds")),
         ]),
@@ -595,6 +597,27 @@ mod tests {
                 .iter()
                 .any(|field| field.label == "command" || field.value == "pwd")
         );
+    }
+
+    #[test]
+    fn ordinary_shell_projection_carries_truncated_command_field() {
+        let display = project_tool_call_display(
+            "bash",
+            &[arg(
+                "command",
+                json!("printf 'hello world' && sleep 1 && printf 'done'"),
+            )],
+        );
+
+        assert_eq!(display.kind, ToolDisplayKind::Shell);
+        assert_eq!(display.action, "Run shell command");
+        assert!(display.parameter_summary.as_deref().is_some_and(|summary| {
+            summary.contains("command=printf 'hello world' && sleep 1 && printf 'done'")
+        }));
+        assert!(display.fields.iter().any(|field| {
+            field.label == "command"
+                && field.value == "printf 'hello world' && sleep 1 && printf 'done'"
+        }));
     }
 
     #[test]

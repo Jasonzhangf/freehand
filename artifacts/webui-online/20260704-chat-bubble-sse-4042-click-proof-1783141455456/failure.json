@@ -1,0 +1,42 @@
+{
+  "session": "cli-adp-sample-failure-1783140184144863000",
+  "turn": "runtime-turn-33-r2",
+  "status": "COMPLETED",
+  "cards": [
+    {
+      "i": 0,
+      "cls": "chat-message chat-message-user failed-state",
+      "turn": "runtime-turn-33",
+      "text": "User\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.",
+      "x": 525.640625,
+      "borderLeftColor": "rgba(63, 103, 139, 0.22)"
+    },
+    {
+      "i": 1,
+      "cls": "chat-message chat-message-assistant failed-state",
+      "turn": "runtime-turn-33",
+      "text": "Assistant\ntool failed\nAssistant\nreceived\n\nI'll execute the task as specified: call `read_file` exactly once on the missing file path, then report via the Freehand completion schema.\n\nRead file\n执行失败 · 0s\ntype: read file\ntarget: definitely-missing-freehand-file.txt\npath=definitely-missing-freehand-file.txt",
+      "x": 347,
+      "borderLeftColor": "rgb(178, 72, 62)"
+    },
+    {
+      "i": 2,
+      "cls": "chat-message chat-message-assistant success-state",
+      "turn": "runtime-turn-33-r2",
+      "text": "Assistant\ncompleted\nAssistant\ncompleted\n\nI called `read_file` exactly once as instructed, and the tool failed with \"No such file or directory (os error 2)\" — this is the expected ADP failure sample. The failed result confirms the missing file behaves as designed, so I'm reporting completion.\n\nFinal\ncompleted\n\nPerformed the prescribed single read_file call against the missing path; the tool produced the expected failure output, which is the basis for successful ADP failure-sample handling.",
+      "x": 347,
+      "borderLeftColor": "rgb(23, 107, 85)"
+    }
+  ],
+  "tools": [
+    {
+      "i": 0,
+      "cls": "chat-section chat-section-tool failed",
+      "text": "Read file\n执行失败 · 0s\ntype: read file\ntarget: definitely-missing-freehand-file.txt\npath=definitely-missing-freehand-file.txt",
+      "borderLeftColor": "rgb(178, 72, 62)",
+      "insideAssistant": true
+    }
+  ],
+  "reasoning": [],
+  "bodyText": "FH\nWS\nND\nRP\nDG\nSESSIONS\nSessions\nTASK TARGET DIRECTORY\nNew conversation\nNew task\nBULK\n0 selected\nSelect all\nClear\nDelete\nSUCCESS\ncli-adp-sample-failure-1782953474436814000\nruntime-turn-5-r3 · 3 turn(s) · code/freehand\nINTERRUPTED\ncli-adp-sample-failure-1783100523482624000\nruntime-turn-3-r8 · 7 turn(s) · code/freehand\nSUCCESS\ncli-adp-sample-failure-1783140184144863000\nruntime-turn-33-r2 · 2 turn(s) · code/freehand\nSUCCESS\ncli-adp-sample-success-1782953474447457000\nruntime-turn-6 · 1 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704020727-d1b9081f\nruntime-turn-4-r2 · 7 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704025459-e136d862\nruntime-turn-11 · 7 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704032551-15d84437\nruntime-turn-14-r2 · 6 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704033353-7837d5ac\nruntime-turn-17-r2 · 7 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704033819-59b15848\nruntime-turn-20-r2 · 6 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704034023-f09b8763\nruntime-turn-23-r2 · 5 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704040441-83846879\nruntime-turn-26-r2 · 5 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704040643-e600987e\nruntime-turn-27-r2 · 2 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704040741-4c6589ce\nruntime-turn-28-r2 · 2 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704041512-246e9b67\nruntime-turn-29-r2 · 2 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704041922-19996d17\nruntime-turn-30-r2 · 2 turn(s) · code/freehand\nSUCCESS\nwebui-session-20260704043353-88cc216a\nruntime-turn-31-r2 · 2 turn(s) · code/freehand\nACTIVE\nwebui-session-20260704044146-e2029eaa\nruntime-turn-32-r5 · 5 turn(s) · code/freehand\nCONVERSATION\nFreehand\nWHITE\nBLACK\nDEBUG OFF\nCONNECTED\nSESSION\ncli-adp-sample-failure-1783140184144863000\nTURN\nruntime-turn-33-r2\nCWD\n/Volumes/extension/code/freehand\nSLAVE\nidle\nSlave Agents\nIDLE\nSELECTED SESSION\nruntime-turn-33-r2\nCOMPLETED\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.\n\nAssistant\ntool failed\nAssistant\nreceived\n\nI'll execute the task as specified: call `read_file` exactly once on the missing file path, then report via the Freehand completion schema.\n\nRead file\n执行失败 · 0s\ntype: read file\ntarget: definitely-missing-freehand-file.txt\npath=definitely-missing-freehand-file.txt\nAssistant\ncompleted\nAssistant\ncompleted\n\nI called `read_file` exactly once as instructed, and the tool failed with \"No such file or directory (os error 2)\" — this is the expected ADP failure sample. The failed result confirms the missing file behaves as designed, so I'm reporting completion.\n\nFinal\ncompleted\n\nPerformed the prescribed single read_file call against the missing path; the tool produced the expected failure output, which is the basis for successful ADP failure-sample handling.\n\nSend\nCancel\nSuccess\nFailure\nAttach file\nAttach image\nAttach video\nPreview files\nRefresh session\nCWD\nMODEL\nRuntime config\nno draft attachments\nturn completed\nDETAIL REGION\nSelected Turn Debug\n\n右侧只展示当前 turn 的调试摘要，不抢主消息流焦点。\n\nDEBUG STATUS\ndebug pending\nwaiting for debug snapshot\nCHECKPOINTS\n0 checkpoint(s)\n-"
+}

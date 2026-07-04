@@ -40,10 +40,10 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
     - `scripts/install-launchd.sh installS` with 4042 health, ADP smoke, and served/workspace JS hash match
-    - browser evidence captured blue running tool + italic reasoning: `artifacts/webui-online/20260704-chat-bubble-sse-4042-final-1783140104360/running.png`
-    - browser/ADP evidence captured SSE and semantic shell display; final selection proof remains partially blocked because active non-terminal freeform session kept stealing selected-session render in the automated browser.
+    - browser evidence captured completed/success and failed selected sessions after click, with selected session pinned, user right alignment, assistant left alignment, semantic shell tool embedded inside assistant, green success, red failure, SSE, no raw completion schema leak, and no duplicate r2 assistant/final card: `artifacts/webui-online/20260704-chat-bubble-sse-4042-click-proof-1783141455456/summary.json`.
+    - browser evidence captured current-code running blue tool block plus italic reasoning and SSE: `artifacts/webui-online/20260704-chat-bubble-sse-4042-running-proof-1783141498366/summary.json`.
   - remaining verification gap:
-    - need one clean post-dedupe browser run where selected completed session is held stable and asserts no duplicate r2 card plus green success card in the same artifact.
+    - freeform provider/tool behavior can still time out independently of WebUI rendering; use ADP sample sessions or already-terminal sessions for deterministic terminal visual proofs.
 
 # 2026-07-01 WebUI submitted input/history disappearance trace
   - user live feedback: after submitting a request, the composer text disappeared and the conversation area showed no user-visible history while the top status still showed live model/tool-result state.

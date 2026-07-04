@@ -13,6 +13,7 @@
   - classify read-file, file-mutation, search/list, plan, shell, and generic tools
   - parse each class through its own function
   - shell command classification covers common read/search/list command shapes
+  - ordinary shell projection carries a structured `command` field for UI display while `pwd` keeps hiding raw `command=pwd`
   - result success and result failure update structured display without changing tool truth
 - module black-box plan:
 - `project_tool_call_display` returns low-noise display fields and parameter summaries for read/search/write/plan/shell/generic samples
@@ -28,6 +29,6 @@
 - sync status between design and implementation:
   - parser implementation landed in `crates/freehand-blocks/src/tool_display.rs`
   - UI protocol projection carries `ToolDisplayProjection`
-- WebUI consumes `display` fields and renders parameter summaries as low-weight secondary tool lines
+- WebUI consumes `display` fields and renders parameter summaries / shell command fields as low-weight semantic tool lines
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with display owner code and function map updates

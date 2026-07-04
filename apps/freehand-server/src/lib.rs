@@ -1061,6 +1061,11 @@ mod tests {
         assert!(webui_css_body.contains("@keyframes waitingDot"));
         assert!(webui_css_body.contains("@keyframes toolPulse"));
         assert!(webui_css_body.contains(".chat-empty-title"));
+        assert!(webui_css_body.contains(".chat-message-user"));
+        assert!(webui_css_body.contains(".chat-message-assistant"));
+        assert!(webui_css_body.contains(".chat-section-tool"));
+        assert!(webui_css_body.contains(".chat-reasoning-body"));
+        assert!(webui_css_body.contains(".tool-command-line"));
         assert!(webui_css_body.contains("width: fit-content"));
         assert!(webui_css_body.contains(".execution-block"));
         assert!(webui_css_body.contains(".execution-block.success-state"));
@@ -1094,9 +1099,11 @@ mod tests {
             .await
             .expect("js body 2");
         assert!(js_body.contains("new WebSocket(adpUrl())"));
+        assert!(js_body.contains("new EventSource(endpoint)"));
+        assert!(js_body.contains("function ensureSseTurnSubscription"));
+        assert!(js_body.contains("SSE turn refresh received"));
         assert!(js_body.contains("adpSubscribe"));
         assert!(js_body.contains("subscription_accepted"));
-        assert!(!js_body.contains("new EventSource"));
         assert!(!js_body.contains("fetch("));
         assert!(js_body.contains("refreshCheckpoints"));
         assert!(js_body.contains("freehand-webui-selected-session"));
@@ -1119,6 +1126,11 @@ mod tests {
         assert!(js_body.contains("Send a message to start this session."));
         assert!(js_body.contains("function pendingExecutionCard"));
         assert!(js_body.contains("function turnExecutionCard"));
+        assert!(js_body.contains("function turnChatCards"));
+        assert!(js_body.contains("function userChatBubble"));
+        assert!(js_body.contains("function assistantChatBubble"));
+        assert!(js_body.contains("function renderToolSection"));
+        assert!(js_body.contains("function toolSemanticLines"));
         assert!(js_body.contains("function buildConversationRenderModel"));
         assert!(js_body.contains("function buildRenderTurn"));
         assert!(js_body.contains("function buildRenderRows"));
@@ -1136,6 +1148,9 @@ mod tests {
         assert!(js_body.contains("function clearPendingUserInputIfMaterialized"));
         assert!(js_body.contains("clearPendingUserInputIfMaterialized();"));
         assert!(js_body.contains("function sameRenderableTurn"));
+        assert!(js_body.contains("const merged = [];"));
+        assert!(js_body.contains("sameRenderableTurn(existing, turn)"));
+        assert!(js_body.contains("state.sessionTurns = logicalSessionTurns"));
         assert!(js_body.contains("sameRenderableTurn(existing, state.turn)"));
         assert!(js_body.contains("sameRenderableTurn(turn, latestTurn)"));
         assert!(!js_body.contains("existing.turn_id === state.turn.turn_id"));
@@ -1146,14 +1161,17 @@ mod tests {
             !js_body
                 .contains("conversationTurns.length === 0 && turnIsCurrentLiveTurn(state.turn)")
         );
-        assert!(js_body.contains("fragments.push(turnExecutionCard(renderTurn))"));
+        assert!(js_body.contains("fragments.push(...turnChatCards(renderTurn))"));
+        assert!(js_body.contains("function uniqueChatFragments"));
+        assert!(js_body.contains("uniqueChatFragments(fragments).forEach"));
+        assert!(js_body.contains("fragment.dataset.turnId"));
         assert!(
             js_body
-                .find("fragments.push(turnExecutionCard(renderTurn))")
-                .expect("turn render push")
+                .find("fragments.push(...turnChatCards(renderTurn))")
+                .expect("turn chat render push")
                 < js_body
-                    .find("fragments.push(pendingExecutionCard(renderModel.pendingSubmit))")
-                    .expect("pending render push")
+                    .find("fragments.push(...pendingChatCards(renderModel.pendingSubmit))")
+                    .expect("pending chat render push")
         );
         assert!(js_body.contains("deleteSelectedSessions"));
         assert!(js_body.contains("DeleteSession"));
@@ -1173,10 +1191,15 @@ mod tests {
         assert!(js_body.contains("forceScrollToBottom"));
         assert!(js_body.contains("window.scrollTo"));
         assert!(js_body.contains("function conversationTurnsForRender"));
-        assert!(js_body.contains("return turns.filter(Boolean);"));
+        assert!(js_body.contains("if (!state.selectedSessionId)"));
+        assert!(js_body.contains("await refreshTurn();"));
+        assert!(js_body.contains("turns.filter(Boolean).forEach"));
+        assert!(js_body.contains("merged[index] = turn;"));
         assert!(!js_body.contains("function compareTurnIds"));
         assert!(js_body.contains("latestTurn.session_id !== state.selectedSessionId"));
         assert!(js_body.contains("const renderModel = buildConversationRenderModel();"));
+        assert!(js_body.contains("function successorBaseTurnIds"));
+        assert!(js_body.contains("hideTerminal: successorBaseTurns.has"));
         assert!(js_body.contains("case \"/new\""));
         assert!(js_body.contains("case \"/task\""));
         assert!(js_body.contains("case \"/cwd\""));
@@ -1196,6 +1219,10 @@ mod tests {
         assert!(!js_body.contains("function mergeLogicalTurnGroup"));
         assert!(js_body.contains("logicalSessionTurns(state.sessionTurns)"));
         assert!(js_body.contains("stripFreehandCompletionBlock"));
+        assert!(js_body.contains("stripped.includes(\"</freehand_completion>\")"));
+        assert!(
+            js_body.contains("isInternalRuntimePrompt(left) || isInternalRuntimePrompt(right)")
+        );
         assert!(js_body.contains("terminalBodyForDisplay"));
         assert!(js_body.contains("terminalSummaryLine"));
         assert!(js_body.contains("stripDebugTerminalLines"));

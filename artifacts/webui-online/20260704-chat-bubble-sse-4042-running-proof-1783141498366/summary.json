@@ -1,0 +1,36 @@
+{
+  "artifactDir": "/Volumes/extension/code/freehand/artifacts/webui-online/20260704-chat-bubble-sse-4042-running-proof-1783141498366",
+  "assertion": {
+    "runningBlue": true,
+    "reasoningItalic": true,
+    "toolInsideAssistant": true,
+    "semanticTool": true,
+    "shellCommand": true,
+    "sseConnected": true,
+    "noPageErrors": true
+  },
+  "errors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "sse": [
+    {
+      "status": 200,
+      "contentType": "text/event-stream"
+    }
+  ],
+  "snap": {
+    "hasRunning": true,
+    "toolText": "Run shell command\n等待中 · 0s\ntype: shell\ntarget: sleep 8; printf 'slowdone'\ncommand: sleep 8; printf 'slowdone'\ntimeout: 15",
+    "toolBorder": "rgb(47, 111, 237)",
+    "assistantBorder": "rgb(47, 111, 237)",
+    "reasoning": [
+      {
+        "text": "provider request built",
+        "fontStyle": "italic"
+      }
+    ],
+    "session": "webui-session-20260704050502-2e33729b",
+    "turn": "runtime-turn-34",
+    "status": "TOOL RUNNING: BASH · 0S"
+  }
+}

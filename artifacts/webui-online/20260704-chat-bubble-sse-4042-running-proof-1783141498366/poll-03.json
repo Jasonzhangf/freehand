@@ -1,0 +1,15 @@
+{
+  "hasRunning": true,
+  "toolText": "Run shell command\n等待中 · 0s\ntype: shell\ntarget: sleep 8; printf 'slowdone'\ncommand: sleep 8; printf 'slowdone'\ntimeout: 15",
+  "toolBorder": "rgb(47, 111, 237)",
+  "assistantBorder": "rgb(47, 111, 237)",
+  "reasoning": [
+    {
+      "text": "provider request built",
+      "fontStyle": "italic"
+    }
+  ],
+  "session": "webui-session-20260704050502-2e33729b",
+  "turn": "runtime-turn-34",
+  "status": "TOOL RUNNING: BASH · 0S"
+}
