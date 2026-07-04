@@ -28,6 +28,7 @@ First implemented ops:
 - `heartbeat`
 - `assign`
 - `claim_next`
+- `record_execution`
 - `cancel`
 - `submit_review`
 - `approve`
@@ -56,6 +57,7 @@ Created -> WaitingAgent -> Assigned
 Running -> Paused -> Running
 Running -> Interrupted -> Running
 Running -> Blocked -> Running
+Running -> Running (record_execution)
 ReviewSubmitted -> Rejected -> Running
 Running -> Failed -> Running | Closed
 Running -> Cancelled -> Closed
@@ -166,6 +168,7 @@ Agent selection first version:
 - explicit `agent` requires the agent to exist and be available.
 - `assign` can bind `WaitingAgent`, `Created`, or `Interrupted` to an available agent.
 - `claim_next` lets an agent claim its highest-priority assigned task into lease-backed `Running`.
+- `record_execution` writes worker progress for a running task into the task ledger.
 - `create_agent` creates an idle agent snapshot with declared capabilities.
 - `close_agent` closes only idle agents with no current task, queued task, or running task.
 - assigned tasks count as queued work; running tasks count as running work after heartbeat/resume.

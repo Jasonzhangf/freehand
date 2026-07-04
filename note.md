@@ -120,6 +120,28 @@
     - no UI task projection yet.
     - no worker debug stream/turn update projection yet.
 
+# 2026-07-04 task.orchestration worker execution record skeleton
+  - user requirement: continue task/multi-agent lifecycle implementation in tested rounds with function map and mainline caller updates.
+  - owner: `task.orchestration`.
+  - implementation:
+    - added `record_execution` to the single `task` tool op surface.
+    - added `TaskRuntime::record_execution`, which writes semantic worker progress only for `Running` tasks.
+    - execution records write `TaskExecutionRecorded` events into the task ledger and keep task status `Running`.
+    - non-running tasks reject `record_execution` with invalid transition and do not advance event sequence.
+    - updated task design, test design, function map, feature map, mainline caller JSON, and generated wiki.
+  - verified:
+    - white-box: `cargo test -p freehand-task -- --nocapture` -> 16 passed; covers running progress write/recovery and non-running rejection/no sequence advance.
+    - module black-box: `cargo test -p freehand-runtime task_tool_record_execution_requires_running_task -- --nocapture` -> 1 passed.
+    - existing runtime task black-box tests for claim_next and heartbeat lifecycle passed.
+    - tool schema: `cargo test -p freehand-tools -- --nocapture` -> 27 passed.
+    - `cargo test -p xtask -- --nocapture` -> 18 passed.
+    - `cargo run -p xtask -- mainlines generate`, `mainlines check`, and `gates check` passed.
+    - full regression: `cargo test --workspace` -> 409 passed; `cargo clippy --workspace --all-targets -- -D warnings` -> no issues; `cargo fmt --check` passed.
+  - remaining gaps:
+    - no real worker execution process/channel yet.
+    - no UI task projection yet.
+    - no worker debug stream/turn update projection yet.
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

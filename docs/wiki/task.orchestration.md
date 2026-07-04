@@ -19,6 +19,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
 - `TaskRuntime::assign_task` binds waiting, created, or interrupted tasks to an available agent
 - `TaskRuntime::claim_next_task` lets an agent claim its highest-priority assigned task into lease-backed Running state
+- `TaskRuntime::record_execution` writes worker progress for running tasks into task ledger truth
 - `TaskRuntime::cancel_task` moves non-terminal tasks to Cancelled and releases assignee state
 - `TaskRuntime::create_agent` and `TaskRuntime::close_agent` manage persisted worker agent snapshots
 - lifecycle actions use explicit task mutation requests and validate state transitions before writing truth
@@ -32,6 +33,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - `TaskRuntime::query_agent` returns one agent snapshot
 - append, pause, resume, heartbeat, assign, cancel, submit_review, approve, reject, and close return event-backed mutation results
 - claim_next returns either the claimed running task or an explicit no-task result
+- record_execution returns an event-backed worker progress mutation summary
 - create_agent and close_agent return persisted agent snapshot summaries
 - task tool result returns semantic task ids, status, event names, sequence numbers, or JSON snapshots
 
@@ -44,6 +46,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - heartbeat for non-running or unassigned tasks returns invalid-transition and writes no lease
 - assigning to unavailable agents and closing busy agents return explicit errors without mutating task or agent truth
 - claiming with an empty agent queue returns no-task without mutating truth
+- recording execution for a non-running task returns invalid-transition and writes no event
 - persistence failures return explicit task persistence errors
 - task failures become failed tool results and can be sent back to the model
 
@@ -79,6 +82,12 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
   - allowed callers: runtime task tool bridge
   - related tests: claim_next_runs_highest_priority_assigned_task_with_lease, claim_next_empty_queue_returns_none_without_mutation, task_tool_claim_next_runs_highest_priority_task
   - why shared: keeps queued task selection and running lease transition in task owner
+- `TaskRuntime::record_execution`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: append semantic worker execution progress for running tasks
+  - allowed callers: runtime task tool bridge
+  - related tests: record_execution_writes_progress_for_running_task, record_execution_rejects_non_running_task_without_sequence_advance, task_tool_record_execution_requires_running_task
+  - why shared: keeps worker progress event truth in task owner
 - `TaskRuntime::create_agent`
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: create persisted idle worker agent snapshots with declared capabilities
@@ -102,15 +111,17 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 10 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots plus lease snapshot | recovered runtime state | task boot | task owner | bound |
 | 11 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting, created, or interrupted tasks to an available agent | task assignment request | assigned task snapshot plus queued agent state | runtime task bridge | task owner | bound |
 | 12 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | claim the highest-priority assigned task for an agent and enter lease-backed running state | agent task claim request | claimed running task snapshot or no-task outcome | runtime task bridge | task owner | bound |
-| 13 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal tasks and release assignee state | task mutation request | cancelled task snapshot plus released agent state | runtime task bridge | task owner | bound |
-| 14 | `TaskRuntime::create_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents | agent create request | available agent snapshot | runtime task bridge | task owner | bound |
+| 13 | `TaskRuntime::record_execution` | `crates/freehand-task/src/lib.rs` | append semantic worker execution progress for a running task | worker execution record request | running task snapshot plus progress event | runtime task bridge | task owner | bound |
+| 14 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal tasks and release assignee state | task mutation request | cancelled task snapshot plus released agent state | runtime task bridge | task owner | bound |
+| 15 | `TaskRuntime::create_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents | agent create request | available agent snapshot | runtime task bridge | task owner | bound |
 | 14 | `TaskRuntime::close_agent` | `crates/freehand-task/src/lib.rs` | close only idle agents | agent mutation request | closed agent snapshot | runtime task bridge | task owner | bound |
 
 ## Sync Status Against Mainline Call
 
 - first implementation supports `create`, `query`, `list_agents`, and `query_agent`
-- current implementation supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`
+- current implementation supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `record_execution`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`
 - review-before-close is locked by positive and negative tests
 - lease-backed Running recovery is locked by positive and negative tests
 - agent registry lifecycle is locked by positive and negative tests
+- worker progress event recording is locked by positive and negative tests
 - real worker execution, UI task projection, and multi-agent dispatch are pending

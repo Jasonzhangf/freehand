@@ -177,6 +177,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - agent create/close persists and recovers agent registry state
   - assign moves waiting tasks to assigned state
   - claim_next chooses the highest-priority assigned task for an agent and starts a lease
+  - record_execution writes progress only for running tasks
   - cancel releases agent state and blocks resume
 - required_module_black_box_tests:
   - runtime task tool create routes through task persistence
@@ -184,6 +185,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - runtime task tool list_agents exposes self agent
   - runtime task tool create_agent/assign/cancel/close_agent covers registry lifecycle
   - runtime task tool claim_next covers priority queue claim
+  - runtime task tool record_execution covers worker progress event writes
 - required_project_black_box_tests:
   - restart/reboot recovery query returns the same task truth
 - test_design_doc: `docs/testing/task.orchestration.md`

@@ -234,6 +234,16 @@ pub struct TaskClaimRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskExecutionRecordRequest {
+    pub task_id: TaskId,
+    pub phase: String,
+    pub summary: String,
+    pub evidence: Vec<String>,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskReviewSubmission {
     pub task_id: TaskId,
     pub summary: String,
@@ -654,6 +664,29 @@ impl TaskRuntime {
         })
     }
 
+    pub fn record_execution(
+        &self,
+        request: TaskExecutionRecordRequest,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        require_text(&request.phase, "phase")?;
+        require_text(&request.summary, "summary")?;
+        if request.evidence.is_empty() {
+            return Err(TaskError::MissingField("evidence"));
+        }
+        self.mutate_task(
+            &request.task_id,
+            "TaskExecutionRecorded",
+            None,
+            &request.actor,
+            &request.watermark,
+            json!({
+                "phase": request.phase,
+                "summary": request.summary,
+                "evidence": request.evidence
+            }),
+        )
+    }
+
     pub fn cancel_task(
         &self,
         request: TaskMutationRequest,
@@ -890,7 +923,7 @@ impl TaskRuntime {
                 .unwrap_or_default();
         }
         task.status = target.clone();
-        if event_type == "TaskProgressed" {
+        if matches!(event_type, "TaskProgressed" | "TaskExecutionRecorded") {
             task.last_progress_at = Some(now_unix_seconds());
         }
         let event = build_event(
@@ -1357,6 +1390,7 @@ fn validate_transition(
 ) -> Result<(), TaskError> {
     let valid = match event_type {
         "TaskProgressed" => !matches!(from, TaskStatus::Closed | TaskStatus::Cancelled),
+        "TaskExecutionRecorded" => matches!(from, TaskStatus::Running),
         "TaskPaused" => matches!(
             from,
             TaskStatus::Assigned | TaskStatus::Running | TaskStatus::Rejected
@@ -1983,6 +2017,76 @@ mod tests {
                 .join("state/task-runtime/master/leases.json")
                 .is_file()
         );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn record_execution_writes_progress_for_running_task() {
+        let runtime_home = temp_runtime_home("task-record-execution");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+        let task_id = outcome.task.task_id.clone();
+        runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("resume");
+
+        let recorded = runtime
+            .record_execution(TaskExecutionRecordRequest {
+                task_id: task_id.clone(),
+                phase: "debug".to_owned(),
+                summary: "read function map".to_owned(),
+                evidence: vec!["docs/function-maps/task.orchestration.md".to_owned()],
+                actor: sample_actor(agent_id),
+                watermark: sample_watermark(),
+            })
+            .expect("record execution");
+
+        assert_eq!(recorded.task.status, TaskStatus::Running);
+        assert_eq!(recorded.event.event_type, "TaskExecutionRecorded");
+        assert_eq!(
+            recorded.event.payload.get("phase").and_then(Value::as_str),
+            Some("debug")
+        );
+        assert!(recorded.task.last_progress_at.is_some());
+        let recovered = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("recover");
+        let task = recovered.query_task(&task_id).expect("query");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(task.last_progress_at.is_some());
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn record_execution_rejects_non_running_task_without_sequence_advance() {
+        let runtime_home = temp_runtime_home("task-record-execution-reject");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+        let before = runtime.query_task(&outcome.task.task_id).expect("before");
+
+        let err = runtime
+            .record_execution(TaskExecutionRecordRequest {
+                task_id: outcome.task.task_id.clone(),
+                phase: "debug".to_owned(),
+                summary: "should fail".to_owned(),
+                evidence: vec!["not running".to_owned()],
+                actor: sample_actor(agent_id),
+                watermark: sample_watermark(),
+            })
+            .expect_err("assigned task cannot record execution");
+
+        assert!(matches!(err, TaskError::InvalidTransition { .. }));
+        let after = runtime.query_task(&outcome.task.task_id).expect("after");
+        assert_eq!(after.last_event_seq, before.last_event_seq);
+        assert_eq!(after.status, TaskStatus::Assigned);
         let _ = fs::remove_dir_all(runtime_home);
     }
 

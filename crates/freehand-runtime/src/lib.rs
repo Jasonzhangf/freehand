@@ -60,9 +60,9 @@ use freehand_reason::{
 };
 use freehand_task::{
     AgentCreateRequest, AgentMutationRequest, TaskActor, TaskAppendRequest, TaskAssignRequest,
-    TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskHeartbeatRequest, TaskId,
-    TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime,
-    TaskWatermark,
+    TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskExecutionRecordRequest,
+    TaskHeartbeatRequest, TaskId, TaskMutationRequest, TaskParentRef, TaskReviewRejection,
+    TaskReviewSubmission, TaskRuntime, TaskWatermark,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
@@ -3774,6 +3774,23 @@ fn execute_task_tool(
                 Ok("Task claimed: none".to_owned())
             }
         }
+        "record_execution" => {
+            let outcome = task_runtime
+                .record_execution(TaskExecutionRecordRequest {
+                    task_id: TaskId::new(required_json_string(&args, "task_id")?),
+                    phase: required_json_string(&args, "phase")?.to_owned(),
+                    summary: required_json_string(&args, "summary")?.to_owned(),
+                    evidence: required_json_string_array(&args, "evidence")?,
+                    actor: task_actor(turn),
+                    watermark: task_watermark(tool_call),
+                })
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task execution recorded",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
         "cancel" => {
             let outcome = task_runtime
                 .cancel_task(task_mutation_request(&args, turn, tool_call)?)
@@ -6328,6 +6345,86 @@ mod tests {
         )
         .expect("query low");
         assert!(low.contains("\"status\":\"assigned\""));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_tool_record_execution_requires_running_task() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-task"),
+                    turn_id: TurnId::new("turn-task"),
+                    trace_id: TraceId::new("trace-task"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-task"),
+                    user_text: "record worker progress".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("create")),
+                ("task_id", json!("task-runtime-execution")),
+                ("title", json!("Execution progress")),
+                ("content", json!("Record execution progress")),
+                ("goal", json!("Progress enters task ledger")),
+                ("deliverables", json!(["event"])),
+                ("acceptance", json!(["running only"])),
+                ("dispatch", json!({"mode":"self"})),
+            ]),
+        )
+        .expect("create task");
+        let rejected = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("record_execution")),
+                ("task_id", json!("task-runtime-execution")),
+                ("phase", json!("debug")),
+                ("summary", json!("should fail before running")),
+                ("evidence", json!(["assigned only"])),
+            ]),
+        )
+        .expect_err("assigned task cannot record execution");
+        assert!(rejected.contains("invalid task transition"));
+
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("resume")),
+                ("task_id", json!("task-runtime-execution")),
+            ]),
+        )
+        .expect("resume task");
+        let recorded = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("record_execution")),
+                ("task_id", json!("task-runtime-execution")),
+                ("phase", json!("debug")),
+                ("summary", json!("read function map")),
+                (
+                    "evidence",
+                    json!(["docs/function-maps/task.orchestration.md"]),
+                ),
+            ]),
+        )
+        .expect("record execution");
+        assert!(recorded.contains("status=Running"));
+        assert!(recorded.contains("event=TaskExecutionRecorded"));
         let _ = fs::remove_dir_all(runtime_home);
     }
 

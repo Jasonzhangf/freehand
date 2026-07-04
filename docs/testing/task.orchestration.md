@@ -12,6 +12,7 @@
   - agent registry persists and recovers worker snapshots
   - waiting tasks can be assigned to an available agent
   - assigned worker queue can claim the highest-priority task into running state
+  - running workers can record execution progress into task ledger truth
   - cancellation releases assigned agent state
   - query returns persisted task truth
   - agent registry exposes self agent
@@ -31,6 +32,8 @@
 - assign moves `WaitingAgent` to `Assigned` and marks the assignee busy with queued work
 - claim_next picks the highest-priority assigned task for an agent and creates a running lease
 - claim_next returns no task without mutation when the agent queue is empty
+- record_execution writes progress only for `Running` tasks
+- record_execution rejects non-running tasks without advancing event sequence
 - cancel releases the assignee and prevents later resume
 - close_agent rejects busy agents
 
@@ -44,6 +47,7 @@
 - runtime task tool resume plus heartbeat persists a running lease
 - runtime task tool create_agent/assign/cancel/close_agent covers agent lifecycle and busy-close rejection
 - runtime task tool claim_next returns the highest-priority assigned task and running lease
+- runtime task tool record_execution writes semantic worker execution progress
 - tool registry exposes `task` as one implemented built-in tool schema
 
 ## Project Black-Box Impact
@@ -61,6 +65,7 @@ cargo test -p freehand-runtime task_tool_review_lifecycle_rejects_early_close_an
 cargo test -p freehand-runtime task_tool_resume_and_heartbeat_persist_running_lease -- --nocapture
 cargo test -p freehand-runtime task_tool_agent_assign_cancel_close_lifecycle -- --nocapture
 cargo test -p freehand-runtime task_tool_claim_next_runs_highest_priority_task -- --nocapture
+cargo test -p freehand-runtime task_tool_record_execution_requires_running_task -- --nocapture
 cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```
