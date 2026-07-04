@@ -162,13 +162,16 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `error.center`
 
 - owner: `crates/freehand-control`
-- allowed_paths: `crates/freehand-control/**`, `crates/freehand-runtime/**`, `docs/design/**`, `docs/function-maps/error.center.md`, `docs/testing/error.center.md`, `docs/mainline-calls/error.center.json`, `docs/wiki/error.center.md`, `docs/architecture/feature-map.md`, `MEMORY.md`, `note.md`
+- allowed_paths: `crates/freehand-control/**`, `crates/freehand-runtime/**`, `crates/freehand-ui-protocol/**`, `apps/freehand-server/**`, `apps/freehand-daemon/**`, `apps/freehand-cli/**`, `docs/design/**`, `docs/function-maps/error.center.md`, `docs/testing/error.center.md`, `docs/mainline-calls/error.center.json`, `docs/wiki/error.center.md`, `docs/architecture/feature-map.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: provider adapter wire DTO internals, UI app-local error policy, task state mutation without accepted action metadata
 - required_checks:
   - `cargo test -p freehand-control`
   - `cargo test -p freehand-runtime live_bridge_records_error_center_metadata_for_schema_repair -- --nocapture`
   - `cargo test -p freehand-runtime live_bridge_returns_unknown_tool_as_failed_tool_result_without_terminalizing -- --nocapture`
   - `cargo test -p freehand-runtime live_bridge_writes_provider_error_metadata_on_executor_failure -- --nocapture`
+  - `cargo test -p freehand-runtime runtime_query_reads_error_center_metadata_without_raw_text -- --nocapture`
+  - `cargo test -p freehand-daemon daemon_adp_queries_runtime_error_center_truth -- --nocapture`
+  - `cargo test -p freehand-cli -- --nocapture`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
@@ -176,13 +179,15 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - retry cap changes schema recovery action to stop_turn
   - provider executor failures classify as provider/recoverable/fail_turn
   - tool failures classify as tool/validation/repair_schema
+  - error-center metadata query projection filters by trace/turn/domain and omits raw text
 - required_module_black_box_tests:
   - runtime writes `error.center` metadata for completion schema rejection
   - runtime writes `error.center` metadata for failed tool result before provider re-entry
   - runtime writes `error.center` metadata for provider executor failure before materializing terminal failure
   - metadata write failure blocks the originating decision
+  - daemon ADP query returns runtime-backed error-center metadata projection
 - required_project_black_box_tests:
-  - none for this skeleton; online ADP/UI error status projection is future scope
+  - S-profile daemon ADP `adp-error-query` against a real error-center metadata row
 - test_design_doc: `docs/testing/error.center.md`
 - function_map_doc: `docs/function-maps/error.center.md`
 - mainline_call_doc: `docs/mainline-calls/error.center.json`
@@ -200,6 +205,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - every classified decision carries `error.center` writer owner and write-node provenance
   - runtime does not convert provider/tool/schema failures to owner state changes before error-center metadata admission
   - public/request payload text is hashed only, not written into error metadata entries
+  - ADP projection remains read-only and does not repair malformed metadata into invented error semantics
 
 ### `config.core`
 

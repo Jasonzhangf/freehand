@@ -75,7 +75,11 @@ fn build_runtime_dispatcher_from_default_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use freehand_contracts::TurnId;
+    use freehand_contracts::{FeatureId, SessionId, TraceId, TurnId};
+    use freehand_metadata::{
+        MetadataCenter, MetadataEntry, MetadataEnvelope, MetadataId, MetadataKind, MetadataSubject,
+        MetadataWriteNode, MetadataWriteOwner,
+    };
     use freehand_task::{
         TaskActor, TaskCreateRequest, TaskDispatchRequest, TaskParentRef, TaskRuntime,
         TaskWatermark,
@@ -709,6 +713,137 @@ mod tests {
                 assert!(!failure.retryable);
             }
             other => panic!("unexpected missing task response: {other:?}"),
+        }
+
+        let _ = socket.close(None).await;
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn daemon_adp_queries_runtime_error_center_truth() {
+        let home =
+            write_test_home(&master_config_text("https://example.invalid")).expect("test home");
+        let runtime_home = home.join(".freehand");
+        let session_id = SessionId::new("runtime-session-master");
+        let trace_id = TraceId::new("runtime-trace-adp-error");
+        let turn_id = TurnId::new("runtime-turn-adp-error");
+        let ledger_path = runtime_home
+            .join("ledgers")
+            .join("metadata")
+            .join("master")
+            .join(format!("{}.jsonl", session_id.as_str()));
+        let mut center = MetadataCenter::with_ledger_path(ledger_path).expect("metadata center");
+        center
+            .write(
+                MetadataEnvelope::new(
+                    MetadataId::new("error.center:runtime-trace-adp-error:provider"),
+                    MetadataKind::RuntimeState,
+                    MetadataWriteOwner {
+                        feature_id: FeatureId::new("error.center"),
+                        crate_name: "freehand-control".to_owned(),
+                        module_path: "freehand_control".to_owned(),
+                        symbol_path: "classify_error_center_failure".to_owned(),
+                    },
+                    MetadataWriteNode {
+                        pipeline_node: "RuntimeLive03ProviderResponseRaw".to_owned(),
+                        runtime_node_id: None,
+                    },
+                    MetadataSubject {
+                        agent_id: Some(freehand_contracts::AgentId::new("master")),
+                        session_id: Some(session_id.clone()),
+                        turn_id: Some(turn_id.clone()),
+                        trace_id: trace_id.clone(),
+                    },
+                    vec![
+                        MetadataEntry {
+                            key: "error.domain".to_owned(),
+                            value: serde_json::json!("provider"),
+                        },
+                        MetadataEntry {
+                            key: "error.class".to_owned(),
+                            value: serde_json::json!("recoverable"),
+                        },
+                        MetadataEntry {
+                            key: "error.code".to_owned(),
+                            value: serde_json::json!("provider_executor_failure"),
+                        },
+                        MetadataEntry {
+                            key: "error.source_owner".to_owned(),
+                            value: serde_json::json!("provider.reason-live-bridge"),
+                        },
+                        MetadataEntry {
+                            key: "error.source_pipeline_node".to_owned(),
+                            value: serde_json::json!("RuntimeLive03ProviderResponseRaw"),
+                        },
+                        MetadataEntry {
+                            key: "error.recovery_action".to_owned(),
+                            value: serde_json::json!("fail_turn"),
+                        },
+                        MetadataEntry {
+                            key: "error.retry_index".to_owned(),
+                            value: serde_json::json!(0),
+                        },
+                        MetadataEntry {
+                            key: "error.retry_cap".to_owned(),
+                            value: serde_json::json!(0),
+                        },
+                        MetadataEntry {
+                            key: "error.public_visibility".to_owned(),
+                            value: serde_json::json!("public_summary"),
+                        },
+                        MetadataEntry {
+                            key: "error.owner_target".to_owned(),
+                            value: serde_json::json!("provider.semantic"),
+                        },
+                        MetadataEntry {
+                            key: "error.repair_fields".to_owned(),
+                            value: serde_json::json!([]),
+                        },
+                        MetadataEntry {
+                            key: "error.raw_hash".to_owned(),
+                            value: serde_json::json!("provider-hash-only"),
+                        },
+                    ],
+                )
+                .expect("error center envelope"),
+            )
+            .expect("write error center metadata");
+
+        let server = TestServer::spawn_existing_home(home, true).await;
+        let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
+        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Query {
+                    request_id: "error-center-1".to_owned(),
+                    query: UiCommand::QueryErrorCenterEvents {
+                        session_id: session_id.clone(),
+                        trace_id: Some(trace_id.as_str().to_owned()),
+                        turn_id: Some(turn_id.clone()),
+                        domain: Some("provider".to_owned()),
+                    },
+                })
+                .expect("error center query json")
+                .into(),
+            ))
+            .await
+            .expect("send error center query");
+        match next_adp_response(&mut socket, "error center query").await {
+            UiAdpResponse::QueryResult {
+                request_id,
+                result: UiQueryResult::ErrorCenterEvents(list),
+            } => {
+                assert_eq!(request_id, "error-center-1");
+                assert_eq!(list.source_agent_id.as_str(), "master");
+                assert_eq!(list.events.len(), 1);
+                assert_eq!(list.events[0].domain, "provider");
+                assert_eq!(list.events[0].class, "recoverable");
+                assert_eq!(list.events[0].recovery_action, "fail_turn");
+                assert_eq!(list.events[0].raw_hash, "provider-hash-only");
+            }
+            other => panic!("unexpected error center response: {other:?}"),
         }
 
         let _ = socket.close(None).await;

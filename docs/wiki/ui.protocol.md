@@ -18,10 +18,12 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied
+- error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 - CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id
 - SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation
 - task list subscribe commands are protocol-owned ADP/subscribe shapes while task truth remains runtime/task-owner supplied
+- error-center subscribe commands are protocol-owned ADP/subscribe shapes while error truth remains runtime/error-center supplied
 
 ## Response Mainline
 
@@ -48,6 +50,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn
 - session list and transcript projections expose cwd bound by runtime/session truth
 - task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
+- error-center query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
 - task list subscription events carry UI-safe task list projections published by runtime owner code
 
 ## Error Mainline
@@ -64,7 +67,8 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module
 - empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently
 - empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse
-- task history remains query-only; task list subscribe rejects non-subscription misuse through protocol stream matching
+- empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse
+- task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching
 
 ## Shared Multi-Reference Functions
 
@@ -128,6 +132,12 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
   - allowed callers: runtime.ui-command-dispatch
   - related tests: task_list_subscription_matches_runtime_projection_only, daemon_adp_subscribes_runtime_task_truth
   - why shared: keeps ADP task push on the same protocol subscription bus as turn/debug updates
+- `UiErrorCenterEventProjection`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: define UI-safe error-center event DTOs that expose watermarked fields and raw hashes without raw provider/tool/request text
+  - allowed callers: runtime.ui-command-dispatch, ADP transports, CLI automation
+  - related tests: error_center_query_requires_session_id, error_center_subscription_matches_projection
+  - why shared: keeps error-center read projection shape protocol-owned and transport-neutral
 
 ## Function Call Table
 
@@ -157,6 +167,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 10b | `UiProtocolState::apply_terminal_event / turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text plus terminal status projection | runtime/app protocol consumers | protocol projector | bound |
 | 21 | `UiProtocolState::publish_task_list_projection` | `crates/freehand-ui-protocol/src/lib.rs` | publish runtime-supplied task list projection to subscribers | UI task list projection | UI subscription event | runtime.ui-command-dispatch | protocol subscription channel | bound |
 | 22 | `subscription_selector / subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route task list subscription selectors to task list projection events | SubscribeTaskList command plus UI projection | subscription delivery decision | ADP/SSE subscription transport | protocol selector matcher | bound |
+| 23 | `UiCommand::QueryErrorCenterEvents / UiCommand::SubscribeErrorCenterEvents / UiErrorCenterEventProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center ADP query/subscribe shapes and UI-safe event DTOs | session/trace/turn/domain filters | ErrorCenterEvents query result or subscription projection | ADP/CLI/WebUI transports | runtime query port / protocol selector matcher | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -177,3 +188,4 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn
 - ADP request and response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
 - task list/history query command DTOs and runtime query-port shape are landed
+- error-center query/subscribe command DTOs and UI-safe event projection are landed

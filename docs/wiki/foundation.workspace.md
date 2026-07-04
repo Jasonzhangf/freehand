@@ -22,7 +22,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
 - symlink install script builds debug host binaries, exposes S-suffixed development commands, and installs a prefix-local launchd wrapper without replacing global release commands
 - launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths
-- launchd install script supports a coexisting symlink profile through installS and restartS with a separate label, env file, bind, binary, and logs
+- launchd install script supports a coexisting symlink profile through installS and restartS with a separate label, env file, bind, binary, and logs; restartS refreshes the debug daemon binary copy before service kickstart so launchd does not run stale code
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 - framework loop governance starts in L1 report-only under docs/loops/freehand-framework-loop and must not automate code/config changes until signal quality and checker gates are proven
@@ -37,7 +37,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - global install exposes freehand-cli, freehand-server, freehand-daemon, and freehand-daemon-launchd on the chosen install prefix
 - symlink install exposes freehand-cliS, freehand-serverS, freehand-daemonS, and freehand-daemon-launchdS on the chosen install prefix, with host commands pointing at repo debug binaries and the launchd wrapper installed as a prefix-local file
 - launchd install exposes com.freehand.daemon as a user LaunchAgent with RunAtLoad, KeepAlive, explicit FREEHAND_DAEMON_BIN, fixed 127.0.0.1:4041 WebUI, and logs under ~/.freehand/logs
-- launchd symlink install exposes com.freehand.daemonS as a separate user LaunchAgent with explicit FREEHAND_DAEMON_BIN, fixed 127.0.0.1:4042 WebUI, and daemonS logs under ~/.freehand/logs
+- launchd symlink install exposes com.freehand.daemonS as a separate user LaunchAgent with explicit FREEHAND_DAEMON_BIN, fixed 127.0.0.1:4042 WebUI, and daemonS logs under ~/.freehand/logs; symlink profile restart refreshes the debug daemon binary copy before restarting
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
 - gate returns explicit failure with missing path, missing policy snippet, or stale generated wiki
 - mainline generation writes `docs/wiki/*.md` and `docs/wiki/README.md` from JSON truth
@@ -86,7 +86,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 | 17 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that docs/architecture/feature-map.md keeps one seed entry per feature_id | feature-map markdown | pass/fail | run_gates_check | feature-map scanner | bound |
 | 18 | `run_release` | `scripts/release.sh` | run release regressions and build/stage host + Android artifacts | repo root state | dist/ artifacts | operator / GitHub release workflow | make ci, Cargo, Gradle | bound |
 | 19 | `run_install_global` | `scripts/install-global.sh` | run release script and install host binaries to a global prefix | release artifacts | installed commands | operator | scripts/release.sh, install tool | bound |
-| 20 | `run_install_launchd` | `scripts/install-launchd.sh` | install global binaries and bootstrap the macOS user LaunchAgent | repo root plus runtime env | running launchd service | operator | scripts/install-global.sh, launchctl | bound |
+| 20 | `run_install_launchd` | `scripts/install-launchd.sh` | install global binaries or refresh S debug binaries and bootstrap/restart the macOS user LaunchAgent | repo root plus runtime env | running launchd service | operator | scripts/install-global.sh, launchctl | bound |
 | 21 | `run_uninstall_launchd` | `scripts/uninstall-launchd.sh` | stop and remove the macOS user LaunchAgent plist | launchd label | service removed | operator | launchctl | bound |
 | 22 | `run_install_symlink` | `scripts/install-symlink.sh` | build debug host binaries and expose S-suffixed symlinks for development | repo root state | installed symlink commands | operator | Cargo, symlink creation | bound |
 

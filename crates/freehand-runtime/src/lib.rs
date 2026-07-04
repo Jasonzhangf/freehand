@@ -70,9 +70,10 @@ use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
     UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
-    UiCompletionSchemaRetryWaiting, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
-    UiQueryResult, UiRuntimeQueryPort, UiSessionMetadataProjection, UiTaskHistoryProjection,
-    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskSnapshotProjection, UiTurnProjection,
+    UiCompletionSchemaRetryWaiting, UiErrorCenterEventListProjection, UiErrorCenterEventProjection,
+    UiModelRequestKind, UiModelRequestWaiting, UiProtocolState, UiQueryResult, UiRuntimeQueryPort,
+    UiSessionMetadataProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
+    UiTaskListProjection, UiTaskSnapshotProjection, UiTurnProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
 };
@@ -2258,6 +2259,26 @@ impl RuntimeCommandDispatcher {
                     ),
                 )))
             }
+            UiCommand::QueryErrorCenterEvents {
+                session_id,
+                trace_id,
+                turn_id,
+                domain,
+            } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let projection = query_error_center_events_for_ui(
+                    &live.runtime_home,
+                    &state.config.reason_agent_id,
+                    session_id,
+                    trace_id.clone(),
+                    turn_id.clone(),
+                    domain.clone(),
+                )
+                .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+                Ok(Some(UiQueryResult::ErrorCenterEvents(projection)))
+            }
             _ => Ok(None),
         }
     }
@@ -3200,6 +3221,110 @@ fn project_task_history_for_ui(
             })
             .collect(),
     }
+}
+
+fn query_error_center_events_for_ui(
+    runtime_home: &Path,
+    source_agent_id: &AgentId,
+    session_id: &SessionId,
+    trace_filter: Option<String>,
+    turn_filter: Option<TurnId>,
+    domain_filter: Option<String>,
+) -> Result<UiErrorCenterEventListProjection, MetadataError> {
+    let center = MetadataCenter::with_ledger_path(metadata_ledger_path(
+        runtime_home,
+        source_agent_id,
+        session_id,
+    ))?;
+    let events = center
+        .records()
+        .iter()
+        .filter(|record| record.owner.feature_id.as_str() == "error.center")
+        .filter(|record| {
+            trace_filter
+                .as_deref()
+                .is_none_or(|trace_id| record.subject.trace_id.as_str() == trace_id)
+        })
+        .filter(|record| {
+            turn_filter
+                .as_ref()
+                .is_none_or(|turn_id| record.subject.turn_id.as_ref() == Some(turn_id))
+        })
+        .filter_map(project_error_center_event_for_ui)
+        .filter(|event| {
+            domain_filter
+                .as_deref()
+                .is_none_or(|domain| event.domain == domain)
+        })
+        .collect();
+    Ok(UiErrorCenterEventListProjection {
+        source_agent_id: source_agent_id.clone(),
+        session_id: session_id.clone(),
+        trace_filter,
+        turn_filter,
+        domain_filter,
+        events,
+    })
+}
+
+fn project_error_center_event_for_ui(
+    record: &MetadataEnvelope,
+) -> Option<UiErrorCenterEventProjection> {
+    Some(UiErrorCenterEventProjection {
+        metadata_id: record.metadata_id.as_str().to_owned(),
+        source_agent_id: record.subject.agent_id.clone(),
+        session_id: record.subject.session_id.clone(),
+        turn_id: record.subject.turn_id.clone(),
+        trace_id: record.subject.trace_id.as_str().to_owned(),
+        writer_feature_id: record.owner.feature_id.as_str().to_owned(),
+        writer_crate: record.owner.crate_name.clone(),
+        writer_symbol: record.owner.symbol_path.clone(),
+        pipeline_node: record.write_node.pipeline_node.clone(),
+        domain: metadata_entry_string(record, "error.domain")?,
+        class: metadata_entry_string(record, "error.class")?,
+        code: metadata_entry_string(record, "error.code")?,
+        source_owner: metadata_entry_string(record, "error.source_owner")?,
+        source_pipeline_node: metadata_entry_string(record, "error.source_pipeline_node")?,
+        recovery_action: metadata_entry_string(record, "error.recovery_action")?,
+        retry_index: metadata_entry_u64(record, "error.retry_index")?,
+        retry_cap: metadata_entry_u64(record, "error.retry_cap")?,
+        public_visibility: metadata_entry_string(record, "error.public_visibility")?,
+        owner_target: metadata_entry_string(record, "error.owner_target")?,
+        repair_fields: metadata_entry_string_array(record, "error.repair_fields")?,
+        raw_hash: metadata_entry_string(record, "error.raw_hash")?,
+    })
+}
+
+fn metadata_entry_string(record: &MetadataEnvelope, key: &str) -> Option<String> {
+    record
+        .entries
+        .iter()
+        .find(|entry| entry.key == key)?
+        .value
+        .as_str()
+        .map(str::to_owned)
+}
+
+fn metadata_entry_u64(record: &MetadataEnvelope, key: &str) -> Option<u64> {
+    record
+        .entries
+        .iter()
+        .find(|entry| entry.key == key)?
+        .value
+        .as_u64()
+}
+
+fn metadata_entry_string_array(record: &MetadataEnvelope, key: &str) -> Option<Vec<String>> {
+    let value = &record.entries.iter().find(|entry| entry.key == key)?.value;
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect()
+        })
+        .or_else(|| value.as_str().map(|item| vec![item.to_owned()]))
 }
 
 fn task_status_label(status: &TaskStatus) -> &'static str {
@@ -9092,6 +9217,161 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             err,
             UiCommandDispatchPortError::TargetNotFound("missing-runtime-task".to_owned())
         );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_query_reads_error_center_metadata_without_raw_text() {
+        let runtime_home = temp_runtime_home();
+        let session_id = SessionId::new("runtime-session-agent-live");
+        let trace_id = TraceId::new("runtime-trace-error-query");
+        let turn_id = TurnId::new("runtime-turn-error-query");
+        let ledger_path =
+            metadata_ledger_path(&runtime_home, &AgentId::new("agent-live"), &session_id);
+        let mut center = MetadataCenter::with_ledger_path(&ledger_path).expect("metadata center");
+        center
+            .write(
+                MetadataEnvelope::new(
+                    MetadataId::new("error.center:runtime-trace-error-query:schema"),
+                    MetadataKind::RuntimeState,
+                    MetadataWriteOwner {
+                        feature_id: FeatureId::new("error.center"),
+                        crate_name: "freehand-control".to_owned(),
+                        module_path: "freehand_control".to_owned(),
+                        symbol_path: "classify_error_center_failure".to_owned(),
+                    },
+                    MetadataWriteNode {
+                        pipeline_node: "ReasonResp04CompletionSchemaRejected".to_owned(),
+                        runtime_node_id: None,
+                    },
+                    MetadataSubject {
+                        agent_id: Some(AgentId::new("agent-live")),
+                        session_id: Some(session_id.clone()),
+                        turn_id: Some(turn_id.clone()),
+                        trace_id: trace_id.clone(),
+                    },
+                    vec![
+                        MetadataEntry {
+                            key: "error.domain".to_owned(),
+                            value: json!("schema"),
+                        },
+                        MetadataEntry {
+                            key: "error.class".to_owned(),
+                            value: json!("validation"),
+                        },
+                        MetadataEntry {
+                            key: "error.code".to_owned(),
+                            value: json!("completion_schema_rejected"),
+                        },
+                        MetadataEntry {
+                            key: "error.source_owner".to_owned(),
+                            value: json!("provider.reason-live-bridge"),
+                        },
+                        MetadataEntry {
+                            key: "error.source_pipeline_node".to_owned(),
+                            value: json!("ReasonResp04CompletionSchemaRejected"),
+                        },
+                        MetadataEntry {
+                            key: "error.recovery_action".to_owned(),
+                            value: json!("repair_schema"),
+                        },
+                        MetadataEntry {
+                            key: "error.retry_index".to_owned(),
+                            value: json!(1),
+                        },
+                        MetadataEntry {
+                            key: "error.retry_cap".to_owned(),
+                            value: json!(2),
+                        },
+                        MetadataEntry {
+                            key: "error.public_visibility".to_owned(),
+                            value: json!("internal"),
+                        },
+                        MetadataEntry {
+                            key: "error.owner_target".to_owned(),
+                            value: json!("reason.turn"),
+                        },
+                        MetadataEntry {
+                            key: "error.repair_fields".to_owned(),
+                            value: json!(["summary"]),
+                        },
+                        MetadataEntry {
+                            key: "error.raw_hash".to_owned(),
+                            value: json!("hash-only"),
+                        },
+                    ],
+                )
+                .expect("error center envelope"),
+            )
+            .expect("write error center metadata");
+        center
+            .write(
+                MetadataEnvelope::new(
+                    MetadataId::new("control.center:runtime-trace-error-query:ignored"),
+                    MetadataKind::RuntimeState,
+                    MetadataWriteOwner {
+                        feature_id: FeatureId::new("control.center"),
+                        crate_name: "freehand-control".to_owned(),
+                        module_path: "freehand_control".to_owned(),
+                        symbol_path: "control_status_rhythm_decision".to_owned(),
+                    },
+                    MetadataWriteNode {
+                        pipeline_node: "ControlHook03AfterModelResponse".to_owned(),
+                        runtime_node_id: None,
+                    },
+                    MetadataSubject {
+                        agent_id: Some(AgentId::new("agent-live")),
+                        session_id: Some(session_id.clone()),
+                        turn_id: Some(turn_id.clone()),
+                        trace_id: trace_id.clone(),
+                    },
+                    vec![MetadataEntry {
+                        key: "control.hook".to_owned(),
+                        value: json!("ControlHook03AfterModelResponse"),
+                    }],
+                )
+                .expect("control envelope"),
+            )
+            .expect("write control metadata");
+
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime");
+
+        let result = runtime
+            .query_runtime(&UiCommand::QueryErrorCenterEvents {
+                session_id: session_id.clone(),
+                trace_id: Some(trace_id.as_str().to_owned()),
+                turn_id: Some(turn_id.clone()),
+                domain: Some("schema".to_owned()),
+            })
+            .expect("error center query")
+            .expect("runtime-backed error center result");
+        match result {
+            UiQueryResult::ErrorCenterEvents(list) => {
+                assert_eq!(list.session_id, session_id);
+                assert_eq!(list.events.len(), 1);
+                let event = &list.events[0];
+                assert_eq!(event.domain, "schema");
+                assert_eq!(event.class, "validation");
+                assert_eq!(event.recovery_action, "repair_schema");
+                assert_eq!(event.raw_hash, "hash-only");
+                assert_eq!(event.repair_fields, vec!["summary".to_owned()]);
+                assert!(
+                    !serde_json::to_string(event)
+                        .expect("json")
+                        .contains("raw provider body")
+                );
+            }
+            other => panic!("unexpected error center result: {other:?}"),
+        }
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }

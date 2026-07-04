@@ -218,6 +218,7 @@ case "$command" in
     restart_launchd
     ;;
   restartS)
+    env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
     restart_launchd
     ;;
 esac

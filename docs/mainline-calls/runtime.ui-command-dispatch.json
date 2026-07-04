@@ -15,6 +15,7 @@
     "runtime dispatch owner reads the declared owner target from the envelope",
     "runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics",
     "runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs",
+    "runtime read-only error-center queries enter through `UiRuntimeQueryPort` and read watermarked metadata rows through the runtime metadata projection owner",
     "live submit registers an active turn cancel token before provider execution and releases the runtime mutex before running provider IO",
     "CancelLatestActiveTurn resolves to the newest active live turn before falling back to latest persisted runtime turn",
     "submit commands may carry selected cwd; runtime canonicalizes and binds cwd to the selected session",
@@ -36,6 +37,7 @@
     "latest-active cancellation supports Esc during the short window before WebUI has received a concrete turn_id",
     "selected session cwd is persisted on turn records, projected to UiProtocolState, and restored for later same-session inheritance",
     "runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events",
+    "runtime error-center queries return UI-safe projections built from watermarked metadata rows and omit raw error/request/provider text",
     "runtime task list subscription updates reuse the same UI-safe projection helper as task list queries"
   ],
   "error_mainline": [
@@ -51,6 +53,7 @@
     "live provider/tool failures that materialize failed turn truth are returned as explicit dispatch failures only after the failed projection has been refreshed into UiProtocolState",
     "CancelLatestActiveTurn with no active or persisted turn returns explicit target-not-found",
     "missing task history targets return explicit target-not-found and invalid task filters return dispatch failures",
+    "invalid error-center query filters or metadata read failures return explicit dispatch failures",
     "task list publication failures after task mutation are explicit live bridge failures"
   ],
   "shared_functions": [
@@ -121,6 +124,19 @@
         "daemon_adp_subscribes_runtime_task_truth"
       ],
       "why_shared": "keeps task UI projection single-sourced while task filtering remains in task.orchestration"
+    },
+    {
+      "symbol": "query_error_center_events_for_ui",
+      "owner": "crates/freehand-runtime/src/lib.rs",
+      "purpose": "read and project error-center metadata into UI-safe query results",
+      "allowed_callers": [
+        "RuntimeCommandDispatcher::query_runtime"
+      ],
+      "related_tests": [
+        "runtime_query_reads_error_center_metadata_without_raw_text",
+        "daemon_adp_queries_runtime_error_center_truth"
+      ],
+      "why_shared": "keeps metadata/error-center read projection in runtime owner instead of app transports"
     }
   ],
   "call_table": [
@@ -255,6 +271,17 @@
       "caller": "run_live_reason_turn_with_hooks / RuntimeCommandDispatcher::query_runtime",
       "callee": "TaskRuntime::list_tasks",
       "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "query_error_center_events_for_ui / project_error_center_event_for_ui",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "read watermarked error-center metadata and project UI-safe event DTOs",
+      "input_semantic": "QueryErrorCenterEvents filters",
+      "output_semantic": "ErrorCenterEvents query projection",
+      "caller": "RuntimeCommandDispatcher::query_runtime",
+      "callee": "metadata.core ledger plus ui.protocol DTO",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -279,6 +306,7 @@
     "runtime dispatch now supports CancelLatestActiveTurn for current-turn stop without requiring the UI to know turn_id",
     "runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and terminal persistence",
     "missing CancelTurn, empty CancelLatestActiveTurn, and wrong-node direct-message dispatch paths now stay explicit target-not-found failures",
-    "runtime task query bridge routes list/history through task.orchestration and is covered by runtime and daemon ADP tests"
+    "runtime task query bridge routes list/history through task.orchestration and is covered by runtime and daemon ADP tests",
+    "runtime error-center query bridge routes metadata rows through a UI-safe projection and is covered by runtime and daemon ADP tests"
   ]
 }

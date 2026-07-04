@@ -1378,3 +1378,48 @@ Current real root cause split:
 - follow-up correction: flow rhythm and errors need explicit centers. New design doc `docs/design/control-error-center-refactor.md` and architecture gap entry define planned `control.center`, `error.center`, and `task.orchestration`; local runtime/provider/tool retry/fail/block decisions must move behind a centralized metadata-watermarked error policy before the task/subagent refactor.
 - follow-up correction: model feedback has two channels. Status schema is no-side-effect interaction state used for reasoning rhythm and UI status; side effects must use compact built-in action tools, preferably one `task` tool with `op=create|dispatch|append|stop|close|query`, maximum three framework tools total. Status schema can allow simple stop, task-complete-with-evidence terminal, next-step continuation, blocked terminal, user-option stop, and schema repair feedback when required fields are missing.
 - follow-up correction: first implementation must be a four-point hook skeleton, not a full-flow hook chain. Raw request-side checks needing the most precise local tool/result data mount after local tool result; outbound controls mount before model request send; raw response processing mounts immediately after model response receive; final client-return processing mounts after all processing immediately before returning to the client. No schema/action implementation may bypass these hook points.
+
+# 2026-07-04 error-center ADP read surface closeout
+
+- owner slice: `error.center`, `ui.protocol`, `runtime.ui-command-dispatch`, `app.runtime-daemon`, `app.cli-runtime-smoke`, `app.webui-smoke`, plus `foundation.workspace` for S profile restart repair.
+- implementation already present on resume:
+  - `UiCommand::QueryErrorCenterEvents` / `SubscribeErrorCenterEvents`.
+  - `UiQueryResult::ErrorCenterEvents` / `UiProjection::ErrorCenterEvents`.
+  - runtime `RuntimeCommandDispatcher::query_runtime` route to `query_error_center_events_for_ui`.
+  - server ADP query and initial subscription projection support.
+  - daemon black-box test and CLI `adp-error-query`.
+- documentation closeout:
+  - synced `error.center`, `runtime.ui-command-dispatch`, `ui.protocol`, `app.cli-runtime-smoke`, `app.runtime-daemon`, `app.webui-smoke`, and `foundation.workspace` function maps/test designs/mainline JSONs.
+  - regenerated generated wiki from mainline JSON truth.
+- S profile runtime gap found:
+  - `restartS` previously only kickstarted launchd; because launchd runs copied `freehand-daemonS-bin`, daemon could keep stale code while `freehand-cliS` symlink used current code.
+  - fixed `scripts/install-launchd.sh restartS` to run `scripts/install-symlink.sh` before `launchctl kickstart`, refreshing debug binaries and the launchd daemon copy without touching global service.
+  - updated `.agents/skills/freehand-dev/SKILL.md` to preserve the stale-code diagnostic rule.
+- verification:
+  - `cargo fmt --check`
+  - `cargo test -p freehand-control -- --nocapture` -> 5 passed
+  - `cargo test -p freehand-runtime runtime_query_reads_error_center_metadata_without_raw_text -- --nocapture`
+  - `cargo test -p freehand-daemon daemon_adp_queries_runtime_error_center_truth -- --nocapture`
+  - `cargo test -p freehand-cli -- --nocapture` -> 12 passed
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 43 passed
+  - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+  - `cargo test --workspace` -> 423 passed
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `bash -n scripts/install-launchd.sh scripts/install-symlink.sh scripts/freehand-daemon-launchd.sh`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `cargo test -p xtask` -> 18 passed
+  - `make ci` -> exit 0
+- online S-profile proof:
+  - `scripts/install-launchd.sh installS`, health `ok`, `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp`.
+  - before `restartS` fix, `adp-error-query` timed out because daemon copy was stale; after `installS` refresh and script fix, query passed.
+  - real failure sample: `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample failure` -> session `cli-adp-sample-failure-1783177452885366000`, turn `runtime-turn-37-r2`, `rounds=2`, `tool_executions=1`, `failed_tools=1`.
+  - query proof: `freehand-cliS adp-error-query --url ws://127.0.0.1:4042/adp --session cli-adp-sample-failure-1783177452885366000` -> `count=1`, event `tool:validation:repair_schema:tool_result_failed:451bc61e1a05e812`.
+  - filter proof: `--domain tool` -> `count=1`; `--domain provider` -> `count=0`.
+  - raw ADP subscribe proof with correct externally tagged `UiCommand`: accepted plus initial event `tool:validation:repair_schema:tool_result_failed:451bc61e1a05e812`.
+  - post-fix `scripts/install-launchd.sh restartS` rebuilt S binaries, restarted `com.freehand.daemonS`, health `ok`, ADP smoke passed, and persisted error-center query still returned `count=1`.
+- remaining gaps:
+  - live push when new error-center metadata is written after subscription is still pending.
+  - WebUI visible error-center cards are still pending.
+  - task/node/UI error policy integration remains future scope.

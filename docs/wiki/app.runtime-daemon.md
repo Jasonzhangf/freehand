@@ -16,12 +16,12 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - runtime bootstrap consumes configured local and paired node topology before daemon transport starts
 - if persisted runtime turn truth exists, daemon bootstrap restores it through the injected runtime owner before serving query and SSE routes
 - daemon injects the runtime dispatcher and its shared UI state into the protocol-only HTTP and SSE transport
-- daemon injects the same runtime dispatcher as the protocol-owned runtime query port for ADP read-only owner queries
+- daemon injects the same runtime dispatcher as the protocol-owned runtime query port for ADP read-only owner queries, including task list/history and error-center metadata
 - daemon exposes the same runtime dispatcher and shared UI state through protocol-owned ADP WebSocket frames at /adp
 - mutation commands travel through protocol-owned ingress validation and dispatch envelope building before runtime dispatch
 - explicit checkpoint rewind can travel through the same HTTP command ingress without adding app-owned business logic
 - checkpoint summary query travels through the shared protocol-only HTTP query route from runtime-populated UI state
-- daemon ADP WebSocket accepts task list subscriptions through the shared protocol transport and injected runtime query port
+- daemon ADP WebSocket accepts task list and error-center subscriptions through the shared protocol transport and injected runtime query port
 
 ## Response Mainline
 
@@ -30,12 +30,14 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - daemon serves query and continuous SSE projections from the runtime-owned shared UI state
 - daemon serves ADP WebSocket command/query/subscribe frames from the same runtime-owned shared UI state and runtime query port, so WebUI, Android, and CLI automation can use one control/status path
 - daemon serves task list/history ADP query results through runtime's task owner bridge without becoming task truth owner
+- daemon serves error-center ADP query results through runtime's metadata query bridge without becoming error-center or metadata truth owner
 - daemon restart can serve restored terminal projection before any new submit arrives
 - daemon SSE subscriptions stay open across later runtime turn updates and observe the same protocol-owned projections as query consumers
 - daemon can rewind a previously checkpointed writable-tool mutation through runtime owner dispatch while leaving turn/session/UI truth untouched
 - daemon can serve checkpoint summary query results after writable mutation and after explicit rewind without reading checkpoint files in app code
 - daemon remains a host process and does not own reason or node semantics itself
 - daemon serves task list subscription events from runtime-published task projections after task tool mutations
+- daemon serves error-center initial subscription snapshots from runtime metadata projection
 
 ## Error Mainline
 
@@ -47,10 +49,11 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - runtime dispatch failures return protocol-mapped HTTP failures through the shared transport layer
 - ADP command/query/subscribe misuse returns explicit protocol failure frames on the WebSocket connection
 - task query misses return explicit ADP target-not-found failure frames from the runtime query bridge
+- error-center query/projection failures return explicit ADP failure frames from the runtime query bridge
 - missing checkpoint rewind manifests surface protocol-mapped target-not-found failure over the same HTTP command ingress
 - slave-mode agent selection returns explicit daemon startup error
 - async command ingress does not execute injected synchronous provider or runtime work inline; it returns explicit transport failure if the dispatch task itself fails
-- task subscription initial query and projection failures surface explicit ADP failure frames
+- task and error-center subscription initial query/projection failures surface explicit ADP failure frames
 
 ## Shared Multi-Reference Functions
 
@@ -97,9 +100,9 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 | 06 | `handle_query_checkpoints` | `apps/freehand-server/src/lib.rs` | serve checkpoint summaries from injected protocol state | HTTP checkpoint query | UI checkpoint snapshot JSON | daemon-hosted WebUI transport | protocol state | bound |
 | 07 | `handle_adp_socket` | `apps/freehand-server/src/lib.rs` | upgrade daemon-hosted ADP WebSocket connections into protocol-owned command/query/subscribe frame handling | WebSocket ADP frames plus shared protocol state plus dispatch port | ADP response frames and subscription events | WebUI/Android/CLI automation | protocol transport owner | bound |
 | 08 | `handle_adp_connection` | `apps/freehand-server/src/lib.rs` | serve protocol-owned ADP command/query/subscribe frames and matching subscription events on one connection | WebSocket ADP connection plus shared protocol state plus dispatch port | ADP response frames and subscription events | ADP socket route | protocol state and runtime dispatch port | bound |
-| 08a | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | serve daemon-hosted read-only runtime query frames such as task list/history | ADP query command | ADP query result or failure frame | shared ADP transport | runtime owner query bridge | bound |
+| 08a | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | serve daemon-hosted read-only runtime query frames such as task list/history and error-center metadata | ADP query command | ADP query result or failure frame | shared ADP transport | runtime owner query bridge | bound |
 | 09 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | ~/.freehand/daemon.env | daemon process exec | macOS launchd | FREEHAND_DAEMON_BIN serve | bound |
-| 09 | `handle_adp_socket / RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP task list query and subscribe surfaces from runtime task truth | ADP task query or subscribe frame | ADP task query result or subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime query/projection owner | bound |
+| 09 | `handle_adp_socket / RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP task list/error-center query and subscribe surfaces from runtime owner truth | ADP task or error-center query/subscribe frame | ADP task/error-center query result or subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime query/projection owner | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -108,6 +111,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - provider-backed submit, query, continuous-SSE restore, provider-failure surfacing, restart resume of turn-id allocation, direct-message HTTP smoke, checkpoint rewind HTTP smoke, missing-checkpoint rewind HTTP failure smoke, and corrupt-checkpoint-bootstrap startup smoke are covered through the daemon app boundary
 - ADP WebSocket command/query/subscribe control is covered through the daemon app boundary, including query-as-command rejection
 - ADP task list/history query control is covered through the daemon app boundary
+- ADP error-center metadata query control is covered through the daemon app boundary
 - checkpoint query projection is covered through daemon HTTP after writable mutation and after rewind
 - config-selected bootstrap is now bound in code and uses configured peer topology
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

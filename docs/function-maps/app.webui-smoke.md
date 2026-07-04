@@ -28,8 +28,8 @@
 - front-end attachment drafts are scoped by selected session, persist metadata only, append placeholder lines to the current send, clear on command receipt, and remain available for retry after dispatch failure
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
-- transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history before using protocol-state snapshots
-- transport-facing ADP subscribe route accepts protocol-owned task list subscriptions and obtains the initial task list projection from the injected runtime query port
+- transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history and error-center metadata before using protocol-state snapshots
+- transport-facing ADP subscribe route accepts protocol-owned task list and error-center subscriptions and obtains initial projections from the injected runtime query port
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
 - HTTP query and POST command ingress remain compatibility routes; SSE latest-turn subscribe is consumed by WebUI as a display-refresh mirror without owning command dispatch
 - per-turn debug SSE is a live subscription and waits for late debug snapshots when turn projection arrives before debug projection
@@ -43,8 +43,8 @@
 
 - app boundary renders a protocol-driven WebUI page shell; live content is populated from ADP query/subscribe/command frames plus latest-turn SSE display refresh events
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason/debug truth writer
-- app boundary serves runtime-query-port payloads without importing runtime or task owner crates
-- app boundary serves task list subscription initial snapshots and later runtime-published task list projection events without importing task owner crates
+- app boundary serves runtime-query-port payloads without importing runtime, task, metadata, or error-center owner crates
+- app boundary serves task list subscription initial snapshots, error-center initial snapshots, and later runtime-published projection events without importing task, metadata, or error-center owner crates
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
 - app boundary keeps one selected session at a time, can synthesize a draft session entry before the first turn exists, keeps the selected transcript pinned to that session instead of falling back to global latest turn, and keeps a new draft session visually clean instead of rendering system feedback as chat content
 - app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
@@ -103,7 +103,7 @@
 - debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state
 - dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
 - runtime query port failures surface explicit ADP failure frames and do not become app-owned fallback state
-- task subscription initial query failures surface explicit ADP failure frames and do not become app-owned fallback state
+- task/error-center subscription initial query failures surface explicit ADP failure frames and do not become app-owned fallback state
 - direct reason/provider/node/config coupling is a policy violation, not a fallback path
 
 ## Shared Multi-Reference Functions
@@ -143,7 +143,7 @@
 | 13 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send `CancelTurn` or `CancelLatestActiveTurn` over ADP for the active protocol turn from button or Escape key | latest protocol turn id | ADP command receipt + refreshed projection | WebUI shell | daemon `/adp` | bound |
 | 14 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP compatibility transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
 | 15 | `loadSamplePrompt` | `apps/freehand-server/assets/webui.js` | load hidden success/failure diagnostic prompts into the composer without inventing a second command path or rendering persistent sample buttons | scenario kind | composer text + command status | WebUI shell | normal ADP submit path | bound |
-| 16 | `initial_adp_subscription_projection` | `apps/freehand-server/src/lib.rs` | serve initial ADP subscription snapshot including runtime-backed task list projection | subscription command plus protocol state plus runtime query port | optional UI projection or explicit failure | `handle_adp_subscribe` | `UiRuntimeQueryPort::query_runtime` / `UiProtocolState::query` | bound |
+| 16 | `initial_adp_subscription_projection` | `apps/freehand-server/src/lib.rs` | serve initial ADP subscription snapshot including runtime-backed task list and error-center projections | subscription command plus protocol state plus runtime query port | optional UI projection or explicit failure | `handle_adp_subscribe` | `UiRuntimeQueryPort::query_runtime` / `UiProtocolState::query` | bound |
 
 ## Sync Status Against Code
 
@@ -188,6 +188,6 @@
 - WebUI assistant cards stay within their own round and strip raw `<freehand_completion>` blocks; final user-facing completion content remains in the terminal Final row at the bottom of the round sequence
 - WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics
-- app query transport now accepts an injected `UiRuntimeQueryPort`; the app still does not import runtime/task semantics
-- app subscription transport now uses the injected `UiRuntimeQueryPort` for task list initial snapshots while keeping later updates on protocol subscription events
+- app query transport now accepts an injected `UiRuntimeQueryPort`; the app still does not import runtime/task/error-center semantics
+- app subscription transport now uses the injected `UiRuntimeQueryPort` for task list and error-center initial snapshots while keeping later updates on protocol subscription events
 - generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes

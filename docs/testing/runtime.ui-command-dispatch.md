@@ -9,6 +9,7 @@
   - submit commands may carry an optional selected session id and selected cwd and must create or continue that cwd-bound session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
   - runtime-backed read-only task queries route to task owner APIs and return UI-safe projections without becoming task truth writers
+  - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - successful task tool mutations publish a runtime-owned task list projection into shared UI protocol state so ADP task subscribers receive owner-backed lifecycle changes
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
   - live bootstrap restores persisted turn projection and next runtime turn ordinal from all persisted sessions when recovery truth exists
@@ -54,6 +55,7 @@
   - checkpoint rewind missing-manifest target-not-found coverage
   - task list/history runtime query coverage
   - missing task history query target-not-found coverage
+  - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
   - task list publication coverage after successful task tool mutation
 - live reason hook-to-ui-state coverage
 - live provider-request-built debug-to-model-waiting UI coverage
@@ -81,6 +83,7 @@
   - runtime checkpoint rewind receipt smoke
   - runtime session CRUD receipt smoke over the shared UI protocol state
   - daemon ADP task list/history query smoke over the shared runtime query port
+  - daemon ADP error-center query smoke over the shared runtime query port
   - daemon ADP task list subscription smoke over the shared runtime projection channel
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
@@ -121,6 +124,8 @@
   - explicit unsupported resume dispatch is covered
   - runtime task query bridge is covered by `runtime_query_reads_task_truth_from_task_runtime`
   - daemon ADP task query bridge is covered by `daemon_adp_queries_runtime_task_truth`
+  - runtime error-center query bridge is covered by `runtime_query_reads_error_center_metadata_without_raw_text`
+  - daemon ADP error-center query bridge is covered by `daemon_adp_queries_runtime_error_center_truth`
   - runtime task list push bridge is planned for `runtime_task_tool_mutation_publishes_task_list_projection`
   - daemon ADP task list subscribe bridge is planned for `daemon_adp_subscribes_runtime_task_truth`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

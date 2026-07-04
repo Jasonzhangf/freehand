@@ -48,6 +48,7 @@
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - task list and task history queries are protocol-owned ADP/query command shapes, but the protocol only defines UI-safe DTOs and query-port routing; persisted task truth remains owned by `task.orchestration`
 - task list subscriptions are protocol-owned ADP/subscribe command shapes; task list projection contents must be supplied by runtime/task owners and remain read-only UI DTOs
+- error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 
 ## Response Mainline
@@ -69,6 +70,8 @@
 - session list projections expose owner-supplied session `title` and `archived` metadata so WebUI, Android, CLI, and headless ADP clients share one CRUD truth
 - task list and task history query results expose UI-safe task snapshot and ledger-event projections supplied by runtime owner code through `UiRuntimeQueryPort`
 - task list subscription events expose the same UI-safe task list projection as query results so task panels can refresh from push without polling or app-local task state
+- error-center event query results expose UI-safe watermarked metadata fields plus raw hash only; raw provider/tool/request/user/assistant text is not part of the protocol DTO
+- error-center subscription initial snapshots use the same `UiErrorCenterEventListProjection` as query results
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards; tool status/outcome is conveyed by the status field while the public body stays semantic and target-focused instead of echoing success/failure result text
 - public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/parameters/result without parsing raw tool terms
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
@@ -93,6 +96,7 @@
 - `CancelLatestActiveTurn` without any active or persisted turn returns explicit target-not-found from the owner module
 - empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch
 - empty task history ids are rejected at the protocol boundary as `empty_task_id`
+- empty error-center session ids are rejected at the protocol boundary as `empty_session_id`
 - task list/history commands sent to command ingress are rejected as query-route misuse instead of mutating task truth
 - task history remains query-only; task list subscribe accepts only list filters and must reject history/query misuse on the subscribe route
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
@@ -146,9 +150,9 @@
   - why shared: keeps checkpoint UI projection single-sourced without letting UI parse runtime manifests
 - `UiRuntimeQueryPort::query_runtime`
   - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: let app transports ask runtime owners for read-only query projections such as task list/history before falling back to protocol-state queries
+  - purpose: let app transports ask runtime owners for read-only query projections such as task list/history and error-center events before falling back to protocol-state queries
   - allowed callers: WebUI/daemon ADP query transport
-  - related tests: daemon ADP task query smoke
+  - related tests: daemon ADP task query smoke, daemon ADP error-center query smoke
   - why shared: keeps app transports protocol-bound while allowing runtime-owned read models without importing runtime into `freehand-server`
 - `project_tool_call_display` / `project_tool_result_display`
   - owner: `crates/freehand-blocks/src/tool_display.rs`
@@ -187,6 +191,8 @@
 | 18 | `UiAdpRequest` / `UiAdpResponse` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP frames for command/query/subscribe automation | ADP JSON frame | typed command/query/subscription response or failure | WebUI/Android/CLI automation transports | protocol owner | bound |
 | 19 | `validate_command` / `command_dispatch_target` | `crates/freehand-ui-protocol/src/lib.rs` | validate session-management mutation intents and route them to the session persistence owner | session CRUD command | owner-routed dispatch envelope or protocol rejection | WebUI/Android/CLI transports | runtime/reason persistence owner path | bound |
 | 20 | `UiRuntimeQueryPort::query_runtime` | `crates/freehand-ui-protocol/src/lib.rs` | define runtime-backed read-only query extension point without making app transports import runtime owners | UI query command | optional runtime-owned query result or explicit dispatch failure | WebUI/daemon ADP query transport | runtime query owner | bound |
+| 21 | `UiCommand::QueryErrorCenterEvents` / `UiQueryResult::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center query/result DTOs | session/trace/turn/domain filters | UI-safe error-center projection | ADP query transport | runtime query port | bound |
+| 22 | `UiCommand::SubscribeErrorCenterEvents` / `UiProjection::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define error-center subscription command and projection event shape | error-center subscription filters | UI-safe error-center subscription event | ADP subscribe transport | protocol selector matcher | bound |
 
 ## Sync Status Against Code
 
@@ -208,4 +214,5 @@
 - session CRUD protocol routing is bound for create, rename, archive, restore, and delete-as-archive commands through `runtime.ui-command-dispatch` into `reason.persistence`
 - task list/history query DTOs and runtime query-port routing are protocol-bound; `UiProtocolState::query` rejects them so runtime owner code must supply task truth
 - task list subscription projection is protocol-bound; runtime owner code publishes task list projection events into `UiProtocolState`
+- error-center query/subscription DTOs and runtime query-port routing are protocol-bound; runtime owner code supplies metadata-backed read projections
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

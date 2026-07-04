@@ -641,6 +641,23 @@ fn initial_adp_subscription_projection(
                 Err(_) => Err(StatusCode::BAD_REQUEST),
             }
         }
+        UiCommand::SubscribeErrorCenterEvents {
+            session_id,
+            trace_id,
+            turn_id,
+            domain,
+        } => match runtime_query_port.query_runtime(&UiCommand::QueryErrorCenterEvents {
+            session_id: session_id.clone(),
+            trace_id: trace_id.clone(),
+            turn_id: turn_id.clone(),
+            domain: domain.clone(),
+        }) {
+            Ok(Some(UiQueryResult::ErrorCenterEvents(events))) => {
+                Ok(Some(UiProjection::ErrorCenterEvents(events)))
+            }
+            Ok(Some(_)) | Ok(None) => Err(StatusCode::BAD_REQUEST),
+            Err(_) => Err(StatusCode::BAD_REQUEST),
+        },
         _ => Err(StatusCode::BAD_REQUEST),
     }
 }
@@ -652,6 +669,7 @@ fn projection_latest_active_turn_id(projection: &UiProjection) -> Option<TurnId>
         UiProjection::Progress(snapshot) => Some(snapshot.turn_id.clone()),
         UiProjection::NodeStatus(_) | UiProjection::Checkpoints(_) => None,
         UiProjection::TaskList(_) => None,
+        UiProjection::ErrorCenterEvents(_) => None,
     }
 }
 
@@ -711,6 +729,9 @@ fn projection_to_sse_event(projection: UiProjection, client: UiClientKind) -> Ev
         UiProjection::TaskList(snapshot) => Event::default()
             .event("task_list")
             .data(serde_json::to_string(&snapshot).expect("task list json")),
+        UiProjection::ErrorCenterEvents(snapshot) => Event::default()
+            .event("error_center_events")
+            .data(serde_json::to_string(&snapshot).expect("error center json")),
     }
 }
 

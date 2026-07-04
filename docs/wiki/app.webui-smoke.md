@@ -17,38 +17,39 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets
 - app boundary keeps theme assets separate from WebUI layout assets
 - front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames
-- front-end exposes success and failure sample prompt buttons that load reproducible ADP sample prompts into the composer without bypassing normal Send/ADP command flow
+- front-end keeps success and failure scenario prompts as hidden slash/keyboard diagnostic affordances without rendering persistent sample buttons in the composer
 - front-end composer control strip exposes attachment buttons, preview, selected-session refresh, cwd input, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP
 - front-end attachment drafts are scoped by selected session, persist metadata only, append placeholder lines to the current send, clear on command receipt, and remain available for retry after dispatch failure
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
-- transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history before using protocol-state snapshots
+- transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history and error-center metadata before using protocol-state snapshots
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
-- HTTP query, SSE subscribe, and POST command ingress remain compatibility routes, not the WebUI default control/status path
+- HTTP query and POST command ingress remain compatibility routes; SSE latest-turn subscribe is consumed by WebUI as a display-refresh mirror without owning command dispatch
 - per-turn debug SSE is a live subscription and waits for late debug snapshots when turn projection arrives before debug projection
 - transport-facing app routes expose POST command ingress for protocol-owned validation and dispatch-port-backed owner routing
 - the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only
 - front-end cancel button and Escape key send protocol-owned CancelTurn commands through command ingress
 - front-end Escape sends CancelLatestActiveTurn when submit is in flight but no concrete turn_id has reached the browser yet
 - command-ingress transport failures must stay explicit at the app boundary and may not collapse into success projection
-- transport-facing ADP subscribe route can accept protocol-owned task list subscriptions and obtain the initial snapshot from the injected runtime query port
+- transport-facing ADP subscribe route can accept protocol-owned task list and error-center subscriptions and obtain initial snapshots from the injected runtime query port
 
 ## Response Mainline
 
-- app boundary renders a protocol-driven WebUI page shell; live content is populated from ADP query/subscribe/command frames by default
+- app boundary renders a protocol-driven WebUI page shell; live content is populated from ADP query/subscribe/command frames plus latest-turn SSE display refresh events
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason or debug truth writer
-- app boundary serves runtime-query-port payloads without importing runtime or task owner crates
+- app boundary serves runtime-query-port payloads without importing runtime, task, metadata, or error-center owner crates
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
 - app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
 - ADP subscribe returns an explicit accepted/waiting state before later turn/debug events, so the WebUI can render waiting instead of appearing frozen
 - SSE subscribe routes emit one initial snapshot followed by continuous incremental projection updates over the same connection, latest-turn subscribe keeps waiting when no turn exists yet, and debug subscribe keeps waiting when no debug snapshot exists yet
 - WebUI submit success path actively re-queries latest turn truth over ADP after command receipt to cover command-complete-before-browser-subscriber timing
-- WebUI success/failure sample buttons populate the composer with the same sample prompts used by CLI/headless ADP sample automation, then the operator can send them through the normal ADP submit path
+- WebUI success/failure diagnostic prompts populate the composer through slash commands or keyboard shortcuts, then the operator can send them through the normal ADP submit path; these prompts must not appear as persistent composer buttons
 - WebUI composer control strip renders low-noise controls below the composer without creating a second protocol or truth source
 - WebUI forwards selected cwd through SubmitUserInput.cwd and keeps draft-session empty state out of the chat stream
 - WebUI attachment tray renders session-scoped draft metadata and file-handle availability; restored metadata stays visible but is not treated as rehydrated binary payload
 - WebUI sends attachment placeholders as current-send text only, clears the session draft after successful command receipt, and restores the composer text while retaining draft attachments after dispatch failure
 - front-end script projects protocol-owned ADP `UiQueryResult`, `UiSubscriptionEvent`, and `DebugStateSnapshot` frames into semantic message cards and detail panes, including the user prompt
+- front-end script projects latest-turn SSE events through the same turn projection path as ADP subscription updates so SSE refreshes the visible chat bubbles
 - front-end debug state distinguishes missing snapshot (debug pending) from debug SSE transport errors (debug stream reconnecting)
 - front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket without surfacing verbose tool term text in the main card
 - front-end script normalizes tool cards by tool_call_id, renders waiting cards with animation and local elapsed timers, and clears the composer input immediately after submit while keeping the pending user card visible
@@ -56,7 +57,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - front-end script renders protocol-projected model request waiting as an animated elapsed-time card that clearly shows the request has been sent and the UI is waiting for model response
 - front-end script renders completed or failed tool result detail in the same tool card and renders tool-complete-to-next-model waiting as an animated elapsed-time card
 - front-end script renders a neutral non-animated waiting state when a turn has no terminal status, no waiting tool activity, and no protocol-projected model request; it must not invent streaming from text-only or restored inactive state
-- front-end script groups runtime-turn-N plus runtime-turn-N-rM round projections into one logical execution cycle for display and collapses assistant text into one visible card per logical turn while preserving tool, terminal, and error cards
+- front-end script renders runtime-turn-N plus later runtime-turn-N-rM round projections as chronological per-round lifecycle cards instead of merging the whole execution into one summary card
 - front-end script projects checkpoint summaries into a secondary inspector card and sends explicit rewind commands through command ingress
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
 - theme module owns white and black theme switching and is separated from WebUI layout/runtime scripts
@@ -84,7 +85,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - restored attachment metadata without a current page file handle is visible as metadata-only and must not pretend the binary payload was rehydrated
 - transient missing debug snapshots are rendered as pending debug state, not command failure
 - debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state
-- task subscription initial query failures surface explicit ADP failure frames instead of app-owned fallback state
+- task/error-center subscription initial query failures surface explicit ADP failure frames instead of app-owned fallback state
 
 ## Shared Multi-Reference Functions
 
@@ -121,8 +122,8 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | 12 | `handle_query_checkpoints / refreshCheckpoints` | `apps/freehand-server/src/lib.rs / apps/freehand-server/assets/webui.js` | serve compatibility checkpoint query and render read-only checkpoint summaries from ADP protocol state by default | protocol checkpoint snapshot | checkpoint snapshot plus secondary inspector cards | WebUI shell | ui.protocol state | bound |
 | 13 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send CancelTurn or CancelLatestActiveTurn over ADP for the active protocol turn from button or Escape key | latest protocol turn id | ADP command receipt plus refreshed projection | WebUI shell | daemon `/adp` | bound |
 | 14 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP compatibility transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
-| 15 | `loadSamplePrompt` | `apps/freehand-server/assets/webui.js` | load success/failure ADP sample prompts into the composer without inventing a second command path | sample kind | composer text plus visible command status | WebUI shell | normal ADP submit path | bound |
-| 16 | `initial_adp_subscription_projection` | `apps/freehand-server/src/lib.rs` | serve initial ADP subscription snapshot including runtime-backed task list projection | subscription command plus protocol state plus runtime query port | optional UI projection or failure | handle_adp_subscribe | UiRuntimeQueryPort::query_runtime / UiProtocolState::query | bound |
+| 15 | `loadSamplePrompt` | `apps/freehand-server/assets/webui.js` | load hidden success/failure diagnostic prompts into the composer without inventing a second command path or rendering persistent sample buttons | sample kind | composer text plus visible command status | WebUI shell | normal ADP submit path | bound |
+| 16 | `initial_adp_subscription_projection` | `apps/freehand-server/src/lib.rs` | serve initial ADP subscription snapshot including runtime-backed task list and error-center projections | subscription command plus protocol state plus runtime query port | optional UI projection or failure | handle_adp_subscribe | UiRuntimeQueryPort::query_runtime / UiProtocolState::query | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -130,12 +131,12 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - theme code is split into `assets/theme.css` and `assets/theme.js`
 - WebUI layout and protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`
 - WebUI shell now advertises `data-adp-endpoint="/adp"` and the front-end opens a WebSocket to that endpoint by default
-- WebUI shell now exposes success/failure sample buttons and WebUI JS carries the paired sample prompts
+- WebUI success/failure diagnostic prompts remain available through slash commands and shortcuts, while persistent Success/Failure composer buttons are intentionally absent
 - WebUI shell now exposes composer controls for file, image, video, preview, selected-session refresh, and read-only model selection
 - WebUI attachment drafts are session-scoped in local UI metadata, render as placeholder chips, append placeholder lines to current submitted text, clear after successful command receipt, and remain for retry after dispatch failure
 - app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface
 - app boundary now serves protocol-only POST command ingress dispatch-receipt or failure smoke route from that shared transport surface
-- HTTP/SSE/POST routes remain compatibility transport surfaces; WebUI JS no longer uses `fetch` or `EventSource` as its default live path
+- HTTP/POST routes remain compatibility transport surfaces; WebUI JS uses ADP for command/query/subscription truth and EventSource for latest-turn SSE display refresh
 - app boundary now surfaces explicit command-ingress dispatch-port failures and dispatch-task join failures instead of collapsing them into success
 - app boundary now serves static embedded assets through an explicit 404ing route
 - runtime host reuse now happens through injected state and dispatch port, not by duplicating transport behavior
@@ -145,7 +146,8 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - WebUI submit path still explicitly refreshes latest turn truth over ADP after a successful command receipt
 - WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files
 - app dependency boundary is intended to remain protocol-only and must not import reason, provider, node, or config semantics
-- app query transport now accepts an injected UiRuntimeQueryPort while remaining free of runtime/task imports
+- app query transport now accepts an injected UiRuntimeQueryPort while remaining free of runtime/task/error-center imports
+- app subscription transport now uses the injected UiRuntimeQueryPort for task list and error-center initial snapshots while keeping app dependency boundary protocol-only
 - generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes
 - WebUI Cancel button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn

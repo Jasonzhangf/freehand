@@ -13,7 +13,7 @@
   - global install script installs release host binaries into the configured prefix
   - symlink install script builds debug host binaries, exposes S-suffixed development commands, and installs a prefix-local launchd wrapper without replacing global release commands
   - launchd install script installs release host binaries, writes `~/Library/LaunchAgents/com.freehand.daemon.plist`, writes `~/.freehand/daemon.env` with explicit daemon binary path, starts the user service, and exposes fixed logs/WebUI
-  - launchd symlink profile writes `~/Library/LaunchAgents/com.freehand.daemonS.plist`, writes `~/.freehand/daemonS.env`, uses `freehand-daemonS`, and exposes `127.0.0.1:4042` plus separate `daemonS.*.log` files
+  - launchd symlink profile writes `~/Library/LaunchAgents/com.freehand.daemonS.plist`, writes `~/.freehand/daemonS.env`, uses `freehand-daemonS-bin` for launchd execution, refreshes that debug binary copy during `restartS`, and exposes `127.0.0.1:4042` plus separate `daemonS.*.log` files
   - launchd install script does not leak daemon workspace root overrides into release/global-install regression subprocesses
   - gate command can validate policy locks
   - gate command can reject data/control boundary leaks at the repo source level
@@ -34,6 +34,7 @@
   - symlink install S-suffix command, symlink target logic, and prefix-local launchd wrapper copy
   - launchd daemon binary prefix mismatch rejection
   - launchd S-profile label/env/bin/bind/log separation
+  - launchd `restartS` debug daemon binary refresh before kickstart
   - launchd release subprocess daemon-workdir env isolation
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
   - loop governance docs include required L1 report-only files and deny automated action until explicit L2 approval
@@ -59,6 +60,7 @@
   - `scripts/install-symlink.sh` installs `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` as symlinks
   - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
   - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`
+  - `scripts/install-launchd.sh restartS` refreshes S debug binaries and restarts only `com.freehand.daemonS`
   - machine-readable mainline truth remains the only source for generated wiki artifacts
   - loop governance starts as report-only project control, not unattended automation
 - fixtures / replay inputs / runtime evidence paths:

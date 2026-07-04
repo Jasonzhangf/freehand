@@ -255,6 +255,7 @@ name = "freehand-daemon"
 version = "0.1.0"
 dependencies = [
  "freehand-contracts",
+ "freehand-metadata",
  "freehand-runtime",
  "freehand-server",
  "freehand-task",

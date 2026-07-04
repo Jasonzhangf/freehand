@@ -34,6 +34,7 @@ pub enum UiStreamKind {
     Debug,
     Checkpoint,
     TaskList,
+    ErrorCenter,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +89,15 @@ pub enum UiCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<AgentId>,
     },
+    SubscribeErrorCenterEvents {
+        session_id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_id: Option<TurnId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        domain: Option<String>,
+    },
     SubscribeDebugState {
         client: UiClientKind,
         turn_id: TurnId,
@@ -109,6 +119,15 @@ pub enum UiCommand {
     },
     QueryTaskHistory {
         task_id: String,
+    },
+    QueryErrorCenterEvents {
+        session_id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_id: Option<TurnId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        domain: Option<String>,
     },
     QueryNodeStatus {
         node_id: String,
@@ -392,6 +411,41 @@ pub struct UiTaskHistoryProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiErrorCenterEventProjection {
+    pub metadata_id: String,
+    pub source_agent_id: Option<AgentId>,
+    pub session_id: Option<SessionId>,
+    pub turn_id: Option<TurnId>,
+    pub trace_id: String,
+    pub writer_feature_id: String,
+    pub writer_crate: String,
+    pub writer_symbol: String,
+    pub pipeline_node: String,
+    pub domain: String,
+    pub class: String,
+    pub code: String,
+    pub source_owner: String,
+    pub source_pipeline_node: String,
+    pub recovery_action: String,
+    pub retry_index: u64,
+    pub retry_cap: u64,
+    pub public_visibility: String,
+    pub owner_target: String,
+    pub repair_fields: Vec<String>,
+    pub raw_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiErrorCenterEventListProjection {
+    pub source_agent_id: AgentId,
+    pub session_id: SessionId,
+    pub trace_filter: Option<String>,
+    pub turn_filter: Option<TurnId>,
+    pub domain_filter: Option<String>,
+    pub events: Vec<UiErrorCenterEventProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiProjection {
     Turn(UiTurnProjection),
     NodeStatus(NodeStatusSnapshot),
@@ -399,6 +453,7 @@ pub enum UiProjection {
     Debug(DebugStateSnapshot),
     Checkpoints(UiCheckpointSnapshot),
     TaskList(UiTaskListProjection),
+    ErrorCenterEvents(UiErrorCenterEventListProjection),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -435,6 +490,7 @@ pub enum UiQueryResult {
     Checkpoints(UiCheckpointSnapshot),
     TaskList(UiTaskListProjection),
     TaskHistory(UiTaskHistoryProjection),
+    ErrorCenterEvents(UiErrorCenterEventListProjection),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -657,6 +713,13 @@ impl UiProtocolState {
 
     pub fn publish_task_list_projection(&self, projection: UiTaskListProjection) {
         self.publish_projection(UiProjection::TaskList(projection));
+    }
+
+    pub fn publish_error_center_events_projection(
+        &self,
+        projection: UiErrorCenterEventListProjection,
+    ) {
+        self.publish_projection(UiProjection::ErrorCenterEvents(projection));
     }
 
     pub fn apply_turn_projection(&mut self, projection: UiTurnProjection) {
@@ -1054,9 +1117,9 @@ impl UiProtocolState {
                     &self.session_metadata,
                 )))
             }
-            UiCommand::QueryTaskList { .. } | UiCommand::QueryTaskHistory { .. } => {
-                Err(UiProtocolError::StreamKindMismatch)
-            }
+            UiCommand::QueryTaskList { .. }
+            | UiCommand::QueryTaskHistory { .. }
+            | UiCommand::QueryErrorCenterEvents { .. } => Err(UiProtocolError::StreamKindMismatch),
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
                 self.node_status.get(node_id).cloned(),
             )),
@@ -1172,6 +1235,12 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::QueryTaskHistory { task_id } if task_id.trim().is_empty() => {
             Err(UiProtocolError::EmptyTaskId)
         }
+        UiCommand::QueryErrorCenterEvents { session_id, .. }
+        | UiCommand::SubscribeErrorCenterEvents { session_id, .. }
+            if session_id.as_str().trim().is_empty() =>
+        {
+            Err(UiProtocolError::EmptySessionId)
+        }
         _ => Ok(()),
     }
 }
@@ -1267,6 +1336,11 @@ pub fn subscription_selector(command: &UiCommand) -> Option<SubscriptionSelector
             stream_kind: UiStreamKind::TaskList,
             target_turn_id: None,
         }),
+        UiCommand::SubscribeErrorCenterEvents { .. } => Some(SubscriptionSelector {
+            client: UiClientKind::WebUi,
+            stream_kind: UiStreamKind::ErrorCenter,
+            target_turn_id: None,
+        }),
         UiCommand::SubscribeDebugState { client, turn_id } => Some(SubscriptionSelector {
             client: *client,
             stream_kind: UiStreamKind::Debug,
@@ -1293,6 +1367,7 @@ pub fn subscription_matches(
         }
         (UiStreamKind::Checkpoint, UiProjection::Checkpoints(_)) => true,
         (UiStreamKind::TaskList, UiProjection::TaskList(_)) => true,
+        (UiStreamKind::ErrorCenter, UiProjection::ErrorCenterEvents(_)) => true,
         _ => false,
     }
 }
@@ -1756,6 +1831,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::SubscribeNodeStatus => "subscribe_node_status",
         UiCommand::SubscribeProgress => "subscribe_progress",
         UiCommand::SubscribeTaskList { .. } => "subscribe_task_list",
+        UiCommand::SubscribeErrorCenterEvents { .. } => "subscribe_error_center_events",
         UiCommand::SubscribeDebugState { .. } => "subscribe_debug_state",
         UiCommand::QueryLatestActiveTurn => "query_latest_active_turn",
         UiCommand::QueryTurn { .. } => "query_turn",
@@ -1764,6 +1840,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QuerySessionTurns { .. } => "query_session_turns",
         UiCommand::QueryTaskList { .. } => "query_task_list",
         UiCommand::QueryTaskHistory { .. } => "query_task_history",
+        UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",
