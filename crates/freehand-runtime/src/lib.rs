@@ -59,7 +59,8 @@ use freehand_reason::{
     SessionHistory, TurnRecord, TurnStartInput,
 };
 use freehand_task::{
-    TaskActor, TaskCreateRequest, TaskDispatchRequest, TaskId, TaskParentRef, TaskRuntime,
+    TaskActor, TaskAppendRequest, TaskCreateRequest, TaskDispatchRequest, TaskId,
+    TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime,
     TaskWatermark,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
@@ -3656,18 +3657,8 @@ fn execute_task_tool(
                     turn_id: Some(turn.request.turn_id.clone()),
                     trace_id: Some(turn.request.trace_id.clone()),
                 },
-                actor: TaskActor {
-                    agent_id: turn.request.agent_id.clone(),
-                    source: "control.center".to_owned(),
-                    session_id: Some(turn.request.session_id.clone()),
-                    turn_id: Some(turn.request.turn_id.clone()),
-                    trace_id: Some(turn.request.trace_id.clone()),
-                },
-                watermark: TaskWatermark {
-                    metadata_id: None,
-                    hook: Some("ControlHook03AfterModelResponse".to_owned()),
-                    action_tool_call_id: Some(tool_call.tool_call.tool_call_id.as_str().to_owned()),
-                },
+                actor: task_actor(turn),
+                watermark: task_watermark(tool_call),
             };
             let outcome = task_runtime
                 .create_task(request)
@@ -3692,6 +3683,94 @@ fn execute_task_tool(
                 )
             }))
         }
+        "append" => {
+            let outcome = task_runtime
+                .append_task(TaskAppendRequest {
+                    task_id: TaskId::new(required_json_string(&args, "task_id")?),
+                    note: required_json_string(&args, "note")?.to_owned(),
+                    actor: task_actor(turn),
+                    watermark: task_watermark(tool_call),
+                })
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task appended",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
+        "pause" => {
+            let outcome = task_runtime
+                .pause_task(task_mutation_request(&args, turn, tool_call)?)
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task paused",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
+        "resume" => {
+            let outcome = task_runtime
+                .resume_task(task_mutation_request(&args, turn, tool_call)?)
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task resumed",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
+        "submit_review" => {
+            let outcome = task_runtime
+                .submit_review(TaskReviewSubmission {
+                    task_id: TaskId::new(required_json_string(&args, "task_id")?),
+                    summary: required_json_string(&args, "summary")?.to_owned(),
+                    deliverables: required_json_string_array(&args, "deliverables")?,
+                    evidence: required_json_string_array(&args, "evidence")?,
+                    actor: task_actor(turn),
+                    watermark: task_watermark(tool_call),
+                })
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task review submitted",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
+        "approve" => {
+            let outcome = task_runtime
+                .approve_review(task_mutation_request(&args, turn, tool_call)?)
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task approved",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
+        "reject" => {
+            let outcome = task_runtime
+                .reject_review(TaskReviewRejection {
+                    task_id: TaskId::new(required_json_string(&args, "task_id")?),
+                    reject_reason: required_json_string(&args, "reject_reason")?.to_owned(),
+                    next_requirements: required_json_string_array(&args, "next_requirements")?,
+                    actor: task_actor(turn),
+                    watermark: task_watermark(tool_call),
+                })
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task rejected",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
+        "close" => {
+            let outcome = task_runtime
+                .close_task(task_mutation_request(&args, turn, tool_call)?)
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task closed",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
         "list_agents" => {
             let agents = task_runtime.list_agents().map_err(|err| err.to_string())?;
             Ok(serde_json::to_string(&agents)
@@ -3707,6 +3786,50 @@ fn execute_task_tool(
         }
         other => Err(format!("unsupported task op `{other}`")),
     }
+}
+
+fn task_mutation_request(
+    args: &Map<String, Value>,
+    turn: &TurnRecord,
+    tool_call: &ReasonReq04ToolCall,
+) -> Result<TaskMutationRequest, String> {
+    Ok(TaskMutationRequest {
+        task_id: TaskId::new(required_json_string(args, "task_id")?),
+        actor: task_actor(turn),
+        watermark: task_watermark(tool_call),
+    })
+}
+
+fn task_actor(turn: &TurnRecord) -> TaskActor {
+    TaskActor {
+        agent_id: turn.request.agent_id.clone(),
+        source: "control.center".to_owned(),
+        session_id: Some(turn.request.session_id.clone()),
+        turn_id: Some(turn.request.turn_id.clone()),
+        trace_id: Some(turn.request.trace_id.clone()),
+    }
+}
+
+fn task_watermark(tool_call: &ReasonReq04ToolCall) -> TaskWatermark {
+    TaskWatermark {
+        metadata_id: None,
+        hook: Some("ControlHook03AfterModelResponse".to_owned()),
+        action_tool_call_id: Some(tool_call.tool_call.tool_call_id.as_str().to_owned()),
+    }
+}
+
+fn task_mutation_result(
+    label: &str,
+    task: &freehand_task::TaskSnapshot,
+    event: &freehand_task::TaskLedgerEvent,
+) -> String {
+    format!(
+        "{label}: task_id={} status={:?} event={} seq={}",
+        task.task_id.as_str(),
+        task.status,
+        event.event_type,
+        event.seq
+    )
 }
 
 fn tool_arguments_object(arguments: &[ToolArgument]) -> Map<String, Value> {
@@ -5778,6 +5901,88 @@ mod tests {
             execute_task_tool(&runtime_home, &turn, &agents_call).expect("list agents");
 
         assert!(agents_output.contains("\"agent_id\":\"agent-task\""));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_tool_review_lifecycle_rejects_early_close_and_closes_after_approval() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-task"),
+                    turn_id: TurnId::new("turn-task"),
+                    trace_id: TraceId::new("trace-task"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-task"),
+                    user_text: "create a task".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("create")),
+                ("task_id", json!("task-runtime-review")),
+                ("title", json!("Review lifecycle")),
+                ("content", json!("Exercise review lifecycle")),
+                ("goal", json!("Close only after approval")),
+                ("deliverables", json!(["code"])),
+                ("acceptance", json!(["approval required"])),
+                ("dispatch", json!({"mode":"self"})),
+            ]),
+        )
+        .expect("create task");
+
+        let early_close = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("close")),
+                ("task_id", json!("task-runtime-review")),
+            ]),
+        )
+        .expect_err("early close must fail");
+        assert!(early_close.contains("invalid task transition"));
+
+        for call in [
+            task_tool_call(vec![
+                ("op", json!("resume")),
+                ("task_id", json!("task-runtime-review")),
+            ]),
+            task_tool_call(vec![
+                ("op", json!("submit_review")),
+                ("task_id", json!("task-runtime-review")),
+                ("summary", json!("ready")),
+                ("deliverables", json!(["code"])),
+                ("evidence", json!(["tests passed"])),
+            ]),
+            task_tool_call(vec![
+                ("op", json!("approve")),
+                ("task_id", json!("task-runtime-review")),
+            ]),
+        ] {
+            execute_task_tool(&runtime_home, &turn, &call).expect("lifecycle op");
+        }
+        let close = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("close")),
+                ("task_id", json!("task-runtime-review")),
+            ]),
+        )
+        .expect("close after approval");
+
+        assert!(close.contains("status=Closed"));
         let _ = fs::remove_dir_all(runtime_home);
     }
 

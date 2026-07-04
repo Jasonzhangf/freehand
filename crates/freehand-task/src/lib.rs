@@ -175,6 +175,46 @@ pub struct TaskCreateOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskMutationRequest {
+    pub task_id: TaskId,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReviewSubmission {
+    pub task_id: TaskId,
+    pub summary: String,
+    pub deliverables: Vec<String>,
+    pub evidence: Vec<String>,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReviewRejection {
+    pub task_id: TaskId,
+    pub reject_reason: String,
+    pub next_requirements: Vec<String>,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAppendRequest {
+    pub task_id: TaskId,
+    pub note: String,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskMutationOutcome {
+    pub task: TaskSnapshot,
+    pub event: TaskLedgerEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRuntimeSnapshot {
     pub status: String,
     pub tasks: Vec<TaskSnapshot>,
@@ -191,6 +231,11 @@ pub enum TaskError {
     TaskNotFound(String),
     #[error("agent `{0}` not found")]
     AgentNotFound(String),
+    #[error("invalid task transition from `{from:?}` using `{event_type}`")]
+    InvalidTransition {
+        from: TaskStatus,
+        event_type: &'static str,
+    },
     #[error("task persistence failed: {0}")]
     Persistence(String),
     #[error("task ledger replay failed: {0}")]
@@ -341,6 +386,123 @@ impl TaskRuntime {
             .ok_or_else(|| TaskError::TaskNotFound(task_id.as_str().to_owned()))
     }
 
+    pub fn append_task(
+        &self,
+        request: TaskAppendRequest,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        require_text(&request.note, "note")?;
+        self.mutate_task(
+            &request.task_id,
+            "TaskProgressed",
+            None,
+            &request.actor,
+            &request.watermark,
+            json!({"note": request.note}),
+        )
+    }
+
+    pub fn pause_task(
+        &self,
+        request: TaskMutationRequest,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        self.mutate_task(
+            &request.task_id,
+            "TaskPaused",
+            Some(TaskStatus::Paused),
+            &request.actor,
+            &request.watermark,
+            json!({}),
+        )
+    }
+
+    pub fn resume_task(
+        &self,
+        request: TaskMutationRequest,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        self.mutate_task(
+            &request.task_id,
+            "TaskResumed",
+            Some(TaskStatus::Running),
+            &request.actor,
+            &request.watermark,
+            json!({}),
+        )
+    }
+
+    pub fn submit_review(
+        &self,
+        request: TaskReviewSubmission,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        require_text(&request.summary, "summary")?;
+        if request.deliverables.is_empty() {
+            return Err(TaskError::MissingField("deliverables"));
+        }
+        if request.evidence.is_empty() {
+            return Err(TaskError::MissingField("evidence"));
+        }
+        self.mutate_task(
+            &request.task_id,
+            "TaskReviewSubmitted",
+            Some(TaskStatus::ReviewSubmitted),
+            &request.actor,
+            &request.watermark,
+            json!({
+                "summary": request.summary,
+                "deliverables": request.deliverables,
+                "evidence": request.evidence
+            }),
+        )
+    }
+
+    pub fn approve_review(
+        &self,
+        request: TaskMutationRequest,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        self.mutate_task(
+            &request.task_id,
+            "TaskReviewApproved",
+            Some(TaskStatus::Approved),
+            &request.actor,
+            &request.watermark,
+            json!({}),
+        )
+    }
+
+    pub fn reject_review(
+        &self,
+        request: TaskReviewRejection,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        require_text(&request.reject_reason, "reject_reason")?;
+        if request.next_requirements.is_empty() {
+            return Err(TaskError::MissingField("next_requirements"));
+        }
+        self.mutate_task(
+            &request.task_id,
+            "TaskReviewRejected",
+            Some(TaskStatus::Rejected),
+            &request.actor,
+            &request.watermark,
+            json!({
+                "reject_reason": request.reject_reason,
+                "next_requirements": request.next_requirements
+            }),
+        )
+    }
+
+    pub fn close_task(
+        &self,
+        request: TaskMutationRequest,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        self.mutate_task(
+            &request.task_id,
+            "TaskClosed",
+            Some(TaskStatus::Closed),
+            &request.actor,
+            &request.watermark,
+            json!({}),
+        )
+    }
+
     pub fn list_agents(&self) -> Result<Vec<AgentSnapshot>, TaskError> {
         Ok(self
             .state
@@ -372,6 +534,83 @@ impl TaskRuntime {
             tasks: state.tasks.values().cloned().collect(),
             agents: state.agents.values().cloned().collect(),
         })
+    }
+
+    fn mutate_task(
+        &self,
+        task_id: &TaskId,
+        event_type: &'static str,
+        to_status: Option<TaskStatus>,
+        actor: &TaskActor,
+        watermark: &TaskWatermark,
+        payload: Value,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        let mut task = state
+            .tasks
+            .get(task_id)
+            .cloned()
+            .ok_or_else(|| TaskError::TaskNotFound(task_id.as_str().to_owned()))?;
+        let from = task.status.clone();
+        let target = to_status.unwrap_or_else(|| task.status.clone());
+        validate_transition(&from, &target, event_type)?;
+        if event_type == "TaskReviewSubmitted" {
+            task.review.status = "submitted".to_owned();
+            task.review.submitted_at = Some(now_unix_seconds());
+            task.review.decision = None;
+        } else if event_type == "TaskReviewApproved" {
+            task.review.status = "approved".to_owned();
+            task.review.decision = Some("approved".to_owned());
+        } else if event_type == "TaskReviewRejected" {
+            task.review.status = "rejected".to_owned();
+            task.review.decision = Some("rejected".to_owned());
+            task.review.reject_reason = payload
+                .get("reject_reason")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            task.review.next_requirements = payload
+                .get("next_requirements")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(ToOwned::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+        task.status = target.clone();
+        if event_type == "TaskProgressed" {
+            task.last_progress_at = Some(now_unix_seconds());
+        }
+        let event = build_event(
+            &task,
+            Some(from),
+            target,
+            event_type,
+            actor,
+            watermark,
+            payload,
+        );
+        apply_event(&mut task, &event);
+        self.store.append_event_and_snapshot(&task, &event)?;
+        if matches!(task.status, TaskStatus::Closed)
+            && let Some(assignee) = task.assignee.as_ref()
+            && let Some(agent) = state.agents.get_mut(&assignee.agent_id)
+        {
+            agent.status = AgentStatus::Available;
+            agent.current_task_id = None;
+            agent.current_cwd = None;
+            agent.running_tasks = 0;
+            agent.last_seen_at = now_unix_seconds();
+            self.store.write_agent_snapshot(agent)?;
+        }
+        state.tasks.insert(task.task_id.clone(), task.clone());
+        Ok(TaskMutationOutcome { task, event })
     }
 }
 
@@ -557,6 +796,57 @@ fn validate_create_request(request: &TaskCreateRequest) -> Result<(), TaskError>
     Ok(())
 }
 
+fn validate_transition(
+    from: &TaskStatus,
+    to: &TaskStatus,
+    event_type: &'static str,
+) -> Result<(), TaskError> {
+    let valid = match event_type {
+        "TaskProgressed" => !matches!(from, TaskStatus::Closed | TaskStatus::Cancelled),
+        "TaskPaused" => matches!(
+            from,
+            TaskStatus::Assigned | TaskStatus::Running | TaskStatus::Rejected
+        ),
+        "TaskResumed" => matches!(
+            from,
+            TaskStatus::Paused | TaskStatus::Blocked | TaskStatus::Rejected | TaskStatus::Assigned
+        ),
+        "TaskReviewSubmitted" => matches!(from, TaskStatus::Running | TaskStatus::Assigned),
+        "TaskReviewApproved" => matches!(from, TaskStatus::ReviewSubmitted),
+        "TaskReviewRejected" => matches!(from, TaskStatus::ReviewSubmitted),
+        "TaskClosed" => matches!(
+            from,
+            TaskStatus::Approved
+                | TaskStatus::Failed
+                | TaskStatus::Cancelled
+                | TaskStatus::Paused
+                | TaskStatus::Blocked
+        ),
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(TaskError::InvalidTransition {
+            from: from.clone(),
+            event_type,
+        })
+    }?;
+    let status_matches = match event_type {
+        "TaskProgressed" => from == to,
+        "TaskReviewRejected" => matches!(to, TaskStatus::Rejected),
+        _ => true,
+    };
+    if status_matches {
+        Ok(())
+    } else {
+        Err(TaskError::InvalidTransition {
+            from: from.clone(),
+            event_type,
+        })
+    }
+}
+
 fn require_text(value: &str, field: &'static str) -> Result<(), TaskError> {
     if value.trim().is_empty() {
         Err(TaskError::MissingField(field))
@@ -693,6 +983,114 @@ mod tests {
         let _ = fs::remove_dir_all(runtime_home);
     }
 
+    #[test]
+    fn review_reject_resume_submit_approve_close_lifecycle_persists() {
+        let runtime_home = temp_runtime_home("task-review-lifecycle");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+        let task_id = outcome.task.task_id.clone();
+        let actor = sample_actor(agent_id);
+        let watermark = sample_watermark();
+
+        let running = runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect("resume to running");
+        assert_eq!(running.task.status, TaskStatus::Running);
+
+        let submitted = runtime
+            .submit_review(TaskReviewSubmission {
+                task_id: task_id.clone(),
+                summary: "ready for review".to_owned(),
+                deliverables: vec!["code".to_owned()],
+                evidence: vec!["tests passed".to_owned()],
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect("submit review");
+        assert_eq!(submitted.task.status, TaskStatus::ReviewSubmitted);
+
+        let rejected = runtime
+            .reject_review(TaskReviewRejection {
+                task_id: task_id.clone(),
+                reject_reason: "needs online proof".to_owned(),
+                next_requirements: vec!["run browser proof".to_owned()],
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect("reject");
+        assert_eq!(rejected.task.status, TaskStatus::Rejected);
+
+        let running_again = runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect("resume rejected");
+        assert_eq!(running_again.task.status, TaskStatus::Running);
+
+        runtime
+            .submit_review(TaskReviewSubmission {
+                task_id: task_id.clone(),
+                summary: "ready again".to_owned(),
+                deliverables: vec!["code".to_owned()],
+                evidence: vec!["online proof passed".to_owned()],
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect("submit second review");
+        let approved = runtime
+            .approve_review(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect("approve");
+        assert_eq!(approved.task.status, TaskStatus::Approved);
+        let closed = runtime
+            .close_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor,
+                watermark,
+            })
+            .expect("close");
+        assert_eq!(closed.task.status, TaskStatus::Closed);
+
+        let recovered = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("recover");
+        let task = recovered.query_task(&task_id).expect("query recovered");
+        assert_eq!(task.status, TaskStatus::Closed);
+        assert_eq!(task.last_event_seq, 9);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn close_before_review_approval_is_rejected() {
+        let runtime_home = temp_runtime_home("task-close-rejected");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+
+        let err = runtime
+            .close_task(TaskMutationRequest {
+                task_id: outcome.task.task_id,
+                actor: sample_actor(agent_id),
+                watermark: sample_watermark(),
+            })
+            .expect_err("assigned task cannot close");
+
+        assert!(matches!(err, TaskError::InvalidTransition { .. }));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
     fn sample_create_request(agent_id: AgentId) -> TaskCreateRequest {
         TaskCreateRequest {
             task_id: Some(TaskId::new(format!("task-{}", now_unix_seconds()))),
@@ -709,18 +1107,26 @@ mod tests {
                 turn_id: Some(TurnId::new("turn-1")),
                 trace_id: Some(TraceId::new("trace-1")),
             },
-            actor: TaskActor {
-                agent_id,
-                source: "control.center".to_owned(),
-                session_id: Some(SessionId::new("session-1")),
-                turn_id: Some(TurnId::new("turn-1")),
-                trace_id: Some(TraceId::new("trace-1")),
-            },
-            watermark: TaskWatermark {
-                metadata_id: Some("control.center:test".to_owned()),
-                hook: Some("ControlHook03AfterModelResponse".to_owned()),
-                action_tool_call_id: Some("toolu_task_1".to_owned()),
-            },
+            actor: sample_actor(agent_id),
+            watermark: sample_watermark(),
+        }
+    }
+
+    fn sample_actor(agent_id: AgentId) -> TaskActor {
+        TaskActor {
+            agent_id,
+            source: "control.center".to_owned(),
+            session_id: Some(SessionId::new("session-1")),
+            turn_id: Some(TurnId::new("turn-1")),
+            trace_id: Some(TraceId::new("trace-1")),
+        }
+    }
+
+    fn sample_watermark() -> TaskWatermark {
+        TaskWatermark {
+            metadata_id: Some("control.center:test".to_owned()),
+            hook: Some("ControlHook03AfterModelResponse".to_owned()),
+            action_tool_call_id: Some("toolu_task_1".to_owned()),
         }
     }
 

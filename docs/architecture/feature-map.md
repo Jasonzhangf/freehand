@@ -182,6 +182,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - restart/reboot recovery query returns the same task truth
 - test_design_doc: `docs/testing/task.orchestration.md`
 - function_map_doc: `docs/function-maps/task.orchestration.md`
+- mainline_call_doc: `docs/mainline-calls/task.orchestration.json`
+- generated_wiki_doc: `docs/wiki/task.orchestration.md`
 - debug_artifacts:
   - task ledger rows
   - task snapshots

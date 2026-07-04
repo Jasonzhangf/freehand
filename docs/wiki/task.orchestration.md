@@ -1,0 +1,71 @@
+# Wiki: `task.orchestration`
+
+Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by hand.
+
+- owner crate: `crates/freehand-task`
+- owner module: `crates/freehand-task/src/lib.rs`
+- function map: `docs/function-maps/task.orchestration.md`
+- generated wiki: `docs/wiki/task.orchestration.md`
+- test design: `docs/testing/task.orchestration.md`
+
+## Request Mainline
+
+- runtime receives a provider tool call named `task`
+- runtime routes `task` tool calls to `execute_task_tool` instead of generic file/tool execution
+- `TaskRuntime::boot` loads task snapshots and self-agent snapshot into memory
+- `TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance
+- create action writes append-only ledger events and atomic snapshots
+- dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
+- lifecycle actions use explicit task mutation requests and validate state transitions before writing truth
+
+## Response Mainline
+
+- `TaskRuntime::query_task` returns persisted task snapshot truth
+- `TaskRuntime::list_agents` returns current in-memory agent registry projection
+- `TaskRuntime::query_agent` returns one agent snapshot
+- append, pause, resume, submit_review, approve, reject, and close return event-backed mutation results
+- task tool result returns semantic task ids, status, event names, sequence numbers, or JSON snapshots
+
+## Error Mainline
+
+- missing task fields return explicit task errors
+- unknown task id returns explicit task-not-found
+- unknown agent id returns explicit agent-not-found
+- invalid lifecycle transitions return explicit invalid-transition errors
+- persistence failures return explicit task persistence errors
+- task failures become failed tool results and can be sent back to the model
+
+## Shared Multi-Reference Functions
+
+- `TaskRuntime::boot`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: rebuild memory state from persisted task and agent snapshots
+  - allowed callers: runtime task tool bridge, future daemon bootstrap
+  - related tests: create_task_writes_ledger_snapshot_and_recovers_on_boot, task_tool_create_persists_and_queries_task
+  - why shared: keeps startup recovery in task owner, not UI/runtime glue
+- `TaskRuntime::mutate_task`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: validate lifecycle transitions, write ledger and snapshot, and update memory state
+  - allowed callers: TaskRuntime lifecycle methods
+  - related tests: review_reject_resume_submit_approve_close_lifecycle_persists, close_before_review_approval_is_rejected
+  - why shared: keeps lifecycle mutation sequencing single-sourced
+
+## Function Call Table
+
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `reasonix_aligned_builtin_specs` | `crates/freehand-tools/src/lib.rs` | expose one `task` tool schema with op-dispatched arguments | static registry truth | provider tool definition | runtime live bridge | tool registry | bound |
+| 02 | `execute_task_tool` | `crates/freehand-runtime/src/lib.rs` | route task tool calls into task owner with runtime home, session, turn, and trace context | task tool call | tool result text | runtime live bridge | task runtime | bound |
+| 03 | `TaskRuntime::boot` | `crates/freehand-task/src/lib.rs` | load task and agent snapshots into memory | runtime home and owner agent | ready task runtime | runtime task bridge | task owner | bound |
+| 04 | `TaskRuntime::create_task` | `crates/freehand-task/src/lib.rs` | validate, persist, assign/wait, and update memory state | task create request | task snapshot plus ledger events | runtime task bridge | task owner | bound |
+| 05 | `TaskRuntime::query_task` | `crates/freehand-task/src/lib.rs` | return one task snapshot truth | task id | task snapshot | runtime task bridge | task owner | bound |
+| 06 | `TaskRuntime::submit_review` | `crates/freehand-task/src/lib.rs` | record review submission with deliverables and evidence | task review submission | review-submitted task snapshot and event | runtime task bridge | task owner | bound |
+| 07 | `TaskRuntime::approve_review` | `crates/freehand-task/src/lib.rs` | approve submitted review before close | task mutation request | approved task snapshot and event | runtime task bridge | task owner | bound |
+| 08 | `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | close only approved or otherwise closeable tasks and release assignee state | task mutation request | closed task snapshot and event | runtime task bridge | task owner | bound |
+
+## Sync Status Against Mainline Call
+
+- first implementation supports `create`, `query`, `list_agents`, and `query_agent`
+- current implementation supports `append`, `pause`, `resume`, `submit_review`, `approve`, `reject`, and `close`
+- review-before-close is locked by positive and negative tests
+- real worker execution, lease heartbeat, UI task projection, and multi-agent dispatch are pending

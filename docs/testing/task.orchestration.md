@@ -15,12 +15,16 @@
 - create task writes ledger, snapshot, index, and recovers after boot
 - create with no dispatch becomes `WaitingAgent`
 - boot registers self agent as `Available`
+- review reject/resume/submit/approve/close lifecycle persists and recovers
+- close before review approval is rejected
 
 ## Module Black-Box Coverage
 
 - runtime task tool create persists a task and returns task id/status
 - runtime task tool query returns snapshot JSON
 - runtime task tool list_agents returns self agent
+- runtime task tool close before approval returns failure
+- runtime task tool review submission, approval, and close return event-backed success
 - tool registry exposes `task` as one implemented built-in tool schema
 
 ## Project Black-Box Impact
@@ -34,6 +38,8 @@
 cargo test -p freehand-task
 cargo test -p freehand-tools
 cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --nocapture
+cargo test -p freehand-runtime task_tool_review_lifecycle_rejects_early_close_and_closes_after_approval -- --nocapture
+cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```
 
@@ -42,5 +48,4 @@ cargo run -p xtask -- gates check
 - no real worker execution
 - no queue runner
 - no lease/heartbeat recovery yet
-- no review action lifecycle yet
 - no UI task timeline

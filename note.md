@@ -32,6 +32,26 @@
     - `cargo run -p xtask -- mainlines check`
     - `cargo run -p xtask -- gates check`
 
+# 2026-07-04 task.orchestration lifecycle and mainline migration
+  - user requirement: each implementation round must include white-box/black-box tests plus mainline caller and function map updates.
+  - implementation:
+    - added lifecycle methods: append, pause, resume, submit_review, approve, reject, close.
+    - added transition validation so close before approval fails.
+    - runtime `task` tool supports the lifecycle ops.
+    - migrated task.orchestration to machine-readable mainline call source and generated wiki.
+    - updated xtask required-file gate list, function map, test design, and design doc.
+  - verified:
+    - `cargo fmt --check`
+    - `cargo test -p freehand-task -- --nocapture`
+    - `cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --nocapture`
+    - `cargo test -p freehand-runtime task_tool_review_lifecycle_rejects_early_close_and_closes_after_approval -- --nocapture`
+    - `cargo test -p xtask -- --nocapture`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `cargo test --workspace`
+    - `cargo clippy --workspace --all-targets -- -D warnings`
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

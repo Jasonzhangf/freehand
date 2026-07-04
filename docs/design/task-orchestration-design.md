@@ -22,17 +22,17 @@ First implemented ops:
 - `query`
 - `list_agents`
 - `query_agent`
-
-Planned ops:
-
 - `append`
-- `assign`
 - `pause`
 - `resume`
 - `submit_review`
 - `approve`
 - `reject`
 - `close`
+
+Planned ops:
+
+- `assign`
 - `cancel`
 - `create_agent`
 - `close_agent`
@@ -171,6 +171,8 @@ Implemented:
 - create/query/list_agents/query_agent
 - self-agent registry skeleton
 - create with self/auto assignment or WaitingAgent
+- append, pause, resume, submit_review, approve, reject, close
+- review-before-close transition validation
 - runtime task tool bridge
 
 Not implemented:
@@ -178,6 +180,5 @@ Not implemented:
 - real worker execution
 - queue selection loop
 - leases and heartbeat
-- review actions
 - UI task projection
 - error.center classification
