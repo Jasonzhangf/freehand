@@ -176,12 +176,14 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - no-dispatch create becomes `WaitingAgent`
   - agent create/close persists and recovers agent registry state
   - assign moves waiting tasks to assigned state
+  - claim_next chooses the highest-priority assigned task for an agent and starts a lease
   - cancel releases agent state and blocks resume
 - required_module_black_box_tests:
   - runtime task tool create routes through task persistence
   - runtime task tool query reads persisted task truth
   - runtime task tool list_agents exposes self agent
   - runtime task tool create_agent/assign/cancel/close_agent covers registry lifecycle
+  - runtime task tool claim_next covers priority queue claim
 - required_project_black_box_tests:
   - restart/reboot recovery query returns the same task truth
 - test_design_doc: `docs/testing/task.orchestration.md`

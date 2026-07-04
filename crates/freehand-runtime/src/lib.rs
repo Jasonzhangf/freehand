@@ -60,8 +60,9 @@ use freehand_reason::{
 };
 use freehand_task::{
     AgentCreateRequest, AgentMutationRequest, TaskActor, TaskAppendRequest, TaskAssignRequest,
-    TaskCreateRequest, TaskDispatchRequest, TaskHeartbeatRequest, TaskId, TaskMutationRequest,
-    TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime, TaskWatermark,
+    TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskHeartbeatRequest, TaskId,
+    TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime,
+    TaskWatermark,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
@@ -3751,6 +3752,28 @@ fn execute_task_tool(
                 &outcome.event,
             ))
         }
+        "claim_next" => {
+            let outcome = task_runtime
+                .claim_next_task(TaskClaimRequest {
+                    agent_id: AgentId::new(required_json_string(&args, "agent_id")?),
+                    ttl_seconds: optional_json_i64(&args, "ttl_seconds")
+                        .unwrap_or(300)
+                        .try_into()
+                        .map_err(|_| "`ttl_seconds` must be positive".to_owned())?,
+                    actor: task_actor(turn),
+                    watermark: task_watermark(tool_call),
+                })
+                .map_err(|err| err.to_string())?;
+            if let Some(task) = outcome.task {
+                Ok(format!(
+                    "Task claimed: task_id={} status={:?}",
+                    task.task_id.as_str(),
+                    task.status
+                ))
+            } else {
+                Ok("Task claimed: none".to_owned())
+            }
+        }
         "cancel" => {
             let outcome = task_runtime
                 .cancel_task(task_mutation_request(&args, turn, tool_call)?)
@@ -6231,6 +6254,80 @@ mod tests {
         )
         .expect("close idle worker");
         assert!(closed.contains("status=Closed"));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_tool_claim_next_runs_highest_priority_task() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-task"),
+                    turn_id: TurnId::new("turn-task"),
+                    trace_id: TraceId::new("trace-task"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-task"),
+                    user_text: "claim highest priority task".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+        for (task_id, priority) in [("task-low", 10), ("task-high", 90)] {
+            execute_task_tool(
+                &runtime_home,
+                &turn,
+                &task_tool_call(vec![
+                    ("op", json!("create")),
+                    ("task_id", json!(task_id)),
+                    ("title", json!(format!("Claim {task_id}"))),
+                    ("content", json!("Exercise priority claim")),
+                    ("goal", json!("Claim highest priority task")),
+                    ("deliverables", json!(["task"])),
+                    ("acceptance", json!(["highest priority claimed"])),
+                    ("priority", json!(priority)),
+                    ("dispatch", json!({"mode":"none"})),
+                ]),
+            )
+            .expect("create task");
+            execute_task_tool(
+                &runtime_home,
+                &turn,
+                &task_tool_call(vec![
+                    ("op", json!("assign")),
+                    ("task_id", json!(task_id)),
+                    ("agent_id", json!("agent-task")),
+                ]),
+            )
+            .expect("assign task");
+        }
+
+        let claimed = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("claim_next")),
+                ("agent_id", json!("agent-task")),
+                ("ttl_seconds", json!(600)),
+            ]),
+        )
+        .expect("claim next");
+        assert!(claimed.contains("task_id=task-high"));
+        assert!(claimed.contains("status=Running"));
+
+        let low = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![("op", json!("query")), ("task_id", json!("task-low"))]),
+        )
+        .expect("query low");
+        assert!(low.contains("\"status\":\"assigned\""));
         let _ = fs::remove_dir_all(runtime_home);
     }
 

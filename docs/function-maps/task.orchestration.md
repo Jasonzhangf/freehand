@@ -11,6 +11,7 @@
   - `TaskRuntime::resume_task`
   - `TaskRuntime::heartbeat_task`
   - `TaskRuntime::assign_task`
+  - `TaskRuntime::claim_next_task`
   - `TaskRuntime::cancel_task`
   - `TaskRuntime::create_agent`
   - `TaskRuntime::close_agent`
@@ -34,6 +35,7 @@
 - create action writes append-only ledger events and atomic snapshots
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
 - `assign_task` binds waiting/created/interrupted tasks to an available agent
+- `claim_next_task` lets an agent claim its highest-priority assigned task into `Running` with a lease
 - `create_agent` and `close_agent` manage persisted worker agent snapshots
 - `cancel_task` moves a non-terminal task to `Cancelled` and releases assignee state
 - lifecycle actions use explicit mutation request types and validate allowed transitions before writing ledger/snapshot truth
@@ -48,6 +50,7 @@
 - task tool result returns semantic task ids, status, event counts, or JSON snapshots
 - review lifecycle actions return event-backed mutation summaries
 - heartbeat returns event-backed running-state mutation summary
+- claim_next returns either the claimed running task or an explicit no-task result
 - agent create/close returns persisted agent snapshot summaries
 
 ## Error Mainline
@@ -59,6 +62,7 @@
 - invalid lifecycle transitions return explicit `InvalidTransition` errors and do not write ledger/snapshot truth
 - heartbeat for non-running or unassigned tasks returns explicit invalid transition and writes no lease
 - assigning to unavailable agents and closing busy agents return explicit errors without mutating task/agent truth
+- claiming with an empty agent queue returns no-task without mutating truth
 - task failures become failed tool results and can be sent back to the model
 
 ## Shared Multi-Reference Functions
@@ -84,11 +88,12 @@
 | 09 | `TaskRuntime::heartbeat_task` | `crates/freehand-task/src/lib.rs` | refresh the lease for an assigned running task and persist a heartbeat event | task heartbeat request | running task snapshot + lease | runtime task bridge | task owner | bound |
 | 10 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots + lease snapshot | recovered runtime state | task boot | task owner | bound |
 | 11 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting/created/interrupted task to an available agent | task assignment request | assigned task snapshot + agent queued state | runtime task bridge | task owner | bound |
-| 12 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal task and release assignee state | task mutation request | cancelled task snapshot + released agent | runtime task bridge | task owner | bound |
-| 13 | `TaskRuntime::create_agent` / `close_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents and close only idle agents | agent mutation request | agent snapshot | runtime task bridge | task owner | bound |
+| 12 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | claim the highest-priority assigned task for an agent and enter lease-backed running state | agent task-claim request | claimed running task snapshot or no-task outcome | runtime task bridge | task owner | bound |
+| 13 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal task and release assignee state | task mutation request | cancelled task snapshot + released agent | runtime task bridge | task owner | bound |
+| 14 | `TaskRuntime::create_agent` / `close_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents and close only idle agents | agent mutation request | agent snapshot | runtime task bridge | task owner | bound |
 
 ## Sync Status Against Code
 
 - first implementation supports `create`, `query`, `list_agents`, and `query_agent`
-- current implementation also supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`
+- current implementation also supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`
 - real worker execution, UI task projection, and multi-agent dispatch are pending

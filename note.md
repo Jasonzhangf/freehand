@@ -98,6 +98,28 @@
     - no UI task projection yet.
     - multi-agent dispatch still has no real worker process/channel; agent registry lifecycle is only persisted skeleton truth.
 
+# 2026-07-04 task.orchestration priority claim skeleton
+  - user requirement: continue task lifecycle implementation in tested rounds with function map and mainline caller updates.
+  - owner: `task.orchestration`.
+  - implementation:
+    - added `claim_next` to the single `task` tool op surface.
+    - added `TaskRuntime::claim_next_task`, which lets an agent claim its highest-priority assigned task into lease-backed `Running`.
+    - adjusted assign semantics so an agent can hold multiple queued assigned tasks; assigned work increments queued count, claim/resume moves one queued task into running count.
+    - empty queue claim returns an explicit no-task result without mutating task/agent/lease truth.
+    - updated task design, test design, function map, feature map, mainline caller JSON, and generated wiki.
+  - verified:
+    - white-box: `cargo test -p freehand-task -- --nocapture` -> 14 passed; covers highest-priority claim, running lease creation, queue count, and empty queue no-mutation.
+    - module black-box: `cargo test -p freehand-runtime task_tool_claim_next_runs_highest_priority_task -- --nocapture` -> 1 passed.
+    - existing runtime task black-box tests for agent lifecycle and heartbeat lifecycle passed.
+    - tool schema: `cargo test -p freehand-tools -- --nocapture` -> 27 passed.
+    - `cargo test -p xtask -- --nocapture` -> 18 passed.
+    - `cargo run -p xtask -- mainlines generate`, `mainlines check`, and `gates check` passed.
+    - full regression: `cargo test --workspace` -> 406 passed; `cargo clippy --workspace --all-targets -- -D warnings` -> no issues; `cargo fmt --check` passed.
+  - remaining gaps:
+    - no real worker execution process/channel yet.
+    - no UI task projection yet.
+    - no worker debug stream/turn update projection yet.
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

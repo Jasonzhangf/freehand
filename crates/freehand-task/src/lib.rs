@@ -226,6 +226,14 @@ pub struct AgentMutationRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskClaimRequest {
+    pub agent_id: AgentId,
+    pub ttl_seconds: u64,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskReviewSubmission {
     pub task_id: TaskId,
     pub summary: String,
@@ -261,6 +269,12 @@ pub struct TaskMutationOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentMutationOutcome {
     pub agent: AgentSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskClaimOutcome {
+    pub task: Option<TaskSnapshot>,
+    pub event: Option<TaskLedgerEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -544,7 +558,7 @@ impl TaskRuntime {
             .agents
             .get_mut(&request.agent_id)
             .ok_or_else(|| TaskError::AgentNotFound(request.agent_id.as_str().to_owned()))?;
-        if !matches!(agent.status, AgentStatus::Available) {
+        if !matches!(agent.status, AgentStatus::Available | AgentStatus::Busy) {
             return Err(TaskError::AgentUnavailable(
                 request.agent_id.as_str().to_owned(),
             ));
@@ -579,6 +593,65 @@ impl TaskRuntime {
         self.store.write_agent_snapshot(agent)?;
         state.tasks.insert(task.task_id.clone(), task.clone());
         Ok(TaskMutationOutcome { task, event })
+    }
+
+    pub fn claim_next_task(
+        &self,
+        request: TaskClaimRequest,
+    ) -> Result<TaskClaimOutcome, TaskError> {
+        let task_id = {
+            let state = self
+                .state
+                .lock()
+                .map_err(|err| TaskError::Persistence(err.to_string()))?;
+            state
+                .agents
+                .get(&request.agent_id)
+                .ok_or_else(|| TaskError::AgentNotFound(request.agent_id.as_str().to_owned()))?;
+            state
+                .tasks
+                .values()
+                .filter(|task| {
+                    matches!(task.status, TaskStatus::Assigned)
+                        && task
+                            .assignee
+                            .as_ref()
+                            .map(|assignee| assignee.agent_id == request.agent_id)
+                            .unwrap_or(false)
+                })
+                .max_by(|left, right| {
+                    left.priority
+                        .cmp(&right.priority)
+                        .then_with(|| right.created_at.cmp(&left.created_at))
+                        .then_with(|| right.task_id.cmp(&left.task_id))
+                })
+                .map(|task| task.task_id.clone())
+        };
+        let Some(task_id) = task_id else {
+            return Ok(TaskClaimOutcome {
+                task: None,
+                event: None,
+            });
+        };
+        let resumed = self.mutate_task(
+            &task_id,
+            "TaskResumed",
+            Some(TaskStatus::Running),
+            &request.actor,
+            &request.watermark,
+            json!({"claim_agent_id": request.agent_id.as_str()}),
+        )?;
+        let heartbeat = self.acquire_or_refresh_lease(
+            &task_id,
+            &request.agent_id,
+            &request.actor,
+            &request.watermark,
+            request.ttl_seconds,
+        )?;
+        Ok(TaskClaimOutcome {
+            task: Some(heartbeat.task),
+            event: Some(resumed.event),
+        })
     }
 
     pub fn cancel_task(
@@ -1825,6 +1898,91 @@ mod tests {
             .expect_err("busy agent cannot close");
 
         assert!(matches!(err, TaskError::InvalidAgentTransition { .. }));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn claim_next_runs_highest_priority_assigned_task_with_lease() {
+        let runtime_home = temp_runtime_home("task-claim-priority");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let mut low = sample_create_request(agent_id.clone());
+        low.task_id = Some(TaskId::new("task-low"));
+        low.priority = 10;
+        low.dispatch = TaskDispatchRequest::None;
+        let mut high = sample_create_request(agent_id.clone());
+        high.task_id = Some(TaskId::new("task-high"));
+        high.priority = 90;
+        high.dispatch = TaskDispatchRequest::None;
+        let low = runtime.create_task(low).expect("low");
+        let high = runtime.create_task(high).expect("high");
+        runtime
+            .assign_task(TaskAssignRequest {
+                task_id: low.task.task_id,
+                agent_id: agent_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("assign low");
+        runtime
+            .assign_task(TaskAssignRequest {
+                task_id: high.task.task_id,
+                agent_id: agent_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("assign high");
+
+        let claimed = runtime
+            .claim_next_task(TaskClaimRequest {
+                agent_id: agent_id.clone(),
+                ttl_seconds: 600,
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("claim");
+        let task = claimed.task.expect("claimed task");
+        assert_eq!(task.task_id, TaskId::new("task-high"));
+        assert_eq!(task.status, TaskStatus::Running);
+        let low_task = runtime
+            .query_task(&TaskId::new("task-low"))
+            .expect("low task");
+        assert_eq!(low_task.status, TaskStatus::Assigned);
+        let agent = runtime.query_agent(&agent_id).expect("agent");
+        assert_eq!(agent.status, AgentStatus::Busy);
+        assert_eq!(agent.running_tasks, 1);
+        assert_eq!(agent.queued_tasks, 1);
+        let leases: Vec<TaskLease> =
+            read_json(&runtime_home.join("state/task-runtime/master/leases.json")).expect("leases");
+        assert_eq!(leases.len(), 1);
+        assert_eq!(leases[0].task_id, TaskId::new("task-high"));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn claim_next_empty_queue_returns_none_without_mutation() {
+        let runtime_home = temp_runtime_home("task-claim-empty");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+
+        let outcome = runtime
+            .claim_next_task(TaskClaimRequest {
+                agent_id: agent_id.clone(),
+                ttl_seconds: 300,
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("claim empty");
+
+        assert!(outcome.task.is_none());
+        assert!(outcome.event.is_none());
+        let agent = runtime.query_agent(&agent_id).expect("agent");
+        assert_eq!(agent.status, AgentStatus::Available);
+        assert!(
+            !runtime_home
+                .join("state/task-runtime/master/leases.json")
+                .is_file()
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 
