@@ -25,15 +25,15 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 |---|---|
 | feature_id | planned `control.center`, planned `error.center`, planned `task.orchestration` |
 | owner crate | planned `crates/freehand-control`; current related owners are `metadata.core`, `reason.turn`, `runtime.ui-command-dispatch`, `node.master-slave` |
-| gap kind | agent-framework control and error policy are still distributed; completion schema retry, provider/tool error decisions, task/subagent control, and runtime flow rhythm are not admitted through one metadata-watermarked control/error center |
+| gap kind | agent-framework control and error policy are still distributed; completion schema retry, provider/tool error decisions, task/subagent action tools, status-schema rhythm, and runtime flow rhythm are not admitted through one metadata-watermarked control/error center |
 | why not violation | existing landed behavior still has explicit owners and metadata/request isolation gates; this is a next refactor scope, not a claimed implemented feature |
-| risk | runtime/provider/tool paths can make local retry/fail/block decisions without one auditable control/error policy; future task/subagent routing could accidentally pass control fields as data |
+| risk | runtime/provider/tool paths can make local retry/fail/block decisions without one auditable control/error policy; future task/subagent routing could accidentally execute side effects from status schema instead of compact built-in task tools |
 | gate | no current gate requires control/error center admission before flow decisions |
 | current producers | `reason.turn` and runtime live bridge write some metadata; provider/tool/runtime errors can materialize shared `ErrorErr01RuntimeClassified` but not through a central error policy owner |
-| missing coverage | `<<<freehand>>>` control block parser, control schema validator, control repair loop, error-center classifier, recovery decision owner, control/error watermark schema, task state transitions linked to accepted control metadata |
+| missing coverage | `<<<freehand_status>>>` status block parser, status schema validator, status repair loop, compact `task` action tool, error-center classifier, recovery decision owner, control/error watermark schema, task state transitions linked to accepted action metadata |
 | design doc | `docs/design/control-error-center-refactor.md` |
 | priority | high — required before task/subagent orchestration refactor |
-| closure path | 1) add feature-map/function-map/test-design entries for `control.center`, `error.center`, `task.orchestration` 2) implement pure parsers/validators in blocks/contracts 3) extend metadata center with control/error watermark helpers 4) route runtime/reason/provider/tool failures through error center 5) gate owner state transitions on accepted control metadata |
+| closure path | 1) add feature-map/function-map/test-design entries for `control.center`, `error.center`, `task.orchestration` 2) implement pure parsers/validators in blocks/contracts 3) extend metadata center with status/action/error watermark helpers 4) route runtime/reason/provider/tool failures through error center 5) gate owner state transitions on accepted action metadata |
 
 ## 管理规则
 
