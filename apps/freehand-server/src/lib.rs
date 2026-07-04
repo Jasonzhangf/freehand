@@ -1246,8 +1246,14 @@ mod tests {
                     .expect("pending chat render push")
         );
         assert!(js_body.contains("deleteSelectedSessions"));
-        assert!(js_body.contains("DeleteSession"));
+        assert!(js_body.contains("ArchiveSession"));
+        assert!(js_body.contains("RestoreSession"));
+        assert!(js_body.contains("RollbackLatestSessionTurn"));
+        assert!(js_body.contains("rollbackLatestSessionTurn"));
+        assert!(js_body.contains("setArchivedSessionList"));
+        assert!(js_body.contains("archivedSessions"));
         assert!(js_body.contains("session-selector"));
+        assert!(js_body.contains("session-rename-selected-button"));
         assert!(js_body.contains("renderSessionBulkToolbar"));
         assert!(js_body.contains("selectedWorkspaceCwd"));
         assert!(js_body.contains("requireTaskCwd"));

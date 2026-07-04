@@ -178,7 +178,7 @@ fn run_adp_session_query(args: Vec<String>) -> Result<String, String> {
 
 fn run_adp_session_manage(args: Vec<String>) -> Result<String, String> {
     let usage =
-        "usage: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]"
+        "usage: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete|rollback> --session <id> [--title <title>] [--cwd <path>]"
             .to_owned();
     let mut url = None::<String>;
     let mut action = None::<String>;
@@ -227,9 +227,11 @@ fn run_adp_session_manage(args: Vec<String>) -> Result<String, String> {
         "archive" => UiCommand::ArchiveSession { session_id },
         "restore" => UiCommand::RestoreSession { session_id },
         "delete" => UiCommand::DeleteSession { session_id },
+        "rollback" => UiCommand::RollbackLatestSessionTurn { session_id },
         _ => {
             return Err(
-                "action must be one of: create, rename, archive, restore, delete".to_owned(),
+                "action must be one of: create, rename, archive, restore, delete, rollback"
+                    .to_owned(),
             );
         }
     };
@@ -523,6 +525,7 @@ async fn run_adp_session_manage_async(url: String, command: UiCommand) -> Result
         UiCommand::ArchiveSession { .. } => "archive",
         UiCommand::RestoreSession { .. } => "restore",
         UiCommand::DeleteSession { .. } => "delete",
+        UiCommand::RollbackLatestSessionTurn { .. } => "rollback",
         _ => "unknown",
     };
     send_adp(

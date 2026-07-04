@@ -18,6 +18,7 @@
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
   - WebUI control strip and session rail expose session switching, `/new` global conversation creation, `/task` cwd-bound task creation, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
+  - WebUI session rail exposes rename, archive, archived-session list, restore, and double-Esc rollback as protocol commands instead of local session truth
   - WebUI attachment lifecycle keeps draft attachments session-scoped, clears them only after successful send, and preserves them across send failure for retry
   - WebUI transcript history renders attachment placeholders rather than raw payload blobs
   - HTTP query and POST command ingress remain compatibility transport routes; latest-turn SSE subscribe refreshes visible turn display without owning command dispatch
@@ -47,6 +48,8 @@
   - WebUI submit-success path refresh smoke
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
+  - WebUI rename/archive/archived-list/restore asset smoke
+  - WebUI double-Esc rollback asset smoke proving first Esc arms rollback and second Esc calls `RollbackLatestSessionTurn`
   - WebUI command ingress dispatch receipt smoke
   - WebUI command ingress dispatch failure projection smoke
   - WebUI command ingress dispatch join-failure projection smoke
@@ -76,6 +79,7 @@
   - WebUI JS asset smoke locks chronological per-round rendering so `runtime-turn-N` and `runtime-turn-N-rM` render as separate lifecycle cards instead of one all-in summary card
   - WebUI JS asset smoke locks internal runtime continuation prompt hiding and raw completion-schema stripping while preserving Final card projection at the end of the round sequence
   - WebUI JS asset smoke locks that new conversation does not require cwd, new task requires a visible cwd and routes through `CreateSession`, optional `SubmitUserInput.cwd` forwarding remains available, and the old selected-session/no-turns system chat card stays absent
+  - WebUI JS asset smoke locks that Archive uses `ArchiveSession`, archived sessions query `QueryArchivedSessionList`, restore uses `RestoreSession`, rename uses `RenameSession`, and double-Esc rollback uses `RollbackLatestSessionTurn`
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
@@ -104,6 +108,7 @@
   - WebUI terminal display defaults to summary-only; evidence, learned notes, and completion reason require debug details to be enabled
   - WebUI JS must keep shortcuts and slash commands as input-layer affordances that call existing ADP query/command helpers instead of mutating protocol truth directly
   - WebUI session creation and selection must remain input-layer affordances over ADP/query state, not local truth writers
+  - WebUI session rename/archive/restore/rollback controls remain ADP command affordances over protocol/runtime/persistence truth, not local transcript mutation
   - command-ingress dispatch-port failure and join-failure projection coverage is landed
   - ADP query transport now accepts an injected runtime query port while the app dependency boundary remains protocol-only
 - ADP subscribe transport now uses the injected runtime query port for task list and error-center initial snapshots while keeping app dependency boundary protocol-only

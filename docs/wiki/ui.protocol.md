@@ -22,6 +22,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 - CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id
 - SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation
+- session management commands (`CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, `RollbackLatestSessionTurn`) are mutation intents only; protocol validates and routes them while `reason.persistence` owns durable metadata and rollback truth
 - task list subscribe commands are protocol-owned ADP/subscribe shapes while task truth remains runtime/task-owner supplied
 - error-center subscribe commands are protocol-owned ADP/subscribe shapes while error truth remains runtime/error-center supplied
 
@@ -50,6 +51,8 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn
 - session list and transcript projections expose cwd bound by runtime/session truth
 - task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
+- session list and transcript projections expose owner-supplied session title, archived state, cwd, and effective transcript projections after rollback
+- rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth
 - error-center query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
 - task list subscription events carry UI-safe task list projections published by runtime owner code
 
@@ -66,6 +69,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - cancelled terminal projection must stay explicit and must not be collapsed into failed or completed UI status
 - CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module
 - empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently
+- empty session ids and empty session titles are rejected at the protocol boundary for session management commands, including rollback
 - empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse
 - empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse
 - task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching
@@ -138,6 +142,12 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
   - allowed callers: runtime.ui-command-dispatch, ADP transports, CLI automation
   - related tests: error_center_query_requires_session_id, error_center_subscription_matches_projection
   - why shared: keeps error-center read projection shape protocol-owned and transport-neutral
+- `UiProtocolState::replace_session_turn_projections`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: replace one session transcript projection after persistence-owned rollback without making the UI a truth writer
+  - allowed callers: runtime.ui-command-dispatch
+  - related tests: session_transcript_replacement_updates_query_projection, runtime_dispatches_session_rollback_into_effective_ui_projection
+  - why shared: runtime must refresh effective transcript projection centrally after rollback instead of letting each UI delete DOM rows locally
 
 ## Function Call Table
 
@@ -147,6 +157,8 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 02 | `accept_command_ingress` | `crates/freehand-ui-protocol/src/lib.rs` | accept only mutation-intent ingress commands and return explicit ack | UI command | ingress ack | CLI/WebUI transport adapters | protocol boundary | bound |
 | 03 | `protocol_rejection` | `crates/freehand-ui-protocol/src/lib.rs` | convert protocol error into transport-safe rejection payload | protocol error | rejection payload | CLI/WebUI transport adapters | protocol boundary | bound |
 | 04 | `build_command_dispatch_envelope` | `crates/freehand-ui-protocol/src/lib.rs` | wrap accepted ingress command with declared owner routing | UI command | dispatch envelope | CLI/WebUI transport adapters | protocol boundary | bound |
+| 04a | `validate_command / command_dispatch_target` | `crates/freehand-ui-protocol/src/lib.rs` | validate session-management mutation intents and route them to the session persistence owner | session CRUD or rollback command | owner-routed dispatch envelope or protocol rejection | CLI/WebUI/ADP transports | protocol boundary | bound |
+| 04b | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session's effective transcript projection after persistence-owned rollback | session id plus effective turn projections | queryable session transcript excluding rolled-back turns | runtime.ui-command-dispatch | protocol state | bound |
 | 05 | `UiProtocolState::query` | `crates/freehand-ui-protocol/src/lib.rs` | execute read-only query path | query command | snapshot projection | protocol boundary | query handler | bound |
 | 06 | `UiProtocolState::subscribe` | `crates/freehand-ui-protocol/src/lib.rs` | expose the protocol-owned continuous subscription channel for app transports | none | UiSubscriptionEvent receiver | app/transport adapters | protocol state | bound |
 | 07 | `subscription_selector` | `crates/freehand-ui-protocol/src/lib.rs` | build read-only subscribe selector | subscribe command | subscription selector | protocol boundary | stream handler | bound |

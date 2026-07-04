@@ -1423,3 +1423,35 @@ Current real root cause split:
   - live push when new error-center metadata is written after subscription is still pending.
   - WebUI visible error-center cards are still pending.
   - task/node/UI error policy integration remains future scope.
+
+# 2026-07-05 session CRUD + double-Esc rollback S-profile closeout
+
+- owner slice: `ui.protocol`, `reason.persistence`, `runtime.ui-command-dispatch`, `app.webui-smoke`, `app.runtime-daemon`, `app.cli-runtime-smoke`.
+- local gates passed before online proof:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 44 passed
+  - `cargo test -p freehand-reason -- --nocapture --test-threads=1` -> 60 passed
+  - `cargo test -p freehand-runtime -- --nocapture --test-threads=1` -> 70 passed
+  - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+  - `cargo test -p freehand-daemon -- --nocapture` -> 17 passed
+  - `cargo test -p freehand-cli -- --nocapture` -> 13 passed
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `cargo test --workspace` -> 430 passed
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `make ci` -> exit 0
+- S profile proof:
+  - `scripts/install-launchd.sh restartS` refreshed S symlink/debug daemon copy and restarted `com.freehand.daemonS`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `~/.local/bin/freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> subscription/query/failure smoke passed.
+  - real browser/CDP evidence saved under `artifacts/webui-online/20260705-session-crud-rollback-4042-1783188706/`.
+  - session: `webui-session-20260704182300-fe1fceed`.
+  - marker: `fh-crud-rollback-1783189377071`.
+  - flow: new conversation -> first terminal `runtime-turn-38` -> WebUI rename -> refresh title persisted -> WebUI archive -> active list excluded and archived list included titled session -> WebUI restore -> transcript intact -> second terminal `runtime-turn-39` -> double Esc rollback -> composer restored second prompt and visible transcript hid `SECOND_TURN_FOR_ROLLBACK` -> edited replacement terminal `runtime-turn-40` -> restartS + browser reload restored title and effective transcript.
+  - ADP before restart: `turns=2`, `turn_ids=runtime-turn-38,runtime-turn-40`, status `success`.
+  - ADP after restart: same `turns=2`, `turn_ids=runtime-turn-38,runtime-turn-40`, status `success`.
+  - browser states reported `pageErrors=0`, console errors none.
+- validation note:
+  - For CDP online proof in this environment, spawn headless Chrome inside the automation process and shut down only that explicit PID. Starting Chrome as a background child of a short-lived shell can leave the DevTools port unavailable because Chrome exits when the parent shell closes.

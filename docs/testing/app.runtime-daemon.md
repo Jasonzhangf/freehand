@@ -35,6 +35,7 @@
   - daemon slave-mode startup rejection smoke
   - daemon corrupt-checkpoint-bootstrap startup rejection smoke
   - daemon ADP WebSocket command/query/subscribe smoke
+  - daemon ADP session CRUD plus rollback command/query smoke
   - daemon ADP task list/history query smoke
   - daemon ADP task list subscription smoke
   - daemon ADP error-center metadata query smoke
@@ -57,6 +58,7 @@
   - daemon HTTP rewind now also has explicit missing-manifest failure coverage through the same command ingress
   - daemon startup now also has explicit corrupt checkpoint-projection bootstrap failure coverage
   - daemon ADP WebSocket command/query/subscribe and query-as-command rejection coverage is landed
+  - daemon ADP session rollback coverage is required when session rollback command surface changes
   - daemon ADP task list/history query coverage is landed
   - daemon ADP task list subscription coverage is landed
   - daemon ADP error-center metadata query coverage is landed

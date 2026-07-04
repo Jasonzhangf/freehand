@@ -12,6 +12,8 @@ const sessionBulkCount = document.getElementById("session-bulk-count");
 const sessionSelectAllButton = document.getElementById("session-select-all-button");
 const sessionClearSelectionButton = document.getElementById("session-clear-selection-button");
 const sessionDeleteSelectedButton = document.getElementById("session-delete-selected-button");
+const sessionRenameSelectedButton = document.getElementById("session-rename-selected-button");
+const archivedSessionList = document.getElementById("archived-session-list");
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
@@ -47,6 +49,7 @@ const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) ||
 const state = {
   turn: null,
   sessions: [],
+  archivedSessions: [],
   selectedSessionIds: new Set(),
   selectedSessionId: initialSelectedSessionId,
   selectedCwd: initialSelectedCwd,
@@ -77,6 +80,7 @@ const state = {
   attachmentsPreviewOpen: true,
   debugDetailsVisible: false,
   forceScrollToBottom: false,
+  rollbackArmedAt: 0,
 };
 
 function shellConfig() {
@@ -1826,6 +1830,10 @@ function setSessionList(projection) {
   }
 }
 
+function setArchivedSessionList(projection) {
+  state.archivedSessions = (projection && projection.sessions) || [];
+}
+
 function selectedManagedSessionIds() {
   return Array.from(state.selectedSessionIds).filter((sessionId) =>
     state.sessions.some((session) => session.session_id === sessionId),
@@ -1862,13 +1870,13 @@ function selectAllSessions() {
 async function deleteSelectedSessions() {
   const sessionIds = selectedManagedSessionIds();
   if (sessionIds.length === 0) {
-    setCommandStatus("select sessions to delete", { stickyMs: 5000 });
+    setCommandStatus("select sessions to archive", { stickyMs: 5000 });
     return;
   }
-  setCommandStatus(`deleting ${sessionIds.length} session(s)...`, { stickyMs: 8000 });
+  setCommandStatus(`archiving ${sessionIds.length} session(s)...`, { stickyMs: 8000 });
   try {
     for (const sessionId of sessionIds) {
-      await adpCommand({ DeleteSession: { session_id: sessionId } });
+      await adpCommand({ ArchiveSession: { session_id: sessionId } });
     }
     const deletedSelected = sessionIds.includes(state.selectedSessionId);
     state.selectedSessionIds.clear();
@@ -1879,9 +1887,80 @@ async function deleteSelectedSessions() {
     }
     await refreshSessions();
     await refreshSelectedSession();
-    setCommandStatus(`deleted ${sessionIds.length} session(s)`, { stickyMs: 6000 });
+    setCommandStatus(`archived ${sessionIds.length} session(s)`, { stickyMs: 6000 });
   } catch (error) {
-    setCommandStatus(`delete session failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`archive session failed: ${error.message}`, { stickyMs: 9000 });
+  }
+}
+
+async function renameSelectedSession() {
+  const sessionIds = selectedManagedSessionIds();
+  const sessionId = sessionIds.length === 1 ? sessionIds[0] : state.selectedSessionId;
+  if (!sessionId || isDraftSessionId(sessionId)) {
+    setCommandStatus("select one persisted session to rename", { stickyMs: 5000 });
+    return;
+  }
+  const current = state.sessions.find((session) => session.session_id === sessionId);
+  const nextTitle = window.prompt("Rename session", current?.title || current?.session_id || sessionId);
+  if (nextTitle === null) {
+    return;
+  }
+  const title = nextTitle.trim();
+  if (!title) {
+    setCommandStatus("rename requires a non-empty title", { stickyMs: 6000 });
+    return;
+  }
+  setCommandStatus("renaming session...", { stickyMs: 5000 });
+  try {
+    await adpCommand({ RenameSession: { session_id: sessionId, title } });
+    await refreshSessions();
+    await refreshSelectedSession();
+    setCommandStatus(`renamed session · ${title}`, { stickyMs: 5000 });
+  } catch (error) {
+    setCommandStatus(`rename failed: ${error.message}`, { stickyMs: 9000 });
+  }
+}
+
+async function restoreArchivedSession(sessionId) {
+  if (!sessionId) {
+    return;
+  }
+  setCommandStatus(`restoring ${sessionId}...`, { stickyMs: 5000 });
+  try {
+    await adpCommand({ RestoreSession: { session_id: sessionId } });
+    setSelectedSessionId(sessionId);
+    await refreshSessions();
+    await refreshSelectedSession();
+    setCommandStatus(`restored ${sessionId}`, { stickyMs: 5000 });
+  } catch (error) {
+    setCommandStatus(`restore failed: ${error.message}`, { stickyMs: 9000 });
+  }
+}
+
+function latestRollbackUserText() {
+  const turns = conversationTurnsForRender();
+  const latest = turns[turns.length - 1];
+  return `${(latest && latest.user_text) || ""}`.trim();
+}
+
+async function rollbackLatestSessionTurn() {
+  if (!state.selectedSessionId || isDraftSessionId(state.selectedSessionId)) {
+    setCommandStatus("rollback requires a persisted selected session", { stickyMs: 6000 });
+    return;
+  }
+  const userText = latestRollbackUserText();
+  setCommandStatus("rolling back latest session turn...", { stickyMs: 8000 });
+  try {
+    await adpCommand({ RollbackLatestSessionTurn: { session_id: state.selectedSessionId } });
+    await refreshSessions();
+    await refreshSelectedSession();
+    if (userText) {
+      composerInput.value = userText;
+      composerInput.focus();
+    }
+    setCommandStatus("latest turn rolled back; edit and send replacement", { stickyMs: 7000 });
+  } catch (error) {
+    setCommandStatus(`rollback failed: ${error.message}`, { stickyMs: 9000 });
   }
 }
 
@@ -1962,7 +2041,12 @@ function applyAdpQueryResult(result) {
   }
   const sessionListResult = variantPayload(result, "SessionList");
   if (sessionListResult !== undefined) {
-    setSessionList(sessionListResult);
+    const sessions = (sessionListResult && sessionListResult.sessions) || [];
+    if (sessions.some((session) => session.archived)) {
+      setArchivedSessionList(sessionListResult);
+    } else {
+      setSessionList(sessionListResult);
+    }
     renderAll();
     return;
   }
@@ -2186,12 +2270,50 @@ function renderSessionBulkToolbar() {
   const selectableCount = state.sessions.filter((session) => !isDraftSessionId(session.session_id)).length;
   sessionBulkCount.textContent = `${selectedCount} selected`;
   sessionDeleteSelectedButton.disabled = selectedCount === 0;
+  if (sessionRenameSelectedButton) {
+    sessionRenameSelectedButton.disabled = selectedCount > 1;
+  }
   if (sessionSelectAllButton) {
     sessionSelectAllButton.disabled = selectableCount === 0 || selectedCount === selectableCount;
   }
   if (sessionClearSelectionButton) {
     sessionClearSelectionButton.disabled = selectedCount === 0;
   }
+}
+
+function renderArchivedSessions() {
+  if (!archivedSessionList) {
+    return;
+  }
+  archivedSessionList.replaceChildren();
+  if (state.archivedSessions.length === 0) {
+    const empty = document.createElement("section");
+    empty.className = "session-item";
+    appendSessionParts(empty, "archived", "none", "no archived sessions");
+    archivedSessionList.appendChild(empty);
+    return;
+  }
+  state.archivedSessions.forEach((session) => {
+    const item = document.createElement("section");
+    item.className = "session-item archived-session-row";
+    const title = session.title || session.session_id;
+    const cwd = normalizeCwd(session.cwd);
+    appendSessionParts(
+      item,
+      "archived",
+      title,
+      cwd ? `${session.turn_count} turn(s) · ${cwd}` : `${session.turn_count} turn(s)`,
+    );
+    const restoreButton = document.createElement("button");
+    restoreButton.className = "session-bulk-button restore-session-button";
+    restoreButton.type = "button";
+    restoreButton.textContent = "Restore";
+    restoreButton.addEventListener("click", () => {
+      restoreArchivedSession(session.session_id);
+    });
+    item.appendChild(restoreButton);
+    archivedSessionList.appendChild(item);
+  });
 }
 
 function renderSessions() {
@@ -2203,12 +2325,14 @@ function renderSessions() {
   if (state.sessions.length === 0) {
     if (state.draftSessionId) {
       renderDraftSessionItem();
+      renderArchivedSessions();
       return;
     }
     const empty = document.createElement("section");
     empty.className = "session-item active";
     appendSessionParts(empty, "empty", "no sessions", "waiting for first turn");
     sessionList.appendChild(empty);
+    renderArchivedSessions();
     return;
   }
 
@@ -2241,7 +2365,7 @@ function renderSessions() {
     appendSessionParts(
       button,
       session.active_turn_id ? "active" : session.latest_status || "session",
-      session.session_id,
+      session.title || session.session_id,
       turnText,
     );
 
@@ -2255,6 +2379,7 @@ function renderSessions() {
     sessionList.appendChild(item);
   });
   renderSessionBulkToolbar();
+  renderArchivedSessions();
 }
 
 function renderDraftSessionItem() {
@@ -2387,7 +2512,10 @@ async function refreshTurn() {
 
 async function refreshSessions() {
   const result = await adpQuery("QuerySessionList");
-  applyAdpQueryResult(result);
+  setSessionList(variantPayload(result, "SessionList") || { sessions: [] });
+  const archived = await adpQuery("QueryArchivedSessionList");
+  setArchivedSessionList(variantPayload(archived, "SessionList") || { sessions: [] });
+  renderAll();
 }
 
 async function refreshSelectedSession() {
@@ -2771,6 +2899,11 @@ sessionSelectAllButton.addEventListener("click", () => {
 sessionClearSelectionButton.addEventListener("click", () => {
   clearSessionSelection();
 });
+if (sessionRenameSelectedButton) {
+  sessionRenameSelectedButton.addEventListener("click", () => {
+    renameSelectedSession();
+  });
+}
 sessionDeleteSelectedButton.addEventListener("click", () => {
   deleteSelectedSessions();
 });
@@ -2869,9 +3002,28 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   event.preventDefault();
-  cancelActiveTurn().catch((error) => {
-    setCommandStatus(`cancel failed: ${error.message}`);
-  });
+  const hasLiveTurn = state.submitInFlight || (state.turn && turnIsCurrentLiveTurn(state.turn));
+  if (hasLiveTurn) {
+    state.rollbackArmedAt = 0;
+    cancelActiveTurn().catch((error) => {
+      setCommandStatus(`cancel failed: ${error.message}`);
+    });
+    return;
+  }
+  if (composerInput.value.trim()) {
+    state.rollbackArmedAt = 0;
+    composerInput.value = "";
+    setCommandStatus("composer cleared", { stickyMs: 3000 });
+    return;
+  }
+  const now = Date.now();
+  if (state.rollbackArmedAt && now - state.rollbackArmedAt <= 900) {
+    state.rollbackArmedAt = 0;
+    rollbackLatestSessionTurn();
+    return;
+  }
+  state.rollbackArmedAt = now;
+  setCommandStatus("press Esc again to rollback latest session turn", { stickyMs: 1200 });
 });
 
 ensureAdpSocket()

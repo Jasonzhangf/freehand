@@ -12,6 +12,7 @@
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - successful task tool mutations publish a runtime-owned task list projection into shared UI protocol state so ADP task subscribers receive owner-backed lifecycle changes
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
+  - session rollback dispatch routes `RollbackLatestSessionTurn` to reason persistence, reloads effective turn snapshots, and replaces the shared UI session transcript projection
   - live bootstrap restores persisted turn projection and next runtime turn ordinal from all persisted sessions when recovery truth exists
   - live bootstrap restores multi-round turn snapshots as separate derived UI session transcript cards after daemon restart
   - reason-backed submit/cancel update derived UI state
@@ -42,6 +43,7 @@
   - selected-session live submit coverage
   - selected-session cwd inheritance coverage
   - session metadata dispatch coverage for create, rename, archive, restore, and delete-as-archive
+  - session rollback dispatch coverage for append-only marker write plus effective transcript refresh
   - session metadata negative coverage for unknown session id and empty title rejection before runtime dispatch
   - live tool execution with requested session cwd coverage
   - persisted latest-turn restore coverage
@@ -82,6 +84,7 @@
   - config-selected live node-metadata-ledger bootstrap smoke
   - runtime checkpoint rewind receipt smoke
   - runtime session CRUD receipt smoke over the shared UI protocol state
+  - runtime session rollback receipt smoke over the shared UI protocol state
   - daemon ADP task list/history query smoke over the shared runtime query port
   - daemon ADP error-center query smoke over the shared runtime query port
   - daemon ADP task list subscription smoke over the shared runtime projection channel
@@ -105,6 +108,7 @@
   - selected non-default session restore now has regression coverage proving the next live submit does not reuse an existing `runtime-turn-N` after daemon restart
 - selected-session cwd projection and inheritance are covered
 - session metadata dispatch coverage is implemented through runtime dispatch into `reason.persistence` and shared UI projection queries
+- session rollback dispatch coverage is implemented through runtime dispatch into `reason.persistence` and shared UI transcript replacement queries
 - live provider submit now streams incremental UI state updates through runtime-owned hooks
 - live provider submit now projects provider-request-built lifecycle state into UI before model response arrives
 - live provider submit now projects both missing-schema and invalid-schema retry lifecycle feedback into UI before the repair response completes

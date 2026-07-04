@@ -8,7 +8,7 @@
   - command ingress accepts only mutation-intent commands and rejects query-route misuse explicitly
   - accepted command ingress is routed to declared owner feature/module before transport dispatch
   - submit command validation accepts an optional selected session id and optional selected cwd without weakening empty-text rejection
-  - session management commands are protocol-owned ingress intents: create, rename, archive, restore, and delete route to the session persistence owner instead of mutating WebUI local state
+  - session management commands are protocol-owned ingress intents: create, rename, archive, restore, delete-as-archive, and rollback route to the session persistence owner instead of mutating WebUI local state
   - latest-active cancellation is accepted as mutation intent and routes to `reason.turn`
   - query returns snapshot truth
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
@@ -42,7 +42,8 @@
   - command dispatch routing mapping
   - submit command selected-session validation mapping
   - submit command selected-cwd validation and JSON roundtrip mapping
-  - session management command validation covers empty title, empty session id, empty cwd, and explicit owner-routing to `reason.persistence`
+  - session management command validation covers empty title, empty session id, empty cwd, rollback empty session id, and explicit owner-routing to `reason.persistence`
+  - session transcript replacement coverage proves runtime can refresh one effective session transcript after rollback without UI-local deletion
   - explicit cancel and latest-active cancel owner-routing mapping
   - checkpoint rewind ingress validation and owner-routing mapping
   - checkpoint projection storage and query mapping
@@ -86,7 +87,7 @@
   - ADP error-center query smoke proves the protocol frame can carry metadata read models supplied by runtime
   - ADP error-center subscription smoke proves initial error-center projection uses the same subscription frame shape
   - ADP query-as-command negative smoke
-  - ADP session management negative smoke proves invalid session metadata commands, including empty cwd, fail explicitly instead of becoming local-only UI state
+  - ADP session management negative smoke proves invalid session metadata and rollback commands, including empty cwd/session id, fail explicitly instead of becoming local-only UI state
 - project black-box impact:
   - CLI and WebUI consume one protocol truth while rendering different views
   - protocol truth can back a minimal service boundary without duplicating projection logic in apps
@@ -127,7 +128,7 @@
   - tool summaries now expose `display` from the `tool.display` owner, and public bodies prefer structured result summaries over raw detail text
   - ADP request/response frames are landed and regression-locked by JSON roundtrip coverage
   - session cwd summary/transcript projection is landed and regression-locked
-  - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, and `DeleteSession` routing through runtime to `reason.persistence`; `CreateSession.cwd` empty-string rejection is regression-locked at the protocol boundary
+  - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, and `RollbackLatestSessionTurn` routing through runtime to `reason.persistence`; `CreateSession.cwd` empty-string rejection and rollback empty-session rejection are regression-locked at the protocol boundary
   - task list/history query commands and DTOs are landed; runtime-backed ADP task query is regression-locked in daemon tests
   - task list subscription shape is landed for runtime-backed ADP task push and stays projection-only
   - error-center query/subscription commands and DTOs are landed; runtime-backed ADP error-center query is regression-locked in daemon tests

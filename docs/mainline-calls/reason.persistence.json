@@ -20,14 +20,18 @@
     "reason persistence appends provider raw debug-ledger rows under `~/.freehand/ledgers/providers/<family>/<agent>/<session>/<turn>.jsonl` without mutating authoritative session truth",
     "reason persistence returns deterministic restore state from snapshot plus reason-ledger tail replay, or from reason-ledger-only rebuild when snapshots are missing or invalid",
     "terminal turn persistence yields immutable per-turn truth plus updated session cursor truth",
-    "derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete"
+    "derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete",
+    "session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management and stays separate from provider-visible session history",
+    "session rollback appends a durable marker, filters effective transcript restore by logical turn key, and retains raw closed-turn files for audit"
   ],
   "error_mainline": [
     "invalid persisted snapshot JSON is rejected explicitly",
     "invalid persisted snapshot coherence is rejected explicitly",
     "reason-ledger sequence gaps or duplicate sequence numbers must block recovery",
     "provider raw payload availability alone must not mask missing authoritative reason truth",
-    "UI sidecar presence alone must not be treated as session-truth recovery evidence"
+    "UI sidecar presence alone must not be treated as session-truth recovery evidence",
+    "session metadata mutation targets that do not exist fail explicitly",
+    "rollback with no eligible target or with an active turn fails explicitly without deleting raw turn truth"
   ],
   "shared_functions": [
     {
@@ -102,6 +106,21 @@
         "save/load smoke"
       ],
       "why_shared": "all persistence file writes must use one atomic replacement path instead of ad hoc writes"
+    },
+    {
+      "symbol": "ReasonPersistence::rollback_latest_session_turn",
+      "owner": "crates/freehand-reason/src/persistence.rs",
+      "purpose": "append one rollback marker for the latest effective logical user turn and return audit data without deleting raw turn files",
+      "allowed_callers": [
+        "runtime UI command dispatch owner",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "rollback_latest_session_turn_is_append_only_and_filters_effective_transcript",
+        "rollback_latest_session_turn_rejects_no_target_and_active_turn",
+        "repeated_rollback_steps_backward_through_effective_turns_then_fails"
+      ],
+      "why_shared": "session rollback must be one durable reason-owned truth shared by WebUI, daemon, and CLI instead of a client-local transcript edit"
     }
   ],
   "call_table": [
@@ -234,6 +253,39 @@
       "input_semantic": "snapshot directory plus reason ledger",
       "output_semantic": "restored in-memory session and turn truth",
       "caller": "runtime/bootstrap/testkit/CLI smoke",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "ReasonPersistence::restore_turn_snapshots_for_ui",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "rebuild latest per-turn snapshots from reason ledger while applying rollback markers to the effective UI transcript",
+      "input_semantic": "reason ledger rows plus rollback markers",
+      "output_semantic": "effective UI turn snapshots",
+      "caller": "runtime bootstrap / rollback refresh",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "ReasonPersistence::create_session_metadata / ReasonPersistence::rename_session / ReasonPersistence::archive_session / ReasonPersistence::restore_session / ReasonPersistence::delete_session",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "persist shared session display metadata mutations without mutating turn transcript truth",
+      "input_semantic": "session id plus metadata mutation intent",
+      "output_semantic": "updated session metadata sidecar",
+      "caller": "runtime UI command dispatch",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "15",
+      "symbol_path": "ReasonPersistence::rollback_latest_session_turn",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "append latest-logical-turn rollback marker and advance effective cursor/projection state without deleting raw turn files",
+      "input_semantic": "session id",
+      "output_semantic": "rollback marker with target turn, previous effective head, and restored user text",
+      "caller": "runtime UI command dispatch",
       "callee": "persistence owner",
       "binding_status": "bound"
     }

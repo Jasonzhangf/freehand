@@ -441,6 +441,36 @@ fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
                         )
                         .await;
                     }
+                    UiAdpRequest::Command {
+                        request_id,
+                        command:
+                            UiCommand::CreateSession { .. }
+                            | UiCommand::RenameSession { .. }
+                            | UiCommand::ArchiveSession { .. }
+                            | UiCommand::RestoreSession { .. }
+                            | UiCommand::DeleteSession { .. }
+                            | UiCommand::RollbackLatestSessionTurn { .. },
+                    } => {
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::CommandReceipt {
+                                request_id,
+                                receipt: UiCommandDispatchReceipt {
+                                    ingress: freehand_ui_protocol::UiCommandIngressAck {
+                                        command_kind: "session_manage".to_owned(),
+                                        accepted: true,
+                                        status_text: "accepted".to_owned(),
+                                        mutation_authority: "runtime".to_owned(),
+                                    },
+                                    target_feature_id: "reason.persistence".to_owned(),
+                                    target_owner_module: "crates/freehand-reason".to_owned(),
+                                    dispatch_status: "session_turn_rolled_back:runtime-turn-10"
+                                        .to_owned(),
+                                },
+                            },
+                        )
+                        .await;
+                    }
                     UiAdpRequest::Query { request_id, .. }
                     | UiAdpRequest::Command { request_id, .. }
                     | UiAdpRequest::Subscribe { request_id, .. } => {
@@ -799,6 +829,35 @@ fn cli_runs_adp_session_query_against_mock_websocket() {
     assert!(stdout.contains("turn_ids=runtime-turn-2,runtime-turn-10"));
 
     handle.join().expect("adp session query mock join");
+}
+
+#[test]
+fn cli_runs_adp_session_manage_rollback_against_mock_websocket() {
+    let (url, handle) = spawn_adp_session_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("adp-session-manage")
+        .arg("--url")
+        .arg(&url)
+        .arg("--action")
+        .arg("rollback")
+        .arg("--session")
+        .arg("cli-session")
+        .output()
+        .expect("run adp session manage");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("adp_session_manage_ok"));
+    assert!(stdout.contains("action=rollback"));
+    assert!(stdout.contains("target=reason.persistence"));
+    assert!(stdout.contains("session_turn_rolled_back:runtime-turn-10"));
+
+    handle.join().expect("adp session manage mock join");
 }
 
 #[test]

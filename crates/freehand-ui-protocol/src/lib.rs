@@ -67,6 +67,9 @@ pub enum UiCommand {
     DeleteSession {
         session_id: SessionId,
     },
+    RollbackLatestSessionTurn {
+        session_id: SessionId,
+    },
     SubmitUserInput {
         text: String,
         #[serde(default)]
@@ -732,6 +735,37 @@ impl UiProtocolState {
         self.publish_projection(UiProjection::Turn(projection));
     }
 
+    pub fn replace_session_turn_projections(
+        &mut self,
+        session_id: &SessionId,
+        projections: impl IntoIterator<Item = UiTurnProjection>,
+    ) {
+        self.turns
+            .retain(|_, projection| &projection.session_id != session_id);
+        let mut latest_session_turn_id = None;
+        for projection in projections {
+            latest_session_turn_id = Some(projection.turn_id.clone());
+            if let Some(cwd) = projection.cwd.clone() {
+                self.session_cwds.insert(projection.session_id.clone(), cwd);
+            }
+            self.turns
+                .insert(projection.turn_id.clone(), projection.clone());
+            self.publish_projection(UiProjection::Turn(projection));
+        }
+        if self
+            .latest_active_turn_id
+            .as_ref()
+            .is_some_and(|turn_id| !self.turns.contains_key(turn_id))
+        {
+            self.latest_active_turn_id = latest_session_turn_id.or_else(|| {
+                self.turns
+                    .values()
+                    .last()
+                    .map(|projection| projection.turn_id.clone())
+            });
+        }
+    }
+
     pub fn set_session_cwd(&mut self, session_id: SessionId, cwd: impl Into<String>) {
         let cwd = cwd.into();
         self.session_cwds.insert(session_id.clone(), cwd.clone());
@@ -1216,6 +1250,7 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::ArchiveSession { session_id }
         | UiCommand::RestoreSession { session_id }
         | UiCommand::DeleteSession { session_id }
+        | UiCommand::RollbackLatestSessionTurn { session_id }
             if session_id.as_str().trim().is_empty() =>
         {
             Err(UiProtocolError::EmptySessionId)
@@ -1825,6 +1860,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::ArchiveSession { .. } => "archive_session",
         UiCommand::RestoreSession { .. } => "restore_session",
         UiCommand::DeleteSession { .. } => "delete_session",
+        UiCommand::RollbackLatestSessionTurn { .. } => "rollback_latest_session_turn",
         UiCommand::SubmitUserInput { .. } => "submit_user_input",
         UiCommand::SubscribeLatestActiveTurn { .. } => "subscribe_latest_active_turn",
         UiCommand::SubscribeTurn { .. } => "subscribe_turn",
@@ -1861,6 +1897,7 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::ArchiveSession { .. }
             | UiCommand::RestoreSession { .. }
             | UiCommand::DeleteSession { .. }
+            | UiCommand::RollbackLatestSessionTurn { .. }
             | UiCommand::SubmitUserInput { .. }
             | UiCommand::SendDirectMessageToSlave { .. }
             | UiCommand::RewindCheckpoint { .. }
@@ -1876,7 +1913,10 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         | UiCommand::RenameSession { .. }
         | UiCommand::ArchiveSession { .. }
         | UiCommand::RestoreSession { .. }
-        | UiCommand::DeleteSession { .. } => ("reason.persistence", "crates/freehand-reason"),
+        | UiCommand::DeleteSession { .. }
+        | UiCommand::RollbackLatestSessionTurn { .. } => {
+            ("reason.persistence", "crates/freehand-reason")
+        }
         UiCommand::SubmitUserInput { .. }
         | UiCommand::CancelTurn { .. }
         | UiCommand::CancelLatestActiveTurn { .. }
@@ -3066,6 +3106,26 @@ mod tests {
         assert_eq!(envelope.ingress.command_kind, "rename_session");
         assert_eq!(envelope.target_feature_id, "reason.persistence");
         assert_eq!(envelope.target_owner_module, "crates/freehand-reason");
+    }
+
+    #[test]
+    fn command_dispatch_envelope_routes_session_rollback_to_persistence_owner() {
+        let envelope = build_command_dispatch_envelope(&UiCommand::RollbackLatestSessionTurn {
+            session_id: SessionId::new("session-rollback"),
+        })
+        .expect("envelope");
+        assert_eq!(
+            envelope.ingress.command_kind,
+            "rollback_latest_session_turn"
+        );
+        assert_eq!(envelope.target_feature_id, "reason.persistence");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-reason");
+
+        let err = accept_command_ingress(&UiCommand::RollbackLatestSessionTurn {
+            session_id: SessionId::new("   "),
+        })
+        .expect_err("blank session must be rejected");
+        assert_eq!(err, UiProtocolError::EmptySessionId);
     }
 
     #[test]

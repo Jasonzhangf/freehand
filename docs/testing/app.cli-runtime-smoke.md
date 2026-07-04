@@ -13,6 +13,7 @@
   - CLI ADP smoke verifies subscribe accepted, subscription event, query result, and query-as-command explicit failure
   - CLI runs no-UI ADP success/failure turn samples against a daemon `/adp` WebSocket URL
   - CLI ADP turn samples use an isolated sample session, verify command outcome plus matching terminal projection, then query the sample session transcript; the failure sample must show `Success` terminal status plus transcript evidence for at least two rounds and at least one unique failed tool activity
+  - CLI ADP session manage sends create/rename/archive/restore/delete-as-archive/rollback command frames and reports command receipts without owning session truth
   - CLI ADP task query sends task list/history query frames and reports task projection summaries without WebUI
   - CLI ADP task subscribe sends task list subscribe frames and reports the first task projection event without WebUI
   - CLI ADP error query sends error-center query frames and reports metadata projection summaries without WebUI
@@ -25,6 +26,7 @@
   - CLI ADP mock WebSocket smoke
   - CLI ADP success turn sample mock WebSocket smoke
   - CLI ADP failure turn sample mock WebSocket smoke with isolated-session transcript evidence and unique tool-call counting
+  - CLI ADP session manage argument/result summary smoke
   - CLI ADP task query argument/result summary smoke
   - CLI ADP task subscribe argument/result summary smoke
   - CLI ADP error query argument/result summary smoke
@@ -34,6 +36,7 @@
   - provider usage and recovery policy remain wired through the shared harness path
   - no-UI ADP smoke can diagnose status/control failures without WebUI or Android
   - no-UI ADP turn samples can populate and verify WebUI-visible success and failed-tool-result recovery projections without relying on manual DOM inspection, and the failure sample now rejects one-round or system-failure outcomes
+  - no-UI ADP session manage can verify daemon session CRUD and rollback receipt paths without WebUI DOM inspection
   - no-UI ADP task query can verify daemon task list/history visibility without WebUI DOM inspection
   - no-UI ADP task subscribe can verify daemon task list subscription visibility without WebUI DOM inspection
   - no-UI ADP error query can verify daemon error-center metadata visibility without WebUI DOM inspection
@@ -52,6 +55,7 @@
   - CLI smoke baseline is implemented in integration tests
   - CLI ADP smoke baseline is implemented in integration tests and verified against a real local `/adp` server
   - CLI ADP success/failure sample baseline is implemented in integration tests; failure means recovered failed tool result with `rounds>=2` transcript evidence, not ADP/system failure
+  - CLI ADP session manage command is implemented for live daemon session CRUD and rollback checks
   - CLI ADP task query command is implemented for live daemon task list/history checks
   - CLI ADP task subscribe command is implemented for live daemon task list subscription checks
   - CLI ADP error query command is implemented for live daemon error-center metadata checks

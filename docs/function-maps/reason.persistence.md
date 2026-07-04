@@ -37,6 +37,7 @@
 - terminal turn persistence yields immutable per-turn truth plus updated session cursor truth
 - derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete
 - session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management; it is separate from provider-visible session history and turn transcript truth
+- session rollback is persisted as an append-only reason-ledger marker; effective transcript restore filters rolled-back logical turns while raw closed-turn files remain on disk for audit
 
 ## Error Mainline
 
@@ -48,6 +49,7 @@
 - UI sidecar presence alone must not be treated as session-truth recovery evidence
 - session metadata mutations for unknown sessions fail explicitly unless they are creating a new metadata-only session
 - deleting a session through UI protocol is a non-destructive archive operation until a physical deletion design is explicitly approved
+- rollback with no eligible closed turn or with an active turn fails explicitly; it must not delete turn files or silently mutate UI-local state
 
 ## Shared Multi-Reference Functions
 
@@ -87,6 +89,12 @@
   - allowed callers: runtime UI command dispatch owner
   - related tests: session metadata create/rename/archive/restore smoke plus unknown-session rejection
   - why shared: WebUI/Android/CLI must not each invent local session CRUD state
+- `ReasonPersistence::rollback_latest_session_turn`
+  - owner: `crates/freehand-reason/src/persistence.rs`
+  - purpose: append a rollback marker for the latest effective logical user turn and rebuild effective transcript without deleting raw turn truth
+  - allowed callers: runtime UI command dispatch owner
+  - related tests: append-only rollback marker plus effective transcript filtering and raw file retention
+  - why shared: rollback truth must be durable and shared across WebUI/CLI/daemon instead of being a client-local transcript edit
 
 ## Function Call Table
 
@@ -106,6 +114,8 @@
 | 12 | `ReasonPersistence::restore` | `crates/freehand-reason/src/persistence.rs` | rebuild authoritative state from snapshots plus reason-ledger tail, or from ledger alone | snapshot directory + reason ledger | restored in-memory session and turn truth | runtime/bootstrap/testkit/CLI smoke | persistence owner | bound |
 | 13 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | rebuild latest per-turn snapshots from reason ledger for derived UI restore without changing authoritative closed-turn recovery semantics | reason ledger | latest snapshot per turn id | runtime UI bootstrap | persistence owner | bound |
 | 14 | `ReasonPersistence::create_session_metadata` / `rename_session` / `archive_session` / `restore_session` | `crates/freehand-reason/src/persistence.rs` | persist session display metadata sidecar mutations for shared UI CRUD | session id + title/archive intent | updated session metadata sidecar | runtime UI command dispatch | persistence owner | bound |
+| 15 | `ReasonPersistence::rollback_latest_session_turn` | `crates/freehand-reason/src/persistence.rs` | append latest-logical-turn rollback marker and update effective cursor/projection state without deleting raw turn files | session id | rollback marker with target turn, previous effective head, and restored user text | runtime UI command dispatch | persistence owner | bound |
+| 16 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | replay reason ledger rows and filter rollback markers for effective UI transcript restore | reason ledger plus rollback markers | effective per-turn snapshots | runtime UI bootstrap / rollback refresh | persistence owner | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -120,6 +130,7 @@
 - current code baseline now binds session-history JSON/file round-trip, reason-ledger append, provider-raw debug-ledger append, active-turn refresh, terminal turn materialization, derived sidecar writes, and snapshot-plus-tail / ledger-only recovery
 - current code exposes ledger-backed per-turn snapshot restore for UI projection so multi-round tool activity can survive daemon restart without relying on UI sidecars as truth
 - session metadata sidecar CRUD is bound for create, rename, archive, restore, and delete-as-archive while staying separate from authoritative turn transcript truth
+- append-only latest-session-turn rollback is bound for durable marker write, effective transcript filtering, restart restore, and raw turn file retention
 - CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer
 - live Anthropic runtime path now records provider raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` while keeping those ledgers outside recovery truth
 - explicit owner-bound regression coverage now locks ledger sequence gaps plus provider-raw-only and UI-sidecar-only missing-recovery rejection

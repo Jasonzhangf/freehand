@@ -2648,6 +2648,51 @@ impl RuntimeCommandDispatcher {
             UiCommand::ArchiveSession { session_id } => persistence.archive_session(&session_id),
             UiCommand::RestoreSession { session_id } => persistence.restore_session(&session_id),
             UiCommand::DeleteSession { session_id } => persistence.delete_session(&session_id),
+            UiCommand::RollbackLatestSessionTurn { session_id } => {
+                let marker = persistence
+                    .rollback_latest_session_turn(&session_id)
+                    .map_err(map_session_metadata_dispatch_error)?;
+                let effective_turns = persistence
+                    .restore_turn_snapshots_for_ui(&session_id)
+                    .map_err(map_session_metadata_dispatch_error)?;
+                state
+                    .turns
+                    .retain(|turn| turn.request.session_id != session_id);
+                state.turns.extend(effective_turns.clone());
+                state
+                    .turns
+                    .sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
+                state.session_cwds = session_cwds_from_turns(&state.turns);
+                let projections = effective_turns
+                    .iter()
+                    .map(|turn| {
+                        let cwd = state
+                            .session_cwds
+                            .get(&turn.request.session_id)
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .or_else(|| turn.cwd.clone());
+                        project_runtime_turn(
+                            &state.config.reason_agent_id,
+                            &state.config.master_node_id,
+                            turn,
+                            cwd,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.ui_state
+                    .lock()
+                    .expect("lock ui state")
+                    .replace_session_turn_projections(&session_id, projections);
+                return Ok(UiCommandDispatchReceipt {
+                    ingress: envelope.ingress,
+                    target_feature_id: envelope.target_feature_id,
+                    target_owner_module: envelope.target_owner_module,
+                    dispatch_status: format!(
+                        "session_turn_rolled_back:{}",
+                        marker.target_turn_id.as_str()
+                    ),
+                });
+            }
             _ => {
                 return Err(UiCommandDispatchPortError::Unsupported(
                     "command is not a session management target".to_owned(),
@@ -3046,7 +3091,8 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             | UiCommand::RenameSession { .. }
             | UiCommand::ArchiveSession { .. }
             | UiCommand::RestoreSession { .. }
-            | UiCommand::DeleteSession { .. } => {
+            | UiCommand::DeleteSession { .. }
+            | UiCommand::RollbackLatestSessionTurn { .. } => {
                 self.dispatch_session_management(&mut state, envelope)
             }
             UiCommand::CancelTurn { turn_id } => {
@@ -3103,6 +3149,9 @@ fn map_node_dispatch_error(err: NodeRuntimeError) -> UiCommandDispatchPortError 
 fn map_session_metadata_dispatch_error(err: ReasonPersistenceError) -> UiCommandDispatchPortError {
     match err {
         ReasonPersistenceError::SessionMetadataTargetNotFound(session_id) => {
+            UiCommandDispatchPortError::TargetNotFound(session_id)
+        }
+        ReasonPersistenceError::SessionRollbackTargetNotFound(session_id) => {
             UiCommandDispatchPortError::TargetNotFound(session_id)
         }
         ReasonPersistenceError::InvalidSessionMetadata(message) => {
@@ -5308,6 +5357,90 @@ mod tests {
             err,
             UiCommandDispatchPortError::TargetNotFound("missing-session".to_owned())
         );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_dispatches_session_rollback_into_effective_ui_projection() {
+        let runtime_home = temp_runtime_home();
+        let session_id = SessionId::new("session-rollback-runtime");
+        let persistence = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"));
+        let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("history");
+        for (turn_id, trace_id, prompt, summary) in [
+            ("runtime-turn-1", "trace-1", "first prompt", "first done"),
+            ("runtime-turn-2", "trace-2", "second prompt", "second done"),
+        ] {
+            let mut turn = ReasonTurnEngine::new()
+                .start_turn(
+                    &mut history,
+                    TurnStartInput {
+                        session_id: session_id.clone(),
+                        turn_id: TurnId::new(turn_id),
+                        trace_id: TraceId::new(trace_id),
+                        feature_id: FeatureId::new("runtime.ui-command-dispatch"),
+                        agent_id: AgentId::new("agent-live"),
+                        user_text: prompt.to_owned(),
+                        planned_context_segments: Vec::new(),
+                        tool_schema_fingerprint: None,
+                        model: "model-a".to_owned(),
+                    },
+                )
+                .expect("turn");
+            turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+                session_id: session_id.clone(),
+                turn_id: TurnId::new(turn_id),
+                trace_id: TraceId::new(trace_id),
+                feature_id: FeatureId::new("runtime.ui-command-dispatch"),
+                agent_id: AgentId::new("agent-live"),
+                status: TerminalStatus::Success,
+                summary: summary.to_owned(),
+            });
+            persistence
+                .record_turn_closed(&history, &turn, 0)
+                .expect("persist turn");
+        }
+
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+        let rollback = build_command_dispatch_envelope(&UiCommand::RollbackLatestSessionTurn {
+            session_id: session_id.clone(),
+        })
+        .expect("rollback envelope");
+        let receipt = runtime.dispatch(rollback).expect("rollback dispatch");
+        assert_eq!(receipt.target_feature_id, "reason.persistence");
+        assert!(
+            receipt
+                .dispatch_status
+                .contains("session_turn_rolled_back:runtime-turn-2")
+        );
+
+        match runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("session turns")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                assert_eq!(transcript.turns[0].turn_id, TurnId::new("runtime-turn-1"));
+                assert_eq!(
+                    transcript.turns[0].user_text.as_deref(),
+                    Some("first prompt")
+                );
+            }
+            other => panic!("unexpected session turns: {other:?}"),
+        }
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }

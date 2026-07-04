@@ -249,6 +249,19 @@ body.theme-dark .inspector-block {
   opacity: 0.44;
 }
 
+.archived-session-drawer {
+  margin-top: 12px;
+  color: var(--text);
+}
+
+.archived-session-drawer summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .session-conversation-button,
 .session-task-button {
   width: 100%;
@@ -311,6 +324,14 @@ body.theme-dark .inspector-block {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
   align-items: start;
+}
+
+.archived-session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  opacity: 0.86;
 }
 
 .session-selector {

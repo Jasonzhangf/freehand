@@ -16,6 +16,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - config-selected live bootstrap may also seed one shared metadata ledger path for node-owned bootstrap and pairing provenance
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
 - runtime dispatch owner reads the declared owner target from the envelope
+- session management commands route through runtime into `reason.persistence` session metadata and rollback APIs; runtime refreshes `UiProtocolState` from persistence-owned metadata/effective transcript projections after mutation
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 - runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs
 - runtime read-only error-center queries enter through `UiRuntimeQueryPort` and read watermarked metadata rows through the runtime metadata projection owner
@@ -40,6 +41,8 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion
 - latest-active cancellation supports Esc during the short window before WebUI has received a concrete turn_id
 - selected session cwd is persisted on turn records, projected to UiProtocolState, and restored for later same-session inheritance
+- session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and protocol projection is refreshed
+- session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections
 - runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events
 - runtime error-center queries return UI-safe projections built from watermarked metadata rows and omit raw error/request/provider text
 - runtime task list subscription updates reuse the same UI-safe projection helper as task list queries
@@ -57,6 +60,8 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries
 - live provider/tool failures that materialize failed turn truth are returned as explicit dispatch failures only after the failed projection has been refreshed into UiProtocolState
 - CancelLatestActiveTurn with no active or persisted turn returns explicit target-not-found
+- unknown session metadata mutation targets return explicit target-not-found failures
+- rollback with no eligible target or with an active turn returns explicit dispatch failure; runtime must not delete UI turns locally to pretend success
 - missing task history targets return explicit target-not-found and invalid task filters return dispatch failures
 - invalid error-center query filters or metadata read failures return explicit dispatch failures
 - task list publication failures after task mutation are explicit live bridge failures
@@ -117,6 +122,8 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 | 11 | `project_task_list_for_ui / project_task_history_for_ui` | `crates/freehand-runtime/src/lib.rs` | project task owner snapshots and ledger events into UI-safe DTOs | task snapshots or task ledger events | task query projection | RuntimeCommandDispatcher::query_runtime | UI protocol DTO | bound |
 | 12 | `task_list_projection_from_runtime` | `crates/freehand-runtime/src/lib.rs` | build and publish task list projection from task runtime after successful task mutation | runtime home plus task filters | UI task list projection | run_live_reason_turn_with_hooks / RuntimeCommandDispatcher::query_runtime | TaskRuntime::list_tasks | bound |
 | 13 | `query_error_center_events_for_ui / project_error_center_event_for_ui` | `crates/freehand-runtime/src/lib.rs` | read watermarked error-center metadata and project UI-safe event DTOs | QueryErrorCenterEvents filters | ErrorCenterEvents query projection | RuntimeCommandDispatcher::query_runtime | metadata.core ledger plus ui.protocol DTO | bound |
+| 14 | `RuntimeCommandDispatcher::dispatch_session_management` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned session CRUD and rollback commands into reason persistence APIs and refresh shared UI projection | session CRUD or rollback dispatch envelope | dispatch receipt or explicit target-not-found/failure | RuntimeCommandDispatcher::dispatch | ReasonPersistence session metadata/rollback owner | bound |
+| 15 | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session transcript with persistence-owned effective projections after rollback | session id plus effective turn projections | queryable transcript excluding rolled-back logical turns | RuntimeCommandDispatcher::dispatch_session_management | ui.protocol state | bound |
 
 ## Sync Status Against Mainline Call
 

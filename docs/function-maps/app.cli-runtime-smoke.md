@@ -10,6 +10,8 @@
   - `run_adp_smoke_async`
   - `run_adp_turn_sample`
   - `run_adp_turn_sample_async`
+  - `run_adp_session_manage`
+  - `run_adp_session_manage_async`
   - `run_adp_task_query`
   - `run_adp_task_query_async`
   - `run_adp_task_subscribe`
@@ -25,6 +27,7 @@
 - provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting
 - for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe/query/query-as-command frames
 - for ADP turn samples, CLI connects to the same daemon `/adp`, creates an isolated sample session, subscribes to latest-turn updates, submits a success sample prompt or a tool-result-failure recovery prompt, verifies the matching terminal projection, then queries the sample session transcript to prove round/tool evidence
+- for ADP session manage, CLI connects to the same daemon `/adp` and sends protocol-owned create, rename, archive, restore, delete-as-archive, or rollback command frames for no-UI session lifecycle diagnosis
 - for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis
 - for ADP task subscribe, CLI connects to the same daemon `/adp` and sends protocol-owned task list subscription frames for no-UI task push diagnosis
 - for ADP error query, CLI connects to the same daemon `/adp` and sends protocol-owned error-center query frames for no-UI metadata truth diagnosis
@@ -36,6 +39,7 @@
 - CLI output remains a terminal-facing projection, not debug ledger raw payload
 - ADP smoke prints the observed `subscription_accepted`, `subscription_event`, `query_result`, and explicit failure frame sequence for no-UI diagnosis
 - ADP turn samples print the observed command outcome plus the matching latest-turn projection and transcript evidence; the failure sample proves a failed tool result can continue to a successful terminal turn with `rounds>=2`, one or more unique tool executions, and one or more unique failed tool results instead of becoming an ADP/system failure
+- ADP session manage prints command receipt status for session CRUD and rollback commands without creating a second source of session truth
 - ADP task query prints task list count/task ids or task history event counts from protocol-owned query results
 - ADP task subscribe prints accepted state plus task list count/task ids from the initial protocol-owned subscription event
 - ADP error query prints error-center event count plus compact domain/class/recovery/code/hash summaries without dumping raw metadata payloads
@@ -47,6 +51,7 @@
 - smoke runtime failures return explicit reason/runtime errors
 - ADP connect/send/receive/decode timeouts return explicit terminal errors
 - ADP turn sample timeout, wrong terminal status, missing isolated-session transcript evidence, missing failed tool activity for the failure sample, or system/provider terminal failure returns explicit terminal errors
+- ADP session manage failures print explicit ADP failure code/message instead of treating session mutation errors as empty success
 - rewrite recovery block is reported as explicit blocked outcome, not disguised as success
 - ADP query-as-command must return `ingress_command_kind_mismatch`, proving command/query separation without mutation
 - ADP task query failures print explicit ADP failure code/message instead of treating missing task truth as an empty success
@@ -87,6 +92,7 @@
 | 13 | `run_adp_task_subscribe_async` | `apps/freehand-cli/src/main.rs` | send task list subscription over ADP and summarize the first task list event | ADP WebSocket URL + task subscription filters | terminal-facing task list subscription summary or explicit ADP failure | ADP task subscribe runner | daemon `/adp` | bound |
 | 14 | `run_adp_error_query` | `apps/freehand-cli/src/main.rs` | parse ADP error-center query URL and session/trace/turn/domain filters | `--url ws://.../adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]` | selected error-center query command | CLI dispatcher | ADP error query runner | bound |
 | 15 | `run_adp_error_query_async` | `apps/freehand-cli/src/main.rs` | send error-center query over ADP and summarize the returned metadata projection | ADP WebSocket URL + error-center query command | terminal-facing error-center summary or explicit ADP failure | ADP error query runner | daemon `/adp` | bound |
+| 16 | `run_adp_session_manage` / `run_adp_session_manage_async` | `apps/freehand-cli/src/main.rs` | send protocol-owned session CRUD or rollback command over ADP and summarize the command receipt | `--url ws://.../adp --action create\|rename\|archive\|restore\|delete\|rollback --session <id> [--title <title>] [--cwd <path>]` | terminal-facing session manage receipt or explicit ADP failure | CLI dispatcher | daemon `/adp` | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -100,6 +106,7 @@
 - CLI reason E2E smoke path is implemented
 - CLI ADP no-UI smoke path is implemented
 - CLI ADP success/failure turn sample path is implemented; the failure sample requires isolated-session terminal success plus transcript evidence for `rounds>=2`, unique failed tool-result activity, and no system/provider terminal failure
+- CLI ADP session manage path is implemented for no-UI session CRUD and rollback diagnosis
 - CLI ADP task list/history query path is implemented for no-UI task truth diagnosis
 - CLI ADP task list subscribe path is implemented for no-UI task push diagnosis
 - CLI ADP error-center query path is implemented for no-UI metadata truth diagnosis

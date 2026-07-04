@@ -21,7 +21,7 @@
 - submit commands may carry an optional selected session id and selected cwd so a draft or explicitly chosen cwd-bound session can receive the new turn instead of always using the default session
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
 - runtime dispatch owner reads the declared owner target from the envelope
-- session management commands route through runtime into `reason.persistence` session metadata APIs; runtime refreshes `UiProtocolState` from the persistence-owned metadata projection after mutation
+- session management commands route through runtime into `reason.persistence` session metadata and rollback APIs; runtime refreshes `UiProtocolState` from persistence-owned metadata/effective transcript projections after mutation
 - live submit registers active turn cancellation state before provider execution and releases the runtime mutex before provider IO
 - `CancelLatestActiveTurn` resolves to the newest active live turn before falling back to latest persisted runtime turn
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
@@ -53,6 +53,7 @@
 - live bootstrap groups persisted `runtime-turn-N` round snapshots into one UI projection when restoring session transcripts, while keeping authoritative closed-turn recovery unchanged
 - runtime-owned UI state reflects derived projections only, not authoritative turn truth
 - session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and the protocol projection has been refreshed
+- session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections
 - runtime-backed task list and task history queries return UI-safe task projections sourced from `task.orchestration` snapshot and ledger APIs
 - runtime-backed error-center queries return UI-safe projections sourced from `metadata.core` ledger rows written by `error.center`
 - runtime-backed task list subscription updates reuse the same projection helper and source task truth from `TaskRuntime::list_tasks`
@@ -61,6 +62,7 @@
 
 - unsupported runtime command paths return explicit dispatch-port failures
 - unknown session metadata mutation targets return explicit target-not-found failures
+- rollback with no eligible target or with an active turn returns explicit dispatch failure; runtime must not delete UI turns locally to pretend success
 - missing turn targets for cancel/resume return explicit dispatch-port failures
 - cancelled live turns return explicit cancelled dispatch failure to the original submitter and must not overwrite cancelled UI projection with later provider success
 - live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries
@@ -110,7 +112,8 @@
 | 08 | `RuntimeCommandDispatcher::dispatch_prepared_live_submit` | `crates/freehand-runtime/src/lib.rs` | run provider-backed live turn outside runtime mutex while honoring active cancel token | prepared live submit | live receipt or cancelled dispatch failure | `RuntimeCommandDispatcher::dispatch` | `run_live_reason_turn_with_hooks` | bound |
 | 09 | `RuntimeCommandDispatcher::dispatch_cancel_turn` | `crates/freehand-runtime/src/lib.rs` | cancel active or persisted turns through reason-owned terminal semantics and UI projection | cancel command turn id | cancel receipt + cancelled projection | `RuntimeCommandDispatcher::dispatch` | reason owner / active cancel registry | bound |
 | 10 | `restore_all_persisted_sessions_into_ui` | `crates/freehand-runtime/src/lib.rs` | rehydrate UI protocol state from reason-ledger turn snapshots and group same-ordinal runtime rounds for transcript projection | persisted reason sessions | derived UI session list/transcripts with retained tool activity | runtime bootstrap | reason persistence + UI protocol | bound |
-| 11 | `RuntimeCommandDispatcher::dispatch_session_management` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned session CRUD commands into reason persistence metadata APIs and refresh UI projection | session CRUD dispatch envelope | dispatch receipt or target-not-found failure | `RuntimeCommandDispatcher::dispatch` | `ReasonPersistence` session metadata owner | bound |
+| 11 | `RuntimeCommandDispatcher::dispatch_session_management` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned session CRUD and rollback commands into reason persistence APIs and refresh UI projection | session CRUD or rollback dispatch envelope | dispatch receipt or target-not-found failure | `RuntimeCommandDispatcher::dispatch` | `ReasonPersistence` session metadata/rollback owner | bound |
+| 11a | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace a session transcript with persistence-owned effective projections after rollback | session id + effective turn projections | queryable transcript excluding rolled-back logical turn | `RuntimeCommandDispatcher::dispatch_session_management` | ui.protocol state | bound |
 | 12 | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | route read-only runtime queries such as task list/history and error-center events into owner APIs | UI query command | optional query result or explicit dispatch failure | WebUI/daemon ADP query transport | task runtime owner / metadata center | bound |
 | 13 | `project_task_list_for_ui` / `project_task_history_for_ui` | `crates/freehand-runtime/src/lib.rs` | convert task owner snapshots and ledger events into protocol DTOs without changing task truth | task snapshots or ledger events | UI-safe task query projection | `RuntimeCommandDispatcher::query_runtime` | UI protocol DTOs | bound |
 | 14 | `task_list_projection_from_runtime` / `UiProtocolState::publish_task_list_projection` | `crates/freehand-runtime/src/lib.rs` / `crates/freehand-ui-protocol/src/lib.rs` | publish runtime-owned task list projection after successful task tool mutation | task runtime snapshot | UI task list subscription event | live task tool bridge | ui.protocol subscription channel | bound |
@@ -142,6 +145,7 @@
 - config-selected live bootstrap now restores multi-round tool activity into UI session transcripts after daemon restart
 - config-selected live bootstrap now restores persisted session cwd from turn records and preserves cwd for later same-session submits
 - runtime session-management dispatch is bound as a thin route to `reason.persistence`
+- runtime rollback dispatch is bound as a thin route to `reason.persistence::rollback_latest_session_turn` plus UI effective transcript replacement
 - runtime task query dispatch is bound as a thin read-only route to `task.orchestration`
 - runtime error-center query dispatch is bound as a thin read-only route to `metadata.core` rows written by `error.center`
 - runtime task list projection publication is bound as a thin route from task mutation to `ui.protocol`

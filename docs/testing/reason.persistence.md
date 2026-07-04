@@ -10,6 +10,7 @@
   - UI restore can read latest per-turn ledger snapshots so non-terminal multi-round tool activity remains projectable after restart without becoming closed-turn truth
   - derived UI and index sidecars rebuild from authoritative truth and are never recovery truth
   - reason-owned session display metadata stores `title` and `archived` state for shared UI CRUD without entering provider-visible session history
+  - append-only rollback markers filter effective transcript restore while preserving raw closed-turn files for audit
   - provider raw ledgers remain debug-only and never become session truth
 - white-box plan:
   - session snapshot render/load tests
@@ -32,12 +33,17 @@
   - session metadata create/rename/archive/restore smoke tests
   - unknown-session metadata mutation rejection tests
   - non-destructive delete-as-archive session metadata test
+  - append-only latest-turn rollback marker test
+  - effective transcript filtering test after rollback
+  - raw closed-turn file retention test after rollback
+  - multi-round logical turn rollback test
 - module black-box plan:
   - persistence save/reload smoke at the `freehand-reason` boundary
   - active-turn update then terminal materialization smoke
   - snapshot-missing recovery smoke
   - derived-sidecar rebuild smoke
   - session metadata sidecar reload smoke
+  - rollback marker reload smoke through `restore` and `restore_turn_snapshots_for_ui`
   - provider-raw debug-ledger append smoke
 - project black-box impact:
   - CLI persistence restore smoke
@@ -61,4 +67,5 @@
   - runtime white-box coverage now explicitly locks ledger sequence-gap rejection plus provider-raw-only and UI-sidecar-only missing-recovery rejection
   - runtime white-box coverage now explicitly locks invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate-sequence recovery rejection
   - session metadata CRUD is implemented with positive create/rename/archive/restore/delete-as-archive coverage and negative unknown-session rejection coverage
+  - append-only latest-session-turn rollback is implemented with positive marker/effective-filter/raw-file-retention coverage
   - migrated mainline-call source and generated wiki are kept in sync with this test design

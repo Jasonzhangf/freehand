@@ -355,6 +355,80 @@ mod tests {
         (receipt.expect("receipt"), event.expect("event"))
     }
 
+    async fn send_adp_command_and_wait_receipt(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        request_id: &str,
+        command: UiCommand,
+    ) -> UiCommandDispatchReceipt {
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Command {
+                    request_id: request_id.to_owned(),
+                    command,
+                })
+                .expect("command json")
+                .into(),
+            ))
+            .await
+            .expect("send command");
+        match next_adp_response_matching(socket, "command receipt", |response| {
+            matches!(
+                response,
+                UiAdpResponse::CommandReceipt { request_id: got, .. } if got == request_id
+            ) || matches!(
+                response,
+                UiAdpResponse::Failure { request_id: got, .. } if got == request_id
+            )
+        })
+        .await
+        {
+            UiAdpResponse::CommandReceipt { receipt, .. } => receipt,
+            UiAdpResponse::Failure { failure, .. } => {
+                panic!("unexpected ADP command failure {request_id}: {failure:?}")
+            }
+            other => panic!("unexpected ADP command response: {other:?}"),
+        }
+    }
+
+    async fn send_adp_query_and_wait_result(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        request_id: &str,
+        query: UiCommand,
+    ) -> UiQueryResult {
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Query {
+                    request_id: request_id.to_owned(),
+                    query,
+                })
+                .expect("query json")
+                .into(),
+            ))
+            .await
+            .expect("send query");
+        match next_adp_response_matching(socket, "query result", |response| {
+            matches!(
+                response,
+                UiAdpResponse::QueryResult { request_id: got, .. } if got == request_id
+            ) || matches!(
+                response,
+                UiAdpResponse::Failure { request_id: got, .. } if got == request_id
+            )
+        })
+        .await
+        {
+            UiAdpResponse::QueryResult { result, .. } => result,
+            UiAdpResponse::Failure { failure, .. } => {
+                panic!("unexpected ADP query failure {request_id}: {failure:?}")
+            }
+            other => panic!("unexpected ADP query response: {other:?}"),
+        }
+    }
+
     #[tokio::test]
     #[serial]
     async fn daemon_submit_input_updates_runtime_backed_latest_turn_query() {
@@ -545,6 +619,202 @@ mod tests {
                 );
             }
             other => panic!("unexpected ADP query response: {other:?}"),
+        }
+
+        let _ = socket.close(None).await;
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn daemon_adp_manages_sessions_and_rolls_back_effective_transcript() {
+        let (provider_url, request_rx, provider_handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                complete_single_response("first session turn"),
+                complete_single_response("second session turn"),
+            ],
+        );
+        let server = TestServer::spawn(master_config_text(&provider_url)).await;
+        let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
+        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        let session_id = SessionId::new("daemon-adp-session-crud-rollback");
+
+        let create = send_adp_command_and_wait_receipt(
+            &mut socket,
+            "session-create-1",
+            UiCommand::CreateSession {
+                session_id: session_id.clone(),
+                title: Some("ADP rollback draft".to_owned()),
+                cwd: None,
+            },
+        )
+        .await;
+        assert_eq!(create.target_feature_id, "reason.persistence");
+
+        let rename = send_adp_command_and_wait_receipt(
+            &mut socket,
+            "session-rename-1",
+            UiCommand::RenameSession {
+                session_id: session_id.clone(),
+                title: "ADP rollback renamed".to_owned(),
+            },
+        )
+        .await;
+        assert_eq!(rename.dispatch_status, "session_metadata_updated");
+
+        send_adp_command_and_wait_receipt(
+            &mut socket,
+            "session-archive-1",
+            UiCommand::ArchiveSession {
+                session_id: session_id.clone(),
+            },
+        )
+        .await;
+        match send_adp_query_and_wait_result(
+            &mut socket,
+            "session-active-list-1",
+            UiCommand::QuerySessionList,
+        )
+        .await
+        {
+            UiQueryResult::SessionList(list) => assert!(
+                !list
+                    .sessions
+                    .iter()
+                    .any(|session| session.session_id == session_id)
+            ),
+            other => panic!("unexpected active session list: {other:?}"),
+        }
+        match send_adp_query_and_wait_result(
+            &mut socket,
+            "session-archived-list-1",
+            UiCommand::QueryArchivedSessionList,
+        )
+        .await
+        {
+            UiQueryResult::SessionList(list) => {
+                let archived = list
+                    .sessions
+                    .iter()
+                    .find(|session| session.session_id == session_id)
+                    .expect("archived session");
+                assert!(archived.archived);
+                assert_eq!(archived.title.as_deref(), Some("ADP rollback renamed"));
+            }
+            other => panic!("unexpected archived session list: {other:?}"),
+        }
+
+        send_adp_command_and_wait_receipt(
+            &mut socket,
+            "session-restore-1",
+            UiCommand::RestoreSession {
+                session_id: session_id.clone(),
+            },
+        )
+        .await;
+        match send_adp_query_and_wait_result(
+            &mut socket,
+            "session-active-list-2",
+            UiCommand::QuerySessionList,
+        )
+        .await
+        {
+            UiQueryResult::SessionList(list) => {
+                let restored = list
+                    .sessions
+                    .iter()
+                    .find(|session| session.session_id == session_id)
+                    .expect("restored session");
+                assert!(!restored.archived);
+                assert_eq!(restored.title.as_deref(), Some("ADP rollback renamed"));
+            }
+            other => panic!("unexpected restored session list: {other:?}"),
+        }
+
+        send_adp_command_and_wait_receipt(
+            &mut socket,
+            "session-submit-1",
+            UiCommand::SubmitUserInput {
+                text: "first prompt for rollback session".to_owned(),
+                session_id: Some(session_id.clone()),
+                cwd: None,
+            },
+        )
+        .await;
+        send_adp_command_and_wait_receipt(
+            &mut socket,
+            "session-submit-2",
+            UiCommand::SubmitUserInput {
+                text: "second prompt to roll back".to_owned(),
+                session_id: Some(session_id.clone()),
+                cwd: None,
+            },
+        )
+        .await;
+        let _ = request_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first provider request");
+        let _ = request_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("second provider request");
+        provider_handle.join().expect("join provider");
+
+        match send_adp_query_and_wait_result(
+            &mut socket,
+            "session-turns-before-rollback",
+            UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            },
+        )
+        .await
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 2);
+                assert_eq!(
+                    transcript.turns[0].user_text.as_deref(),
+                    Some("first prompt for rollback session")
+                );
+                assert_eq!(
+                    transcript.turns[1].user_text.as_deref(),
+                    Some("second prompt to roll back")
+                );
+            }
+            other => panic!("unexpected transcript before rollback: {other:?}"),
+        }
+
+        let rollback = send_adp_command_and_wait_receipt(
+            &mut socket,
+            "session-rollback-1",
+            UiCommand::RollbackLatestSessionTurn {
+                session_id: session_id.clone(),
+            },
+        )
+        .await;
+        assert_eq!(rollback.target_feature_id, "reason.persistence");
+        assert!(
+            rollback
+                .dispatch_status
+                .contains("session_turn_rolled_back:runtime-turn-2")
+        );
+
+        match send_adp_query_and_wait_result(
+            &mut socket,
+            "session-turns-after-rollback",
+            UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            },
+        )
+        .await
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                assert_eq!(
+                    transcript.turns[0].user_text.as_deref(),
+                    Some("first prompt for rollback session")
+                );
+            }
+            other => panic!("unexpected transcript after rollback: {other:?}"),
         }
 
         let _ = socket.close(None).await;

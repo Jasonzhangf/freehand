@@ -16,6 +16,7 @@
     "daemon injects the same runtime dispatcher as the protocol-owned runtime query port for ADP read-only owner queries, including task list/history and error-center metadata",
     "daemon exposes the same runtime dispatcher and shared UI state through protocol-owned ADP WebSocket frames at /adp",
     "mutation commands travel through protocol-owned ingress validation and dispatch envelope building before runtime dispatch",
+    "session CRUD and rollback commands travel through the same ADP command path and remain runtime/reason-owned mutations",
     "explicit checkpoint rewind can travel through the same HTTP command ingress without adding app-owned business logic",
     "checkpoint summary query travels through the shared protocol-only HTTP query route from runtime-populated UI state",
     "daemon ADP WebSocket accepts task list and error-center subscriptions through the shared protocol transport and injected runtime query port"
@@ -33,7 +34,8 @@
     "daemon can serve checkpoint summary query results after writable mutation and after explicit rewind without reading checkpoint files in app code",
     "daemon remains a host process and does not own reason or node semantics itself",
     "daemon serves task list subscription events from runtime-published task projections after task tool mutations",
-    "daemon serves error-center initial subscription snapshots from runtime metadata projection"
+    "daemon serves error-center initial subscription snapshots from runtime metadata projection",
+    "daemon ADP session management can create, rename, archive, list archived sessions, restore, submit turns, rollback latest effective turn, and query the resulting effective transcript"
   ],
   "error_mainline": [
     "invalid daemon CLI input returns explicit startup error",
@@ -48,7 +50,8 @@
     "missing checkpoint rewind manifests surface protocol-mapped target-not-found failure over the same HTTP command ingress",
     "slave-mode agent selection returns explicit daemon startup error",
     "async command ingress does not execute injected synchronous provider or runtime work inline; it returns explicit transport failure if the dispatch task itself fails",
-    "task and error-center subscription initial query/projection failures surface explicit ADP failure frames"
+    "task and error-center subscription initial query/projection failures surface explicit ADP failure frames",
+    "session rollback failures surface explicit ADP failure frames instead of app-owned transcript mutation"
   ],
   "shared_functions": [
     {
@@ -240,6 +243,17 @@
       "output_semantic": "ADP task/error-center query result or subscription event",
       "caller": "daemon-hosted ADP client",
       "callee": "shared WebUI transport plus runtime query/projection owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "handle_adp_socket / RuntimeCommandDispatcher::dispatch",
+      "file_path": "apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs",
+      "responsibility": "serve daemon ADP session CRUD and rollback commands through shared protocol transport and runtime owner dispatch",
+      "input_semantic": "ADP session management command or session transcript query frame",
+      "output_semantic": "ADP command receipt plus active/archived/effective transcript query projection",
+      "caller": "daemon-hosted ADP client",
+      "callee": "shared WebUI transport plus runtime.ui-command-dispatch",
       "binding_status": "bound"
     }
   ],

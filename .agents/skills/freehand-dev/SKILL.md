@@ -223,6 +223,7 @@ Use this skill for any non-trivial work in this repo.
   - query ADP state for the same session/turn and compare it with visible UI state
   - save screenshot evidence under `artifacts/webui-online/` or another explicit repo artifact path
   - report the exact commands, ADP sample/query result summary, and screenshot path in the final answer
+- When using Chrome DevTools Protocol for WebUI online proof from shell automation, spawn the browser inside the long-running automation process and stop only that explicit PID after evidence capture. A short-lived shell background Chrome can exit before CDP connects, producing false DevTools-port failures unrelated to Freehand.
 - Do not say WebUI behavior is fixed, verified, or passing unless browser-visible evidence and ADP/session truth both prove the changed behavior. If online verification cannot run, state that explicitly and treat the work as unverified.
 - For WebUI lifecycle/helper edits, `node --check` is only syntax coverage. Capture browser console/page errors during a real fixed-port WebUI submit, because undefined runtime helpers such as lifecycle phase functions can pass syntax checks and fail only in browser execution.
 - UI validation must prove the user's submitted text remains observable after send and after refresh, live lifecycle animation stops when the underlying ADP turn is terminal, and no historical turn keeps fake streaming/timer state after a newer turn starts.

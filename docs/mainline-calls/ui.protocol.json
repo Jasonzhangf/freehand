@@ -19,6 +19,7 @@
     "subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams",
     "CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id",
     "SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation",
+    "session management commands (`CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, `RollbackLatestSessionTurn`) are mutation intents only; protocol validates and routes them while `reason.persistence` owns durable metadata and rollback truth",
     "task list subscribe commands are protocol-owned ADP/subscribe shapes while task truth remains runtime/task-owner supplied",
     "error-center subscribe commands are protocol-owned ADP/subscribe shapes while error truth remains runtime/error-center supplied"
   ],
@@ -46,6 +47,8 @@
     "cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn",
     "session list and transcript projections expose cwd bound by runtime/session truth",
     "task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
+    "session list and transcript projections expose owner-supplied session title, archived state, cwd, and effective transcript projections after rollback",
+    "rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth",
     "error-center query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
     "task list subscription events carry UI-safe task list projections published by runtime owner code"
   ],
@@ -61,6 +64,7 @@
     "cancelled terminal projection must stay explicit and must not be collapsed into failed or completed UI status",
     "CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module",
     "empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently",
+    "empty session ids and empty session titles are rejected at the protocol boundary for session management commands, including rollback",
     "empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse",
     "empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse",
     "task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching"
@@ -211,6 +215,19 @@
         "error_center_subscription_matches_projection"
       ],
       "why_shared": "keeps error-center read projection shape protocol-owned and transport-neutral"
+    },
+    {
+      "symbol": "UiProtocolState::replace_session_turn_projections",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "replace one session transcript projection after persistence-owned rollback without making the UI a truth writer",
+      "allowed_callers": [
+        "runtime.ui-command-dispatch"
+      ],
+      "related_tests": [
+        "session_transcript_replacement_updates_query_projection",
+        "runtime_dispatches_session_rollback_into_effective_ui_projection"
+      ],
+      "why_shared": "runtime must refresh effective transcript projection centrally after rollback instead of letting each UI delete DOM rows locally"
     }
   ],
   "call_table": [
@@ -256,6 +273,28 @@
       "output_semantic": "dispatch envelope",
       "caller": "CLI/WebUI transport adapters",
       "callee": "protocol boundary",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04a",
+      "symbol_path": "validate_command / command_dispatch_target",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "validate session-management mutation intents and route them to the session persistence owner",
+      "input_semantic": "session CRUD or rollback command",
+      "output_semantic": "owner-routed dispatch envelope or protocol rejection",
+      "caller": "CLI/WebUI/ADP transports",
+      "callee": "protocol boundary",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04b",
+      "symbol_path": "UiProtocolState::replace_session_turn_projections",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "replace one session's effective transcript projection after persistence-owned rollback",
+      "input_semantic": "session id plus effective turn projections",
+      "output_semantic": "queryable session transcript excluding rolled-back turns",
+      "caller": "runtime.ui-command-dispatch",
+      "callee": "protocol state",
       "binding_status": "bound"
     },
     {

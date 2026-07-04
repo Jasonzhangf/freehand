@@ -13,6 +13,7 @@
     "config-selected live bootstrap may also seed one shared metadata ledger path for node-owned bootstrap and pairing provenance",
     "live bootstrap may restore persisted session truth and prior turn projections before the next command runs",
     "runtime dispatch owner reads the declared owner target from the envelope",
+    "session management commands route through runtime into `reason.persistence` session metadata and rollback APIs; runtime refreshes `UiProtocolState` from persistence-owned metadata/effective transcript projections after mutation",
     "runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics",
     "runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs",
     "runtime read-only error-center queries enter through `UiRuntimeQueryPort` and read watermarked metadata rows through the runtime metadata projection owner",
@@ -36,6 +37,8 @@
     "active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion",
     "latest-active cancellation supports Esc during the short window before WebUI has received a concrete turn_id",
     "selected session cwd is persisted on turn records, projected to UiProtocolState, and restored for later same-session inheritance",
+    "session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and protocol projection is refreshed",
+    "session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections",
     "runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events",
     "runtime error-center queries return UI-safe projections built from watermarked metadata rows and omit raw error/request/provider text",
     "runtime task list subscription updates reuse the same UI-safe projection helper as task list queries"
@@ -52,6 +55,8 @@
     "live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries",
     "live provider/tool failures that materialize failed turn truth are returned as explicit dispatch failures only after the failed projection has been refreshed into UiProtocolState",
     "CancelLatestActiveTurn with no active or persisted turn returns explicit target-not-found",
+    "unknown session metadata mutation targets return explicit target-not-found failures",
+    "rollback with no eligible target or with an active turn returns explicit dispatch failure; runtime must not delete UI turns locally to pretend success",
     "missing task history targets return explicit target-not-found and invalid task filters return dispatch failures",
     "invalid error-center query filters or metadata read failures return explicit dispatch failures",
     "task list publication failures after task mutation are explicit live bridge failures"
@@ -281,6 +286,28 @@
       "output_semantic": "ErrorCenterEvents query projection",
       "caller": "RuntimeCommandDispatcher::query_runtime",
       "callee": "metadata.core ledger plus ui.protocol DTO",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "RuntimeCommandDispatcher::dispatch_session_management",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "route protocol-owned session CRUD and rollback commands into reason persistence APIs and refresh shared UI projection",
+      "input_semantic": "session CRUD or rollback dispatch envelope",
+      "output_semantic": "dispatch receipt or explicit target-not-found/failure",
+      "caller": "RuntimeCommandDispatcher::dispatch",
+      "callee": "ReasonPersistence session metadata/rollback owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "15",
+      "symbol_path": "UiProtocolState::replace_session_turn_projections",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "replace one session transcript with persistence-owned effective projections after rollback",
+      "input_semantic": "session id plus effective turn projections",
+      "output_semantic": "queryable transcript excluding rolled-back logical turns",
+      "caller": "RuntimeCommandDispatcher::dispatch_session_management",
+      "callee": "ui.protocol state",
       "binding_status": "bound"
     }
   ],
