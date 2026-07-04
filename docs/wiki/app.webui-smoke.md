@@ -31,6 +31,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - front-end cancel button and Escape key send protocol-owned CancelTurn commands through command ingress
 - front-end Escape sends CancelLatestActiveTurn when submit is in flight but no concrete turn_id has reached the browser yet
 - command-ingress transport failures must stay explicit at the app boundary and may not collapse into success projection
+- transport-facing ADP subscribe route can accept protocol-owned task list subscriptions and obtain the initial snapshot from the injected runtime query port
 
 ## Response Mainline
 
@@ -64,6 +65,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - front-end cancel handling clears pending local input only after sending CancelTurn for the current active turn and refreshing protocol truth
 - terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success
 - front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window
+- ADP task list subscription returns accepted plus initial runtime task list projection and later runtime-published task list events
 
 ## Error Mainline
 
@@ -82,6 +84,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - restored attachment metadata without a current page file handle is visible as metadata-only and must not pretend the binary payload was rehydrated
 - transient missing debug snapshots are rendered as pending debug state, not command failure
 - debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state
+- task subscription initial query failures surface explicit ADP failure frames instead of app-owned fallback state
 
 ## Shared Multi-Reference Functions
 
@@ -119,6 +122,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | 13 | `cancelActiveTurn` | `apps/freehand-server/assets/webui.js` | send CancelTurn or CancelLatestActiveTurn over ADP for the active protocol turn from button or Escape key | latest protocol turn id | ADP command receipt plus refreshed projection | WebUI shell | daemon `/adp` | bound |
 | 14 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP compatibility transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper | bound |
 | 15 | `loadSamplePrompt` | `apps/freehand-server/assets/webui.js` | load success/failure ADP sample prompts into the composer without inventing a second command path | sample kind | composer text plus visible command status | WebUI shell | normal ADP submit path | bound |
+| 16 | `initial_adp_subscription_projection` | `apps/freehand-server/src/lib.rs` | serve initial ADP subscription snapshot including runtime-backed task list projection | subscription command plus protocol state plus runtime query port | optional UI projection or failure | handle_adp_subscribe | UiRuntimeQueryPort::query_runtime / UiProtocolState::query | bound |
 
 ## Sync Status Against Mainline Call
 

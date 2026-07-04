@@ -17,7 +17,8 @@
     "runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs",
     "live submit registers an active turn cancel token before provider execution and releases the runtime mutex before running provider IO",
     "CancelLatestActiveTurn resolves to the newest active live turn before falling back to latest persisted runtime turn",
-    "submit commands may carry selected cwd; runtime canonicalizes and binds cwd to the selected session"
+    "submit commands may carry selected cwd; runtime canonicalizes and binds cwd to the selected session",
+    "successful task tool mutations publish task list projection events through runtime-owned UI protocol state"
   ],
   "response_mainline": [
     "reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections, including the original user prompt and explicit cancelled terminal status for public conversation projection",
@@ -34,7 +35,8 @@
     "active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion",
     "latest-active cancellation supports Esc during the short window before WebUI has received a concrete turn_id",
     "selected session cwd is persisted on turn records, projected to UiProtocolState, and restored for later same-session inheritance",
-    "runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events"
+    "runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events",
+    "runtime task list subscription updates reuse the same UI-safe projection helper as task list queries"
   ],
   "error_mainline": [
     "unsupported runtime command paths return explicit dispatch-port failures",
@@ -48,7 +50,8 @@
     "live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries",
     "live provider/tool failures that materialize failed turn truth are returned as explicit dispatch failures only after the failed projection has been refreshed into UiProtocolState",
     "CancelLatestActiveTurn with no active or persisted turn returns explicit target-not-found",
-    "missing task history targets return explicit target-not-found and invalid task filters return dispatch failures"
+    "missing task history targets return explicit target-not-found and invalid task filters return dispatch failures",
+    "task list publication failures after task mutation are explicit live bridge failures"
   ],
   "shared_functions": [
     {
@@ -103,6 +106,21 @@
         "daemon_adp_queries_runtime_task_truth"
       ],
       "why_shared": "keeps ledger ordering in task.orchestration instead of duplicating it in runtime or UI"
+    },
+    {
+      "symbol": "task_list_projection_from_runtime",
+      "owner": "crates/freehand-runtime/src/lib.rs",
+      "purpose": "build UI-safe task list projection from task owner snapshots for query and push surfaces",
+      "allowed_callers": [
+        "RuntimeCommandDispatcher::query_runtime",
+        "run_live_reason_turn_with_hooks task projection hook"
+      ],
+      "related_tests": [
+        "runtime_query_reads_task_truth_from_task_runtime",
+        "runtime_task_tool_mutation_publishes_task_list_projection",
+        "daemon_adp_subscribes_runtime_task_truth"
+      ],
+      "why_shared": "keeps task UI projection single-sourced while task filtering remains in task.orchestration"
     }
   ],
   "call_table": [
@@ -225,6 +243,17 @@
       "output_semantic": "task query projection",
       "caller": "RuntimeCommandDispatcher::query_runtime",
       "callee": "UI protocol DTO",
+      "binding_status": "bound"
+    },
+    {
+      "step": "12",
+      "symbol_path": "task_list_projection_from_runtime",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "build and publish task list projection from task runtime after successful task mutation",
+      "input_semantic": "runtime home plus task filters",
+      "output_semantic": "UI task list projection",
+      "caller": "run_live_reason_turn_with_hooks / RuntimeCommandDispatcher::query_runtime",
+      "callee": "TaskRuntime::list_tasks",
       "binding_status": "bound"
     }
   ],

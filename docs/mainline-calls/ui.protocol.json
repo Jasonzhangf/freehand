@@ -17,7 +17,8 @@
     "task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied",
     "subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams",
     "CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id",
-    "SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation"
+    "SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation",
+    "task list subscribe commands are protocol-owned ADP/subscribe shapes while task truth remains runtime/task-owner supplied"
   ],
   "response_mainline": [
     "query returns snapshots",
@@ -42,7 +43,8 @@
     "public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed public tool bodies expose protocol-projected tool result detail",
     "cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn",
     "session list and transcript projections expose cwd bound by runtime/session truth",
-    "task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`"
+    "task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
+    "task list subscription events carry UI-safe task list projections published by runtime owner code"
   ],
   "error_mainline": [
     "invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors",
@@ -56,7 +58,8 @@
     "cancelled terminal projection must stay explicit and must not be collapsed into failed or completed UI status",
     "CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module",
     "empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently",
-    "empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse"
+    "empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse",
+    "task history remains query-only; task list subscribe rejects non-subscription misuse through protocol stream matching"
   ],
   "shared_functions": [
     {
@@ -176,6 +179,19 @@
         "daemon_adp_queries_runtime_task_truth"
       ],
       "why_shared": "keeps app transports protocol-only while allowing runtime owner read models"
+    },
+    {
+      "symbol": "UiProtocolState::publish_task_list_projection",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "publish runtime-supplied task list projection through the protocol subscription channel without owning task truth",
+      "allowed_callers": [
+        "runtime.ui-command-dispatch"
+      ],
+      "related_tests": [
+        "task_list_subscription_matches_runtime_projection_only",
+        "daemon_adp_subscribes_runtime_task_truth"
+      ],
+      "why_shared": "keeps ADP task push on the same protocol subscription bus as turn/debug updates"
     }
   ],
   "call_table": [
@@ -419,6 +435,28 @@
       "output_semantic": "terminal text plus terminal status projection",
       "caller": "runtime/app protocol consumers",
       "callee": "protocol projector",
+      "binding_status": "bound"
+    },
+    {
+      "step": "21",
+      "symbol_path": "UiProtocolState::publish_task_list_projection",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "publish runtime-supplied task list projection to subscribers",
+      "input_semantic": "UI task list projection",
+      "output_semantic": "UI subscription event",
+      "caller": "runtime.ui-command-dispatch",
+      "callee": "protocol subscription channel",
+      "binding_status": "bound"
+    },
+    {
+      "step": "22",
+      "symbol_path": "subscription_selector / subscription_matches",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "route task list subscription selectors to task list projection events",
+      "input_semantic": "SubscribeTaskList command plus UI projection",
+      "output_semantic": "subscription delivery decision",
+      "caller": "ADP/SSE subscription transport",
+      "callee": "protocol selector matcher",
       "binding_status": "bound"
     }
   ],

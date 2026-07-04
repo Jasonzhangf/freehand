@@ -717,6 +717,144 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn daemon_adp_subscribes_runtime_task_truth() {
+        let (provider_url, request_rx, provider_handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_named_response(
+                    "toolu_task_adp_push_1",
+                    "task",
+                    serde_json::json!({
+                        "op":"create",
+                        "task_id":"adp-task-push-1",
+                        "title":"ADP task push",
+                        "content":"Publish task truth to ADP subscribers",
+                        "goal":"Task subscriber receives push",
+                        "deliverables":["task list subscription"],
+                        "acceptance":["subscription event contains task"],
+                        "dispatch":{"mode":"none"},
+                        "priority":88
+                    }),
+                ),
+                complete_single_response("task push done"),
+            ],
+        );
+        let server = TestServer::spawn(master_config_text(&provider_url)).await;
+        let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
+        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Subscribe {
+                    request_id: "task-sub-1".to_owned(),
+                    subscription: UiCommand::SubscribeTaskList {
+                        status: Some("waiting_agent".to_owned()),
+                        agent_id: None,
+                    },
+                })
+                .expect("task list subscribe json")
+                .into(),
+            ))
+            .await
+            .expect("send task subscribe");
+        match next_adp_response(&mut socket, "task subscription accepted").await {
+            UiAdpResponse::SubscriptionAccepted {
+                request_id,
+                selector,
+            } => {
+                assert_eq!(request_id, "task-sub-1");
+                assert_eq!(
+                    selector.stream_kind,
+                    freehand_ui_protocol::UiStreamKind::TaskList
+                );
+            }
+            other => panic!("unexpected task subscription ack: {other:?}"),
+        }
+        match next_adp_response(&mut socket, "initial task list event").await {
+            UiAdpResponse::SubscriptionEvent { request_id, event } => {
+                assert_eq!(request_id, "task-sub-1");
+                match event.projection {
+                    freehand_ui_protocol::UiProjection::TaskList(list) => {
+                        assert!(list.tasks.is_empty());
+                    }
+                    other => panic!("unexpected initial task projection: {other:?}"),
+                }
+            }
+            other => panic!("unexpected initial task response: {other:?}"),
+        }
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Command {
+                    request_id: "task-submit-1".to_owned(),
+                    command: UiCommand::SubmitUserInput {
+                        text: "create task through provider".to_owned(),
+                        session_id: None,
+                        cwd: None,
+                    },
+                })
+                .expect("task submit json")
+                .into(),
+            ))
+            .await
+            .expect("send task submit");
+
+        let mut saw_task_push = false;
+        let mut saw_receipt = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !saw_task_push || !saw_receipt {
+            let now = tokio::time::Instant::now();
+            assert!(now < deadline, "ADP task subscribe timeout");
+            let response = timeout(deadline - now, socket.next())
+                .await
+                .expect("ADP response timeout")
+                .expect("ADP response")
+                .expect("ADP websocket message");
+            let Message::Text(text) = response else {
+                panic!("unexpected ADP websocket message: {response:?}");
+            };
+            let response: UiAdpResponse = serde_json::from_str(&text).expect("adp response json");
+            match response {
+                UiAdpResponse::SubscriptionEvent { request_id, event }
+                    if request_id == "task-sub-1" =>
+                {
+                    if let freehand_ui_protocol::UiProjection::TaskList(list) = event.projection
+                        && list
+                            .tasks
+                            .iter()
+                            .any(|task| task.task_id == "adp-task-push-1")
+                    {
+                        saw_task_push = true;
+                    }
+                }
+                UiAdpResponse::CommandReceipt {
+                    request_id,
+                    receipt,
+                } if request_id == "task-submit-1" => {
+                    assert!(
+                        receipt
+                            .dispatch_status
+                            .contains("reason_live_turn_completed")
+                    );
+                    saw_receipt = true;
+                }
+                UiAdpResponse::Failure {
+                    request_id,
+                    failure,
+                } => panic!("unexpected ADP failure {request_id}: {failure:?}"),
+                _ => {}
+            }
+        }
+
+        let _ = request_rx.recv().expect("first provider request");
+        let _ = request_rx.recv().expect("second provider request");
+        provider_handle.join().expect("join provider");
+        let _ = socket.close(None).await;
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn daemon_blank_latest_sse_streams_user_prompt_before_provider_output() {
         let (provider_url, request_rx, provider_handle) = spawn_sequence_server(
             "application/json",
@@ -1480,6 +1618,20 @@ api_key = "test-api-key"
 
     fn tool_use_single_response() -> String {
         r#"{"content":[{"type":"tool_use","id":"toolu_read_1","name":"read_file","input":{"path":"Cargo.toml","offset":0,"limit":2}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
+    }
+
+    fn tool_use_named_response(tool_call_id: &str, tool_name: &str, input: Value) -> String {
+        serde_json::json!({
+            "content": [{
+                "type": "tool_use",
+                "id": tool_call_id,
+                "name": tool_name,
+                "input": input
+            }],
+            "usage": {"input_tokens": 20, "output_tokens": 16},
+            "stop_reason": "tool_use"
+        })
+        .to_string()
     }
 
     fn tool_use_write_file_response(path: &str, content: &str) -> String {

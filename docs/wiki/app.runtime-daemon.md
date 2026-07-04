@@ -21,6 +21,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - mutation commands travel through protocol-owned ingress validation and dispatch envelope building before runtime dispatch
 - explicit checkpoint rewind can travel through the same HTTP command ingress without adding app-owned business logic
 - checkpoint summary query travels through the shared protocol-only HTTP query route from runtime-populated UI state
+- daemon ADP WebSocket accepts task list subscriptions through the shared protocol transport and injected runtime query port
 
 ## Response Mainline
 
@@ -34,6 +35,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - daemon can rewind a previously checkpointed writable-tool mutation through runtime owner dispatch while leaving turn/session/UI truth untouched
 - daemon can serve checkpoint summary query results after writable mutation and after explicit rewind without reading checkpoint files in app code
 - daemon remains a host process and does not own reason or node semantics itself
+- daemon serves task list subscription events from runtime-published task projections after task tool mutations
 
 ## Error Mainline
 
@@ -48,6 +50,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - missing checkpoint rewind manifests surface protocol-mapped target-not-found failure over the same HTTP command ingress
 - slave-mode agent selection returns explicit daemon startup error
 - async command ingress does not execute injected synchronous provider or runtime work inline; it returns explicit transport failure if the dispatch task itself fails
+- task subscription initial query and projection failures surface explicit ADP failure frames
 
 ## Shared Multi-Reference Functions
 
@@ -96,6 +99,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 | 08 | `handle_adp_connection` | `apps/freehand-server/src/lib.rs` | serve protocol-owned ADP command/query/subscribe frames and matching subscription events on one connection | WebSocket ADP connection plus shared protocol state plus dispatch port | ADP response frames and subscription events | ADP socket route | protocol state and runtime dispatch port | bound |
 | 08a | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | serve daemon-hosted read-only runtime query frames such as task list/history | ADP query command | ADP query result or failure frame | shared ADP transport | runtime owner query bridge | bound |
 | 09 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | ~/.freehand/daemon.env | daemon process exec | macOS launchd | FREEHAND_DAEMON_BIN serve | bound |
+| 09 | `handle_adp_socket / RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP task list query and subscribe surfaces from runtime task truth | ADP task query or subscribe frame | ADP task query result or subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime query/projection owner | bound |
 
 ## Sync Status Against Mainline Call
 

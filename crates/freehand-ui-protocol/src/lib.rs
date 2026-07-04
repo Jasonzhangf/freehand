@@ -33,6 +33,7 @@ pub enum UiStreamKind {
     NodeStatus,
     Debug,
     Checkpoint,
+    TaskList,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +82,12 @@ pub enum UiCommand {
     },
     SubscribeNodeStatus,
     SubscribeProgress,
+    SubscribeTaskList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<AgentId>,
+    },
     SubscribeDebugState {
         client: UiClientKind,
         turn_id: TurnId,
@@ -391,6 +398,7 @@ pub enum UiProjection {
     Progress(TaskProgressSnapshot),
     Debug(DebugStateSnapshot),
     Checkpoints(UiCheckpointSnapshot),
+    TaskList(UiTaskListProjection),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -645,6 +653,10 @@ impl UiProtocolState {
 
     pub fn subscribe(&self) -> broadcast::Receiver<UiSubscriptionEvent> {
         self.subscription_tx.subscribe()
+    }
+
+    pub fn publish_task_list_projection(&self, projection: UiTaskListProjection) {
+        self.publish_projection(UiProjection::TaskList(projection));
     }
 
     pub fn apply_turn_projection(&mut self, projection: UiTurnProjection) {
@@ -1250,6 +1262,11 @@ pub fn subscription_selector(command: &UiCommand) -> Option<SubscriptionSelector
             stream_kind: UiStreamKind::Progress,
             target_turn_id: None,
         }),
+        UiCommand::SubscribeTaskList { .. } => Some(SubscriptionSelector {
+            client: UiClientKind::WebUi,
+            stream_kind: UiStreamKind::TaskList,
+            target_turn_id: None,
+        }),
         UiCommand::SubscribeDebugState { client, turn_id } => Some(SubscriptionSelector {
             client: *client,
             stream_kind: UiStreamKind::Debug,
@@ -1275,6 +1292,7 @@ pub fn subscription_matches(
             selector.target_turn_id.as_ref() == Some(&debug.semantic.turn_id)
         }
         (UiStreamKind::Checkpoint, UiProjection::Checkpoints(_)) => true,
+        (UiStreamKind::TaskList, UiProjection::TaskList(_)) => true,
         _ => false,
     }
 }
@@ -1737,6 +1755,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::SubscribeTurn { .. } => "subscribe_turn",
         UiCommand::SubscribeNodeStatus => "subscribe_node_status",
         UiCommand::SubscribeProgress => "subscribe_progress",
+        UiCommand::SubscribeTaskList { .. } => "subscribe_task_list",
         UiCommand::SubscribeDebugState { .. } => "subscribe_debug_state",
         UiCommand::QueryLatestActiveTurn => "query_latest_active_turn",
         UiCommand::QueryTurn { .. } => "query_turn",
@@ -3083,6 +3102,51 @@ mod tests {
                 latest_active_turn_id: Some(projection.turn_id),
             }
         );
+    }
+
+    #[test]
+    fn task_list_subscription_matches_runtime_projection_only() {
+        let selector = subscription_selector(&UiCommand::SubscribeTaskList {
+            status: Some("waiting_agent".to_owned()),
+            agent_id: Some(AgentId::new("worker-1")),
+        })
+        .expect("task list selector");
+        assert_eq!(selector.stream_kind, UiStreamKind::TaskList);
+        assert_eq!(selector.target_turn_id, None);
+
+        let projection = UiTaskListProjection {
+            source_agent_id: AgentId::new("master"),
+            status_filter: Some("waiting_agent".to_owned()),
+            agent_filter: Some(AgentId::new("worker-1")),
+            tasks: Vec::new(),
+        };
+        assert!(subscription_matches(
+            &selector,
+            &UiProjection::TaskList(projection),
+            None,
+        ));
+        assert!(!subscription_matches(
+            &selector,
+            &UiProjection::Progress(TaskProgressSnapshot {
+                source: UiSource {
+                    source_agent_id: AgentId::new("master"),
+                    source_node_id: "master-node".to_owned(),
+                    source_turn_id: Some(TurnId::new("turn-1")),
+                    stream_kind: UiStreamKind::Progress,
+                },
+                turn_id: TurnId::new("turn-1"),
+                status_text: "running".to_owned(),
+            }),
+            None,
+        ));
+
+        let err = UiProtocolState::default()
+            .query(&UiCommand::QueryTaskList {
+                status: None,
+                agent_id: None,
+            })
+            .expect_err("task query must stay runtime-owned");
+        assert_eq!(err, UiProtocolError::StreamKindMismatch);
     }
 
     #[test]

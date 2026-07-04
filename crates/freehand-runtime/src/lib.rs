@@ -133,8 +133,16 @@ pub enum RuntimeLiveBridgeError {
     ToolCheckpointFailed(String),
     #[error("live tool execution failed: {0}")]
     ToolExecutionFailed(String),
+    #[error("task projection failed: {0}")]
+    TaskProjectionFailed(String),
     #[error("live turn cancelled")]
     Cancelled,
+}
+
+#[derive(Debug, Clone)]
+struct ExecutedToolResult {
+    result: ReasonReq05ToolResultReentry,
+    task_truth_changed: bool,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -706,22 +714,30 @@ pub fn run_live_reason_turn(
     selected: &SelectedAgentConfig,
     request: LiveReasonTurnRequest,
 ) -> Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError> {
-    run_live_reason_turn_with_hooks(selected, request, |_| {}, |_| {})
+    run_live_reason_turn_with_hooks(selected, request, |_| {}, |_| {}, |_| {})
 }
 
-pub fn run_live_reason_turn_with_hooks<FB, FD>(
+pub fn run_live_reason_turn_with_hooks<FB, FD, FT>(
     selected: &SelectedAgentConfig,
     request: LiveReasonTurnRequest,
     on_broadcast: FB,
     on_debug: FD,
+    on_task_list_projection: FT,
 ) -> Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError>
 where
     FB: FnMut(&ReasonBroadcastEvent),
     FD: FnMut(&DebugEvent),
+    FT: FnMut(&UiTaskListProjection),
 {
     match (selected.provider.provider_type, selected.provider.protocol) {
         (ProviderType::Anthropic, ConfigProviderProtocol::Messages) => {
-            run_live_anthropic_reason_turn(selected, request, on_broadcast, on_debug)
+            run_live_anthropic_reason_turn(
+                selected,
+                request,
+                on_broadcast,
+                on_debug,
+                on_task_list_projection,
+            )
         }
         _ => Err(RuntimeLiveBridgeError::UnsupportedLiveProvider {
             provider: selected.provider.provider_type.as_str().to_owned(),
@@ -730,15 +746,17 @@ where
     }
 }
 
-fn run_live_anthropic_reason_turn<FB, FD>(
+fn run_live_anthropic_reason_turn<FB, FD, FT>(
     selected: &SelectedAgentConfig,
     request: LiveReasonTurnRequest,
     mut on_broadcast: FB,
     mut on_debug: FD,
+    mut on_task_list_projection: FT,
 ) -> Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError>
 where
     FB: FnMut(&ReasonBroadcastEvent),
     FD: FnMut(&DebugEvent),
+    FT: FnMut(&UiTaskListProjection),
 {
     let agent_id = AgentId::new(selected.name.clone());
     let persistence = ReasonPersistence::new(request.runtime_home.clone(), agent_id.clone());
@@ -1183,13 +1201,14 @@ where
             consecutive_schema_rejections = 0;
             for tool_call in pending_tool_calls {
                 ensure_live_not_cancelled(&request)?;
-                let tool_result = execute_registry_tool_call(
+                let executed_tool_result = execute_registry_tool_call(
                     &tool_registry,
                     &request.runtime_home,
                     request.cwd.as_deref(),
                     &turn,
                     &tool_call,
                 )?;
+                let tool_result = executed_tool_result.result.clone();
                 write_control_hook_metadata(
                     &metadata_center,
                     &agent_id,
@@ -1294,6 +1313,18 @@ where
                     })?;
                 drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                 drain_debug_events(&debug_receiver, &mut on_debug);
+                if executed_tool_result.task_truth_changed
+                    && tool_result.tool_result.status == ToolResultStatus::Success
+                {
+                    let projection = task_list_projection_from_runtime(
+                        &request.runtime_home,
+                        &agent_id,
+                        None,
+                        None,
+                    )
+                    .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+                    on_task_list_projection(&projection);
+                }
                 executed_tool_call_ids.push(tool_call.tool_call.tool_call_id.as_str().to_owned());
                 tool_exchanges.push(ProviderToolExchange {
                     tool_call,
@@ -2319,6 +2350,14 @@ impl RuntimeCommandDispatcher {
                     apply_runtime_debug_event(&ui_state, &reason_agent_id, &master_node_id, event);
                 }
             },
+            |projection| {
+                if !cancel_token.load(Ordering::SeqCst) {
+                    ui_state
+                        .lock()
+                        .expect("lock ui state")
+                        .publish_task_list_projection(projection.clone());
+                }
+            },
         );
         let outcome = self.finish_live_submit(&prepared, outcome)?;
         Ok(UiCommandDispatchReceipt {
@@ -3038,6 +3077,30 @@ fn project_task_list_for_ui(
     }
 }
 
+fn task_list_projection_from_runtime(
+    runtime_home: &Path,
+    source_agent_id: &AgentId,
+    status_filter: Option<String>,
+    agent_filter: Option<AgentId>,
+) -> Result<UiTaskListProjection, TaskError> {
+    let task_runtime = TaskRuntime::boot(runtime_home, source_agent_id.clone())?;
+    let parsed_status = status_filter
+        .as_deref()
+        .map(parse_task_status)
+        .transpose()
+        .map_err(TaskError::Persistence)?;
+    let tasks = task_runtime.list_tasks(TaskListQuery {
+        status: parsed_status,
+        assignee: agent_filter.clone(),
+    })?;
+    Ok(project_task_list_for_ui(
+        source_agent_id.clone(),
+        status_filter,
+        agent_filter,
+        tasks,
+    ))
+}
+
 fn project_task_snapshot_for_ui(task: TaskSnapshot) -> UiTaskSnapshotProjection {
     UiTaskSnapshotProjection {
         task_id: task.task_id.as_str().to_owned(),
@@ -3699,14 +3762,17 @@ fn execute_registry_tool_call(
     workspace_root: Option<&Path>,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
-) -> Result<ReasonReq05ToolResultReentry, RuntimeLiveBridgeError> {
+) -> Result<ExecutedToolResult, RuntimeLiveBridgeError> {
     if !tool_call.tool_call.arguments_complete {
-        return Ok(tool_result_reentry(
-            turn,
-            tool_call,
-            ToolResultStatus::Failed,
-            "Tool execution failed: cannot execute incomplete tool arguments".to_owned(),
-        ));
+        return Ok(ExecutedToolResult {
+            result: tool_result_reentry(
+                turn,
+                tool_call,
+                ToolResultStatus::Failed,
+                "Tool execution failed: cannot execute incomplete tool arguments".to_owned(),
+            ),
+            task_truth_changed: false,
+        });
     }
     if let Some(root) = workspace_root {
         return with_workspace_root(root, || {
@@ -3725,17 +3791,26 @@ fn execute_registry_tool_call_with_workspace(
     workspace_root: &Path,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
-) -> Result<ReasonReq05ToolResultReentry, RuntimeLiveBridgeError> {
+) -> Result<ExecutedToolResult, RuntimeLiveBridgeError> {
     let tool_name = tool_call.tool_call.tool_name.as_str();
     if tool_name == "task" {
-        let (status, output) = match execute_task_tool(runtime_home, turn, tool_call) {
-            Ok(output) => (ToolResultStatus::Success, output),
-            Err(err) => (
-                ToolResultStatus::Failed,
-                format!("Task tool execution failed: {err}"),
-            ),
-        };
-        return Ok(tool_result_reentry(turn, tool_call, status, output));
+        let (status, output, task_truth_changed) =
+            match execute_task_tool(runtime_home, turn, tool_call) {
+                Ok(output) => (
+                    ToolResultStatus::Success,
+                    output,
+                    task_tool_call_mutates_truth(tool_call),
+                ),
+                Err(err) => (
+                    ToolResultStatus::Failed,
+                    format!("Task tool execution failed: {err}"),
+                    false,
+                ),
+            };
+        return Ok(ExecutedToolResult {
+            result: tool_result_reentry(turn, tool_call, status, output),
+            task_truth_changed,
+        });
     }
     if is_checkpointable_file_mutation_tool(tool_name) {
         let store = RuntimeCheckpointStore::new_with_workspace_root(
@@ -3772,7 +3847,10 @@ fn execute_registry_tool_call_with_workspace(
                 .mark_applied(&manifest)
                 .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
         }
-        return Ok(tool_result_reentry(turn, tool_call, status, output));
+        return Ok(ExecutedToolResult {
+            result: tool_result_reentry(turn, tool_call, status, output),
+            task_truth_changed: false,
+        });
     }
     let (status, output) = match registry.execute(tool_call) {
         Ok(output) => (ToolResultStatus::Success, output.text),
@@ -3781,7 +3859,10 @@ fn execute_registry_tool_call_with_workspace(
             format!("Tool execution failed: {err}"),
         ),
     };
-    Ok(tool_result_reentry(turn, tool_call, status, output))
+    Ok(ExecutedToolResult {
+        result: tool_result_reentry(turn, tool_call, status, output),
+        task_truth_changed: false,
+    })
 }
 
 fn execute_task_tool(
@@ -4070,6 +4151,31 @@ fn execute_task_tool(
         }
         other => Err(format!("unsupported task op `{other}`")),
     }
+}
+
+fn task_tool_call_mutates_truth(tool_call: &ReasonReq04ToolCall) -> bool {
+    let args = tool_arguments_object(&tool_call.tool_call.arguments);
+    let Some(Value::String(op)) = args.get("op") else {
+        return false;
+    };
+    matches!(
+        op.as_str(),
+        "create"
+            | "append"
+            | "pause"
+            | "resume"
+            | "heartbeat"
+            | "assign"
+            | "claim_next"
+            | "record_execution"
+            | "cancel"
+            | "submit_review"
+            | "approve"
+            | "reject"
+            | "close"
+            | "create_agent"
+            | "close_agent"
+    )
 }
 
 fn task_mutation_request(
@@ -5988,6 +6094,7 @@ mod tests {
             request,
             |_| {},
             |event| debug_events.push(event.clone()),
+            |_| {},
         )
         .expect("live bridge");
         let raw_request = rx.recv().expect("request");
@@ -6105,6 +6212,7 @@ mod tests {
         let outcome = run_live_reason_turn_with_hooks(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
             request,
+            |_| {},
             |_| {},
             |_| {},
         )
@@ -6892,6 +7000,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 }
             },
             |_| {},
+            |_| {},
         )
         .expect("live bridge");
         let raw_request = rx.recv().expect("request");
@@ -6958,6 +7067,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 }
             },
             |_| {},
+            |_| {},
         )
         .expect_err("cancelled before tool execution");
         handle.join().expect("join");
@@ -7003,6 +7113,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     cancel_token.store(true, Ordering::SeqCst);
                 }
             },
+            |_| {},
             |_| {},
         )
         .expect_err("cancelled before terminal persistence");
@@ -7176,6 +7287,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             request,
             |_| {},
             |event| debug_events.push(event.clone()),
+            |_| {},
         )
         .expect("live bridge");
         let first_request = rx.recv().expect("first request");
@@ -8743,6 +8855,64 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             err,
             UiCommandDispatchPortError::TargetNotFound("missing-runtime-task".to_owned())
         );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_task_tool_mutation_publishes_task_list_projection() {
+        let runtime_home = temp_runtime_home();
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_named_response(
+                    "toolu_task_create_1",
+                    "task",
+                    json!({
+                        "op":"create",
+                        "task_id":"runtime-push-task-1",
+                        "title":"Runtime push task",
+                        "content":"Task list push content",
+                        "goal":"Publish task projection",
+                        "deliverables":["task projection"],
+                        "acceptance":["subscriber sees task"],
+                        "dispatch":{"mode":"none"},
+                        "priority":77
+                    }),
+                ),
+                complete_single_response("task push done"),
+            ],
+        );
+        let request = LiveReasonTurnRequest {
+            runtime_home: runtime_home.clone(),
+            session_id: SessionId::new("runtime-task-push-session"),
+            turn_id: TurnId::new("runtime-turn-task-push-1"),
+            trace_id: TraceId::new("runtime-trace-task-push-1"),
+            prompt: "create a task".to_owned(),
+            cwd: None,
+            stream: false,
+            cancel_token: None,
+        };
+        let mut task_projections = Vec::<UiTaskListProjection>::new();
+
+        let outcome = run_live_reason_turn_with_hooks(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+            |_| {},
+            |_| {},
+            |projection| task_projections.push(projection.clone()),
+        )
+        .expect("live bridge");
+        let _ = rx.recv().expect("first provider request");
+        let _ = rx.recv().expect("second provider request");
+        handle.join().expect("join provider");
+
+        assert_eq!(outcome.tool_executions, 1);
+        assert_eq!(task_projections.len(), 1);
+        assert_eq!(task_projections[0].tasks.len(), 1);
+        assert_eq!(task_projections[0].tasks[0].task_id, "runtime-push-task-1");
+        assert_eq!(task_projections[0].tasks[0].status, "waiting_agent");
+        assert_eq!(task_projections[0].tasks[0].priority, 77);
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }

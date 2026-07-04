@@ -17,6 +17,7 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe, query, and query-as-command frames
 - for ADP turn samples, CLI connects to the same daemon `/adp`, creates an isolated sample session, subscribes to latest-turn updates, submits a success sample prompt or a tool-result-failure recovery prompt, verifies the matching terminal projection, then queries the sample session transcript to prove round/tool evidence
 - for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis
+- for ADP task subscribe, CLI connects to the same daemon `/adp` and sends protocol-owned task list subscription frames for no-UI task push diagnosis
 
 ## Response Mainline
 
@@ -26,6 +27,7 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - ADP smoke prints the observed subscription_accepted, subscription_event, query_result, and explicit failure frame sequence for no-UI diagnosis
 - ADP turn samples print the observed command outcome plus the matching latest-turn projection and transcript evidence; the failure sample proves a failed tool result can continue to a successful terminal turn with rounds>=2, one or more unique tool executions, and one or more unique failed tool results instead of becoming an ADP/system failure
 - ADP task query prints task list count/task ids or task history event counts from protocol-owned query results
+- ADP task subscribe prints accepted state plus task list count/task ids from the initial protocol-owned subscription event
 
 ## Error Mainline
 
@@ -37,6 +39,7 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - rewrite recovery block is reported as explicit blocked outcome, not disguised as success
 - ADP query-as-command must return ingress_command_kind_mismatch, proving command/query separation without mutation
 - ADP task query failures print explicit ADP failure code/message instead of treating missing task truth as an empty success
+- ADP task subscribe failures print explicit ADP failure code/message instead of treating missing task truth as an empty success
 
 ## Shared Multi-Reference Functions
 
@@ -68,6 +71,8 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 | 09 | `run_adp_turn_sample_async` | `apps/freehand-cli/src/main.rs` | submit success/failure sample prompts over ADP into an isolated sample session, verify matching terminal projection, query transcript evidence, and reject system/provider terminal failure explicitly | ADP WebSocket URL plus sample kind | observed success projection or recovered failed-tool-result projection with round/tool counts | ADP sample runner | daemon /adp | bound |
 | 10 | `run_adp_task_query` | `apps/freehand-cli/src/main.rs` | parse ADP task query URL and optional list/history filters | --url ws://.../adp plus optional task filters | selected task query command | CLI dispatcher | ADP task query runner | bound |
 | 11 | `run_adp_task_query_async` | `apps/freehand-cli/src/main.rs` | send task list/history query over ADP and summarize the task projection | ADP WebSocket URL plus task query command | terminal-facing task list/history summary or explicit ADP failure | ADP task query runner | daemon /adp | bound |
+| 12 | `run_adp_task_subscribe` | `apps/freehand-cli/src/main.rs` | parse ADP task subscribe URL and optional list filters | --url ws://.../adp [--status <status>] [--agent <id>] | selected task subscribe command | CLI dispatcher | ADP task subscribe runner | bound |
+| 13 | `run_adp_task_subscribe_async` | `apps/freehand-cli/src/main.rs` | send task list subscription over ADP and summarize the first task list event | ADP WebSocket URL plus task subscription filters | terminal-facing task list subscription summary or explicit ADP failure | ADP task subscribe runner | daemon /adp | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -79,3 +84,4 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - harness-backed app E2E smoke now exists before production CLI or server runtime loop
 - remaining gap: production non-smoke command loop is still pending
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes
+- CLI ADP task list subscribe path is implemented for no-UI task push diagnosis

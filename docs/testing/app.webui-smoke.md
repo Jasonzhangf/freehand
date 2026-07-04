@@ -14,6 +14,7 @@
   - app boundary remains decoupled from reason/provider/node/config semantics
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
   - app boundary can serve ADP runtime-query-port results without importing runtime/task owner crates
+  - app boundary can serve ADP task list subscription initial snapshots through the runtime query port without importing runtime/task owner crates
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
   - WebUI control strip and session rail expose session switching, `/new` global conversation creation, `/task` cwd-bound task creation, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
@@ -52,6 +53,7 @@
   - WebUI command ingress query-route-misuse rejection smoke
   - WebUI ADP query-as-command failure does not mutate state and renders failure
   - WebUI ADP runtime-query-port failure frame smoke
+  - WebUI ADP task list subscription initial snapshot smoke
   - WebUI query projection smoke
   - WebUI debug query projection smoke
   - WebUI latest-turn SSE initial snapshot plus later update smoke
@@ -103,6 +105,7 @@
   - WebUI session creation and selection must remain input-layer affordances over ADP/query state, not local truth writers
   - command-ingress dispatch-port failure and join-failure projection coverage is landed
   - ADP query transport now accepts an injected runtime query port while the app dependency boundary remains protocol-only
+  - ADP subscribe transport now uses the injected runtime query port for task list initial snapshots while keeping app dependency boundary protocol-only
   - submit-success path now refreshes latest turn truth after command receipt
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input
   - submit-in-flight cancel path uses `CancelLatestActiveTurn` before a concrete `turn_id` arrives

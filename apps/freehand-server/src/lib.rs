@@ -553,8 +553,13 @@ async fn handle_adp_subscribe(
         }
     };
     let initial_projection = {
-        let state = state.protocol_state.lock().expect("lock protocol state");
-        match initial_adp_subscription_projection(&state, &subscription) {
+        let runtime_query_port = Arc::clone(&state.runtime_query_port);
+        let protocol_state = state.protocol_state.lock().expect("lock protocol state");
+        match initial_adp_subscription_projection(
+            &protocol_state,
+            &subscription,
+            &runtime_query_port,
+        ) {
             Ok(initial) => initial,
             Err(status) => {
                 let _ = outbound_tx.send(UiAdpResponse::Failure {
@@ -590,6 +595,7 @@ async fn handle_adp_subscribe(
 fn initial_adp_subscription_projection(
     state: &UiProtocolState,
     subscription: &UiCommand,
+    runtime_query_port: &Arc<dyn UiRuntimeQueryPort>,
 ) -> Result<Option<UiProjection>, StatusCode> {
     match subscription {
         UiCommand::SubscribeLatestActiveTurn { client } => match state
@@ -625,6 +631,16 @@ fn initial_adp_subscription_projection(
             _ => Err(StatusCode::BAD_REQUEST),
         },
         UiCommand::SubscribeNodeStatus | UiCommand::SubscribeProgress => Ok(None),
+        UiCommand::SubscribeTaskList { status, agent_id } => {
+            match runtime_query_port.query_runtime(&UiCommand::QueryTaskList {
+                status: status.clone(),
+                agent_id: agent_id.clone(),
+            }) {
+                Ok(Some(UiQueryResult::TaskList(list))) => Ok(Some(UiProjection::TaskList(list))),
+                Ok(Some(_)) | Ok(None) => Err(StatusCode::BAD_REQUEST),
+                Err(_) => Err(StatusCode::BAD_REQUEST),
+            }
+        }
         _ => Err(StatusCode::BAD_REQUEST),
     }
 }
@@ -635,6 +651,7 @@ fn projection_latest_active_turn_id(projection: &UiProjection) -> Option<TurnId>
         UiProjection::Debug(snapshot) => Some(snapshot.semantic.turn_id.clone()),
         UiProjection::Progress(snapshot) => Some(snapshot.turn_id.clone()),
         UiProjection::NodeStatus(_) | UiProjection::Checkpoints(_) => None,
+        UiProjection::TaskList(_) => None,
     }
 }
 
@@ -691,6 +708,9 @@ fn projection_to_sse_event(projection: UiProjection, client: UiClientKind) -> Ev
         UiProjection::Progress(snapshot) => Event::default()
             .event("progress")
             .data(serde_json::to_string(&snapshot).expect("progress json")),
+        UiProjection::TaskList(snapshot) => Event::default()
+            .event("task_list")
+            .data(serde_json::to_string(&snapshot).expect("task list json")),
     }
 }
 

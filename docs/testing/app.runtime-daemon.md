@@ -8,7 +8,7 @@
   - runtime dispatcher exposes one shared UI state handle
   - daemon injects runtime dispatch into shared HTTP/SSE transport
   - daemon exposes the same shared state and runtime dispatch through ADP WebSocket at `/adp`
-  - daemon exposes runtime-backed read-only query port through ADP for owner projections such as task list/history
+  - daemon exposes runtime-backed read-only query port through ADP for owner projections such as task list/history and task list subscription initial snapshots
   - daemon restart restores persisted latest-turn projection before new command ingress
   - provider-backed submit and direct-message commands return runtime-backed receipts
   - latest-turn query reflects runtime-owned terminal projection changes after provider completion
@@ -36,6 +36,7 @@
   - daemon corrupt-checkpoint-bootstrap startup rejection smoke
   - daemon ADP WebSocket command/query/subscribe smoke
   - daemon ADP task list/history query smoke
+  - daemon ADP task list subscription smoke
   - daemon ADP query-as-command rejection smoke
   - launchd service smoke: `launchctl print`, `/health`, `/`, log file creation, and restart wait-until-healthy behavior
 - project black-box impact:
@@ -56,5 +57,6 @@
   - daemon startup now also has explicit corrupt checkpoint-projection bootstrap failure coverage
   - daemon ADP WebSocket command/query/subscribe and query-as-command rejection coverage is landed
   - daemon ADP task list/history query coverage is landed
+  - daemon ADP task list subscription coverage is landed
   - config-selected bootstrap smoke is landed and uses configured peer topology
   - migrated mainline-call source and generated wiki are kept in sync with this test design

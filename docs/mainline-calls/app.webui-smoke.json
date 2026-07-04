@@ -27,7 +27,8 @@
     "the protocol-only transport implementation may be reused by a separate runtime host app, but it must remain protocol-only",
     "front-end cancel button and Escape key send protocol-owned CancelTurn commands through command ingress",
     "front-end Escape sends CancelLatestActiveTurn when submit is in flight but no concrete turn_id has reached the browser yet",
-    "command-ingress transport failures must stay explicit at the app boundary and may not collapse into success projection"
+    "command-ingress transport failures must stay explicit at the app boundary and may not collapse into success projection",
+    "transport-facing ADP subscribe route can accept protocol-owned task list subscriptions and obtain the initial snapshot from the injected runtime query port"
   ],
   "response_mainline": [
     "app boundary renders a protocol-driven WebUI page shell; live content is populated from ADP query/subscribe/command frames by default",
@@ -59,7 +60,8 @@
     "the app is a render-only transport boundary, not a reasoning or provider boundary",
     "front-end cancel handling clears pending local input only after sending CancelTurn for the current active turn and refreshing protocol truth",
     "terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success",
-    "front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window"
+    "front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window",
+    "ADP task list subscription returns accepted plus initial runtime task list projection and later runtime-published task list events"
   ],
   "error_mainline": [
     "invalid smoke input or missing projection returns explicit app error",
@@ -76,7 +78,8 @@
     "attachment dispatch failure preserves draft metadata and page-held file handles for retry and must not silently drop the selected files",
     "restored attachment metadata without a current page file handle is visible as metadata-only and must not pretend the binary payload was rehydrated",
     "transient missing debug snapshots are rendered as pending debug state, not command failure",
-    "debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state"
+    "debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state",
+    "task subscription initial query failures surface explicit ADP failure frames instead of app-owned fallback state"
   ],
   "shared_functions": [
     {
@@ -293,6 +296,17 @@
       "output_semantic": "composer text plus visible command status",
       "caller": "WebUI shell",
       "callee": "normal ADP submit path",
+      "binding_status": "bound"
+    },
+    {
+      "step": "16",
+      "symbol_path": "initial_adp_subscription_projection",
+      "file_path": "apps/freehand-server/src/lib.rs",
+      "responsibility": "serve initial ADP subscription snapshot including runtime-backed task list projection",
+      "input_semantic": "subscription command plus protocol state plus runtime query port",
+      "output_semantic": "optional UI projection or failure",
+      "caller": "handle_adp_subscribe",
+      "callee": "UiRuntimeQueryPort::query_runtime / UiProtocolState::query",
       "binding_status": "bound"
     }
   ],

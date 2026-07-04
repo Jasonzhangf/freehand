@@ -13,6 +13,7 @@
   - query returns snapshot truth
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
   - task list/history ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies persisted task truth
+  - task list ADP subscribe frames use protocol-owned subscription shape and receive runtime-supplied task list projections without making protocol state the task truth owner
   - debug query returns per-turn read-only debug snapshot truth
   - checkpoint query returns read-only runtime-owned checkpoint summary projections
   - subscribe returns an initial snapshot plus continuous incremental truth, or waits for the first matching turn when subscribing before any turn exists
@@ -56,6 +57,7 @@
   - debug-event ingestion and receiver-drain behavior
   - ADP frame serialization and failure-frame shape
   - task query command validation covers empty history id and command-ingress rejection for query-route misuse
+  - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
 - module black-box plan:
   - command ingress accept/reject smoke
   - selected-session submit command smoke
@@ -77,6 +79,7 @@
   - blank latest-turn subscribe waits until a turn exists instead of failing early
   - ADP command/query/subscribe frame roundtrip smoke
   - ADP task list/history query smoke proves the protocol frame can carry task read models supplied by runtime
+  - ADP task list subscription smoke proves initial task list projection and subsequent runtime-published task changes use the same subscription channel
   - ADP query-as-command negative smoke
   - ADP session management negative smoke proves invalid session metadata commands, including empty cwd, fail explicitly instead of becoming local-only UI state
 - project black-box impact:
@@ -86,6 +89,7 @@
   - protocol state can back HTTP query and SSE subscribe adapters without app-owned projection duplication
   - protocol state can expose runtime checkpoint summaries without becoming checkpoint recovery truth
   - protocol can expose runtime task query DTOs without becoming task persistence truth
+  - protocol can broadcast runtime task list projections without becoming task persistence truth
   - ADP gives WebUI, Android, CLI, and headless smoke tests one shared control/status protocol
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with protocol owner code and function map updates
@@ -119,3 +123,4 @@
   - session cwd summary/transcript projection is landed and regression-locked
   - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, and `DeleteSession` routing through runtime to `reason.persistence`; `CreateSession.cwd` empty-string rejection is regression-locked at the protocol boundary
   - task list/history query commands and DTOs are landed; runtime-backed ADP task query is regression-locked in daemon tests
+  - task list subscription shape is planned for runtime-backed ADP task push and must stay projection-only

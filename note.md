@@ -207,6 +207,27 @@
     - no push subscription for task truth yet; current task visibility is ADP query only.
     - no WebUI visual task management panel yet.
 
+# 2026-07-04 runtime-backed ADP task list subscription
+  - user requirement: continue closing task/multi-agent gaps with real implementation and validation.
+  - owners: `ui.protocol`, `runtime.ui-command-dispatch`, `app.webui-smoke`, `app.runtime-daemon`, `app.cli-runtime-smoke`.
+  - implementation:
+    - added protocol-owned `SubscribeTaskList { status, agent_id }`, `UiStreamKind::TaskList`, and `UiProjection::TaskList`.
+    - added `UiProtocolState::publish_task_list_projection` so runtime can publish task projections without making UI protocol the task truth owner.
+    - ADP subscribe initial snapshot now asks injected `UiRuntimeQueryPort` for task list truth before subscribing.
+    - runtime live task tool bridge publishes task list projection after successful task truth mutation ops.
+    - added `freehand-cli adp-task-subscribe` for no-UI live task subscription verification.
+    - updated function maps, test designs, mainline JSON, and generated wiki for touched features.
+  - verified:
+    - white-box: `cargo test -p freehand-ui-protocol task_list_subscription_matches_runtime_projection_only -- --nocapture`.
+    - runtime white-box: `cargo test -p freehand-runtime runtime_task_tool_mutation_publishes_task_list_projection -- --nocapture`.
+    - daemon black-box: `cargo test -p freehand-daemon daemon_adp_subscribes_runtime_task_truth -- --nocapture`.
+    - package/full gates: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-runtime`, `cargo test -p freehand-server`, `cargo test -p freehand-daemon`, `cargo test -p freehand-cli`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo run -p xtask -- mainlines generate`, `mainlines check`, `gates check`.
+    - online S daemon: `scripts/install-launchd.sh installS`, `curl -4fsS http://127.0.0.1:4042/health`, `freehand-cliS adp-task-query --status waiting_agent`, and `freehand-cliS adp-task-subscribe --status waiting_agent` passed.
+  - remaining gaps:
+    - no WebUI task management panel yet.
+    - no real worker execution process/channel yet.
+    - task history remains query-only; worker debug stream remains separate future scope.
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

@@ -26,6 +26,7 @@
 - `CancelLatestActiveTurn` resolves to the newest active live turn before falling back to latest persisted runtime turn
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 - ADP/read-only task query requests enter through `UiRuntimeQueryPort` and route to `TaskRuntime::list_tasks` or `TaskRuntime::task_history` without duplicating task filtering or ledger ordering in runtime
+- successful task tool mutations publish a runtime-owned task list projection into `UiProtocolState` so ADP task list subscribers observe lifecycle changes without UI polling
 
 ## Response Mainline
 
@@ -52,6 +53,7 @@
 - runtime-owned UI state reflects derived projections only, not authoritative turn truth
 - session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and the protocol projection has been refreshed
 - runtime-backed task list and task history queries return UI-safe task projections sourced from `task.orchestration` snapshot and ledger APIs
+- runtime-backed task list subscription updates reuse the same projection helper and source task truth from `TaskRuntime::list_tasks`
 
 ## Error Mainline
 
@@ -68,6 +70,7 @@
 - invalid persisted recovery truth or node-metadata bootstrap failure returns explicit runtime bootstrap failure
 - unwritable shared node metadata ledgers fail bootstrap explicitly as `NodeRuntimeInit` and must not materialize a runtime dispatcher
 - task query misses map to explicit dispatch target-not-found failures; invalid task status filters and task persistence failures map to dispatch failures
+- task list publication failures after task mutation are explicit dispatch failures and must not be silently swallowed as a successful task tool result
 
 ## Shared Multi-Reference Functions
 
@@ -101,6 +104,7 @@
 | 11 | `RuntimeCommandDispatcher::dispatch_session_management` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned session CRUD commands into reason persistence metadata APIs and refresh UI projection | session CRUD dispatch envelope | dispatch receipt or target-not-found failure | `RuntimeCommandDispatcher::dispatch` | `ReasonPersistence` session metadata owner | bound |
 | 12 | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | route read-only runtime queries such as task list/history into owner APIs | UI query command | optional query result or explicit dispatch failure | WebUI/daemon ADP query transport | task runtime owner | bound |
 | 13 | `project_task_list_for_ui` / `project_task_history_for_ui` | `crates/freehand-runtime/src/lib.rs` | convert task owner snapshots and ledger events into protocol DTOs without changing task truth | task snapshots or ledger events | UI-safe task query projection | `RuntimeCommandDispatcher::query_runtime` | UI protocol DTOs | bound |
+| 14 | `task_list_projection_from_runtime` / `UiProtocolState::publish_task_list_projection` | `crates/freehand-runtime/src/lib.rs` / `crates/freehand-ui-protocol/src/lib.rs` | publish runtime-owned task list projection after successful task tool mutation | task runtime snapshot | UI task list subscription event | live task tool bridge | ui.protocol subscription channel | bound |
 
 ## Sync Status Against Code
 
@@ -128,6 +132,7 @@
 - config-selected live bootstrap now restores persisted session cwd from turn records and preserves cwd for later same-session submits
 - runtime session-management dispatch is bound as a thin route to `reason.persistence`
 - runtime task query dispatch is bound as a thin read-only route to `task.orchestration`
+- runtime task list projection publication is bound as a thin route from task mutation to `ui.protocol`
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

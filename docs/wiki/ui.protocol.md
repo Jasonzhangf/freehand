@@ -21,6 +21,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 - CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id
 - SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation
+- task list subscribe commands are protocol-owned ADP/subscribe shapes while task truth remains runtime/task-owner supplied
 
 ## Response Mainline
 
@@ -47,6 +48,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn
 - session list and transcript projections expose cwd bound by runtime/session truth
 - task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
+- task list subscription events carry UI-safe task list projections published by runtime owner code
 
 ## Error Mainline
 
@@ -62,6 +64,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module
 - empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently
 - empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse
+- task history remains query-only; task list subscribe rejects non-subscription misuse through protocol stream matching
 
 ## Shared Multi-Reference Functions
 
@@ -119,6 +122,12 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
   - allowed callers: WebUI ADP query transport, daemon ADP query transport
   - related tests: daemon_adp_queries_runtime_task_truth
   - why shared: keeps app transports protocol-only while allowing runtime owner read models
+- `UiProtocolState::publish_task_list_projection`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: publish runtime-supplied task list projection through the protocol subscription channel without owning task truth
+  - allowed callers: runtime.ui-command-dispatch
+  - related tests: task_list_subscription_matches_runtime_projection_only, daemon_adp_subscribes_runtime_task_truth
+  - why shared: keeps ADP task push on the same protocol subscription bus as turn/debug updates
 
 ## Function Call Table
 
@@ -146,6 +155,8 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 19 | `UiAdpResponse` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP response frames for command/query/subscribe/event/failure automation | protocol command/query/subscription result | ADP JSON response frame | protocol owner | WebUI/Android/CLI automation transports | bound |
 | 20 | `UiRuntimeQueryPort::query_runtime` | `crates/freehand-ui-protocol/src/lib.rs` | define runtime-backed read-only query port shape | UI query command | optional UI query result or dispatch failure | WebUI/daemon ADP query transport | runtime owner query implementation | bound |
 | 10b | `UiProtocolState::apply_terminal_event / turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text plus terminal status projection | runtime/app protocol consumers | protocol projector | bound |
+| 21 | `UiProtocolState::publish_task_list_projection` | `crates/freehand-ui-protocol/src/lib.rs` | publish runtime-supplied task list projection to subscribers | UI task list projection | UI subscription event | runtime.ui-command-dispatch | protocol subscription channel | bound |
+| 22 | `subscription_selector / subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route task list subscription selectors to task list projection events | SubscribeTaskList command plus UI projection | subscription delivery decision | ADP/SSE subscription transport | protocol selector matcher | bound |
 
 ## Sync Status Against Mainline Call
 

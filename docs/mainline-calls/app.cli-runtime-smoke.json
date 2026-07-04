@@ -13,7 +13,8 @@
     "provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting",
     "for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe, query, and query-as-command frames",
     "for ADP turn samples, CLI connects to the same daemon `/adp`, creates an isolated sample session, subscribes to latest-turn updates, submits a success sample prompt or a tool-result-failure recovery prompt, verifies the matching terminal projection, then queries the sample session transcript to prove round/tool evidence",
-    "for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis"
+    "for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis",
+    "for ADP task subscribe, CLI connects to the same daemon `/adp` and sends protocol-owned task list subscription frames for no-UI task push diagnosis"
   ],
   "response_mainline": [
     "config startup path prints selected-agent summary plus selected-provider metadata without exposing provider secret values",
@@ -21,7 +22,8 @@
     "CLI output remains a terminal-facing projection, not debug ledger raw payload",
     "ADP smoke prints the observed subscription_accepted, subscription_event, query_result, and explicit failure frame sequence for no-UI diagnosis",
     "ADP turn samples print the observed command outcome plus the matching latest-turn projection and transcript evidence; the failure sample proves a failed tool result can continue to a successful terminal turn with rounds>=2, one or more unique tool executions, and one or more unique failed tool results instead of becoming an ADP/system failure",
-    "ADP task query prints task list count/task ids or task history event counts from protocol-owned query results"
+    "ADP task query prints task list count/task ids or task history event counts from protocol-owned query results",
+    "ADP task subscribe prints accepted state plus task list count/task ids from the initial protocol-owned subscription event"
   ],
   "error_mainline": [
     "invalid command shape returns explicit usage",
@@ -31,7 +33,8 @@
     "ADP turn sample timeout, wrong terminal status, missing isolated-session transcript evidence, missing failed tool activity for the failure sample, or system/provider terminal failure returns explicit terminal errors",
     "rewrite recovery block is reported as explicit blocked outcome, not disguised as success",
     "ADP query-as-command must return ingress_command_kind_mismatch, proving command/query separation without mutation",
-    "ADP task query failures print explicit ADP failure code/message instead of treating missing task truth as an empty success"
+    "ADP task query failures print explicit ADP failure code/message instead of treating missing task truth as an empty success",
+    "ADP task subscribe failures print explicit ADP failure code/message instead of treating missing task truth as an empty success"
   ],
   "shared_functions": [
     {
@@ -182,6 +185,28 @@
       "caller": "ADP task query runner",
       "callee": "daemon /adp",
       "binding_status": "bound"
+    },
+    {
+      "step": "12",
+      "symbol_path": "run_adp_task_subscribe",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "parse ADP task subscribe URL and optional list filters",
+      "input_semantic": "--url ws://.../adp [--status <status>] [--agent <id>]",
+      "output_semantic": "selected task subscribe command",
+      "caller": "CLI dispatcher",
+      "callee": "ADP task subscribe runner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "run_adp_task_subscribe_async",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "send task list subscription over ADP and summarize the first task list event",
+      "input_semantic": "ADP WebSocket URL plus task subscription filters",
+      "output_semantic": "terminal-facing task list subscription summary or explicit ADP failure",
+      "caller": "ADP task subscribe runner",
+      "callee": "daemon /adp",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -192,6 +217,7 @@
     "CLI ADP task list/history query path is implemented for no-UI task truth diagnosis",
     "harness-backed app E2E smoke now exists before production CLI or server runtime loop",
     "remaining gap: production non-smoke command loop is still pending",
-    "generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes"
+    "generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes",
+    "CLI ADP task list subscribe path is implemented for no-UI task push diagnosis"
   ]
 }

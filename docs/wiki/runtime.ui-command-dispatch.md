@@ -21,6 +21,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - live submit registers an active turn cancel token before provider execution and releases the runtime mutex before running provider IO
 - CancelLatestActiveTurn resolves to the newest active live turn before falling back to latest persisted runtime turn
 - submit commands may carry selected cwd; runtime canonicalizes and binds cwd to the selected session
+- successful task tool mutations publish task list projection events through runtime-owned UI protocol state
 
 ## Response Mainline
 
@@ -39,6 +40,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - latest-active cancellation supports Esc during the short window before WebUI has received a concrete turn_id
 - selected session cwd is persisted on turn records, projected to UiProtocolState, and restored for later same-session inheritance
 - runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events
+- runtime task list subscription updates reuse the same UI-safe projection helper as task list queries
 
 ## Error Mainline
 
@@ -54,6 +56,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - live provider/tool failures that materialize failed turn truth are returned as explicit dispatch failures only after the failed projection has been refreshed into UiProtocolState
 - CancelLatestActiveTurn with no active or persisted turn returns explicit target-not-found
 - missing task history targets return explicit target-not-found and invalid task filters return dispatch failures
+- task list publication failures after task mutation are explicit live bridge failures
 
 ## Shared Multi-Reference Functions
 
@@ -81,6 +84,12 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
   - allowed callers: RuntimeCommandDispatcher::query_runtime
   - related tests: runtime_query_reads_task_truth_from_task_runtime, daemon_adp_queries_runtime_task_truth
   - why shared: keeps ledger ordering in task.orchestration instead of duplicating it in runtime or UI
+- `task_list_projection_from_runtime`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: build UI-safe task list projection from task owner snapshots for query and push surfaces
+  - allowed callers: RuntimeCommandDispatcher::query_runtime, run_live_reason_turn_with_hooks task projection hook
+  - related tests: runtime_query_reads_task_truth_from_task_runtime, runtime_task_tool_mutation_publishes_task_list_projection, daemon_adp_subscribes_runtime_task_truth
+  - why shared: keeps task UI projection single-sourced while task filtering remains in task.orchestration
 
 ## Function Call Table
 
@@ -97,6 +106,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 | 09 | `RuntimeCommandDispatcher::dispatch_cancel_turn` | `crates/freehand-runtime/src/lib.rs` | cancel active or persisted turns through reason-owned terminal semantics and UI projection | cancel command turn id | cancel receipt plus cancelled projection | RuntimeCommandDispatcher::dispatch | reason owner / active cancel registry | bound |
 | 10 | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | execute runtime-backed read-only task list/history queries | UI query command | optional UI query result or dispatch failure | ADP query transport | task runtime owner | bound |
 | 11 | `project_task_list_for_ui / project_task_history_for_ui` | `crates/freehand-runtime/src/lib.rs` | project task owner snapshots and ledger events into UI-safe DTOs | task snapshots or task ledger events | task query projection | RuntimeCommandDispatcher::query_runtime | UI protocol DTO | bound |
+| 12 | `task_list_projection_from_runtime` | `crates/freehand-runtime/src/lib.rs` | build and publish task list projection from task runtime after successful task mutation | runtime home plus task filters | UI task list projection | run_live_reason_turn_with_hooks / RuntimeCommandDispatcher::query_runtime | TaskRuntime::list_tasks | bound |
 
 ## Sync Status Against Mainline Call
 

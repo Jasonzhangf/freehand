@@ -17,7 +17,7 @@
 - runtime bootstrap consumes configured local/paired node topology before daemon transport starts
 - if persisted runtime turn truth exists, daemon bootstrap restores it through the injected runtime owner before serving query/SSE routes
 - daemon injects the runtime dispatcher and its shared UI state into the protocol-only HTTP/SSE transport
-- daemon injects the same runtime dispatcher as the protocol-owned runtime query port for ADP read-only owner queries
+- daemon injects the same runtime dispatcher as the protocol-owned runtime query port for ADP read-only owner queries and task list subscription initial snapshots
 - daemon exposes the same runtime dispatcher and shared UI state through protocol-owned ADP WebSocket frames at `/adp`
 - mutation commands travel through protocol-owned ingress validation and dispatch envelope building before runtime dispatch
 - explicit checkpoint rewind can travel through the same HTTP command ingress without adding app-owned business logic
@@ -29,7 +29,7 @@
 - daemon launchd wrapper execs the explicit `FREEHAND_DAEMON_BIN` from `~/.freehand/daemon.env` instead of resolving a possibly stale daemon from `PATH`
 - daemon serves query and continuous SSE projections from the runtime-owned shared UI state
 - daemon serves ADP WebSocket command/query/subscribe frames from the same runtime-owned shared UI state and runtime query port, so WebUI/Android/CLI automation can use one control/status path
-- daemon serves task list/history ADP query results through runtime's task owner bridge without becoming task truth owner
+- daemon serves task list/history ADP query results and task list subscription events through runtime's task owner bridge without becoming task truth owner
 - daemon restart can serve restored terminal projection before any new submit arrives
 - daemon SSE subscriptions stay open across later runtime turn updates and observe the same protocol-owned projections as query consumers
 - daemon can rewind a previously checkpointed writable-tool mutation through runtime owner dispatch while leaving turn/session/UI truth untouched
@@ -43,7 +43,7 @@
 - corrupt checkpoint projection bootstrap truth returns explicit daemon startup error before transport serve
 - runtime dispatch failures return protocol-mapped HTTP failures through the shared transport layer
 - ADP command/query/subscribe misuse returns explicit protocol failure frames on the WebSocket connection
-- task query misses return explicit ADP target-not-found failure frames from the runtime query bridge
+- task query misses and task subscription initial query failures return explicit ADP failure frames from the runtime query bridge
 - missing checkpoint rewind manifests surface protocol-mapped target-not-found failure over the same HTTP command ingress
 - slave-mode agent selection returns explicit daemon startup error
 - async command ingress does not execute injected synchronous provider/runtime work inline; it returns explicit transport failure if the dispatch task itself fails
