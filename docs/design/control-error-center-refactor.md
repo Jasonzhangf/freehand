@@ -89,42 +89,58 @@ Freehand has two model feedback channels:
 
 Status schema must not execute actions. Action tools must not rely on status text as their authority.
 
-## Fixed Hook Skeleton
+## Fixed Control Hook Points
 
-The first refactor target is a skeleton, not the full task system. Schema variants and action processors may evolve, but their execution positions must be fixed in the request/response loop.
+The first refactor target is a small skeleton placed at four existing flow points. The existing reasoning/provider/tool loop remains the mainline. Do not turn the whole reasoning loop into a giant hook chain.
 
-Request-side hook order:
+Only these hook points are fixed:
 
 ```text
-ReasonRequestHook01LoadPromptContract
-  -> ReasonRequestHook02InjectStatusSchemaInstructions
-  -> ReasonRequestHook03InjectActionToolSpecs
-  -> ReasonRequestHook04BuildProviderRequest
+ControlHook01AfterLocalToolResult
+  position: immediately after this client/runtime finishes local tool execution and records the tool result
 ```
 
-Response-side hook order:
+```text
+ControlHook02BeforeModelRequest
+  position: after local tool-result re-entry/control feedback preparation, immediately before sending the next request to the model/provider
+```
 
 ```text
-ReasonResponseHook01CaptureProviderOutput
-  -> ReasonResponseHook02ExtractStatusBlocks
-  -> ReasonResponseHook03ValidateStatusSchema
-  -> ReasonResponseHook04AdmitStatusMetadata
-  -> ReasonResponseHook05AdmitActionToolCalls
-  -> ReasonResponseHook06ClassifyErrors
-  -> ReasonResponseHook07DecideRhythm
-  -> ReasonResponseHook08ApplyOwnerActions
-  -> ReasonResponseHook09ProjectPublicOutput
+ControlHook03AfterModelResponse
+  position: immediately after the model/provider response is received and captured
+```
+
+```text
+ControlHook04BeforeClientReturn
+  position: after response inspection/control processing, immediately before returning/projection to the client
 ```
 
 Fixed responsibilities:
 
-- request hooks define what status schemas and action tools are available; they do not execute state changes
-- response hooks parse and validate status before any rhythm decision
-- action tool calls are admitted through the fixed action hook before owner execution
-- all schema validation failures and action failures enter the fixed error hook
-- public projection runs after status stripping and owner/action projection updates
+- `ControlHook01AfterLocalToolResult` observes local tool result completion, admits tool-result-related action/error metadata, and prepares any control feedback needed for the next model request.
+- `ControlHook01AfterLocalToolResult` must not send a provider request and must not perform unrelated owner side effects.
+- `ControlHook02BeforeModelRequest` may inject or refresh prompt-contract material, status-schema instructions, repair feedback, compact action-tool specs, and tool-result feedback for the next provider request.
+- `ControlHook02BeforeModelRequest` must run after local tool result handling and before the exact outbound model request is rendered/sent.
+- `ControlHook03AfterModelResponse` captures the raw provider/model response boundary, extracts hidden status blocks, validates status schema, admits status metadata, and classifies schema/provider response errors before any client-visible return.
+- `ControlHook04BeforeClientReturn` decides final rhythm/projection behavior, strips hidden status blocks, and ensures client-visible output contains only public projection plus explicit task/status/error projections.
+- `ControlHook04BeforeClientReturn` must run before client-visible projection is returned so schema/status/control blocks cannot leak into UI text.
+- owner actions still execute in their existing standard flow. The hook records/adjudicates control and error truth at the fixed boundary; it does not replace the whole flow.
 
-The hook locations are stable contracts. Individual schemas can be versioned under `ReasonResponseHook03ValidateStatusSchema`, and individual action operations can be versioned under `ReasonResponseHook05AdmitActionToolCalls`, but new implementations must not bypass the hook chain.
+The hook locations are stable contracts. Individual status schemas and action processors can vary behind these four hook points, but new implementations must not insert ad hoc parsing, action admission, or error classification elsewhere in the request/response flow.
+
+Mounting standard:
+
+1. If a check needs the most precise raw request-side data available after local tool execution, mount it on `ControlHook01AfterLocalToolResult`.
+2. If a control step must affect what is sent to the model/provider, mount it on `ControlHook02BeforeModelRequest`.
+3. If a step needs raw model/provider response data immediately after receive, mount it on `ControlHook03AfterModelResponse`.
+4. If a step must run after all processing is complete and just before returning to the client, mount it on `ControlHook04BeforeClientReturn`.
+
+Examples:
+
+- tool-result error classification that needs exact local tool output -> hook 01
+- injecting schema repair feedback or compact task tool specs into outbound request -> hook 02
+- extracting `<<<freehand_status>>>` from raw model text -> hook 03
+- stripping hidden schema blocks and producing final public projection -> hook 04
 
 ## Status Schema Block
 
@@ -610,9 +626,12 @@ UI and public conversation projection must:
    - migrate this design into generated mainline manifests when code begins
 
 2. Skeleton hook contracts
-   - land no-op request hooks for prompt contract/status-schema/tool-spec injection
-   - land no-op response hooks for status extraction, validation, metadata admission, action admission, error classification, rhythm decision, owner action, and public projection
-   - add tests proving hook order and no bypass for response parsing/action/error flow
+   - land no-op `ControlHook01AfterLocalToolResult` immediately after local tool execution/result recording
+   - land no-op `ControlHook02BeforeModelRequest` immediately before model/provider request send
+   - land no-op `ControlHook03AfterModelResponse` immediately after model/provider response capture
+   - land no-op `ControlHook04BeforeClientReturn` immediately before client-visible return/projection
+   - lock the mounting standard for raw request checks, outbound controls, raw response processing, and final client return processing
+   - add tests proving the four hook positions and no bypass for status parsing/action admission/error classification
 
 3. Contracts and blocks
    - add status/action/error IDs and typed DTOs to `freehand-contracts`
@@ -653,8 +672,11 @@ UI and public conversation projection must:
 
 Positive tests:
 
-- request hook order is fixed and injects status instructions before provider request build
-- response hook order is fixed and parses status/action/errors before public projection
+- `ControlHook01AfterLocalToolResult` runs immediately after local tool execution/result recording
+- `ControlHook02BeforeModelRequest` runs immediately before provider request send
+- `ControlHook03AfterModelResponse` runs immediately after provider response capture
+- `ControlHook04BeforeClientReturn` runs immediately before client-visible projection
+- hook mounting examples route to the correct phase: precise request/tool-result checks to hook 01, outbound control to hook 02, raw response parsing to hook 03, final public projection to hook 04
 - valid status block writes watermarked accepted status metadata
 - simple request status plus provider stop permits natural terminal completion
 - completed task status requires evidence before terminal acceptance
@@ -667,7 +689,7 @@ Positive tests:
 
 Negative tests:
 
-- a response path that attempts owner action before action admission fails a skeleton gate/test
+- a path that parses status, admits actions, or classifies errors outside the four fixed hook points fails a skeleton gate/test
 - missing status tag when required causes rejected status metadata and repair prompt
 - invalid JSON causes rejected status metadata and repair prompt
 - missing status fields are not guessed
