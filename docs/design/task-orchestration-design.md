@@ -25,6 +25,7 @@ First implemented ops:
 - `append`
 - `pause`
 - `resume`
+- `heartbeat`
 - `submit_review`
 - `approve`
 - `reject`
@@ -50,6 +51,7 @@ Branches:
 ```text
 Created -> WaitingAgent -> Assigned
 Running -> Paused -> Running
+Running -> Interrupted -> Running
 Running -> Blocked -> Running
 ReviewSubmitted -> Rejected -> Running
 Running -> Failed -> Running | Closed
@@ -89,6 +91,7 @@ Paths:
 ~/.freehand/state/tasks/<agent_id>/index.json
 ~/.freehand/state/agents/<agent_id>.json
 ~/.freehand/state/agents/index.json
+~/.freehand/state/task-runtime/<agent_id>/leases.json
 ```
 
 Mutation order:
@@ -110,9 +113,26 @@ Memory state contains:
 
 - task snapshots keyed by task id
 - agent snapshots keyed by agent id
-- future queues and leases
+- active task leases keyed by task id
 
-Startup rebuilds memory state from snapshots. Future recovery will rebuild corrupt snapshots from ledger.
+Startup rebuilds memory state from snapshots and reconciles running-task leases. Future recovery will rebuild corrupt snapshots from ledger.
+
+## Lease And Heartbeat
+
+`Running` is lease-backed. Entering `Running` through `resume` writes a `TaskHeartbeat` ledger event and an active lease:
+
+```text
+task_id
+agent_id
+lease_id
+acquired_at
+heartbeat_at
+expires_at
+```
+
+Workers refresh the lease with `task(op="heartbeat", task_id, ttl_seconds)`. Heartbeat is accepted only for the assigned agent of a `Running` task. Heartbeat for `Assigned`, `Paused`, `Closed`, or unassigned tasks is rejected and must not write a lease.
+
+When a task leaves `Running`, its lease is removed. Recovery must not infer task completion from lease state.
 
 ## Agent Registry
 
@@ -147,16 +167,18 @@ Startup sequence:
 
 ```text
 load task snapshots
+load task leases
 load or create self agent snapshot
+interrupt running tasks with missing, mismatched, inactive, or expired leases
 rebuild runtime memory maps
 return runtime ready
 ```
 
-Future recovery requirements:
+Recovery requirements:
 
 - corrupted/missing snapshot replays ledger
 - running task requires valid lease and live agent heartbeat
-- expired or missing lease becomes `Interrupted` or `WaitingAgent`
+- expired or missing lease becomes `Interrupted`
 - recovery never promotes `Running` to completed
 
 ## Review Closure
@@ -173,12 +195,12 @@ Implemented:
 - create with self/auto assignment or WaitingAgent
 - append, pause, resume, submit_review, approve, reject, close
 - review-before-close transition validation
+- lease-backed Running state with heartbeat and boot interruption recovery
 - runtime task tool bridge
 
 Not implemented:
 
 - real worker execution
 - queue selection loop
-- leases and heartbeat
 - UI task projection
 - error.center classification

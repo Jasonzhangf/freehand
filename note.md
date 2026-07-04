@@ -52,6 +52,28 @@
     - `cargo test --workspace`
     - `cargo clippy --workspace --all-targets -- -D warnings`
 
+# 2026-07-04 task.orchestration lease heartbeat recovery
+  - user requirement: continue implementation in rounds with white-box and black-box tests, plus mainline caller and function map updates.
+  - owner: `task.orchestration`.
+  - implementation:
+    - added `TaskLease` persisted under `~/.freehand/state/task-runtime/<agent_id>/leases.json`.
+    - `resume_task` now enters `Running` and creates an active lease-backed heartbeat record.
+    - added `task(op="heartbeat")` runtime/tool schema bridge.
+    - `TaskRuntime::boot` loads leases and conservatively changes `Running` tasks with missing, mismatched, inactive, or expired lease to `Interrupted`.
+    - leaving `Running` removes the active lease; heartbeat for non-running tasks is rejected and writes no lease.
+    - updated design doc, test design, function map, feature map, machine mainline caller, and generated wiki.
+  - verified:
+    - white-box: `cargo test -p freehand-task -- --nocapture` -> 8 passed; covers resume lease creation, heartbeat refresh, expired lease recovery to `Interrupted`, and non-running heartbeat rejection.
+    - module black-box: `cargo test -p freehand-runtime task_tool_resume_and_heartbeat_persist_running_lease -- --nocapture` -> 1 passed.
+    - existing runtime task black-box: create/query and review lifecycle tests passed.
+    - tool schema: `cargo test -p freehand-tools -- --nocapture` -> 27 passed.
+    - mainline/gate: `cargo run -p xtask -- mainlines generate`, `mainlines check`, `gates check` passed.
+    - full regression: `cargo test --workspace` -> 398 passed; `cargo clippy --workspace --all-targets -- -D warnings` -> no issues.
+  - remaining gaps:
+    - no real worker execution loop yet.
+    - no UI task projection yet.
+    - no multi-agent dispatch/agent create-close operations yet.
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

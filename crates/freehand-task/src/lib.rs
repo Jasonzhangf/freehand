@@ -32,6 +32,7 @@ pub enum TaskStatus {
     WaitingAgent,
     Assigned,
     Running,
+    Interrupted,
     Paused,
     Blocked,
     ReviewSubmitted,
@@ -113,6 +114,18 @@ pub struct AgentSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskLease {
+    pub schema_version: u32,
+    pub task_id: TaskId,
+    pub agent_id: AgentId,
+    pub lease_id: String,
+    pub status: String,
+    pub acquired_at: u64,
+    pub heartbeat_at: u64,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskLedgerEvent {
     pub schema_version: u32,
     pub task_id: TaskId,
@@ -177,6 +190,14 @@ pub struct TaskCreateOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskMutationRequest {
     pub task_id: TaskId,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskHeartbeatRequest {
+    pub task_id: TaskId,
+    pub ttl_seconds: u64,
     pub actor: TaskActor,
     pub watermark: TaskWatermark,
 }
@@ -251,6 +272,7 @@ pub struct TaskRuntime {
 struct TaskRuntimeState {
     tasks: BTreeMap<TaskId, TaskSnapshot>,
     agents: BTreeMap<AgentId, AgentSnapshot>,
+    leases: BTreeMap<TaskId, TaskLease>,
 }
 
 impl TaskRuntime {
@@ -265,6 +287,8 @@ impl TaskRuntime {
         for task in store.load_task_snapshots()? {
             state.tasks.insert(task.task_id.clone(), task);
         }
+        state.leases = store.load_leases()?;
+        reconcile_running_leases(&store, &mut state, now_unix_seconds())?;
         Ok(Self {
             store,
             state: Mutex::new(state),
@@ -419,13 +443,37 @@ impl TaskRuntime {
         &self,
         request: TaskMutationRequest,
     ) -> Result<TaskMutationOutcome, TaskError> {
-        self.mutate_task(
+        let outcome = self.mutate_task(
             &request.task_id,
             "TaskResumed",
             Some(TaskStatus::Running),
             &request.actor,
             &request.watermark,
             json!({}),
+        )?;
+        self.acquire_or_refresh_lease(
+            &outcome.task.task_id,
+            &request.actor.agent_id,
+            &request.actor,
+            &request.watermark,
+            DEFAULT_TASK_LEASE_TTL_SECONDS,
+        )?;
+        Ok(outcome)
+    }
+
+    pub fn heartbeat_task(
+        &self,
+        request: TaskHeartbeatRequest,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        if request.ttl_seconds == 0 {
+            return Err(TaskError::MissingField("ttl_seconds"));
+        }
+        self.acquire_or_refresh_lease(
+            &request.task_id,
+            &request.actor.agent_id,
+            &request.actor,
+            &request.watermark,
+            request.ttl_seconds,
         )
     }
 
@@ -598,6 +646,10 @@ impl TaskRuntime {
         );
         apply_event(&mut task, &event);
         self.store.append_event_and_snapshot(&task, &event)?;
+        if !matches!(task.status, TaskStatus::Running) {
+            self.store.remove_lease(task_id)?;
+            state.leases.remove(task_id);
+        }
         if matches!(task.status, TaskStatus::Closed)
             && let Some(assignee) = task.assignee.as_ref()
             && let Some(agent) = state.agents.get_mut(&assignee.agent_id)
@@ -612,7 +664,86 @@ impl TaskRuntime {
         state.tasks.insert(task.task_id.clone(), task.clone());
         Ok(TaskMutationOutcome { task, event })
     }
+
+    fn acquire_or_refresh_lease(
+        &self,
+        task_id: &TaskId,
+        agent_id: &AgentId,
+        actor: &TaskActor,
+        watermark: &TaskWatermark,
+        ttl_seconds: u64,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        let mut task = state
+            .tasks
+            .get(task_id)
+            .cloned()
+            .ok_or_else(|| TaskError::TaskNotFound(task_id.as_str().to_owned()))?;
+        if !matches!(task.status, TaskStatus::Running) {
+            return Err(TaskError::InvalidTransition {
+                from: task.status,
+                event_type: "TaskHeartbeat",
+            });
+        }
+        let Some(assignee) = task.assignee.as_ref() else {
+            return Err(TaskError::InvalidTransition {
+                from: task.status,
+                event_type: "TaskHeartbeat",
+            });
+        };
+        if &assignee.agent_id != agent_id {
+            return Err(TaskError::AgentNotFound(agent_id.as_str().to_owned()));
+        }
+        let now = now_unix_seconds();
+        let lease = TaskLease {
+            schema_version: 1,
+            task_id: task_id.clone(),
+            agent_id: agent_id.clone(),
+            lease_id: format!("lease-{}-{}", task_id.as_str(), assignee.assignment_id),
+            status: "active".to_owned(),
+            acquired_at: state
+                .leases
+                .get(task_id)
+                .map(|lease| lease.acquired_at)
+                .unwrap_or(now),
+            heartbeat_at: now,
+            expires_at: now.saturating_add(ttl_seconds),
+        };
+        let event = build_event(
+            &task,
+            Some(task.status.clone()),
+            TaskStatus::Running,
+            "TaskHeartbeat",
+            actor,
+            watermark,
+            json!({
+                "agent_id": agent_id.as_str(),
+                "lease_id": lease.lease_id,
+                "heartbeat_at": lease.heartbeat_at,
+                "expires_at": lease.expires_at
+            }),
+        );
+        apply_event(&mut task, &event);
+        self.store.append_event_and_snapshot(&task, &event)?;
+        self.store.write_lease(&lease)?;
+        if let Some(agent) = state.agents.get_mut(agent_id) {
+            agent.status = AgentStatus::Busy;
+            agent.current_task_id = Some(task_id.clone());
+            agent.current_cwd = task.target_cwd.clone();
+            agent.running_tasks = 1;
+            agent.last_seen_at = now;
+            self.store.write_agent_snapshot(agent)?;
+        }
+        state.leases.insert(task_id.clone(), lease);
+        state.tasks.insert(task_id.clone(), task.clone());
+        Ok(TaskMutationOutcome { task, event })
+    }
 }
+
+const DEFAULT_TASK_LEASE_TTL_SECONDS: u64 = 300;
 
 #[derive(Debug, Clone)]
 struct TaskStore {
@@ -722,6 +853,35 @@ impl TaskStore {
         write_json_atomic(&dir.join("index.json"), &agents)
     }
 
+    fn load_leases(&self) -> Result<BTreeMap<TaskId, TaskLease>, TaskError> {
+        let path = self.lease_state_path();
+        if !path.is_file() {
+            return Ok(BTreeMap::new());
+        }
+        let leases: Vec<TaskLease> = read_json(&path)?;
+        Ok(leases
+            .into_iter()
+            .map(|lease| (lease.task_id.clone(), lease))
+            .collect())
+    }
+
+    fn write_leases(&self, leases: &BTreeMap<TaskId, TaskLease>) -> Result<(), TaskError> {
+        let values = leases.values().cloned().collect::<Vec<_>>();
+        write_json_atomic(&self.lease_state_path(), &values)
+    }
+
+    fn write_lease(&self, lease: &TaskLease) -> Result<(), TaskError> {
+        let mut leases = self.load_leases()?;
+        leases.insert(lease.task_id.clone(), lease.clone());
+        self.write_leases(&leases)
+    }
+
+    fn remove_lease(&self, task_id: &TaskId) -> Result<(), TaskError> {
+        let mut leases = self.load_leases()?;
+        leases.remove(task_id);
+        self.write_leases(&leases)
+    }
+
     fn task_state_dir(&self) -> PathBuf {
         self.runtime_home
             .join("state")
@@ -738,6 +898,17 @@ impl TaskStore {
 
     fn agent_state_dir(&self) -> PathBuf {
         self.runtime_home.join("state").join("agents")
+    }
+
+    fn task_runtime_state_dir(&self) -> PathBuf {
+        self.runtime_home
+            .join("state")
+            .join("task-runtime")
+            .join(self.owner_agent_id.as_str())
+    }
+
+    fn lease_state_path(&self) -> PathBuf {
+        self.task_runtime_state_dir().join("leases.json")
     }
 
     fn task_snapshot_path(&self, task_id: &TaskId) -> PathBuf {
@@ -783,6 +954,84 @@ fn resolve_dispatch(
     }
 }
 
+fn reconcile_running_leases(
+    store: &TaskStore,
+    state: &mut TaskRuntimeState,
+    now: u64,
+) -> Result<(), TaskError> {
+    let task_ids = state.tasks.keys().cloned().collect::<Vec<_>>();
+    let mut leases_changed = false;
+    for task_id in task_ids {
+        let Some(task) = state.tasks.get(&task_id).cloned() else {
+            continue;
+        };
+        if !matches!(task.status, TaskStatus::Running) {
+            if state.leases.remove(&task_id).is_some() {
+                leases_changed = true;
+            }
+            continue;
+        }
+        let lease_valid = state
+            .leases
+            .get(&task_id)
+            .map(|lease| {
+                lease.status == "active"
+                    && lease.task_id == task_id
+                    && lease.expires_at > now
+                    && task
+                        .assignee
+                        .as_ref()
+                        .map(|assignee| assignee.agent_id == lease.agent_id)
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if lease_valid {
+            continue;
+        }
+
+        let mut interrupted = task.clone();
+        let event = build_event(
+            &interrupted,
+            Some(TaskStatus::Running),
+            TaskStatus::Interrupted,
+            "TaskInterrupted",
+            &TaskActor {
+                agent_id: store.owner_agent_id.clone(),
+                source: "task.orchestration.recovery".to_owned(),
+                session_id: interrupted.parent.session_id.clone(),
+                turn_id: interrupted.parent.turn_id.clone(),
+                trace_id: interrupted.parent.trace_id.clone(),
+            },
+            &TaskWatermark {
+                metadata_id: None,
+                hook: Some("TaskRuntime::boot".to_owned()),
+                action_tool_call_id: None,
+            },
+            json!({"reason": "missing_or_expired_lease"}),
+        );
+        apply_event(&mut interrupted, &event);
+        store.append_event_and_snapshot(&interrupted, &event)?;
+        if let Some(assignee) = interrupted.assignee.as_ref()
+            && let Some(agent) = state.agents.get_mut(&assignee.agent_id)
+        {
+            agent.status = AgentStatus::Available;
+            agent.current_task_id = None;
+            agent.current_cwd = None;
+            agent.running_tasks = 0;
+            agent.last_seen_at = now;
+            store.write_agent_snapshot(agent)?;
+        }
+        state.tasks.insert(task_id.clone(), interrupted);
+        if state.leases.remove(&task_id).is_some() {
+            leases_changed = true;
+        }
+    }
+    if leases_changed {
+        store.write_leases(&state.leases)?;
+    }
+    Ok(())
+}
+
 fn validate_create_request(request: &TaskCreateRequest) -> Result<(), TaskError> {
     require_text(&request.title, "title")?;
     require_text(&request.content, "content")?;
@@ -809,7 +1058,11 @@ fn validate_transition(
         ),
         "TaskResumed" => matches!(
             from,
-            TaskStatus::Paused | TaskStatus::Blocked | TaskStatus::Rejected | TaskStatus::Assigned
+            TaskStatus::Paused
+                | TaskStatus::Blocked
+                | TaskStatus::Rejected
+                | TaskStatus::Assigned
+                | TaskStatus::Interrupted
         ),
         "TaskReviewSubmitted" => matches!(from, TaskStatus::Running | TaskStatus::Assigned),
         "TaskReviewApproved" => matches!(from, TaskStatus::ReviewSubmitted),
@@ -821,7 +1074,10 @@ fn validate_transition(
                 | TaskStatus::Cancelled
                 | TaskStatus::Paused
                 | TaskStatus::Blocked
+                | TaskStatus::Interrupted
         ),
+        "TaskHeartbeat" => matches!(from, TaskStatus::Running),
+        "TaskInterrupted" => matches!(from, TaskStatus::Running),
         _ => false,
     };
     if valid {
@@ -1066,7 +1322,7 @@ mod tests {
         let recovered = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("recover");
         let task = recovered.query_task(&task_id).expect("query recovered");
         assert_eq!(task.status, TaskStatus::Closed);
-        assert_eq!(task.last_event_seq, 9);
+        assert_eq!(task.last_event_seq, 11);
         let _ = fs::remove_dir_all(runtime_home);
     }
 
@@ -1088,6 +1344,122 @@ mod tests {
             .expect_err("assigned task cannot close");
 
         assert!(matches!(err, TaskError::InvalidTransition { .. }));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn resume_creates_lease_and_heartbeat_extends_it() {
+        let runtime_home = temp_runtime_home("task-lease-heartbeat");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+        let task_id = outcome.task.task_id.clone();
+        let actor = sample_actor(agent_id.clone());
+        let watermark = sample_watermark();
+
+        let running = runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect("resume");
+        assert_eq!(running.task.status, TaskStatus::Running);
+
+        let leases_path = runtime_home.join("state/task-runtime/master/leases.json");
+        let leases: Vec<TaskLease> = read_json(&leases_path).expect("leases");
+        assert_eq!(leases.len(), 1);
+        assert_eq!(leases[0].task_id, task_id);
+        assert_eq!(leases[0].agent_id, agent_id);
+
+        let heartbeat = runtime
+            .heartbeat_task(TaskHeartbeatRequest {
+                task_id: leases[0].task_id.clone(),
+                ttl_seconds: 900,
+                actor,
+                watermark,
+            })
+            .expect("heartbeat");
+        assert_eq!(heartbeat.task.status, TaskStatus::Running);
+        assert_eq!(heartbeat.event.event_type, "TaskHeartbeat");
+        let updated_leases: Vec<TaskLease> = read_json(&leases_path).expect("updated leases");
+        assert!(updated_leases[0].expires_at >= leases[0].expires_at);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn boot_interrupts_running_task_with_expired_lease() {
+        let runtime_home = temp_runtime_home("task-expired-lease-recovery");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+        let task_id = outcome.task.task_id.clone();
+        let actor = sample_actor(agent_id.clone());
+        runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: actor.clone(),
+                watermark: sample_watermark(),
+            })
+            .expect("resume");
+        let expired = vec![TaskLease {
+            schema_version: 1,
+            task_id: task_id.clone(),
+            agent_id: agent_id.clone(),
+            lease_id: "expired-lease".to_owned(),
+            status: "active".to_owned(),
+            acquired_at: 1,
+            heartbeat_at: 1,
+            expires_at: 1,
+        }];
+        write_json_atomic(
+            &runtime_home.join("state/task-runtime/master/leases.json"),
+            &expired,
+        )
+        .expect("force expired lease");
+
+        let recovered = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("recover");
+        let task = recovered.query_task(&task_id).expect("query");
+        let agent = recovered.query_agent(&agent_id).expect("agent");
+
+        assert_eq!(task.status, TaskStatus::Interrupted);
+        assert_eq!(task.last_event_seq, 5);
+        assert_eq!(agent.status, AgentStatus::Available);
+        let leases: Vec<TaskLease> =
+            read_json(&runtime_home.join("state/task-runtime/master/leases.json")).expect("leases");
+        assert!(leases.is_empty());
+        assert_eq!(actor.source, "control.center");
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn heartbeat_for_assigned_task_is_rejected_without_lease_write() {
+        let runtime_home = temp_runtime_home("task-heartbeat-rejected");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+
+        let err = runtime
+            .heartbeat_task(TaskHeartbeatRequest {
+                task_id: outcome.task.task_id.clone(),
+                ttl_seconds: 300,
+                actor: sample_actor(agent_id),
+                watermark: sample_watermark(),
+            })
+            .expect_err("assigned heartbeat must fail");
+
+        assert!(matches!(err, TaskError::InvalidTransition { .. }));
+        assert!(
+            !runtime_home
+                .join("state/task-runtime/master/leases.json")
+                .is_file()
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 

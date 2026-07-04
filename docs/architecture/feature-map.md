@@ -192,6 +192,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `~/.freehand/ledgers/tasks`
   - `~/.freehand/state/tasks`
   - `~/.freehand/state/agents`
+  - `~/.freehand/state/task-runtime`
 - update_triggers:
   - task state machine changes
   - task tool op surface changes
@@ -202,6 +203,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - task ledger remains append-only truth
   - snapshot is rebuildable cache, not sole truth
   - runtime memory state is rebuilt from persistence on boot
+  - running tasks are backed by leases and expired leases recover to `Interrupted`
   - agent and cwd are not permanently bound
   - worker execution cannot close task without review/approval
 

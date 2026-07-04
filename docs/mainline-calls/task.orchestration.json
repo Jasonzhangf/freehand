@@ -9,17 +9,20 @@
   "request_mainline": [
     "runtime receives a provider tool call named `task`",
     "runtime routes `task` tool calls to `execute_task_tool` instead of generic file/tool execution",
-    "`TaskRuntime::boot` loads task snapshots and self-agent snapshot into memory",
+    "`TaskRuntime::boot` loads task snapshots, task leases, and self-agent snapshot into memory",
+    "`TaskRuntime::boot` interrupts running tasks whose lease is missing, mismatched, inactive, or expired",
     "`TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance",
     "create action writes append-only ledger events and atomic snapshots",
     "dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`",
-    "lifecycle actions use explicit task mutation requests and validate state transitions before writing truth"
+    "lifecycle actions use explicit task mutation requests and validate state transitions before writing truth",
+    "`TaskRuntime::resume_task` enters `Running` and creates a lease-backed heartbeat record",
+    "`TaskRuntime::heartbeat_task` refreshes the lease for the assigned running agent"
   ],
   "response_mainline": [
     "`TaskRuntime::query_task` returns persisted task snapshot truth",
     "`TaskRuntime::list_agents` returns current in-memory agent registry projection",
     "`TaskRuntime::query_agent` returns one agent snapshot",
-    "append, pause, resume, submit_review, approve, reject, and close return event-backed mutation results",
+    "append, pause, resume, heartbeat, submit_review, approve, reject, and close return event-backed mutation results",
     "task tool result returns semantic task ids, status, event names, sequence numbers, or JSON snapshots"
   ],
   "error_mainline": [
@@ -27,6 +30,7 @@
     "unknown task id returns explicit task-not-found",
     "unknown agent id returns explicit agent-not-found",
     "invalid lifecycle transitions return explicit invalid-transition errors",
+    "heartbeat for non-running or unassigned tasks returns invalid-transition and writes no lease",
     "persistence failures return explicit task persistence errors",
     "task failures become failed tool results and can be sent back to the model"
   ],
@@ -41,6 +45,7 @@
       ],
       "related_tests": [
         "create_task_writes_ledger_snapshot_and_recovers_on_boot",
+        "boot_interrupts_running_task_with_expired_lease",
         "task_tool_create_persists_and_queries_task"
       ],
       "why_shared": "keeps startup recovery in task owner, not UI/runtime glue"
@@ -57,6 +62,20 @@
         "close_before_review_approval_is_rejected"
       ],
       "why_shared": "keeps lifecycle mutation sequencing single-sourced"
+    },
+    {
+      "symbol": "TaskRuntime::heartbeat_task",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "refresh active running task lease and persist heartbeat event",
+      "allowed_callers": [
+        "runtime task tool bridge"
+      ],
+      "related_tests": [
+        "resume_creates_lease_and_heartbeat_extends_it",
+        "heartbeat_for_assigned_task_is_rejected_without_lease_write",
+        "task_tool_resume_and_heartbeat_persist_running_lease"
+      ],
+      "why_shared": "keeps task execution liveness truth in task owner"
     }
   ],
   "call_table": [
@@ -147,12 +166,35 @@
       "caller": "runtime task bridge",
       "callee": "task owner",
       "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "TaskRuntime::heartbeat_task",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "refresh the lease for an assigned running task",
+      "input_semantic": "task heartbeat request",
+      "output_semantic": "running task snapshot plus active lease",
+      "caller": "runtime task bridge",
+      "callee": "task owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "reconcile_running_leases",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "interrupt running tasks with missing, mismatched, inactive, or expired leases during boot",
+      "input_semantic": "persisted task snapshots plus lease snapshot",
+      "output_semantic": "recovered runtime state",
+      "caller": "task boot",
+      "callee": "task owner",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
     "first implementation supports `create`, `query`, `list_agents`, and `query_agent`",
-    "current implementation supports `append`, `pause`, `resume`, `submit_review`, `approve`, `reject`, and `close`",
+    "current implementation supports `append`, `pause`, `resume`, `heartbeat`, `submit_review`, `approve`, `reject`, and `close`",
     "review-before-close is locked by positive and negative tests",
-    "real worker execution, lease heartbeat, UI task projection, and multi-agent dispatch are pending"
+    "lease-backed Running recovery is locked by positive and negative tests",
+    "real worker execution, UI task projection, and multi-agent dispatch are pending"
   ]
 }

@@ -59,9 +59,9 @@ use freehand_reason::{
     SessionHistory, TurnRecord, TurnStartInput,
 };
 use freehand_task::{
-    TaskActor, TaskAppendRequest, TaskCreateRequest, TaskDispatchRequest, TaskId,
-    TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime,
-    TaskWatermark,
+    TaskActor, TaskAppendRequest, TaskCreateRequest, TaskDispatchRequest, TaskHeartbeatRequest,
+    TaskId, TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission,
+    TaskRuntime, TaskWatermark,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
@@ -3718,6 +3718,24 @@ fn execute_task_tool(
                 &outcome.event,
             ))
         }
+        "heartbeat" => {
+            let outcome = task_runtime
+                .heartbeat_task(TaskHeartbeatRequest {
+                    task_id: TaskId::new(required_json_string(&args, "task_id")?),
+                    ttl_seconds: optional_json_i64(&args, "ttl_seconds")
+                        .unwrap_or(300)
+                        .try_into()
+                        .map_err(|_| "`ttl_seconds` must be positive".to_owned())?,
+                    actor: task_actor(turn),
+                    watermark: task_watermark(tool_call),
+                })
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task heartbeat",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
         "submit_review" => {
             let outcome = task_runtime
                 .submit_review(TaskReviewSubmission {
@@ -5983,6 +6001,85 @@ mod tests {
         .expect("close after approval");
 
         assert!(close.contains("status=Closed"));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_tool_resume_and_heartbeat_persist_running_lease() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-task"),
+                    turn_id: TurnId::new("turn-task"),
+                    trace_id: TraceId::new("trace-task"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-task"),
+                    user_text: "run a task".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("create")),
+                ("task_id", json!("task-runtime-heartbeat")),
+                ("title", json!("Heartbeat lifecycle")),
+                ("content", json!("Exercise task heartbeat")),
+                ("goal", json!("Running task keeps a lease")),
+                ("deliverables", json!(["lease"])),
+                ("acceptance", json!(["heartbeat accepted"])),
+                ("dispatch", json!({"mode":"self"})),
+            ]),
+        )
+        .expect("create task");
+
+        let resume = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("resume")),
+                ("task_id", json!("task-runtime-heartbeat")),
+            ]),
+        )
+        .expect("resume");
+        assert!(resume.contains("status=Running"));
+
+        let heartbeat = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("heartbeat")),
+                ("task_id", json!("task-runtime-heartbeat")),
+                ("ttl_seconds", json!(600)),
+            ]),
+        )
+        .expect("heartbeat");
+        assert!(heartbeat.contains("event=TaskHeartbeat"));
+
+        let query = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("query")),
+                ("task_id", json!("task-runtime-heartbeat")),
+            ]),
+        )
+        .expect("query");
+        assert!(query.contains("\"status\":\"running\""));
+        assert!(
+            runtime_home
+                .join("state/task-runtime/agent-task/leases.json")
+                .is_file()
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 
