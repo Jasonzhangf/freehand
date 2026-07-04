@@ -20,6 +20,7 @@ First implemented ops:
 
 - `create`
 - `query`
+- `list_tasks`
 - `history`
 - `list_agents`
 - `query_agent`
@@ -115,6 +116,8 @@ update runtime memory state
 If ledger append fails, memory must not change. If snapshot write fails, the mutation is not reported as complete.
 
 `history` reads the append-only task ledger and returns ordered lifecycle events. UI task timelines and worker debug projection must use this owner API instead of reading ledger files directly.
+
+`list_tasks` reads in-memory snapshot truth rebuilt from persistence and returns task snapshot projections filtered by status and assignee. Queue/debug/UI surfaces should use this owner API instead of scanning task snapshot files directly.
 
 ## Runtime Memory State
 

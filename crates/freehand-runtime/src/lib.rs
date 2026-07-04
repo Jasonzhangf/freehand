@@ -61,8 +61,8 @@ use freehand_reason::{
 use freehand_task::{
     AgentCreateRequest, AgentMutationRequest, TaskActor, TaskAppendRequest, TaskAssignRequest,
     TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskExecutionRecordRequest,
-    TaskHeartbeatRequest, TaskId, TaskMutationRequest, TaskParentRef, TaskReviewRejection,
-    TaskReviewSubmission, TaskRuntime, TaskWatermark,
+    TaskHeartbeatRequest, TaskId, TaskListQuery, TaskMutationRequest, TaskParentRef,
+    TaskReviewRejection, TaskReviewSubmission, TaskRuntime, TaskStatus, TaskWatermark,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
@@ -3684,6 +3684,18 @@ fn execute_task_tool(
                 )
             }))
         }
+        "list_tasks" => {
+            let tasks = task_runtime
+                .list_tasks(TaskListQuery {
+                    status: optional_json_string(&args, "status")
+                        .map(parse_task_status)
+                        .transpose()?,
+                    assignee: optional_json_string(&args, "agent_id").map(AgentId::new),
+                })
+                .map_err(|err| err.to_string())?;
+            Ok(serde_json::to_string(&tasks)
+                .unwrap_or_else(|_| format!("Task list: count={}", tasks.len())))
+        }
         "history" => {
             let task_id = TaskId::new(required_json_string(&args, "task_id")?);
             let events = task_runtime
@@ -3918,6 +3930,25 @@ fn task_mutation_request(
         actor: task_actor(turn),
         watermark: task_watermark(tool_call),
     })
+}
+
+fn parse_task_status(value: &str) -> Result<TaskStatus, String> {
+    match value {
+        "created" => Ok(TaskStatus::Created),
+        "waiting_agent" => Ok(TaskStatus::WaitingAgent),
+        "assigned" => Ok(TaskStatus::Assigned),
+        "running" => Ok(TaskStatus::Running),
+        "interrupted" => Ok(TaskStatus::Interrupted),
+        "paused" => Ok(TaskStatus::Paused),
+        "blocked" => Ok(TaskStatus::Blocked),
+        "review_submitted" => Ok(TaskStatus::ReviewSubmitted),
+        "approved" => Ok(TaskStatus::Approved),
+        "rejected" => Ok(TaskStatus::Rejected),
+        "failed" => Ok(TaskStatus::Failed),
+        "cancelled" => Ok(TaskStatus::Cancelled),
+        "closed" => Ok(TaskStatus::Closed),
+        other => Err(format!("unsupported task status `{other}`")),
+    }
 }
 
 fn task_actor(turn: &TurnRecord) -> TaskActor {
@@ -6508,6 +6539,75 @@ mod tests {
         assert!(timeline.contains("\"event_type\":\"TaskCreated\""));
         assert!(timeline.contains("\"event_type\":\"TaskExecutionRecorded\""));
         assert!(timeline.contains("\"seq\":1"));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_tool_list_tasks_filters_queue_projection() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-task"),
+                    turn_id: TurnId::new("turn-task"),
+                    trace_id: TraceId::new("trace-task"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-task"),
+                    user_text: "list assigned tasks".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+        for (task_id, priority) in [("task-list-low", 10), ("task-list-high", 90)] {
+            execute_task_tool(
+                &runtime_home,
+                &turn,
+                &task_tool_call(vec![
+                    ("op", json!("create")),
+                    ("task_id", json!(task_id)),
+                    ("title", json!(format!("List {task_id}"))),
+                    ("content", json!("List task queue")),
+                    ("goal", json!("Filter by assigned state")),
+                    ("deliverables", json!(["list"])),
+                    ("acceptance", json!(["filtered"])),
+                    ("priority", json!(priority)),
+                    ("dispatch", json!({"mode":"none"})),
+                ]),
+            )
+            .expect("create task");
+            execute_task_tool(
+                &runtime_home,
+                &turn,
+                &task_tool_call(vec![
+                    ("op", json!("assign")),
+                    ("task_id", json!(task_id)),
+                    ("agent_id", json!("agent-task")),
+                ]),
+            )
+            .expect("assign task");
+        }
+
+        let tasks = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("list_tasks")),
+                ("status", json!("assigned")),
+                ("agent_id", json!("agent-task")),
+            ]),
+        )
+        .expect("list tasks");
+
+        let high_pos = tasks.find("\"task_id\":\"task-list-high\"").expect("high");
+        let low_pos = tasks.find("\"task_id\":\"task-list-low\"").expect("low");
+        assert!(high_pos < low_pos);
+        assert!(tasks.contains("\"status\":\"assigned\""));
         let _ = fs::remove_dir_all(runtime_home);
     }
 

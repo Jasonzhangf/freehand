@@ -29,6 +29,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 ## Response Mainline
 
 - `TaskRuntime::query_task` returns persisted task snapshot truth
+- `TaskRuntime::list_tasks` returns task snapshots filtered by status and assignee
 - `TaskRuntime::task_history` returns ordered persisted task ledger events
 - `TaskRuntime::list_agents` returns current in-memory agent registry projection
 - `TaskRuntime::query_agent` returns one agent snapshot
@@ -106,23 +107,24 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 03 | `TaskRuntime::boot` | `crates/freehand-task/src/lib.rs` | load task and agent snapshots into memory | runtime home and owner agent | ready task runtime | runtime task bridge | task owner | bound |
 | 04 | `TaskRuntime::create_task` | `crates/freehand-task/src/lib.rs` | validate, persist, assign/wait, and update memory state | task create request | task snapshot plus ledger events | runtime task bridge | task owner | bound |
 | 05 | `TaskRuntime::query_task` | `crates/freehand-task/src/lib.rs` | return one task snapshot truth | task id | task snapshot | runtime task bridge | task owner | bound |
-| 06 | `TaskRuntime::task_history` | `crates/freehand-task/src/lib.rs` | return ordered persisted task ledger events for timeline and debug projection | task id | task ledger events | runtime task bridge | task owner | bound |
-| 07 | `TaskRuntime::submit_review` | `crates/freehand-task/src/lib.rs` | record review submission with deliverables and evidence | task review submission | review-submitted task snapshot and event | runtime task bridge | task owner | bound |
-| 08 | `TaskRuntime::approve_review` | `crates/freehand-task/src/lib.rs` | approve submitted review before close | task mutation request | approved task snapshot and event | runtime task bridge | task owner | bound |
-| 09 | `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | close only approved or otherwise closeable tasks and release assignee state | task mutation request | closed task snapshot and event | runtime task bridge | task owner | bound |
-| 10 | `TaskRuntime::heartbeat_task` | `crates/freehand-task/src/lib.rs` | refresh the lease for an assigned running task | task heartbeat request | running task snapshot plus active lease | runtime task bridge | task owner | bound |
-| 11 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots plus lease snapshot | recovered runtime state | task boot | task owner | bound |
-| 12 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting, created, or interrupted tasks to an available agent | task assignment request | assigned task snapshot plus queued agent state | runtime task bridge | task owner | bound |
-| 13 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | claim the highest-priority assigned task for an agent and enter lease-backed running state | agent task claim request | claimed running task snapshot or no-task outcome | runtime task bridge | task owner | bound |
-| 14 | `TaskRuntime::record_execution` | `crates/freehand-task/src/lib.rs` | append semantic worker execution progress for a running task | worker execution record request | running task snapshot plus progress event | runtime task bridge | task owner | bound |
-| 15 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal tasks and release assignee state | task mutation request | cancelled task snapshot plus released agent state | runtime task bridge | task owner | bound |
-| 16 | `TaskRuntime::create_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents | agent create request | available agent snapshot | runtime task bridge | task owner | bound |
+| 06 | `TaskRuntime::list_tasks` | `crates/freehand-task/src/lib.rs` | return task snapshots filtered by status and assignee for queue and UI projection | task list query | task snapshots | runtime task bridge | task owner | bound |
+| 07 | `TaskRuntime::task_history` | `crates/freehand-task/src/lib.rs` | return ordered persisted task ledger events for timeline and debug projection | task id | task ledger events | runtime task bridge | task owner | bound |
+| 08 | `TaskRuntime::submit_review` | `crates/freehand-task/src/lib.rs` | record review submission with deliverables and evidence | task review submission | review-submitted task snapshot and event | runtime task bridge | task owner | bound |
+| 09 | `TaskRuntime::approve_review` | `crates/freehand-task/src/lib.rs` | approve submitted review before close | task mutation request | approved task snapshot and event | runtime task bridge | task owner | bound |
+| 10 | `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | close only approved or otherwise closeable tasks and release assignee state | task mutation request | closed task snapshot and event | runtime task bridge | task owner | bound |
+| 11 | `TaskRuntime::heartbeat_task` | `crates/freehand-task/src/lib.rs` | refresh the lease for an assigned running task | task heartbeat request | running task snapshot plus active lease | runtime task bridge | task owner | bound |
+| 12 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots plus lease snapshot | recovered runtime state | task boot | task owner | bound |
+| 13 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting, created, or interrupted tasks to an available agent | task assignment request | assigned task snapshot plus queued agent state | runtime task bridge | task owner | bound |
+| 14 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | claim the highest-priority assigned task for an agent and enter lease-backed running state | agent task claim request | claimed running task snapshot or no-task outcome | runtime task bridge | task owner | bound |
+| 15 | `TaskRuntime::record_execution` | `crates/freehand-task/src/lib.rs` | append semantic worker execution progress for a running task | worker execution record request | running task snapshot plus progress event | runtime task bridge | task owner | bound |
+| 16 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal tasks and release assignee state | task mutation request | cancelled task snapshot plus released agent state | runtime task bridge | task owner | bound |
+| 17 | `TaskRuntime::create_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents | agent create request | available agent snapshot | runtime task bridge | task owner | bound |
 | 14 | `TaskRuntime::close_agent` | `crates/freehand-task/src/lib.rs` | close only idle agents | agent mutation request | closed agent snapshot | runtime task bridge | task owner | bound |
 
 ## Sync Status Against Mainline Call
 
 - first implementation supports `create`, `query`, `list_agents`, and `query_agent`
-- current implementation supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `record_execution`, `history`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`
+- current implementation supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `record_execution`, `history`, `list_tasks`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`
 - review-before-close is locked by positive and negative tests
 - lease-backed Running recovery is locked by positive and negative tests
 - agent registry lifecycle is locked by positive and negative tests

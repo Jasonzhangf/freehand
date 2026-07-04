@@ -16,6 +16,7 @@
   - task ledger history can be queried as ordered lifecycle events
   - cancellation releases assigned agent state
   - query returns persisted task truth
+  - list_tasks returns task snapshots for queue and UI projection queries
   - agent registry exposes self agent
 
 ## White-Box Coverage
@@ -37,6 +38,7 @@
 - record_execution rejects non-running tasks without advancing event sequence
 - task_history returns ordered ledger events including execution progress
 - task_history for unknown task returns explicit task-not-found
+- list_tasks filters by status and assignee
 - cancel releases the assignee and prevents later resume
 - close_agent rejects busy agents
 
@@ -52,6 +54,7 @@
 - runtime task tool claim_next returns the highest-priority assigned task and running lease
 - runtime task tool record_execution writes semantic worker execution progress
 - runtime task tool history returns task ledger timeline JSON
+- runtime task tool list_tasks returns filtered task snapshots
 - tool registry exposes `task` as one implemented built-in tool schema
 
 ## Project Black-Box Impact
@@ -71,6 +74,7 @@ cargo test -p freehand-runtime task_tool_agent_assign_cancel_close_lifecycle -- 
 cargo test -p freehand-runtime task_tool_claim_next_runs_highest_priority_task -- --nocapture
 cargo test -p freehand-runtime task_tool_record_execution_requires_running_task -- --nocapture
 cargo test -p freehand-runtime task_tool_history_returns_ordered_execution_timeline -- --nocapture
+cargo test -p freehand-runtime task_tool_list_tasks_filters_queue_projection -- --nocapture
 cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```

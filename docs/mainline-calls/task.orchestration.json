@@ -25,6 +25,7 @@
   ],
   "response_mainline": [
     "`TaskRuntime::query_task` returns persisted task snapshot truth",
+    "`TaskRuntime::list_tasks` returns task snapshots filtered by status and assignee",
     "`TaskRuntime::task_history` returns ordered persisted task ledger events",
     "`TaskRuntime::list_agents` returns current in-memory agent registry projection",
     "`TaskRuntime::query_agent` returns one agent snapshot",
@@ -203,6 +204,17 @@
     },
     {
       "step": "06",
+      "symbol_path": "TaskRuntime::list_tasks",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "return task snapshots filtered by status and assignee for queue and UI projection",
+      "input_semantic": "task list query",
+      "output_semantic": "task snapshots",
+      "caller": "runtime task bridge",
+      "callee": "task owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
       "symbol_path": "TaskRuntime::task_history",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "return ordered persisted task ledger events for timeline and debug projection",
@@ -213,7 +225,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "07",
+      "step": "08",
       "symbol_path": "TaskRuntime::submit_review",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "record review submission with deliverables and evidence",
@@ -224,7 +236,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "08",
+      "step": "09",
       "symbol_path": "TaskRuntime::approve_review",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "approve submitted review before close",
@@ -235,7 +247,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "09",
+      "step": "10",
       "symbol_path": "TaskRuntime::close_task",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "close only approved or otherwise closeable tasks and release assignee state",
@@ -246,7 +258,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "10",
+      "step": "11",
       "symbol_path": "TaskRuntime::heartbeat_task",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "refresh the lease for an assigned running task",
@@ -257,7 +269,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "11",
+      "step": "12",
       "symbol_path": "reconcile_running_leases",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "interrupt running tasks with missing, mismatched, inactive, or expired leases during boot",
@@ -268,7 +280,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "12",
+      "step": "13",
       "symbol_path": "TaskRuntime::assign_task",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "assign waiting, created, or interrupted tasks to an available agent",
@@ -279,7 +291,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "13",
+      "step": "14",
       "symbol_path": "TaskRuntime::claim_next_task",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "claim the highest-priority assigned task for an agent and enter lease-backed running state",
@@ -290,7 +302,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "14",
+      "step": "15",
       "symbol_path": "TaskRuntime::record_execution",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "append semantic worker execution progress for a running task",
@@ -301,7 +313,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "15",
+      "step": "16",
       "symbol_path": "TaskRuntime::cancel_task",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "cancel non-terminal tasks and release assignee state",
@@ -312,7 +324,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "16",
+      "step": "17",
       "symbol_path": "TaskRuntime::create_agent",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "create persisted idle worker agents",
@@ -336,7 +348,7 @@
   ],
   "sync_status": [
     "first implementation supports `create`, `query`, `list_agents`, and `query_agent`",
-    "current implementation supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `record_execution`, `history`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`",
+    "current implementation supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `record_execution`, `history`, `list_tasks`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`",
     "review-before-close is locked by positive and negative tests",
     "lease-backed Running recovery is locked by positive and negative tests",
     "agent registry lifecycle is locked by positive and negative tests",

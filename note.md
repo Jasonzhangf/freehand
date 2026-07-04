@@ -164,6 +164,27 @@
     - no UI task projection yet.
     - no worker debug stream/turn update projection yet.
 
+# 2026-07-04 task.orchestration task list query
+  - user requirement: continue task/multi-agent lifecycle implementation in tested rounds with function map and mainline caller updates.
+  - owner: `task.orchestration`.
+  - implementation:
+    - added `list_tasks` to the single `task` tool op surface.
+    - added `TaskRuntime::list_tasks`, which returns task snapshots filtered by status and assignee and sorted by priority.
+    - runtime `task(op="list_tasks", status, agent_id)` returns queue/UI projection JSON without mutating task truth.
+    - updated task design, test design, function map, feature map, mainline caller JSON, and generated wiki.
+  - verified:
+    - white-box: `cargo test -p freehand-task -- --nocapture` -> 19 passed; covers status/assignee filtering and priority order.
+    - module black-box: `cargo test -p freehand-runtime task_tool_list_tasks_filters_queue_projection -- --nocapture` -> 1 passed.
+    - existing runtime task black-box tests for history and record_execution passed.
+    - tool schema: `cargo test -p freehand-tools -- --nocapture` -> 27 passed.
+    - `cargo test -p xtask -- --nocapture` -> 18 passed.
+    - `cargo run -p xtask -- mainlines generate`, `mainlines check`, and `gates check` passed.
+    - full regression: `cargo test --workspace` -> 414 passed; `cargo clippy --workspace --all-targets -- -D warnings` -> no issues; `cargo fmt --check` passed.
+  - remaining gaps:
+    - no real worker execution process/channel yet.
+    - no UI task projection yet.
+    - no worker debug stream/turn update projection yet.
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

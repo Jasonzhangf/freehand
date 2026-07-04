@@ -187,6 +187,12 @@ pub struct TaskCreateOutcome {
     pub events: Vec<TaskLedgerEvent>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TaskListQuery {
+    pub status: Option<TaskStatus>,
+    pub assignee: Option<AgentId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskMutationRequest {
     pub task_id: TaskId,
@@ -473,6 +479,45 @@ impl TaskRuntime {
             .get(task_id)
             .cloned()
             .ok_or_else(|| TaskError::TaskNotFound(task_id.as_str().to_owned()))
+    }
+
+    pub fn list_tasks(&self, query: TaskListQuery) -> Result<Vec<TaskSnapshot>, TaskError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        let mut tasks = state
+            .tasks
+            .values()
+            .filter(|task| {
+                query
+                    .status
+                    .as_ref()
+                    .map(|status| &task.status == status)
+                    .unwrap_or(true)
+            })
+            .filter(|task| {
+                query
+                    .assignee
+                    .as_ref()
+                    .map(|agent_id| {
+                        task.assignee
+                            .as_ref()
+                            .map(|assignee| &assignee.agent_id == agent_id)
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        tasks.sort_by(|left, right| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.task_id.cmp(&right.task_id))
+        });
+        Ok(tasks)
     }
 
     pub fn task_history(&self, task_id: &TaskId) -> Result<Vec<TaskLedgerEvent>, TaskError> {
@@ -2179,6 +2224,50 @@ mod tests {
             .expect_err("missing task");
 
         assert_eq!(err, TaskError::TaskNotFound("missing-task".to_owned()));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn list_tasks_filters_by_status_and_assignee_in_priority_order() {
+        let runtime_home = temp_runtime_home("task-list-filter");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let mut low = sample_create_request(agent_id.clone());
+        low.task_id = Some(TaskId::new("task-list-low"));
+        low.priority = 10;
+        low.dispatch = TaskDispatchRequest::None;
+        let mut high = sample_create_request(agent_id.clone());
+        high.task_id = Some(TaskId::new("task-list-high"));
+        high.priority = 90;
+        high.dispatch = TaskDispatchRequest::None;
+        let low = runtime.create_task(low).expect("low").task;
+        let high = runtime.create_task(high).expect("high").task;
+        for task in [&low, &high] {
+            runtime
+                .assign_task(TaskAssignRequest {
+                    task_id: task.task_id.clone(),
+                    agent_id: agent_id.clone(),
+                    actor: sample_actor(agent_id.clone()),
+                    watermark: sample_watermark(),
+                })
+                .expect("assign");
+        }
+
+        let tasks = runtime
+            .list_tasks(TaskListQuery {
+                status: Some(TaskStatus::Assigned),
+                assignee: Some(agent_id),
+            })
+            .expect("list");
+
+        assert_eq!(
+            tasks
+                .iter()
+                .map(|task| task.task_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["task-list-high", "task-list-low"]
+        );
+        assert!(tasks.iter().all(|task| task.status == TaskStatus::Assigned));
         let _ = fs::remove_dir_all(runtime_home);
     }
 
