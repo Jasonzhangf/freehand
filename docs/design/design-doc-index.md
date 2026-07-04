@@ -89,7 +89,7 @@ Use this directory family for durable design truth.
 - `metadata-core-design.md`
   - internal metadata center, writer owner, write-node provenance, and metadata/request isolation boundary
 - `control-error-center-refactor.md`
-  - next refactor design for passive status schema, compact built-in task action tools, centralized error policy, metadata watermarks, task orchestration, and control/data isolation
+  - next refactor design for fixed request/response hooks, passive status schema, compact built-in task action tools, centralized error policy, metadata watermarks, task orchestration, and control/data isolation
 - `ui-and-runtime-topology.md`
   - multi-UI access, runtime home, master/slave shape, UI protocol boundaries
 - `config-core-design.md`

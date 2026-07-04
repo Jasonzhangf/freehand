@@ -89,6 +89,43 @@ Freehand has two model feedback channels:
 
 Status schema must not execute actions. Action tools must not rely on status text as their authority.
 
+## Fixed Hook Skeleton
+
+The first refactor target is a skeleton, not the full task system. Schema variants and action processors may evolve, but their execution positions must be fixed in the request/response loop.
+
+Request-side hook order:
+
+```text
+ReasonRequestHook01LoadPromptContract
+  -> ReasonRequestHook02InjectStatusSchemaInstructions
+  -> ReasonRequestHook03InjectActionToolSpecs
+  -> ReasonRequestHook04BuildProviderRequest
+```
+
+Response-side hook order:
+
+```text
+ReasonResponseHook01CaptureProviderOutput
+  -> ReasonResponseHook02ExtractStatusBlocks
+  -> ReasonResponseHook03ValidateStatusSchema
+  -> ReasonResponseHook04AdmitStatusMetadata
+  -> ReasonResponseHook05AdmitActionToolCalls
+  -> ReasonResponseHook06ClassifyErrors
+  -> ReasonResponseHook07DecideRhythm
+  -> ReasonResponseHook08ApplyOwnerActions
+  -> ReasonResponseHook09ProjectPublicOutput
+```
+
+Fixed responsibilities:
+
+- request hooks define what status schemas and action tools are available; they do not execute state changes
+- response hooks parse and validate status before any rhythm decision
+- action tool calls are admitted through the fixed action hook before owner execution
+- all schema validation failures and action failures enter the fixed error hook
+- public projection runs after status stripping and owner/action projection updates
+
+The hook locations are stable contracts. Individual schemas can be versioned under `ReasonResponseHook03ValidateStatusSchema`, and individual action operations can be versioned under `ReasonResponseHook05AdmitActionToolCalls`, but new implementations must not bypass the hook chain.
+
 ## Status Schema Block
 
 The future status block is separate from the existing terminal completion block.
@@ -217,7 +254,7 @@ Output:
 Failure:
 
 - missing required status block when the current prompt contract demands one
-- multiple blocks when the action requires exactly one
+- multiple blocks when the status contract requires exactly one
 
 ### `ControlStatus02ParsedBlock`
 
@@ -572,38 +609,43 @@ UI and public conversation projection must:
    - write function maps and test designs
    - migrate this design into generated mainline manifests when code begins
 
-2. Contracts and blocks
+2. Skeleton hook contracts
+   - land no-op request hooks for prompt contract/status-schema/tool-spec injection
+   - land no-op response hooks for status extraction, validation, metadata admission, action admission, error classification, rhythm decision, owner action, and public projection
+   - add tests proving hook order and no bypass for response parsing/action/error flow
+
+3. Contracts and blocks
    - add status/action/error IDs and typed DTOs to `freehand-contracts`
    - add pure parsers/validators/projectors to `freehand-blocks`
    - add public projection stripping tests
 
-3. Metadata center extension
+4. Metadata center extension
    - add metadata kind or typed helpers for control/error records
    - add watermark validation helpers
    - add query indexes by trace/session/turn/action/error code
 
-4. Control center implementation
+5. Control center implementation
    - parse/validate/normalize/repair status blocks
    - admit/validate task tool action calls
    - write accepted/rejected status and action decisions to metadata center
    - expose accepted status rhythm decisions and accepted action decisions
 
-5. Error center implementation
+6. Error center implementation
    - classify observed failures
    - decide retry/repair/stop/fail/block/cancel
    - write decisions to metadata center
 
-6. Runtime/reason integration
+7. Runtime/reason integration
    - route completion/status schema errors through error center
    - remove local retry policy duplication from runtime live loop
    - require accepted action decisions before task/node transitions
 
-7. Task and multi-agent integration
+8. Task and multi-agent integration
    - implement task state truth
    - upgrade delegated task assignment
    - add worker dispatch and task recovery
 
-8. UI/ADP integration
+9. UI/ADP integration
    - query/subscribe control decisions, errors, tasks, and recovery status
    - render task cards and worker agent views
 
@@ -611,6 +653,8 @@ UI and public conversation projection must:
 
 Positive tests:
 
+- request hook order is fixed and injects status instructions before provider request build
+- response hook order is fixed and parses status/action/errors before public projection
 - valid status block writes watermarked accepted status metadata
 - simple request status plus provider stop permits natural terminal completion
 - completed task status requires evidence before terminal acceptance
@@ -623,6 +667,7 @@ Positive tests:
 
 Negative tests:
 
+- a response path that attempts owner action before action admission fails a skeleton gate/test
 - missing status tag when required causes rejected status metadata and repair prompt
 - invalid JSON causes rejected status metadata and repair prompt
 - missing status fields are not guessed

@@ -30,10 +30,10 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 | risk | runtime/provider/tool paths can make local retry/fail/block decisions without one auditable control/error policy; future task/subagent routing could accidentally execute side effects from status schema instead of compact built-in task tools |
 | gate | no current gate requires control/error center admission before flow decisions |
 | current producers | `reason.turn` and runtime live bridge write some metadata; provider/tool/runtime errors can materialize shared `ErrorErr01RuntimeClassified` but not through a central error policy owner |
-| missing coverage | `<<<freehand_status>>>` status block parser, status schema validator, status repair loop, compact `task` action tool, error-center classifier, recovery decision owner, control/error watermark schema, task state transitions linked to accepted action metadata |
+| missing coverage | fixed request/response hook skeleton, `<<<freehand_status>>>` status block parser, status schema validator, status repair loop, compact `task` action tool, error-center classifier, recovery decision owner, control/error watermark schema, task state transitions linked to accepted action metadata |
 | design doc | `docs/design/control-error-center-refactor.md` |
 | priority | high — required before task/subagent orchestration refactor |
-| closure path | 1) add feature-map/function-map/test-design entries for `control.center`, `error.center`, `task.orchestration` 2) implement pure parsers/validators in blocks/contracts 3) extend metadata center with status/action/error watermark helpers 4) route runtime/reason/provider/tool failures through error center 5) gate owner state transitions on accepted action metadata |
+| closure path | 1) add feature-map/function-map/test-design entries for `control.center`, `error.center`, `task.orchestration` 2) land fixed no-op request/response hook skeleton and hook-order tests 3) implement pure parsers/validators in blocks/contracts 4) extend metadata center with status/action/error watermark helpers 5) route runtime/reason/provider/tool failures through error center 6) gate owner state transitions on accepted action metadata |
 
 ## 管理规则
 
