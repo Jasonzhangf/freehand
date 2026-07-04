@@ -14,6 +14,7 @@ run_install_symlink() {
   ln -sfn "$repo_root/target/debug/freehand-cli" "$bin_dir/freehand-cliS"
   ln -sfn "$repo_root/target/debug/freehand-server" "$bin_dir/freehand-serverS"
   ln -sfn "$repo_root/target/debug/freehand-daemon" "$bin_dir/freehand-daemonS"
+  install -m 0755 "$repo_root/target/debug/freehand-daemon" "$bin_dir/freehand-daemonS-bin"
   if [[ -L "$bin_dir/freehand-daemon-launchdS" ]]; then
     rm "$bin_dir/freehand-daemon-launchdS"
   fi
@@ -23,6 +24,7 @@ run_install_symlink() {
   printf '  %s -> %s\n' "$bin_dir/freehand-cliS" "$repo_root/target/debug/freehand-cli"
   printf '  %s -> %s\n' "$bin_dir/freehand-serverS" "$repo_root/target/debug/freehand-server"
   printf '  %s -> %s\n' "$bin_dir/freehand-daemonS" "$repo_root/target/debug/freehand-daemon"
+  printf '  %s (launchd debug binary copy)\n' "$bin_dir/freehand-daemonS-bin"
   printf '  %s (wrapper copy)\n' "$bin_dir/freehand-daemon-launchdS"
   echo "[freehand-symlink] ensure PATH contains: $bin_dir"
   echo "[freehand-symlink] daemon start: freehand-daemonS serve --agent master --bind 127.0.0.1:4042"

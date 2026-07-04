@@ -17,6 +17,33 @@
     - `curl -4fsS http://127.0.0.1:4041/health` and `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` still passed, proving global service stayed available.
     - `make ci` -> exit 0.
   - durable workflow: normal development online validation should use S mode on `127.0.0.1:4042`; global `127.0.0.1:4041` is for release/promotion closeout.
+  - follow-up repair during WebUI verification:
+    - launchd became unreliable when executing the S wrapper or the `freehand-daemonS` symlink after repeated debug rebuilds; symptoms were `Operation not permitted` / `getcwd` stderr and a process that printed listening but did not accept 4042 connections.
+    - current S profile keeps `freehand-cliS` and `freehand-serverS` as symlinks, but uses `~/.local/bin/freehand-daemonS-bin` as a local debug daemon copy for launchd.
+    - plist now starts through `/bin/bash -lc 'cd <repo> && exec <daemonS-bin> serve ...'`, with S env values projected into launchd environment.
+    - verified: `scripts/install-launchd.sh installS`, `curl -4fsS http://127.0.0.1:4042/health`, `freehand-cliS adp-smoke`, and served/workspace `webui.js` hash match.
+
+# 2026-07-04 WebUI chat bubble / SSE display repair
+  - user requirement: render as chat conversation; user right-aligned and visually distinct, assistant left-aligned, tool activity embedded inside assistant card, reasoning italic, normal assistant text regular, SSE refresh supported, semantic tool display, shell command shown/truncated, lifecycle colors blue/green/red.
+  - implementation:
+    - WebUI render path now emits chat bubbles from `RenderConversation` rows; assistant rows and tool rows share one assistant bubble role surface.
+    - `ensureSseTurnSubscription()` consumes latest-turn SSE as a display-refresh mirror and routes events through `setTurnProjection()`.
+    - `tool.display` projects ordinary shell command fields and keeps `pwd` semantic instead of exposing raw `command=pwd`.
+    - WebUI source arrays and DOM fragments dedupe same `turn_id` + visible card text to prevent live latest-turn/session transcript races from duplicating r2 assistant/final cards.
+    - S profile repair was required before browser verification because launchd symlink execution on the external workspace became unreliable.
+  - verified:
+    - `node --check apps/freehand-server/assets/webui.js`
+    - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+    - `cargo test -p freehand-blocks -- --nocapture` -> 42 passed
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `scripts/install-launchd.sh installS` with 4042 health, ADP smoke, and served/workspace JS hash match
+    - browser evidence captured blue running tool + italic reasoning: `artifacts/webui-online/20260704-chat-bubble-sse-4042-final-1783140104360/running.png`
+    - browser/ADP evidence captured SSE and semantic shell display; final selection proof remains partially blocked because active non-terminal freeform session kept stealing selected-session render in the automated browser.
+  - remaining verification gap:
+    - need one clean post-dedupe browser run where selected completed session is held stable and asserts no duplicate r2 card plus green success card in the same artifact.
 
 # 2026-07-01 WebUI submitted input/history disappearance trace
   - user live feedback: after submitting a request, the composer text disappeared and the conversation area showed no user-visible history while the top status still showed live model/tool-result state.

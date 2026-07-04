@@ -33,6 +33,9 @@ label="${FREEHAND_LAUNCHD_LABEL:-$default_label}"
 plist_path="$HOME/Library/LaunchAgents/$label.plist"
 bind_addr="${FREEHAND_DAEMON_BIND:-$default_bind_addr}"
 daemon_bin="$bin_dir/freehand-daemon${service_suffix}"
+if [[ "$service_suffix" == "S" ]]; then
+  daemon_bin="$bin_dir/freehand-daemonS-bin"
+fi
 launchd_wrapper="$bin_dir/freehand-daemon-launchd${service_suffix}"
 stdout_log="$logs_dir/daemon${service_suffix}.stdout.log"
 stderr_log="$logs_dir/daemon${service_suffix}.stderr.log"
@@ -85,7 +88,8 @@ EOF
   else
     # shellcheck disable=SC1090
     . "$env_file"
-    if [[ -n "${FREEHAND_DAEMON_BIN:-}" && "$FREEHAND_DAEMON_BIN" != "$daemon_bin" ]]; then
+    pair_token="${FREEHAND_PAIR_TOKEN_SHARED:-$pair_token}"
+    if [[ -n "${FREEHAND_DAEMON_BIN:-}" && "$FREEHAND_DAEMON_BIN" != "$daemon_bin" && "$service_suffix" != "S" ]]; then
       echo "daemon env uses a different binary path: $FREEHAND_DAEMON_BIN" >&2
       echo "expected: $daemon_bin" >&2
       exit 2
@@ -119,14 +123,16 @@ write_launchd_plist() {
   <string>$label</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$launchd_wrapper</string>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd "$workdir" &amp;&amp; exec "$daemon_bin" serve --agent "$agent" --bind "$bind_addr"</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
   <key>WorkingDirectory</key>
-  <string>$workdir</string>
+  <string>$HOME</string>
   <key>StandardOutPath</key>
   <string>$stdout_log</string>
   <key>StandardErrorPath</key>
@@ -139,6 +145,16 @@ write_launchd_plist() {
     <string>$HOME</string>
     <key>PATH</key>
     <string>$bin_dir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>FREEHAND_DAEMON_AGENT</key>
+    <string>$agent</string>
+    <key>FREEHAND_DAEMON_BIND</key>
+    <string>$bind_addr</string>
+    <key>FREEHAND_DAEMON_WORKDIR</key>
+    <string>$workdir</string>
+    <key>FREEHAND_DAEMON_BIN</key>
+    <string>$daemon_bin</string>
+    <key>FREEHAND_PAIR_TOKEN_SHARED</key>
+    <string>$pair_token</string>
   </dict>
   </dict>
 </plist>
