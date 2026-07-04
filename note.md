@@ -14,6 +14,24 @@
     - no centralized `error.center` yet.
     - no selectable user-option UI projection yet.
 
+# 2026-07-04 task.orchestration persistence skeleton
+  - user requirement: land task persistence/lifecycle/memory/startup/recovery design, then start implementation.
+  - owner: `task.orchestration`.
+  - implementation:
+    - added `docs/design/task-orchestration-design.md`, `docs/function-maps/task.orchestration.md`, and `docs/testing/task.orchestration.md`.
+    - added `crates/freehand-task` with task ids, task statuses, agent statuses, task snapshots, agent snapshots, append-only ledger events, self-agent bootstrap, create/query/list_agents/query_agent, and runtime memory rebuild on boot.
+    - added one built-in `task` tool schema to `freehand-tools`; runtime handles `task` tool calls via `execute_task_tool` and routes to `freehand-task`.
+    - first scope supports create with self/auto assignment or WaitingAgent; no real worker execution yet.
+  - verified:
+    - `cargo fmt --check`
+    - `cargo test -p freehand-task`
+    - `cargo test -p freehand-tools`
+    - `cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --nocapture`
+    - `cargo test --workspace`
+    - `cargo clippy --workspace --all-targets -- -D warnings`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

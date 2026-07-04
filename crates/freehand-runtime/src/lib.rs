@@ -25,8 +25,8 @@ use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
     ContextSegmentKind, ContextStability, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified,
     FeatureId, ReasonReq04ToolCall, ReasonReq05ToolResultReentry, RecoveryPolicy, SessionId,
-    ToolPreviewChangeKind, ToolPreviewContract, ToolResultContract, ToolResultStatus, TraceId,
-    TurnId,
+    ToolArgument, ToolPreviewChangeKind, ToolPreviewContract, ToolResultContract, ToolResultStatus,
+    TraceId, TurnId,
 };
 use freehand_control::{
     ControlRhythmDecision, ControlStatusRejection, ControlStatusSubmission,
@@ -58,6 +58,10 @@ use freehand_reason::{
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting, ReasonTurnEngine,
     SessionHistory, TurnRecord, TurnStartInput,
 };
+use freehand_task::{
+    TaskActor, TaskCreateRequest, TaskDispatchRequest, TaskId, TaskParentRef, TaskRuntime,
+    TaskWatermark,
+};
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
@@ -67,7 +71,7 @@ use freehand_ui_protocol::{
     turn_projection_for_client, turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
@@ -3569,6 +3573,16 @@ fn execute_registry_tool_call_with_workspace(
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ReasonReq05ToolResultReentry, RuntimeLiveBridgeError> {
     let tool_name = tool_call.tool_call.tool_name.as_str();
+    if tool_name == "task" {
+        let (status, output) = match execute_task_tool(runtime_home, turn, tool_call) {
+            Ok(output) => (ToolResultStatus::Success, output),
+            Err(err) => (
+                ToolResultStatus::Failed,
+                format!("Task tool execution failed: {err}"),
+            ),
+        };
+        return Ok(tool_result_reentry(turn, tool_call, status, output));
+    }
     if is_checkpointable_file_mutation_tool(tool_name) {
         let store = RuntimeCheckpointStore::new_with_workspace_root(
             runtime_home,
@@ -3614,6 +3628,164 @@ fn execute_registry_tool_call_with_workspace(
         ),
     };
     Ok(tool_result_reentry(turn, tool_call, status, output))
+}
+
+fn execute_task_tool(
+    runtime_home: &Path,
+    turn: &TurnRecord,
+    tool_call: &ReasonReq04ToolCall,
+) -> Result<String, String> {
+    let args = tool_arguments_object(&tool_call.tool_call.arguments);
+    let op = required_json_string(&args, "op")?;
+    let task_runtime = TaskRuntime::boot(runtime_home, turn.request.agent_id.clone())
+        .map_err(|err| err.to_string())?;
+    match op {
+        "create" => {
+            let request = TaskCreateRequest {
+                task_id: optional_json_string(&args, "task_id").map(TaskId::new),
+                title: required_json_string(&args, "title")?.to_owned(),
+                content: required_json_string(&args, "content")?.to_owned(),
+                goal: required_json_string(&args, "goal")?.to_owned(),
+                deliverables: required_json_string_array(&args, "deliverables")?,
+                acceptance: required_json_string_array(&args, "acceptance")?,
+                priority: optional_json_i64(&args, "priority").unwrap_or(50),
+                target_cwd: optional_json_string(&args, "target_cwd").map(ToOwned::to_owned),
+                dispatch: parse_task_dispatch(&args)?,
+                parent: TaskParentRef {
+                    session_id: Some(turn.request.session_id.clone()),
+                    turn_id: Some(turn.request.turn_id.clone()),
+                    trace_id: Some(turn.request.trace_id.clone()),
+                },
+                actor: TaskActor {
+                    agent_id: turn.request.agent_id.clone(),
+                    source: "control.center".to_owned(),
+                    session_id: Some(turn.request.session_id.clone()),
+                    turn_id: Some(turn.request.turn_id.clone()),
+                    trace_id: Some(turn.request.trace_id.clone()),
+                },
+                watermark: TaskWatermark {
+                    metadata_id: None,
+                    hook: Some("ControlHook03AfterModelResponse".to_owned()),
+                    action_tool_call_id: Some(tool_call.tool_call.tool_call_id.as_str().to_owned()),
+                },
+            };
+            let outcome = task_runtime
+                .create_task(request)
+                .map_err(|err| err.to_string())?;
+            Ok(format!(
+                "Task created: task_id={} status={:?} events={}",
+                outcome.task.task_id.as_str(),
+                outcome.task.status,
+                outcome.events.len()
+            ))
+        }
+        "query" => {
+            let task_id = TaskId::new(required_json_string(&args, "task_id")?);
+            let task = task_runtime
+                .query_task(&task_id)
+                .map_err(|err| err.to_string())?;
+            Ok(serde_json::to_string(&task).unwrap_or_else(|_| {
+                format!(
+                    "Task query: task_id={} status={:?}",
+                    task.task_id.as_str(),
+                    task.status
+                )
+            }))
+        }
+        "list_agents" => {
+            let agents = task_runtime.list_agents().map_err(|err| err.to_string())?;
+            Ok(serde_json::to_string(&agents)
+                .unwrap_or_else(|_| format!("Agent list: count={}", agents.len())))
+        }
+        "query_agent" => {
+            let agent_id = AgentId::new(required_json_string(&args, "agent_id")?);
+            let agent = task_runtime
+                .query_agent(&agent_id)
+                .map_err(|err| err.to_string())?;
+            Ok(serde_json::to_string(&agent)
+                .unwrap_or_else(|_| format!("Agent query: agent_id={}", agent.agent_id.as_str())))
+        }
+        other => Err(format!("unsupported task op `{other}`")),
+    }
+}
+
+fn tool_arguments_object(arguments: &[ToolArgument]) -> Map<String, Value> {
+    arguments
+        .iter()
+        .map(|argument| (argument.name.clone(), argument.value.clone()))
+        .collect()
+}
+
+fn parse_task_dispatch(args: &Map<String, Value>) -> Result<TaskDispatchRequest, String> {
+    let Some(dispatch) = args.get("dispatch") else {
+        return Ok(TaskDispatchRequest::Auto {
+            allow_create_agent: false,
+        });
+    };
+    let object = dispatch
+        .as_object()
+        .ok_or_else(|| "`dispatch` must be an object".to_owned())?;
+    match required_json_string(object, "mode")? {
+        "none" => Ok(TaskDispatchRequest::None),
+        "self" => Ok(TaskDispatchRequest::SelfAgent),
+        "agent" => Ok(TaskDispatchRequest::Agent {
+            agent_id: AgentId::new(required_json_string(object, "agent_id")?),
+        }),
+        "auto" => Ok(TaskDispatchRequest::Auto {
+            allow_create_agent: object
+                .get("allow_create_agent")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        other => Err(format!("unsupported dispatch mode `{other}`")),
+    }
+}
+
+fn required_json_string<'a>(
+    object: &'a Map<String, Value>,
+    field: &str,
+) -> Result<&'a str, String> {
+    object
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("`{field}` is required"))
+}
+
+fn optional_json_string<'a>(object: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
+    object
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn optional_json_i64(object: &Map<String, Value>, field: &str) -> Option<i64> {
+    object.get(field).and_then(Value::as_i64)
+}
+
+fn required_json_string_array(
+    object: &Map<String, Value>,
+    field: &str,
+) -> Result<Vec<String>, String> {
+    let values = object
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("`{field}` is required and must be an array"))?;
+    let mut result = Vec::new();
+    for value in values {
+        let item = value
+            .as_str()
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .ok_or_else(|| format!("`{field}` must contain non-empty strings"))?;
+        result.push(item.to_owned());
+    }
+    if result.is_empty() {
+        return Err(format!("`{field}` must not be empty"));
+    }
+    Ok(result)
 }
 
 fn tool_result_reentry(
@@ -4001,6 +4173,7 @@ fn runtime_turn_position(turn_id: &TurnId) -> (u64, u64, String) {
 mod tests {
     use super::*;
     use freehand_contracts::{FeatureId, SemanticEventKind, TerminalStatus};
+    use freehand_contracts::{ToolCallContract, ToolCallId};
     use freehand_metadata::MetadataEnvelope;
     use freehand_reason::ProviderRawLedgerRow;
     use freehand_ui_protocol::{UiQueryResult, build_command_dispatch_envelope};
@@ -5238,6 +5411,28 @@ mod tests {
         .to_string()
     }
 
+    fn task_tool_call(arguments: Vec<(&str, Value)>) -> ReasonReq04ToolCall {
+        ReasonReq04ToolCall {
+            session_id: SessionId::new("session-task"),
+            turn_id: TurnId::new("turn-task"),
+            trace_id: TraceId::new("trace-task"),
+            feature_id: FeatureId::new("provider.reason-live-bridge"),
+            agent_id: AgentId::new("agent-task"),
+            tool_call: ToolCallContract {
+                tool_call_id: ToolCallId::new("toolu_task_1"),
+                tool_name: "task".to_owned(),
+                arguments: arguments
+                    .into_iter()
+                    .map(|(name, value)| ToolArgument {
+                        name: name.to_owned(),
+                        value,
+                    })
+                    .collect(),
+                arguments_complete: true,
+            },
+        }
+    }
+
     fn tool_use_named_response(tool_call_id: &str, tool_name: &str, input: Value) -> String {
         json!({
             "content": [{
@@ -5527,6 +5722,63 @@ mod tests {
             let encoded = serde_json::to_string(record).expect("metadata json");
             !encoded.contains("<<<freehand_status>>>") && !encoded.contains("pong")
         }));
+    }
+
+    #[test]
+    fn task_tool_create_persists_and_queries_task() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-task"),
+                    turn_id: TurnId::new("turn-task"),
+                    trace_id: TraceId::new("trace-task"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-task"),
+                    user_text: "create a task".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+        let create_call = task_tool_call(vec![
+            ("op", json!("create")),
+            ("task_id", json!("task-runtime-test")),
+            ("title", json!("Task persistence")),
+            ("content", json!("Persist and recover task")),
+            ("goal", json!("Task query survives runtime reboot")),
+            ("deliverables", json!(["ledger", "snapshot"])),
+            ("acceptance", json!(["query returns assigned task"])),
+            ("dispatch", json!({"mode":"self"})),
+        ]);
+
+        let create_output =
+            execute_task_tool(&runtime_home, &turn, &create_call).expect("create task");
+
+        assert!(create_output.contains("task_id=task-runtime-test"));
+        assert!(create_output.contains("status=Assigned"));
+
+        let query_call = task_tool_call(vec![
+            ("op", json!("query")),
+            ("task_id", json!("task-runtime-test")),
+        ]);
+        let query_output =
+            execute_task_tool(&runtime_home, &turn, &query_call).expect("query task");
+
+        assert!(query_output.contains("\"task_id\":\"task-runtime-test\""));
+        assert!(query_output.contains("\"status\":\"assigned\""));
+
+        let agents_call = task_tool_call(vec![("op", json!("list_agents"))]);
+        let agents_output =
+            execute_task_tool(&runtime_home, &turn, &agents_call).expect("list agents");
+
+        assert!(agents_output.contains("\"agent_id\":\"agent-task\""));
+        let _ = fs::remove_dir_all(runtime_home);
     }
 
     #[test]

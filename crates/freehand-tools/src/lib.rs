@@ -161,6 +161,10 @@ impl BuiltinToolRegistry {
             "todo_write" => execute_todo_write(&call.tool_call.arguments),
             "complete_step" => execute_complete_step(&call.tool_call.arguments),
             "delete_range" => execute_delete_range(&call.tool_call.arguments),
+            "task" => Err(ToolRegistryError::ExecutionFailed {
+                tool: "task".to_owned(),
+                message: "task execution requires the runtime task orchestrator".to_owned(),
+            }),
             _ => Err(ToolRegistryError::UnimplementedTool(name.to_owned())),
         }
     }
@@ -460,6 +464,37 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                     "notes": {"type": "string"}
                 },
                 "required": ["step", "result", "evidence"]
+            }),
+        ),
+        spec(
+            "task",
+            false,
+            true,
+            "Manage Freehand framework tasks and agent registry state.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "op": {"type": "string", "enum": ["create", "query", "list_agents", "query_agent"]},
+                    "task_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "content": {"type": "string"},
+                    "goal": {"type": "string"},
+                    "deliverables": {"type": "array", "items": {"type": "string"}},
+                    "acceptance": {"type": "array", "items": {"type": "string"}},
+                    "priority": {"type": "integer"},
+                    "target_cwd": {"type": "string"},
+                    "dispatch": {
+                        "type": "object",
+                        "properties": {
+                            "mode": {"type": "string", "enum": ["none", "self", "agent", "auto"]},
+                            "agent_id": {"type": "string"},
+                            "allow_create_agent": {"type": "boolean"}
+                        },
+                        "required": ["mode"]
+                    },
+                    "agent_id": {"type": "string"}
+                },
+                "required": ["op"]
             }),
         ),
     ]

@@ -16,6 +16,7 @@ Use this directory family for durable design truth.
 - `docs/design/debug-core-design.md`
 - `docs/design/metadata-core-design.md`
 - `docs/design/control-error-center-refactor.md`
+- `docs/design/task-orchestration-design.md`
 - `docs/design/ui-and-runtime-topology.md`
 - `docs/design/config-core-design.md`
 - `docs/design/contracts-core-design.md`
@@ -61,6 +62,8 @@ Use this directory family for durable design truth.
   - built-in tool owner boundary, explicit implementation-state registry, runtime exposure gate, and Reasonix-aligned tool-surface policy
 - `tool-preview-design.md`
   - writable-tool preview truth, preview/execute parity, and diff contract direction
+- `task-orchestration-design.md`
+  - task lifecycle, one-tool action surface, persistence, startup recovery, runtime memory state, and agent registry skeleton
 - `node-master-slave-design.md`
   - local master/slave topology, pairing, node states, task delegation, turn subscription
 - `ui-protocol-design.md`

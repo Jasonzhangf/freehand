@@ -373,6 +373,7 @@ dependencies = [
  "freehand-provider-anthropic",
  "freehand-provider-core",
  "freehand-reason",
+ "freehand-task",
  "freehand-tools",
  "freehand-ui-protocol",
  "serde",
@@ -392,6 +393,16 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+]
+
+[[package]]
+name = "freehand-task"
+version = "0.1.0"
+dependencies = [
+ "freehand-contracts",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

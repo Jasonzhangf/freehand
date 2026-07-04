@@ -15,6 +15,7 @@ freehand-node = { path = "../freehand-node" }
 freehand-provider-anthropic = { path = "../freehand-provider-anthropic" }
 freehand-provider-core = { path = "../freehand-provider-core" }
 freehand-reason = { path = "../freehand-reason" }
+freehand-task = { path = "../freehand-task" }
 freehand-tools = { path = "../freehand-tools" }
 freehand-ui-protocol = { path = "../freehand-ui-protocol" }
 serde = { version = "1", features = ["derive"] }

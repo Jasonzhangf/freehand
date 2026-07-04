@@ -55,6 +55,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | independent debug/trace contracts, snapshots, hub/sinks | `debug.core` | `crates/freehand-debug` | `docs/function-maps/debug.core.md` | `docs/testing/debug.core.md` |
 | internal control metadata center, writer ownership, write-node provenance, metadata/request isolation | `metadata.core` | `crates/freehand-metadata` | `docs/function-maps/metadata.core.md` | `docs/testing/metadata.core.md` |
 | passive framework control status parsing, fixed control hooks, and rhythm decisions | `control.center` | `crates/freehand-control` | `docs/function-maps/control.center.md` | `docs/testing/control.center.md` |
+| task lifecycle, task persistence, task runtime recovery, and agent registry skeleton | `task.orchestration` | `crates/freehand-task` | `docs/function-maps/task.orchestration.md` | `docs/testing/task.orchestration.md` |
 | master/slave pairing, node status, delegation, slave turn publication | `node.master-slave` | `crates/freehand-node` | `docs/function-maps/node.master-slave.md` | `docs/testing/node.master-slave.md` |
 | UI commands, query/subscribe, UI projections | `ui.protocol` | `crates/freehand-ui-protocol` | `docs/function-maps/ui.protocol.md` | `docs/testing/ui.protocol.md` |
 | runtime wiring for UI command dispatch into owner modules | `runtime.ui-command-dispatch` | `crates/freehand-runtime` | `docs/function-maps/runtime.ui-command-dispatch.md` | `docs/testing/runtime.ui-command-dispatch.md` |
@@ -157,6 +158,50 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - task mutations remain action-tool owned, not status-owned
 
 ### `config.core`
+
+### `task.orchestration`
+
+- owner: `crates/freehand-task`
+- allowed_paths: `crates/freehand-task/**`, `crates/freehand-tools/**`, `crates/freehand-runtime/**`, `docs/design/**`, `docs/function-maps/task.orchestration.md`, `docs/testing/task.orchestration.md`, `docs/architecture/feature-map.md`, `MEMORY.md`, `note.md`
+- forbidden_paths: provider adapter wire DTO internals, UI app-local task state, node pairing transport internals except future dispatch adapters
+- required_checks:
+  - `cargo test -p freehand-task`
+  - `cargo test -p freehand-tools`
+  - `cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --nocapture`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - task create writes ledger, snapshot, and index
+  - task runtime boot rebuilds memory state from persisted snapshot
+  - self agent is registered as available on first boot
+  - no-dispatch create becomes `WaitingAgent`
+- required_module_black_box_tests:
+  - runtime task tool create routes through task persistence
+  - runtime task tool query reads persisted task truth
+  - runtime task tool list_agents exposes self agent
+- required_project_black_box_tests:
+  - restart/reboot recovery query returns the same task truth
+- test_design_doc: `docs/testing/task.orchestration.md`
+- function_map_doc: `docs/function-maps/task.orchestration.md`
+- debug_artifacts:
+  - task ledger rows
+  - task snapshots
+  - agent snapshots
+- runtime_paths:
+  - `~/.freehand/ledgers/tasks`
+  - `~/.freehand/state/tasks`
+  - `~/.freehand/state/agents`
+- update_triggers:
+  - task state machine changes
+  - task tool op surface changes
+  - task persistence path changes
+  - agent registry status changes
+  - startup recovery behavior changes
+- lifecycle_checks:
+  - task ledger remains append-only truth
+  - snapshot is rebuildable cache, not sole truth
+  - runtime memory state is rebuilt from persistence on boot
+  - agent and cwd are not permanently bound
+  - worker execution cannot close task without review/approval
 
 - owner: `crates/freehand-config`
 - allowed_paths: `crates/freehand-config/**`, `crates/freehand-contracts/**`, `docs/architecture/**`

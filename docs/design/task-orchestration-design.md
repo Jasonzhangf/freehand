@@ -1,0 +1,183 @@
+# Task Orchestration Design
+
+## Status
+
+Initial skeleton implementation is in progress. This document is the durable design truth for task lifecycle, persistence, memory state, startup, recovery, and agent registry.
+
+## Principles
+
+- One built-in tool surface: `task`.
+- `task` uses `op` parameters instead of many tool names.
+- Status schema has no side effects; only admitted task tool actions mutate task truth.
+- Task truth is append-only ledger plus rebuildable snapshot.
+- Runtime memory state is a cache and scheduler surface, not truth.
+- Agent and cwd are not bound. Cwd is task execution context.
+- Worker agents submit review; close requires approval or explicit close action.
+
+## Tool Surface
+
+First implemented ops:
+
+- `create`
+- `query`
+- `list_agents`
+- `query_agent`
+
+Planned ops:
+
+- `append`
+- `assign`
+- `pause`
+- `resume`
+- `submit_review`
+- `approve`
+- `reject`
+- `close`
+- `cancel`
+- `create_agent`
+- `close_agent`
+
+## Task Lifecycle
+
+Primary path:
+
+```text
+Created -> Assigned -> Running -> ReviewSubmitted -> Approved -> Closed
+```
+
+Branches:
+
+```text
+Created -> WaitingAgent -> Assigned
+Running -> Paused -> Running
+Running -> Blocked -> Running
+ReviewSubmitted -> Rejected -> Running
+Running -> Failed -> Running | Closed
+Running -> Cancelled -> Closed
+```
+
+`Draft` is intentionally absent. A model task action creates a real task.
+
+## Task Fields
+
+Every task has:
+
+- `title`
+- `content`
+- `goal`
+- `deliverables`
+- `acceptance`
+- `priority`
+- optional `target_cwd`
+- optional assignee
+- parent session/turn/trace
+- review state
+
+## Persistence Layers
+
+```text
+Task Ledger       append-only truth
+Task Snapshot     rebuildable cache
+Task RuntimeState process memory cache and scheduler state
+```
+
+Paths:
+
+```text
+~/.freehand/ledgers/tasks/<agent_id>/<task_id>.jsonl
+~/.freehand/state/tasks/<agent_id>/<task_id>.json
+~/.freehand/state/tasks/<agent_id>/index.json
+~/.freehand/state/agents/<agent_id>.json
+~/.freehand/state/agents/index.json
+```
+
+Mutation order:
+
+```text
+validate action
+append ledger event
+apply reducer to snapshot
+atomic write snapshot
+update index
+update runtime memory state
+```
+
+If ledger append fails, memory must not change. If snapshot write fails, the mutation is not reported as complete.
+
+## Runtime Memory State
+
+Memory state contains:
+
+- task snapshots keyed by task id
+- agent snapshots keyed by agent id
+- future queues and leases
+
+Startup rebuilds memory state from snapshots. Future recovery will rebuild corrupt snapshots from ledger.
+
+## Agent Registry
+
+First skeleton always registers the owner agent as a self agent:
+
+```text
+status=Available
+capabilities=code_edit,test_run,docs
+```
+
+Agent states:
+
+```text
+Available
+Busy
+Paused
+Offline
+Closing
+Closed
+Failed
+```
+
+Agent selection first version:
+
+- `self` and `auto` pick an available agent.
+- `none` creates `WaitingAgent`.
+- explicit `agent` requires the agent to exist and be available.
+
+## Startup And Recovery
+
+Startup sequence:
+
+```text
+load task snapshots
+load or create self agent snapshot
+rebuild runtime memory maps
+return runtime ready
+```
+
+Future recovery requirements:
+
+- corrupted/missing snapshot replays ledger
+- running task requires valid lease and live agent heartbeat
+- expired or missing lease becomes `Interrupted` or `WaitingAgent`
+- recovery never promotes `Running` to completed
+
+## Review Closure
+
+Workers cannot directly close tasks. They submit review with deliverables and evidence. Reviewer/master/user approves or rejects. Approval may close. Rejection returns the task to execution with required changes.
+
+## Current Implementation Scope
+
+Implemented:
+
+- task persistence crate
+- create/query/list_agents/query_agent
+- self-agent registry skeleton
+- create with self/auto assignment or WaitingAgent
+- runtime task tool bridge
+
+Not implemented:
+
+- real worker execution
+- queue selection loop
+- leases and heartbeat
+- review actions
+- UI task projection
+- error.center classification
