@@ -3684,6 +3684,14 @@ fn execute_task_tool(
                 )
             }))
         }
+        "history" => {
+            let task_id = TaskId::new(required_json_string(&args, "task_id")?);
+            let events = task_runtime
+                .task_history(&task_id)
+                .map_err(|err| err.to_string())?;
+            Ok(serde_json::to_string(&events)
+                .unwrap_or_else(|_| format!("Task history: events={}", events.len())))
+        }
         "append" => {
             let outcome = task_runtime
                 .append_task(TaskAppendRequest {
@@ -6425,6 +6433,81 @@ mod tests {
         .expect("record execution");
         assert!(recorded.contains("status=Running"));
         assert!(recorded.contains("event=TaskExecutionRecorded"));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_tool_history_returns_ordered_execution_timeline() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-task"),
+                    turn_id: TurnId::new("turn-task"),
+                    trace_id: TraceId::new("trace-task"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-task"),
+                    user_text: "query task timeline".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("create")),
+                ("task_id", json!("task-runtime-history")),
+                ("title", json!("History")),
+                ("content", json!("Query task history")),
+                ("goal", json!("Timeline is queryable")),
+                ("deliverables", json!(["history"])),
+                ("acceptance", json!(["ordered events"])),
+                ("dispatch", json!({"mode":"self"})),
+            ]),
+        )
+        .expect("create task");
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("resume")),
+                ("task_id", json!("task-runtime-history")),
+            ]),
+        )
+        .expect("resume task");
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("record_execution")),
+                ("task_id", json!("task-runtime-history")),
+                ("phase", json!("debug")),
+                ("summary", json!("inspect timeline")),
+                ("evidence", json!(["ledger query"])),
+            ]),
+        )
+        .expect("record execution");
+
+        let timeline = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("history")),
+                ("task_id", json!("task-runtime-history")),
+            ]),
+        )
+        .expect("history");
+
+        assert!(timeline.contains("\"event_type\":\"TaskCreated\""));
+        assert!(timeline.contains("\"event_type\":\"TaskExecutionRecorded\""));
+        assert!(timeline.contains("\"seq\":1"));
         let _ = fs::remove_dir_all(runtime_home);
     }
 

@@ -20,6 +20,7 @@ First implemented ops:
 
 - `create`
 - `query`
+- `history`
 - `list_agents`
 - `query_agent`
 - `append`
@@ -112,6 +113,8 @@ update runtime memory state
 ```
 
 If ledger append fails, memory must not change. If snapshot write fails, the mutation is not reported as complete.
+
+`history` reads the append-only task ledger and returns ordered lifecycle events. UI task timelines and worker debug projection must use this owner API instead of reading ledger files directly.
 
 ## Runtime Memory State
 

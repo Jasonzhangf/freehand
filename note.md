@@ -142,6 +142,28 @@
     - no UI task projection yet.
     - no worker debug stream/turn update projection yet.
 
+# 2026-07-04 task.orchestration ledger history query
+  - user requirement: continue task/multi-agent lifecycle implementation in tested rounds with function map and mainline caller updates.
+  - owner: `task.orchestration`.
+  - implementation:
+    - added `history` to the single `task` tool op surface.
+    - added `TaskRuntime::task_history`, which reads the append-only task ledger and returns ordered lifecycle events.
+    - history for unknown task returns explicit `TaskNotFound`.
+    - runtime `task(op="history")` returns task timeline JSON.
+    - updated task design, test design, function map, feature map, mainline caller JSON, and generated wiki.
+  - verified:
+    - white-box: `cargo test -p freehand-task -- --nocapture` -> 18 passed; covers ordered ledger event history and unknown-task failure.
+    - module black-box: `cargo test -p freehand-runtime task_tool_history_returns_ordered_execution_timeline -- --nocapture` -> 1 passed.
+    - existing runtime task black-box tests for record_execution and claim_next passed.
+    - tool schema: `cargo test -p freehand-tools -- --nocapture` -> 27 passed.
+    - `cargo test -p xtask -- --nocapture` -> 18 passed.
+    - `cargo run -p xtask -- mainlines generate`, `mainlines check`, and `gates check` passed.
+    - full regression: `cargo test --workspace` -> 412 passed; `cargo clippy --workspace --all-targets -- -D warnings` -> no issues; `cargo fmt --check` passed.
+  - remaining gaps:
+    - no real worker execution process/channel yet.
+    - no UI task projection yet.
+    - no worker debug stream/turn update projection yet.
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

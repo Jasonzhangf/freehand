@@ -178,10 +178,12 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - assign moves waiting tasks to assigned state
   - claim_next chooses the highest-priority assigned task for an agent and starts a lease
   - record_execution writes progress only for running tasks
+  - history returns ordered task ledger timeline
   - cancel releases agent state and blocks resume
 - required_module_black_box_tests:
   - runtime task tool create routes through task persistence
   - runtime task tool query reads persisted task truth
+  - runtime task tool history reads task ledger timeline
   - runtime task tool list_agents exposes self agent
   - runtime task tool create_agent/assign/cancel/close_agent covers registry lifecycle
   - runtime task tool claim_next covers priority queue claim

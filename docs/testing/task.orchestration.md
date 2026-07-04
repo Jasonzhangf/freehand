@@ -13,6 +13,7 @@
   - waiting tasks can be assigned to an available agent
   - assigned worker queue can claim the highest-priority task into running state
   - running workers can record execution progress into task ledger truth
+  - task ledger history can be queried as ordered lifecycle events
   - cancellation releases assigned agent state
   - query returns persisted task truth
   - agent registry exposes self agent
@@ -34,6 +35,8 @@
 - claim_next returns no task without mutation when the agent queue is empty
 - record_execution writes progress only for `Running` tasks
 - record_execution rejects non-running tasks without advancing event sequence
+- task_history returns ordered ledger events including execution progress
+- task_history for unknown task returns explicit task-not-found
 - cancel releases the assignee and prevents later resume
 - close_agent rejects busy agents
 
@@ -48,6 +51,7 @@
 - runtime task tool create_agent/assign/cancel/close_agent covers agent lifecycle and busy-close rejection
 - runtime task tool claim_next returns the highest-priority assigned task and running lease
 - runtime task tool record_execution writes semantic worker execution progress
+- runtime task tool history returns task ledger timeline JSON
 - tool registry exposes `task` as one implemented built-in tool schema
 
 ## Project Black-Box Impact
@@ -66,6 +70,7 @@ cargo test -p freehand-runtime task_tool_resume_and_heartbeat_persist_running_le
 cargo test -p freehand-runtime task_tool_agent_assign_cancel_close_lifecycle -- --nocapture
 cargo test -p freehand-runtime task_tool_claim_next_runs_highest_priority_task -- --nocapture
 cargo test -p freehand-runtime task_tool_record_execution_requires_running_task -- --nocapture
+cargo test -p freehand-runtime task_tool_history_returns_ordered_execution_timeline -- --nocapture
 cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```

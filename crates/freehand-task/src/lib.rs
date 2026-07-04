@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -473,6 +473,19 @@ impl TaskRuntime {
             .get(task_id)
             .cloned()
             .ok_or_else(|| TaskError::TaskNotFound(task_id.as_str().to_owned()))
+    }
+
+    pub fn task_history(&self, task_id: &TaskId) -> Result<Vec<TaskLedgerEvent>, TaskError> {
+        let exists = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?
+            .tasks
+            .contains_key(task_id);
+        if !exists {
+            return Err(TaskError::TaskNotFound(task_id.as_str().to_owned()));
+        }
+        self.store.load_task_ledger(task_id)
     }
 
     pub fn append_task(
@@ -1100,6 +1113,25 @@ impl TaskStore {
             }
         }
         Ok(tasks)
+    }
+
+    fn load_task_ledger(&self, task_id: &TaskId) -> Result<Vec<TaskLedgerEvent>, TaskError> {
+        let path = self.task_ledger_path(task_id);
+        if !path.is_file() {
+            return Err(TaskError::TaskNotFound(task_id.as_str().to_owned()));
+        }
+        let file = fs::File::open(&path).map_err(io_err)?;
+        let reader = BufReader::new(file);
+        let mut events = Vec::new();
+        for line in reader.lines() {
+            let line = line.map_err(io_err)?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            events.push(serde_json::from_str(&line).map_err(json_err)?);
+        }
+        events.sort_by_key(|event: &TaskLedgerEvent| event.seq);
+        Ok(events)
     }
 
     fn load_agent_snapshots(&self) -> Result<Vec<AgentSnapshot>, TaskError> {
@@ -2087,6 +2119,66 @@ mod tests {
         let after = runtime.query_task(&outcome.task.task_id).expect("after");
         assert_eq!(after.last_event_seq, before.last_event_seq);
         assert_eq!(after.status, TaskStatus::Assigned);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_history_returns_ordered_ledger_events() {
+        let runtime_home = temp_runtime_home("task-history");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+        let task_id = outcome.task.task_id.clone();
+        runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("resume");
+        runtime
+            .record_execution(TaskExecutionRecordRequest {
+                task_id: task_id.clone(),
+                phase: "debug".to_owned(),
+                summary: "inspect ledger".to_owned(),
+                evidence: vec!["ledger event".to_owned()],
+                actor: sample_actor(agent_id),
+                watermark: sample_watermark(),
+            })
+            .expect("record");
+
+        let history = runtime.task_history(&task_id).expect("history");
+
+        assert_eq!(
+            history.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            (1..=history.len() as u64).collect::<Vec<_>>()
+        );
+        assert!(
+            history
+                .iter()
+                .any(|event| event.event_type == "TaskCreated")
+        );
+        assert!(
+            history
+                .iter()
+                .any(|event| event.event_type == "TaskExecutionRecorded")
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_history_unknown_task_is_explicit_not_found() {
+        let runtime_home = temp_runtime_home("task-history-missing");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id).expect("boot");
+
+        let err = runtime
+            .task_history(&TaskId::new("missing-task"))
+            .expect_err("missing task");
+
+        assert_eq!(err, TaskError::TaskNotFound("missing-task".to_owned()));
         let _ = fs::remove_dir_all(runtime_home);
     }
 
