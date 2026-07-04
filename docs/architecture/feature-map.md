@@ -54,6 +54,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | compaction/rewrite/recovery trigger policy | `reason.rewrite-policy` | `crates/freehand-blocks` | `docs/function-maps/reason.rewrite-policy.md` | `docs/testing/reason.rewrite-policy.md` |
 | independent debug/trace contracts, snapshots, hub/sinks | `debug.core` | `crates/freehand-debug` | `docs/function-maps/debug.core.md` | `docs/testing/debug.core.md` |
 | internal control metadata center, writer ownership, write-node provenance, metadata/request isolation | `metadata.core` | `crates/freehand-metadata` | `docs/function-maps/metadata.core.md` | `docs/testing/metadata.core.md` |
+| passive framework control status parsing, fixed control hooks, and rhythm decisions | `control.center` | `crates/freehand-control` | `docs/function-maps/control.center.md` | `docs/testing/control.center.md` |
 | master/slave pairing, node status, delegation, slave turn publication | `node.master-slave` | `crates/freehand-node` | `docs/function-maps/node.master-slave.md` | `docs/testing/node.master-slave.md` |
 | UI commands, query/subscribe, UI projections | `ui.protocol` | `crates/freehand-ui-protocol` | `docs/function-maps/ui.protocol.md` | `docs/testing/ui.protocol.md` |
 | runtime wiring for UI command dispatch into owner modules | `runtime.ui-command-dispatch` | `crates/freehand-runtime` | `docs/function-maps/runtime.ui-command-dispatch.md` | `docs/testing/runtime.ui-command-dispatch.md` |
@@ -117,6 +118,43 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - information sufficient
   - logic closed-loop
   - lifecycle management complete
+
+### `control.center`
+
+- owner: `crates/freehand-control`
+- allowed_paths: `crates/freehand-control/**`, `crates/freehand-runtime/**`, `crates/freehand-ui-protocol/**`, `docs/design/**`, `docs/function-maps/control.center.md`, `docs/testing/control.center.md`, `docs/architecture/feature-map.md`, `MEMORY.md`, `note.md`
+- forbidden_paths: provider adapter wire DTO internals, task execution state, node pairing transport, UI app-local semantic parsers
+- required_checks:
+  - `cargo test -p freehand-control`
+  - `cargo test -p freehand-runtime live_bridge_accepts_simple_status_stop_hook_without_completion_schema -- --nocapture`
+  - `cargo test -p freehand-ui-protocol public_conversation_strips_hidden_control_status_blocks -- --nocapture`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - status parser accepts valid simple stop
+  - status parser rejects missing required fields
+  - status parser emits next-step rhythm decision without side effects
+- required_module_black_box_tests:
+  - runtime mock provider status stopHook writes control metadata
+  - UI protocol strips hidden status blocks from public projection
+- required_project_black_box_tests:
+  - none for this skeleton; online WebUI required before task lifecycle UI claims
+- test_design_doc: `docs/testing/control.center.md`
+- function_map_doc: `docs/function-maps/control.center.md`
+- debug_artifacts:
+  - control hook metadata ledger rows
+- runtime_paths:
+  - `~/.freehand/ledgers/metadata`
+- update_triggers:
+  - status schema fields change
+  - hook point semantics change
+  - rhythm decision policy changes
+  - hidden status projection filters change
+  - task action tool admission changes
+- lifecycle_checks:
+  - status schema remains no-side-effect
+  - every hook write carries writer owner and node provenance
+  - public projection strips hidden control blocks
+  - task mutations remain action-tool owned, not status-owned
 
 ### `config.core`
 

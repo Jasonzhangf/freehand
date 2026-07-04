@@ -1,5 +1,19 @@
 # note.md
 
+# 2026-07-04 control.center basic status stopHook
+  - user requirement: implement the basic status stopHook on the fixed four-hook skeleton, while keeping task dispatch built-in tool lifecycle as a separate review topic.
+  - owner: `control.center`.
+  - implementation:
+    - added `crates/freehand-control` with `parse_control_status_block`, `control_status_rhythm_decision`, and `strip_control_status_block`.
+    - runtime live bridge includes status contract guidance before model request, writes `control.center` metadata at the four fixed hook points, and accepts `simple_request=true` status stop without requiring legacy `<freehand_completion>`.
+    - UI protocol public projection strips hidden status blocks from assistant and terminal text.
+    - docs updated: feature map, function map, test design, control/error design doc, architecture gap registry.
+  - current non-goals:
+    - no compact `task` action tool yet.
+    - no task lifecycle persistence/dispatch yet.
+    - no centralized `error.center` yet.
+    - no selectable user-option UI projection yet.
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

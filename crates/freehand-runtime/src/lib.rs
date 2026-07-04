@@ -12,9 +12,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::{
-    CompletionDecision, CompletionSchemaRejection, completion_schema_guidance,
-    completion_schema_rejection_feedback, parse_completion_submission_block,
-    strip_completion_submission_block, validate_completion_submission,
+    CompletionClaim, CompletionDecision, CompletionSchemaRejection, CompletionSubmission,
+    completion_schema_guidance, completion_schema_rejection_feedback,
+    parse_completion_submission_block, strip_completion_submission_block,
+    validate_completion_submission,
 };
 use freehand_config::{
     AgentMode, ProviderProtocol as ConfigProviderProtocol, ProviderType, SelectedAgentConfig,
@@ -26,6 +27,10 @@ use freehand_contracts::{
     FeatureId, ReasonReq04ToolCall, ReasonReq05ToolResultReentry, RecoveryPolicy, SessionId,
     ToolPreviewChangeKind, ToolPreviewContract, ToolResultContract, ToolResultStatus, TraceId,
     TurnId,
+};
+use freehand_control::{
+    ControlRhythmDecision, ControlStatusRejection, ControlStatusSubmission,
+    control_status_rhythm_decision, parse_control_status_block, strip_control_status_block,
 };
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
@@ -846,6 +851,7 @@ where
     let mut next_prompt = request.prompt.clone();
     let mut carryover_segments = vec![
         completion_contract_segment(),
+        control_status_contract_segment(),
         tool_guidance_segment(),
         original_task_segment(&request.prompt),
     ];
@@ -893,6 +899,32 @@ where
         semantic_request.tools = tool_registry.implemented_definitions();
         semantic_request.tool_choice = None;
         semantic_request.tool_exchanges = tool_exchanges.clone();
+        write_control_hook_metadata(
+            &metadata_center,
+            &agent_id,
+            &request.session_id,
+            RuntimeControlHookWriteSpec {
+                turn_id: Some(&turn.request.turn_id),
+                trace_id: &turn.request.trace_id,
+                pipeline_node: "ControlHook02BeforeModelRequest",
+                metadata_suffix: "before_model_request".to_owned(),
+                symbol_path: "run_live_anthropic_reason_turn",
+                entries: vec![
+                    MetadataEntry {
+                        key: "control.hook".to_owned(),
+                        value: json!("ControlHook02BeforeModelRequest"),
+                    },
+                    MetadataEntry {
+                        key: "control.status_schema_version".to_owned(),
+                        value: json!(1),
+                    },
+                    MetadataEntry {
+                        key: "control.status_guidance_included".to_owned(),
+                        value: json!(true),
+                    },
+                ],
+            },
+        )?;
         write_live_bridge_metadata(
             &metadata_center,
             &agent_id,
@@ -1149,6 +1181,39 @@ where
                     &turn,
                     &tool_call,
                 )?;
+                write_control_hook_metadata(
+                    &metadata_center,
+                    &agent_id,
+                    &request.session_id,
+                    RuntimeControlHookWriteSpec {
+                        turn_id: Some(&turn.request.turn_id),
+                        trace_id: &turn.request.trace_id,
+                        pipeline_node: "ControlHook01AfterLocalToolResult",
+                        metadata_suffix: format!(
+                            "after_local_tool_result:{}",
+                            tool_call.tool_call.tool_call_id.as_str()
+                        ),
+                        symbol_path: "run_live_anthropic_reason_turn",
+                        entries: vec![
+                            MetadataEntry {
+                                key: "control.hook".to_owned(),
+                                value: json!("ControlHook01AfterLocalToolResult"),
+                            },
+                            MetadataEntry {
+                                key: "tool.name".to_owned(),
+                                value: json!(tool_call.tool_call.tool_name.as_str()),
+                            },
+                            MetadataEntry {
+                                key: "tool.call_id".to_owned(),
+                                value: json!(tool_call.tool_call.tool_call_id.as_str()),
+                            },
+                            MetadataEntry {
+                                key: "tool.result_status".to_owned(),
+                                value: json!(tool_result.tool_result.status),
+                            },
+                        ],
+                    },
+                )?;
                 write_live_bridge_metadata(
                     &metadata_center,
                     &agent_id,
@@ -1293,7 +1358,194 @@ where
         }
 
         let provider_text = collect_turn_text(&turn);
-        let visible_text = strip_completion_submission_block(&provider_text);
+        let public_provider_text =
+            strip_control_status_block(&strip_completion_submission_block(&provider_text));
+        let status_decision = run_control_status_stop_hook(
+            &metadata_center,
+            &agent_id,
+            &request.session_id,
+            &turn,
+            &provider_text,
+        )?;
+        if let Some(decision) = status_decision {
+            match decision {
+                ControlRhythmDecision::AllowNaturalStop
+                | ControlRhythmDecision::AllowTaskCompletion
+                | ControlRhythmDecision::StopForUserOptions(_) => {
+                    ensure_live_not_cancelled(&request)?;
+                    let terminal_summary = control_status_terminal_summary(
+                        &decision,
+                        &provider_text,
+                        &public_provider_text,
+                    );
+                    let submission = CompletionSubmission {
+                        claim: CompletionClaim::Complete,
+                        completion_reason: Some(format!(
+                            "control status accepted {}",
+                            control_decision_label(&decision)
+                        )),
+                        evidence: Some(terminal_summary.clone()),
+                        summary: Some(terminal_summary),
+                        learned: Some("control status stopHook accepted".to_owned()),
+                        next_step: None,
+                        blocked_reason: None,
+                    };
+                    let _ = engine
+                        .submit_completion(&mut turn, &submission)
+                        .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
+                    drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                    drain_debug_events(&debug_receiver, &mut on_debug);
+                    ensure_live_not_cancelled(&request)?;
+                    write_control_hook_metadata(
+                        &metadata_center,
+                        &agent_id,
+                        &request.session_id,
+                        RuntimeControlHookWriteSpec {
+                            turn_id: Some(&turn.request.turn_id),
+                            trace_id: &turn.request.trace_id,
+                            pipeline_node: "ControlHook04BeforeClientReturn",
+                            metadata_suffix: "before_client_return:status_stop".to_owned(),
+                            symbol_path: "run_live_anthropic_reason_turn",
+                            entries: vec![
+                                MetadataEntry {
+                                    key: "control.hook".to_owned(),
+                                    value: json!("ControlHook04BeforeClientReturn"),
+                                },
+                                MetadataEntry {
+                                    key: "control.decision".to_owned(),
+                                    value: json!(control_decision_label(&decision)),
+                                },
+                                MetadataEntry {
+                                    key: "control.public_projection_stripped".to_owned(),
+                                    value: json!(true),
+                                },
+                            ],
+                        },
+                    )?;
+                    write_live_bridge_metadata(
+                        &metadata_center,
+                        &agent_id,
+                        &request.session_id,
+                        RuntimeMetadataWriteSpec {
+                            turn_id: Some(&turn.request.turn_id),
+                            trace_id: &turn.request.trace_id,
+                            kind: MetadataKind::RuntimeState,
+                            pipeline_node: "RuntimeLive04TurnClosed",
+                            metadata_suffix: "turn_closed".to_owned(),
+                            symbol_path: "run_live_anthropic_reason_turn",
+                            entries: vec![
+                                MetadataEntry {
+                                    key: "bridge.rounds".to_owned(),
+                                    value: json!(round),
+                                },
+                                MetadataEntry {
+                                    key: "bridge.schema_rejections".to_owned(),
+                                    value: json!(schema_rejections.len()),
+                                },
+                                MetadataEntry {
+                                    key: "bridge.tool_executions".to_owned(),
+                                    value: json!(tool_executions),
+                                },
+                                MetadataEntry {
+                                    key: "terminal.status".to_owned(),
+                                    value: json!("Success"),
+                                },
+                            ],
+                        },
+                    )?;
+                    emit_live_bridge_debug(
+                        &debug_hub,
+                        &agent_id,
+                        &request.session_id,
+                        RuntimeDebugEmitSpec {
+                            turn_id: &turn.request.turn_id,
+                            trace_id: &turn.request.trace_id,
+                            pipeline_node: "ControlHook04BeforeClientReturn",
+                            function: "run_live_anthropic_reason_turn",
+                            status_text: "control status accepted stop",
+                            detail_lines: vec![
+                                format!("decision={}", control_decision_label(&decision)),
+                                "public_projection_stripped=true".to_owned(),
+                            ],
+                        },
+                    );
+                    drain_debug_events(&debug_receiver, &mut on_debug);
+                    persistence
+                        .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                        .map_err(|err| {
+                            RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                        })?;
+                    turns.push(turn.clone());
+                    return Ok(LiveReasonTurnOutcome {
+                        turn,
+                        turns,
+                        broadcasts,
+                        rounds: round,
+                        schema_rejections,
+                        tool_executions,
+                        restore_status,
+                        restored_closed_turns,
+                    });
+                }
+                ControlRhythmDecision::StopBlocked(blocked_reason) => {
+                    engine.block_turn(&mut turn, blocked_reason);
+                    drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                    drain_debug_events(&debug_receiver, &mut on_debug);
+                    ensure_live_not_cancelled(&request)?;
+                    write_control_hook_metadata(
+                        &metadata_center,
+                        &agent_id,
+                        &request.session_id,
+                        RuntimeControlHookWriteSpec {
+                            turn_id: Some(&turn.request.turn_id),
+                            trace_id: &turn.request.trace_id,
+                            pipeline_node: "ControlHook04BeforeClientReturn",
+                            metadata_suffix: "before_client_return:status_blocked".to_owned(),
+                            symbol_path: "run_live_anthropic_reason_turn",
+                            entries: vec![
+                                MetadataEntry {
+                                    key: "control.hook".to_owned(),
+                                    value: json!("ControlHook04BeforeClientReturn"),
+                                },
+                                MetadataEntry {
+                                    key: "control.decision".to_owned(),
+                                    value: json!("stop_blocked"),
+                                },
+                                MetadataEntry {
+                                    key: "control.public_projection_stripped".to_owned(),
+                                    value: json!(true),
+                                },
+                            ],
+                        },
+                    )?;
+                    persistence
+                        .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                        .map_err(|err| {
+                            RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                        })?;
+                    turns.push(turn.clone());
+                    return Ok(LiveReasonTurnOutcome {
+                        turn,
+                        turns,
+                        broadcasts,
+                        rounds: round,
+                        schema_rejections,
+                        tool_executions,
+                        restore_status,
+                        restored_closed_turns,
+                    });
+                }
+                ControlRhythmDecision::ContinueWithNextStep(next_step) => {
+                    consecutive_schema_rejections = 0;
+                    next_prompt = next_step;
+                    carryover_segments =
+                        next_round_segments(&request.prompt, &public_provider_text, None);
+                    turns.push(turn);
+                    continue;
+                }
+            }
+        }
+        let visible_text = public_provider_text;
         match parse_completion_submission_block(&provider_text) {
             Ok(submission) => match validate_completion_submission(&submission)
                 .expect("completion submission already validated")
@@ -2352,6 +2604,201 @@ fn session_cwds_from_turns(turns: &[TurnRecord]) -> BTreeMap<SessionId, PathBuf>
     cwds
 }
 
+fn run_control_status_stop_hook(
+    center: &Arc<Mutex<MetadataCenter>>,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    turn: &TurnRecord,
+    provider_text: &str,
+) -> Result<Option<ControlRhythmDecision>, RuntimeLiveBridgeError> {
+    if !provider_text.contains("<<<freehand_status>>>") {
+        return Ok(None);
+    }
+    let raw_hash = stable_debug_hash(provider_text);
+    match parse_control_status_block(provider_text) {
+        Ok(submission) => {
+            let decision = control_status_rhythm_decision(&submission).map_err(|rejection| {
+                RuntimeLiveBridgeError::ProviderRequestBuildFailed(
+                    control_status_rejection_summary(&rejection),
+                )
+            })?;
+            record_control_status_metadata(
+                center,
+                agent_id,
+                session_id,
+                turn,
+                &submission,
+                &decision,
+                raw_hash,
+            )?;
+            Ok(Some(decision))
+        }
+        Err(rejection) => {
+            record_control_status_rejection_metadata(
+                center, agent_id, session_id, turn, &rejection, raw_hash,
+            )?;
+            Err(RuntimeLiveBridgeError::ProviderRequestBuildFailed(
+                control_status_rejection_summary(&rejection),
+            ))
+        }
+    }
+}
+
+fn record_control_status_metadata(
+    center: &Arc<Mutex<MetadataCenter>>,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    turn: &TurnRecord,
+    submission: &ControlStatusSubmission,
+    decision: &ControlRhythmDecision,
+    raw_hash: u64,
+) -> Result<(), RuntimeLiveBridgeError> {
+    write_control_hook_metadata(
+        center,
+        agent_id,
+        session_id,
+        RuntimeControlHookWriteSpec {
+            turn_id: Some(&turn.request.turn_id),
+            trace_id: &turn.request.trace_id,
+            pipeline_node: "ControlHook03AfterModelResponse",
+            metadata_suffix: "after_model_response:status_accepted".to_owned(),
+            symbol_path: "run_live_anthropic_reason_turn",
+            entries: vec![
+                MetadataEntry {
+                    key: "control.hook".to_owned(),
+                    value: json!("ControlHook03AfterModelResponse"),
+                },
+                MetadataEntry {
+                    key: "control.status_schema_version".to_owned(),
+                    value: json!(submission.schema_version),
+                },
+                MetadataEntry {
+                    key: "control.status_validation".to_owned(),
+                    value: json!("accepted"),
+                },
+                MetadataEntry {
+                    key: "control.decision".to_owned(),
+                    value: json!(control_decision_label(decision)),
+                },
+                MetadataEntry {
+                    key: "control.raw_hash".to_owned(),
+                    value: json!(raw_hash),
+                },
+                MetadataEntry {
+                    key: "control.block_hash".to_owned(),
+                    value: json!(stable_debug_hash(
+                        &serde_json::to_string(submission).unwrap_or_default()
+                    )),
+                },
+            ],
+        },
+    )
+}
+
+fn record_control_status_rejection_metadata(
+    center: &Arc<Mutex<MetadataCenter>>,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    turn: &TurnRecord,
+    rejection: &ControlStatusRejection,
+    raw_hash: u64,
+) -> Result<(), RuntimeLiveBridgeError> {
+    write_control_hook_metadata(
+        center,
+        agent_id,
+        session_id,
+        RuntimeControlHookWriteSpec {
+            turn_id: Some(&turn.request.turn_id),
+            trace_id: &turn.request.trace_id,
+            pipeline_node: "ControlHook03AfterModelResponse",
+            metadata_suffix: "after_model_response:status_rejected".to_owned(),
+            symbol_path: "run_live_anthropic_reason_turn",
+            entries: vec![
+                MetadataEntry {
+                    key: "control.hook".to_owned(),
+                    value: json!("ControlHook03AfterModelResponse"),
+                },
+                MetadataEntry {
+                    key: "control.status_validation".to_owned(),
+                    value: json!("rejected"),
+                },
+                MetadataEntry {
+                    key: "control.raw_hash".to_owned(),
+                    value: json!(raw_hash),
+                },
+                MetadataEntry {
+                    key: "control.issue_count".to_owned(),
+                    value: json!(rejection.issues.len()),
+                },
+                MetadataEntry {
+                    key: "control.issue_summary".to_owned(),
+                    value: json!(control_status_rejection_summary(rejection)),
+                },
+            ],
+        },
+    )
+}
+
+fn control_status_terminal_summary(
+    decision: &ControlRhythmDecision,
+    provider_text: &str,
+    public_provider_text: &str,
+) -> String {
+    match decision {
+        ControlRhythmDecision::AllowNaturalStop => {
+            let summary = public_provider_text.trim();
+            if summary.is_empty() {
+                "Summary: simple request completed by accepted control status".to_owned()
+            } else {
+                format!("Summary: {summary}")
+            }
+        }
+        ControlRhythmDecision::AllowTaskCompletion => parse_control_status_block(provider_text)
+            .ok()
+            .and_then(|submission| submission.status.summary.or(submission.status.evidence))
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| format!("Summary: {}", value.trim()))
+            .unwrap_or_else(|| "Summary: task completed by accepted control status".to_owned()),
+        ControlRhythmDecision::StopForUserOptions(options) => {
+            format!("Summary: user options available: {}", options.join(", "))
+        }
+        ControlRhythmDecision::ContinueWithNextStep(next_step) => {
+            format!("Summary: continuing with next step: {next_step}")
+        }
+        ControlRhythmDecision::StopBlocked(blocked_reason) => {
+            format!("Blocked reason: {blocked_reason}")
+        }
+    }
+}
+
+fn control_decision_label(decision: &ControlRhythmDecision) -> &'static str {
+    match decision {
+        ControlRhythmDecision::AllowNaturalStop => "allow_natural_stop",
+        ControlRhythmDecision::AllowTaskCompletion => "allow_task_completion",
+        ControlRhythmDecision::ContinueWithNextStep(_) => "continue_with_next_step",
+        ControlRhythmDecision::StopBlocked(_) => "stop_blocked",
+        ControlRhythmDecision::StopForUserOptions(_) => "stop_for_user_options",
+    }
+}
+
+fn control_status_rejection_summary(rejection: &ControlStatusRejection) -> String {
+    rejection
+        .issues
+        .iter()
+        .map(|issue| format!("{}: {}", issue.field, issue.message))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn stable_debug_hash(input: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    input.hash(&mut hasher);
+    hasher.finish()
+}
+
 fn canonicalize_session_cwd(cwd: &str) -> Result<PathBuf, UiCommandDispatchPortError> {
     let trimmed = cwd.trim();
     if trimmed.is_empty() {
@@ -2524,6 +2971,15 @@ struct RuntimeMetadataWriteSpec<'a> {
     entries: Vec<MetadataEntry>,
 }
 
+struct RuntimeControlHookWriteSpec<'a> {
+    turn_id: Option<&'a TurnId>,
+    trace_id: &'a TraceId,
+    pipeline_node: &'a str,
+    metadata_suffix: String,
+    symbol_path: &'a str,
+    entries: Vec<MetadataEntry>,
+}
+
 struct RuntimeDebugEmitSpec<'a> {
     turn_id: &'a TurnId,
     trace_id: &'a TraceId,
@@ -2543,6 +2999,47 @@ fn metadata_ledger_path(
         .join("metadata")
         .join(agent_id.as_str())
         .join(format!("{}.jsonl", session_id.as_str()))
+}
+
+fn write_control_hook_metadata(
+    center: &Arc<Mutex<MetadataCenter>>,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    spec: RuntimeControlHookWriteSpec<'_>,
+) -> Result<(), RuntimeLiveBridgeError> {
+    let envelope = MetadataEnvelope::new(
+        MetadataId::new(format!(
+            "control.center:{}:{}",
+            spec.trace_id.as_str(),
+            spec.metadata_suffix
+        )),
+        MetadataKind::RuntimeState,
+        MetadataWriteOwner {
+            feature_id: FeatureId::new("control.center"),
+            crate_name: "freehand-control".to_owned(),
+            module_path: "freehand_control".to_owned(),
+            symbol_path: spec.symbol_path.to_owned(),
+        },
+        MetadataWriteNode {
+            pipeline_node: spec.pipeline_node.to_owned(),
+            runtime_node_id: None,
+        },
+        MetadataSubject {
+            agent_id: Some(agent_id.clone()),
+            session_id: Some(session_id.clone()),
+            turn_id: spec.turn_id.cloned(),
+            trace_id: spec.trace_id.clone(),
+        },
+        spec.entries,
+    )
+    .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))?;
+    center
+        .lock()
+        .map_err(|err: std::sync::PoisonError<_>| {
+            RuntimeLiveBridgeError::MetadataFailed(err.to_string())
+        })?
+        .write(envelope)
+        .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))
 }
 
 fn write_live_bridge_metadata(
@@ -2861,6 +3358,41 @@ fn completion_contract_segment() -> ContextSegment {
         provenance: ContextProvenance {
             source: "freehand_runtime".to_owned(),
             reference: Some("completion_schema_guidance".to_owned()),
+        },
+    }
+}
+
+fn control_status_contract_segment() -> ContextSegment {
+    ContextSegment {
+        segment_id: ContextSegmentId::new("control-status-contract"),
+        kind: ContextSegmentKind::CompletionContract,
+        stability: ContextStability::Stable,
+        cache_policy: ContextCachePolicy::CacheAnchor,
+        role: ContextRole::Developer,
+        content: concat!(
+            "Freehand may read hidden interaction status from exactly one tagged JSON block:\n",
+            "<<<freehand_status>>>\n",
+            "{\n",
+            "  \"schema_version\": 1,\n",
+            "  \"status\": {\n",
+            "    \"simple_request\": true | false,\n",
+            "    \"task_complete\": true | false,\n",
+            "    \"evidence\": \"required when task_complete=true\",\n",
+            "    \"next_step\": \"required when task_complete=false and more reasoning is needed\",\n",
+            "    \"blocked\": true | false,\n",
+            "    \"blocked_reason\": \"required when blocked=true\",\n",
+            "    \"needs_user_involvement\": true | false,\n",
+            "    \"options\": [\"required when needs_user_involvement=true\"]\n",
+            "  }\n",
+            "}\n",
+            "<</freehand_status>>>\n",
+            "Status has no side effects. Use built-in tools for task mutations."
+        )
+        .to_owned(),
+        token_budget: 1024,
+        provenance: ContextProvenance {
+            source: "freehand_control".to_owned(),
+            reference: Some("control_status_schema_v1".to_owned()),
         },
     }
 }
@@ -4649,6 +5181,21 @@ mod tests {
         )
     }
 
+    fn status_stop_single_response(visible_text: &str) -> String {
+        let status = r#"<<<freehand_status>>>
+{"schema_version":1,"status":{"simple_request":true}}
+<</freehand_status>>>"#;
+        json!({
+            "content": [{
+                "type": "text",
+                "text": format!("{visible_text}\n{status}")
+            }],
+            "usage": {"input_tokens": 14, "output_tokens": 40},
+            "stop_reason": "end_turn"
+        })
+        .to_string()
+    }
+
     fn continue_single_response(next_step: &str) -> String {
         let tagged = tagged_completion_json(&format!(
             r#"{{"claim":"continue","next_step":"{next_step}"}}"#
@@ -4920,6 +5467,65 @@ mod tests {
         assert!(debug_events.iter().all(|event| {
             let encoded = serde_json::to_string(event).expect("encode debug event");
             !encoded.contains("reply exactly pong")
+        }));
+    }
+
+    #[test]
+    fn live_bridge_accepts_simple_status_stop_hook_without_completion_schema() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, rx, handle) =
+            spawn_mock_server(200, "application/json", status_stop_single_response("pong"));
+        let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
+
+        let outcome = run_live_reason_turn_with_hooks(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+            |_| {},
+            |_| {},
+        )
+        .expect("status stop hook");
+        let _raw_request = rx.recv().expect("request");
+        handle.join().expect("join");
+
+        assert_eq!(outcome.rounds, 1);
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+        assert!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .is_some_and(|event| event.summary.contains("Summary: pong"))
+        );
+
+        let metadata = metadata_ledger_records(&runtime_home, "agent-live", &session_id);
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "control.center"
+                && record.write_node.pipeline_node == "ControlHook03AfterModelResponse"
+                && record.entries.iter().any(|entry| {
+                    entry.key == "control.decision" && entry.value == json!("allow_natural_stop")
+                })
+        }));
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "control.center"
+                && record.write_node.pipeline_node == "ControlHook04BeforeClientReturn"
+                && record.entries.iter().any(|entry| {
+                    entry.key == "control.public_projection_stripped" && entry.value == json!(true)
+                })
+        }));
+        assert!(metadata.iter().all(|record| {
+            let encoded = serde_json::to_string(record).expect("metadata json");
+            !encoded.contains("<<<freehand_status>>>") && !encoded.contains("pong")
         }));
     }
 

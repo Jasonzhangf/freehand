@@ -242,6 +242,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "freehand-control"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "freehand-daemon"
 version = "0.1.0"
 dependencies = [
@@ -357,6 +366,7 @@ dependencies = [
  "freehand-blocks",
  "freehand-config",
  "freehand-contracts",
+ "freehand-control",
  "freehand-debug",
  "freehand-metadata",
  "freehand-node",
@@ -419,6 +429,7 @@ version = "0.1.0"
 dependencies = [
  "freehand-blocks",
  "freehand-contracts",
+ "freehand-control",
  "freehand-debug",
  "serde",
  "serde_json",

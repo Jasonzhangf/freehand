@@ -2,7 +2,21 @@
 
 ## Status
 
-Planning truth for the next refactor. This document records the required semantic shape before implementation.
+Planning truth for the next refactor. This document records the required semantic shape and the first landed skeleton.
+
+Landed slice:
+
+- `control.center` owner exists at `crates/freehand-control`
+- fixed hook metadata writes exist for the basic status stopHook path
+- `<<<freehand_status>>>` schema v1 parsing and validation exists for simple stop, task-complete stop, blocked, user options, and next-step rhythm decisions
+- UI public projection strips hidden status blocks
+
+Still pending:
+
+- compact `task` action tool and task lifecycle persistence
+- full schema repair loop for rejected status
+- centralized `error.center`
+- selectable user-option projection
 
 ## Problem
 

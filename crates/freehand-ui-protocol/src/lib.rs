@@ -12,6 +12,7 @@ use freehand_contracts::{
     ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent,
     SemanticEventKind, SessionId, TerminalStatus, ToolResultContract, ToolResultStatus, TurnId,
 };
+use freehand_control::strip_control_status_block;
 pub use freehand_debug::{
     DebugEvent, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot, DebugTraceEnvelope,
 };
@@ -1218,7 +1219,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
         });
     }
     for text in &projection.text {
-        let public_text = strip_completion_submission_block(text);
+        let public_text = strip_control_status_block(&strip_completion_submission_block(text));
         if !public_text.trim().is_empty() {
             items.push(UiConversationItem {
                 kind: UiConversationItemKind::AssistantText,
@@ -1247,7 +1248,8 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
         });
     }
     if let Some(terminal_text) = &projection.terminal_text {
-        let public_text = strip_completion_submission_block(terminal_text);
+        let public_text =
+            strip_control_status_block(&strip_completion_submission_block(terminal_text));
         if !public_text.trim().is_empty() {
             let status = match projection.terminal_status {
                 Some(TerminalStatus::Cancelled) => "cancelled",
@@ -2115,6 +2117,36 @@ mod tests {
                 .map(|display| display.kind.as_str()),
             Some("search")
         );
+    }
+
+    #[test]
+    fn public_conversation_strips_hidden_control_status_blocks() {
+        let mut projection = sample_turn_projection(false);
+        projection.text = vec![
+            concat!(
+                "answer\n",
+                "<<<freehand_status>>>\n",
+                "{\"schema_version\":1,\"status\":{\"simple_request\":true}}\n",
+                "<</freehand_status>>>"
+            )
+            .to_owned(),
+        ];
+        projection.terminal_text = Some(
+            concat!(
+                "final\n",
+                "<<<freehand_status>>>\n",
+                "{\"schema_version\":1,\"status\":{\"simple_request\":true}}\n",
+                "<</freehand_status>>>"
+            )
+            .to_owned(),
+        );
+
+        let items = public_conversation_items(&projection);
+        let encoded = serde_json::to_string(&items).expect("items json");
+
+        assert!(!encoded.contains("freehand_status"));
+        assert!(encoded.contains("answer"));
+        assert!(encoded.contains("final"));
     }
 
     #[test]
