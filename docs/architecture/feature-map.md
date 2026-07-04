@@ -288,10 +288,12 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - CLI recovery block smoke
   - CLI ADP mock WebSocket smoke
   - CLI ADP success/failure turn sample mock WebSocket smoke
+  - CLI ADP task query smoke
 - required_project_black_box_tests:
   - app boundary config -> harness-backed reason E2E smoke
   - no-UI ADP smoke against local daemon/server `/adp`
   - no-UI ADP success/failure turn samples against daemon/server `/adp`
+  - no-UI ADP task list/history query against daemon `/adp`
 - test_design_doc: `docs/testing/app.cli-runtime-smoke.md`
 - function_map_doc: `docs/function-maps/app.cli-runtime-smoke.md`
 - mainline_call_doc: `docs/mainline-calls/app.cli-runtime-smoke.json`
@@ -301,7 +303,9 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - runtime_paths:
   - `~/.freehand/state/config`
   - `~/.freehand/state/turns`
+  - `~/.freehand/state/tasks`
   - `~/.freehand/ledgers/reason`
+  - `~/.freehand/ledgers/tasks`
 - update_triggers:
   - CLI command shape changes
   - smoke scenario changes
@@ -371,6 +375,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - WebUI command ingress query-route-misuse rejection smoke
   - WebUI default ADP query/subscribe/command asset smoke
   - WebUI ADP failure frame visible-state smoke
+  - WebUI ADP runtime-query-port failure frame smoke
   - WebUI query projection smoke
   - WebUI debug query projection smoke
   - WebUI latest-turn SSE subscribe smoke
@@ -403,7 +408,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.runtime-daemon`
 
 - owner: `apps/freehand-daemon`
-- allowed_paths: `apps/freehand-daemon/**`, `crates/freehand-runtime/**`, `apps/freehand-server/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
+- allowed_paths: `apps/freehand-daemon/**`, `crates/freehand-runtime/**`, `crates/freehand-task/**` for daemon test fixture seeding only, `apps/freehand-server/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except through `crates/freehand-runtime`
 - required_checks:
   - `cargo test -p freehand-daemon`
@@ -422,6 +427,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon provider failure HTTP smoke
   - daemon checkpoint rewind HTTP smoke
   - daemon ADP WebSocket command/query/subscribe smoke
+  - daemon ADP task list/history query smoke
   - daemon ADP query-as-command rejection smoke
   - daemon direct-message dispatch smoke
   - daemon slave-mode startup rejection smoke
@@ -810,6 +816,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - ingress acceptance/rejection tests
   - command dispatch routing tests
   - checkpoint rewind ingress validation and owner-routing tests
+  - task query DTO validation and runtime-query-port shape tests
   - subscription selector and match tests
   - public turn projection tests
   - client-specific projection gating tests
@@ -817,6 +824,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - required_module_black_box_tests:
   - command ingress accept/reject smoke
   - command dispatch envelope owner-routing smoke
+  - task query command DTO smoke
   - latest-turn subscribe and specific-turn query smoke
   - debug-state snapshot/query/subscribe smoke
   - CLI/WebUI divergence smoke via protocol projection
@@ -1238,12 +1246,14 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - rewind-checkpoint dispatch tests
   - direct-message dispatch tests
   - resume-turn unsupported dispatch tests
+  - runtime task query bridge tests
   - runtime ui-state projection update tests
 - required_module_black_box_tests:
   - command dispatch receipt smoke
   - command dispatch owner-routing smoke
   - reason-backed turn projection smoke
   - checkpoint rewind receipt smoke
+  - task list/history runtime query smoke
   - node-backed direct-message smoke
   - config-selected runtime bootstrap smoke
   - config-selected live node-metadata-ledger bootstrap smoke
@@ -1258,17 +1268,21 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - runtime_paths:
   - `~/.freehand/state/turns`
   - `~/.freehand/state/ui`
+  - `~/.freehand/state/tasks`
   - `~/.freehand/ledgers/reason`
+  - `~/.freehand/ledgers/tasks`
 - update_triggers:
   - command-to-owner routing changes
   - runtime dispatch receipt/failure contract changes
   - runtime reason/node adapter behavior changes
+  - runtime task query adapter behavior changes
   - app/runtime injection boundary changes
 - lifecycle_checks:
   - apps remain protocol-only and do not become runtime owners
   - command dispatch owner routing remains explicit and single-sourced
   - reason turn truth mutation still stays inside `freehand-reason`
   - node direct-message/task semantics still stay inside `freehand-node`
+  - task truth and filtering stay inside `freehand-task`
 
 ### `runtime.checkpoint-rewind`
 

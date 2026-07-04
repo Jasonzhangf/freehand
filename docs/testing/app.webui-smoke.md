@@ -13,6 +13,7 @@
   - CLI and WebUI divergences stay protocol-safe
   - app boundary remains decoupled from reason/provider/node/config semantics
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
+  - app boundary can serve ADP runtime-query-port results without importing runtime/task owner crates
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
   - WebUI control strip and session rail expose session switching, `/new` global conversation creation, `/task` cwd-bound task creation, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
@@ -50,6 +51,7 @@
   - WebUI command ingress dispatch join-failure projection smoke
   - WebUI command ingress query-route-misuse rejection smoke
   - WebUI ADP query-as-command failure does not mutate state and renders failure
+  - WebUI ADP runtime-query-port failure frame smoke
   - WebUI query projection smoke
   - WebUI debug query projection smoke
   - WebUI latest-turn SSE initial snapshot plus later update smoke
@@ -85,7 +87,7 @@
   - `~/.freehand/replays/ui`
   - WebUI smoke stdout fixture
 - known gaps:
-  - command ingress currently dispatches through a static protocol-owned smoke port, not real runtime owner adapters yet
+  - smoke server command ingress and runtime query port use static protocol-owned ports; daemon tests cover real runtime owner adapters
 - WebUI still re-queries latest turn truth over ADP after submit receipt because a command may complete before the browser consumes the next streamed event
 - sync status between design and implementation:
   - WebUI shell rendering is landed
@@ -100,6 +102,7 @@
   - WebUI JS must keep shortcuts and slash commands as input-layer affordances that call existing ADP query/command helpers instead of mutating protocol truth directly
   - WebUI session creation and selection must remain input-layer affordances over ADP/query state, not local truth writers
   - command-ingress dispatch-port failure and join-failure projection coverage is landed
+  - ADP query transport now accepts an injected runtime query port while the app dependency boundary remains protocol-only
   - submit-success path now refreshes latest turn truth after command receipt
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input
   - submit-in-flight cancel path uses `CancelLatestActiveTurn` before a concrete `turn_id` arrives

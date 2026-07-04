@@ -60,17 +60,20 @@ use freehand_reason::{
 };
 use freehand_task::{
     AgentCreateRequest, AgentMutationRequest, TaskActor, TaskAppendRequest, TaskAssignRequest,
-    TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskExecutionRecordRequest,
-    TaskHeartbeatRequest, TaskId, TaskListQuery, TaskMutationRequest, TaskParentRef,
-    TaskReviewRejection, TaskReviewSubmission, TaskRuntime, TaskStatus, TaskWatermark,
+    TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskError,
+    TaskExecutionRecordRequest, TaskHeartbeatRequest, TaskId, TaskLedgerEvent, TaskListQuery,
+    TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime,
+    TaskSnapshot, TaskStatus, TaskWatermark,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
     UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
     UiCompletionSchemaRetryWaiting, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
-    UiSessionMetadataProjection, UiTurnProjection, checkpoint_projection_from_runtime_summary,
-    turn_projection_for_client, turn_projection_from_events,
+    UiQueryResult, UiRuntimeQueryPort, UiSessionMetadataProjection, UiTaskHistoryProjection,
+    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskSnapshotProjection, UiTurnProjection,
+    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
+    turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -2117,6 +2120,59 @@ impl RuntimeCommandDispatcher {
         Arc::clone(&self.ui_state)
     }
 
+    pub fn query_runtime(
+        &self,
+        command: &UiCommand,
+    ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
+        let state = self.state.lock().expect("lock runtime dispatcher state");
+        match command {
+            UiCommand::QueryTaskList { status, agent_id } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let task_runtime =
+                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
+                        .map_err(map_task_query_error)?;
+                let status_filter = status
+                    .as_deref()
+                    .map(parse_task_status)
+                    .transpose()
+                    .map_err(UiCommandDispatchPortError::DispatchFailed)?;
+                let tasks = task_runtime
+                    .list_tasks(TaskListQuery {
+                        status: status_filter,
+                        assignee: agent_id.clone(),
+                    })
+                    .map_err(map_task_query_error)?;
+                Ok(Some(UiQueryResult::TaskList(project_task_list_for_ui(
+                    state.config.reason_agent_id.clone(),
+                    status.clone(),
+                    agent_id.clone(),
+                    tasks,
+                ))))
+            }
+            UiCommand::QueryTaskHistory { task_id } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let task_runtime =
+                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
+                        .map_err(map_task_query_error)?;
+                let events = task_runtime
+                    .task_history(&TaskId::new(task_id.clone()))
+                    .map_err(map_task_query_error)?;
+                Ok(Some(UiQueryResult::TaskHistory(
+                    project_task_history_for_ui(
+                        state.config.reason_agent_id.clone(),
+                        task_id.clone(),
+                        events,
+                    ),
+                )))
+            }
+            _ => Ok(None),
+        }
+    }
+
     fn dispatch_submit_user_input(
         &self,
         state: &mut RuntimeCommandDispatcherState,
@@ -2895,6 +2951,15 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
     }
 }
 
+impl UiRuntimeQueryPort for RuntimeCommandDispatcher {
+    fn query_runtime(
+        &self,
+        command: &UiCommand,
+    ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
+        RuntimeCommandDispatcher::query_runtime(self, command)
+    }
+}
+
 fn map_node_dispatch_error(err: NodeRuntimeError) -> UiCommandDispatchPortError {
     match err {
         NodeRuntimeError::SlaveNotPaired
@@ -2944,6 +3009,93 @@ fn map_checkpoint_dispatch_error(err: RuntimeCheckpointError) -> UiCommandDispat
             UiCommandDispatchPortError::TargetNotFound(checkpoint_id)
         }
         other => UiCommandDispatchPortError::DispatchFailed(other.to_string()),
+    }
+}
+
+fn map_task_query_error(err: TaskError) -> UiCommandDispatchPortError {
+    match err {
+        TaskError::TaskNotFound(task_id) | TaskError::AgentNotFound(task_id) => {
+            UiCommandDispatchPortError::TargetNotFound(task_id)
+        }
+        other => UiCommandDispatchPortError::DispatchFailed(other.to_string()),
+    }
+}
+
+fn project_task_list_for_ui(
+    source_agent_id: AgentId,
+    status_filter: Option<String>,
+    agent_filter: Option<AgentId>,
+    tasks: Vec<TaskSnapshot>,
+) -> UiTaskListProjection {
+    UiTaskListProjection {
+        source_agent_id,
+        status_filter,
+        agent_filter,
+        tasks: tasks
+            .into_iter()
+            .map(project_task_snapshot_for_ui)
+            .collect(),
+    }
+}
+
+fn project_task_snapshot_for_ui(task: TaskSnapshot) -> UiTaskSnapshotProjection {
+    UiTaskSnapshotProjection {
+        task_id: task.task_id.as_str().to_owned(),
+        status: task_status_label(&task.status).to_owned(),
+        title: task.title,
+        goal: task.goal,
+        priority: task.priority,
+        target_cwd: task.target_cwd,
+        assignee_agent_id: task.assignee.map(|assignee| assignee.agent_id),
+        updated_at: task.updated_at,
+        last_progress_at: task.last_progress_at,
+        last_event_seq: task.last_event_seq,
+    }
+}
+
+fn project_task_history_for_ui(
+    source_agent_id: AgentId,
+    task_id: String,
+    events: Vec<TaskLedgerEvent>,
+) -> UiTaskHistoryProjection {
+    UiTaskHistoryProjection {
+        source_agent_id,
+        task_id,
+        events: events
+            .into_iter()
+            .map(|event| UiTaskLedgerEventProjection {
+                seq: event.seq,
+                event_id: event.event_id,
+                event_type: event.event_type,
+                from_status: event
+                    .from_status
+                    .as_ref()
+                    .map(task_status_label)
+                    .map(str::to_owned),
+                to_status: task_status_label(&event.to_status).to_owned(),
+                timestamp: event.timestamp,
+                actor_agent_id: event.actor.agent_id,
+                payload: event.payload,
+            })
+            .collect(),
+    }
+}
+
+fn task_status_label(status: &TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Created => "created",
+        TaskStatus::WaitingAgent => "waiting_agent",
+        TaskStatus::Assigned => "assigned",
+        TaskStatus::Running => "running",
+        TaskStatus::Interrupted => "interrupted",
+        TaskStatus::Paused => "paused",
+        TaskStatus::Blocked => "blocked",
+        TaskStatus::ReviewSubmitted => "review_submitted",
+        TaskStatus::Approved => "approved",
+        TaskStatus::Rejected => "rejected",
+        TaskStatus::Failed => "failed",
+        TaskStatus::Cancelled => "cancelled",
+        TaskStatus::Closed => "closed",
     }
 }
 
@@ -8501,6 +8653,98 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             err,
             UiCommandDispatchPortError::TargetNotFound("checkpoint-missing".to_owned())
         );
+    }
+
+    #[test]
+    fn runtime_query_reads_task_truth_from_task_runtime() {
+        let runtime_home = temp_runtime_home();
+        let task_runtime = TaskRuntime::boot(&runtime_home, AgentId::new("agent-live"))
+            .expect("task runtime boot");
+        task_runtime
+            .create_task(TaskCreateRequest {
+                task_id: Some(TaskId::new("runtime-query-task-1")),
+                title: "Runtime query task".to_owned(),
+                content: "Task query bridge content".to_owned(),
+                goal: "Expose persisted task truth".to_owned(),
+                deliverables: vec!["task list".to_owned()],
+                acceptance: vec!["task history".to_owned()],
+                priority: 90,
+                target_cwd: Some("/tmp".to_owned()),
+                dispatch: TaskDispatchRequest::None,
+                parent: TaskParentRef {
+                    session_id: None,
+                    turn_id: None,
+                    trace_id: None,
+                },
+                actor: TaskActor {
+                    agent_id: AgentId::new("agent-live"),
+                    source: "runtime_query_test".to_owned(),
+                    session_id: None,
+                    turn_id: None,
+                    trace_id: None,
+                },
+                watermark: TaskWatermark {
+                    metadata_id: None,
+                    hook: Some("runtime_query_test".to_owned()),
+                    action_tool_call_id: None,
+                },
+            })
+            .expect("create task");
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime");
+
+        let list = runtime
+            .query_runtime(&UiCommand::QueryTaskList {
+                status: Some("waiting_agent".to_owned()),
+                agent_id: None,
+            })
+            .expect("task list query")
+            .expect("runtime-backed task list");
+        match list {
+            UiQueryResult::TaskList(list) => {
+                assert_eq!(list.source_agent_id.as_str(), "agent-live");
+                assert_eq!(list.tasks.len(), 1);
+                assert_eq!(list.tasks[0].task_id, "runtime-query-task-1");
+                assert_eq!(list.tasks[0].status, "waiting_agent");
+                assert_eq!(list.tasks[0].priority, 90);
+            }
+            other => panic!("unexpected task list result: {other:?}"),
+        }
+
+        let history = runtime
+            .query_runtime(&UiCommand::QueryTaskHistory {
+                task_id: "runtime-query-task-1".to_owned(),
+            })
+            .expect("task history query")
+            .expect("runtime-backed task history");
+        match history {
+            UiQueryResult::TaskHistory(history) => {
+                assert_eq!(history.task_id, "runtime-query-task-1");
+                assert_eq!(history.events.len(), 2);
+                assert_eq!(history.events[0].event_type, "TaskCreated");
+                assert_eq!(history.events[1].event_type, "TaskWaitingAgent");
+            }
+            other => panic!("unexpected task history result: {other:?}"),
+        }
+
+        let err = runtime
+            .query_runtime(&UiCommand::QueryTaskHistory {
+                task_id: "missing-runtime-task".to_owned(),
+            })
+            .expect_err("missing task history must fail");
+        assert_eq!(
+            err,
+            UiCommandDispatchPortError::TargetNotFound("missing-runtime-task".to_owned())
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
 
     #[test]

@@ -22,6 +22,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - front-end attachment drafts are scoped by selected session, persist metadata only, append placeholder lines to the current send, clear on command receipt, and remain available for retry after dispatch failure
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
+- transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history before using protocol-state snapshots
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
 - HTTP query, SSE subscribe, and POST command ingress remain compatibility routes, not the WebUI default control/status path
 - per-turn debug SSE is a live subscription and waits for late debug snapshots when turn projection arrives before debug projection
@@ -35,6 +36,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 
 - app boundary renders a protocol-driven WebUI page shell; live content is populated from ADP query/subscribe/command frames by default
 - app boundary serves protocol-owned query and subscription payloads without becoming a reason or debug truth writer
+- app boundary serves runtime-query-port payloads without importing runtime or task owner crates
 - app boundary serves protocol-owned command dispatch receipts without claiming truth mutation success
 - app boundary serves protocol-owned command dispatch failures and dispatch-task join failures explicitly when the injected dispatch port fails
 - ADP subscribe returns an explicit accepted/waiting state before later turn/debug events, so the WebUI can render waiting instead of appearing frozen
@@ -73,6 +75,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - checkpoint query uses protocol state only and must not parse runtime checkpoint files in the app boundary
 - blank latest-turn subscribe does not fail early; it keeps waiting for the first matching turn
 - dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
+- runtime query port failures surface explicit ADP failure frames and do not become app-owned fallback state
 - direct reason, provider, node, or config coupling is a policy violation, not a fallback path
 - cancel without an active turn clears only local input and does not invent a runtime mutation
 - attachment dispatch failure preserves draft metadata and page-held file handles for retry and must not silently drop the selected files
@@ -101,13 +104,14 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `render_webui_smoke` | `apps/freehand-server/src/page.rs` | render protocol-driven WebUI shell and endpoint bindings | static page request | HTML shell | app entrypoint or root route | page module | bound |
 | 02 | `assets::asset_response` | `apps/freehand-server/src/assets.rs` | serve split CSS and JS assets with explicit content type | asset path | CSS or JS response or 404 | app asset route | embedded assets | bound |
-| 03 | `build_webui_router` | `apps/freehand-server/src/lib.rs` | define shared protocol-only HTTP, SSE, ADP, and static asset surface | protocol state plus dispatch port | router with root, assets, query, subscribe, command, and ADP routes | app entrypoint, tests, or runtime host | app router | bound |
+| 03 | `build_webui_router` | `apps/freehand-server/src/lib.rs` | define shared protocol-only HTTP, SSE, ADP, and static asset surface | protocol state plus dispatch port plus runtime query port | router with root, assets, query, subscribe, command, and ADP routes | app entrypoint, tests, or runtime host | app router | bound |
 | 04 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | expose protocol-owned command-ingress transport endpoint backed by an injected dispatch port | HTTP JSON command | HTTP dispatch receipt or failure payload | WebUI transport | protocol owner | bound |
-| 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve shared protocol-only router on a listener | TCP listener plus protocol state plus dispatch port plus shutdown future | live HTTP and SSE transport boundary | app entrypoint, tests, or runtime host | app server | bound |
+| 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve shared protocol-only router on a listener | TCP listener plus protocol state plus dispatch port plus runtime query port plus shutdown future | live HTTP, SSE, and ADP transport boundary | app entrypoint, tests, or runtime host | app server | bound |
 | 06 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate slave-card visibility by client kind | turn projection plus client kind | client-specific projection | app boundary | protocol owner | bound |
 | 07 | `initializeThemeToggle` | `apps/freehand-server/assets/theme.js` | switch white and black visual theme only | UI theme choice | body theme class plus persisted localStorage setting | WebUI shell | theme module | bound |
 | 08 | `subscription_event_stream / projection_to_sse_event` | `apps/freehand-server/src/lib.rs` | convert protocol-owned subscription updates into continuous HTTP SSE delivery, including waiting subscriptions for late debug snapshots | `UiSubscriptionEvent` receiver plus selector | streamed SSE events | subscribe routes | protocol state | bound |
-| 09 | `handle_adp_socket / handle_adp_connection` | `apps/freehand-server/src/lib.rs` | expose protocol-owned ADP WebSocket frames for WebUI default query, subscribe, and command control | ADP WebSocket frames plus protocol state plus dispatch port | ADP response frames and subscription events | WebUI shell | shared protocol transport | bound |
+| 09 | `handle_adp_socket / handle_adp_connection` | `apps/freehand-server/src/lib.rs` | expose protocol-owned ADP WebSocket frames for WebUI default query, subscribe, and command control | ADP WebSocket frames plus protocol state plus dispatch port plus runtime query port | ADP response frames and subscription events | WebUI shell | shared protocol transport | bound |
+| 09a | `handle_adp_query` | `apps/freehand-server/src/lib.rs` | route ADP query frames to the injected runtime query port first, then protocol-state query when no runtime owner handles the query | ADP query frame plus protocol state plus runtime query port | ADP query result or failure frame | ADP socket route | runtime query port or protocol state | bound |
 | 10 | `ensureAdpSocket / requestAdp / handleAdpFrame` | `apps/freehand-server/assets/webui.js` | maintain the default WebUI ADP connection and route query_result, subscription_accepted, subscription_event, command_receipt, and failure frames | `UiAdpResponse` JSON frames | visible WebUI state updates or failure cards | WebUI shell | daemon `/adp` | bound |
 | 11 | `refreshTurn / renderMessages / logicalSessionTurns / stripFreehandCompletionBlock / normalizePublicConversation / renderCommandStatus / refreshDebug / submitUserInput` | `apps/freehand-server/assets/webui.js` | consume ADP query and subscription turn payloads, render semantic/tool/debug cards, collapse same execution-cycle rounds into one transcript group, collapse assistant text into one visible card, keep same-tool updates in one card, and keep missing debug snapshots pending instead of failed | `UiAdpResponse` frames plus debug snapshot/pending state plus command dispatch receipt | DOM message blocks plus command status | WebUI shell | ADP protocol frames | bound |
 | 11b | `loadAttachmentDrafts / persistAttachmentDrafts / addAttachmentFiles / renderAttachmentTray / textWithAttachmentPlaceholders / clearCurrentAttachments` | `apps/freehand-server/assets/webui.js` | manage session-scoped attachment draft metadata, render placeholder chips, append current-send placeholders, clear on successful command receipt, and preserve drafts after dispatch failure | selected session plus browser File handles plus metadata-only restored drafts | attachment tray DOM plus placeholder text appended to submitted command | WebUI control layer | ADP command text placeholder only | bound |
@@ -137,6 +141,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - WebUI submit path still explicitly refreshes latest turn truth over ADP after a successful command receipt
 - WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing runtime files
 - app dependency boundary is intended to remain protocol-only and must not import reason, provider, node, or config semantics
+- app query transport now accepts an injected UiRuntimeQueryPort while remaining free of runtime/task imports
 - generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes
 - WebUI Cancel button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn

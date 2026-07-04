@@ -94,6 +94,15 @@ pub enum UiCommand {
     QuerySessionTurns {
         session_id: SessionId,
     },
+    QueryTaskList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<AgentId>,
+    },
+    QueryTaskHistory {
+        task_id: String,
+    },
     QueryNodeStatus {
         node_id: String,
     },
@@ -335,6 +344,47 @@ pub struct UiCheckpointSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskSnapshotProjection {
+    pub task_id: String,
+    pub status: String,
+    pub title: String,
+    pub goal: String,
+    pub priority: i64,
+    pub target_cwd: Option<String>,
+    pub assignee_agent_id: Option<AgentId>,
+    pub updated_at: u64,
+    pub last_progress_at: Option<u64>,
+    pub last_event_seq: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskListProjection {
+    pub source_agent_id: AgentId,
+    pub status_filter: Option<String>,
+    pub agent_filter: Option<AgentId>,
+    pub tasks: Vec<UiTaskSnapshotProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskLedgerEventProjection {
+    pub seq: u64,
+    pub event_id: String,
+    pub event_type: String,
+    pub from_status: Option<String>,
+    pub to_status: String,
+    pub timestamp: u64,
+    pub actor_agent_id: AgentId,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskHistoryProjection {
+    pub source_agent_id: AgentId,
+    pub task_id: String,
+    pub events: Vec<UiTaskLedgerEventProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiProjection {
     Turn(UiTurnProjection),
     NodeStatus(NodeStatusSnapshot),
@@ -375,6 +425,8 @@ pub enum UiQueryResult {
     Progress(Option<TaskProgressSnapshot>),
     Debug(Option<DebugStateSnapshot>),
     Checkpoints(UiCheckpointSnapshot),
+    TaskList(UiTaskListProjection),
+    TaskHistory(UiTaskHistoryProjection),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -470,6 +522,24 @@ pub trait UiCommandDispatchPort: Send + Sync {
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError>;
 }
 
+pub trait UiRuntimeQueryPort: Send + Sync {
+    fn query_runtime(
+        &self,
+        command: &UiCommand,
+    ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError>;
+}
+
+pub struct UiProtocolOnlyQueryPort;
+
+impl UiRuntimeQueryPort for UiProtocolOnlyQueryPort {
+    fn query_runtime(
+        &self,
+        _command: &UiCommand,
+    ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
+        Ok(None)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StaticUiCommandDispatchPort {
     dispatch_status: String,
@@ -539,6 +609,8 @@ pub enum UiProtocolError {
     EmptySlaveMessage,
     #[error("rewind checkpoint command requires non-empty checkpoint id")]
     EmptyCheckpointId,
+    #[error("task query requires non-empty task id")]
+    EmptyTaskId,
     #[error("command ingress route only accepts mutation-intent commands")]
     IngressCommandKindMismatch,
     #[error("stream kind mismatch for requested projection")]
@@ -970,6 +1042,9 @@ impl UiProtocolState {
                     &self.session_metadata,
                 )))
             }
+            UiCommand::QueryTaskList { .. } | UiCommand::QueryTaskHistory { .. } => {
+                Err(UiProtocolError::StreamKindMismatch)
+            }
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
                 self.node_status.get(node_id).cloned(),
             )),
@@ -1082,6 +1157,9 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::RewindCheckpoint { checkpoint_id } if checkpoint_id.trim().is_empty() => {
             Err(UiProtocolError::EmptyCheckpointId)
         }
+        UiCommand::QueryTaskHistory { task_id } if task_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskId)
+        }
         _ => Ok(()),
     }
 }
@@ -1107,6 +1185,7 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptySessionCwd => "empty_session_cwd",
         UiProtocolError::EmptySlaveMessage => "empty_slave_message",
         UiProtocolError::EmptyCheckpointId => "empty_checkpoint_id",
+        UiProtocolError::EmptyTaskId => "empty_task_id",
         UiProtocolError::IngressCommandKindMismatch => "ingress_command_kind_mismatch",
         UiProtocolError::StreamKindMismatch => "stream_kind_mismatch",
     };
@@ -1664,6 +1743,8 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QuerySessionList => "query_session_list",
         UiCommand::QueryArchivedSessionList => "query_archived_session_list",
         UiCommand::QuerySessionTurns { .. } => "query_session_turns",
+        UiCommand::QueryTaskList { .. } => "query_task_list",
+        UiCommand::QueryTaskHistory { .. } => "query_task_history",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",

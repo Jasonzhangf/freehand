@@ -17,6 +17,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
 - runtime dispatch owner reads the declared owner target from the envelope
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
+- runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs
 - live submit registers an active turn cancel token before provider execution and releases the runtime mutex before running provider IO
 - CancelLatestActiveTurn resolves to the newest active live turn before falling back to latest persisted runtime turn
 - submit commands may carry selected cwd; runtime canonicalizes and binds cwd to the selected session
@@ -37,6 +38,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - active live cancel requests set the active cancel token immediately and publish a cancelled UI projection without waiting for provider completion
 - latest-active cancellation supports Esc during the short window before WebUI has received a concrete turn_id
 - selected session cwd is persisted on turn records, projected to UiProtocolState, and restored for later same-session inheritance
+- runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events
 
 ## Error Mainline
 
@@ -51,6 +53,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - live provider/tool loops check cancellation at round, stream callback, provider-output, tool-execution, and terminal-write boundaries
 - live provider/tool failures that materialize failed turn truth are returned as explicit dispatch failures only after the failed projection has been refreshed into UiProtocolState
 - CancelLatestActiveTurn with no active or persisted turn returns explicit target-not-found
+- missing task history targets return explicit target-not-found and invalid task filters return dispatch failures
 
 ## Shared Multi-Reference Functions
 
@@ -66,6 +69,18 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
   - allowed callers: runtime bootstrap helpers, CLI/startup tests
   - related tests: config load smoke, runtime bootstrap smoke
   - why shared: keeps config loading and selection in the config owner
+- `TaskRuntime::list_tasks`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: return filtered task snapshots for runtime-backed UI task list queries
+  - allowed callers: RuntimeCommandDispatcher::query_runtime
+  - related tests: runtime_query_reads_task_truth_from_task_runtime, daemon_adp_queries_runtime_task_truth
+  - why shared: keeps task filtering in task.orchestration instead of duplicating it in runtime or UI
+- `TaskRuntime::task_history`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: return ordered task ledger events for runtime-backed UI task history queries
+  - allowed callers: RuntimeCommandDispatcher::query_runtime
+  - related tests: runtime_query_reads_task_truth_from_task_runtime, daemon_adp_queries_runtime_task_truth
+  - why shared: keeps ledger ordering in task.orchestration instead of duplicating it in runtime or UI
 
 ## Function Call Table
 
@@ -80,6 +95,8 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 | 07 | `RuntimeCommandDispatcher::prepare_live_submit_user_input` | `crates/freehand-runtime/src/lib.rs` | register active live turn cancellation state before provider execution | runtime state plus submitted user text | prepared live submit plus active cancel token | RuntimeCommandDispatcher::dispatch | runtime owner | bound |
 | 08 | `RuntimeCommandDispatcher::dispatch_prepared_live_submit` | `crates/freehand-runtime/src/lib.rs` | run provider-backed live turn outside runtime mutex while honoring active cancel token | prepared live submit | live receipt or cancelled dispatch failure | RuntimeCommandDispatcher::dispatch | run_live_reason_turn_with_hooks | bound |
 | 09 | `RuntimeCommandDispatcher::dispatch_cancel_turn` | `crates/freehand-runtime/src/lib.rs` | cancel active or persisted turns through reason-owned terminal semantics and UI projection | cancel command turn id | cancel receipt plus cancelled projection | RuntimeCommandDispatcher::dispatch | reason owner / active cancel registry | bound |
+| 10 | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | execute runtime-backed read-only task list/history queries | UI query command | optional UI query result or dispatch failure | ADP query transport | task runtime owner | bound |
+| 11 | `project_task_list_for_ui / project_task_history_for_ui` | `crates/freehand-runtime/src/lib.rs` | project task owner snapshots and ledger events into UI-safe DTOs | task snapshots or task ledger events | task query projection | RuntimeCommandDispatcher::query_runtime | UI protocol DTO | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -104,3 +121,4 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime dispatch now supports CancelLatestActiveTurn for current-turn stop without requiring the UI to know turn_id
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and terminal persistence
 - missing CancelTurn, empty CancelLatestActiveTurn, and wrong-node direct-message dispatch paths now stay explicit target-not-found failures
+- runtime task query bridge routes list/history through task.orchestration and is covered by runtime and daemon ADP tests

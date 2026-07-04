@@ -185,6 +185,28 @@
     - no UI task projection yet.
     - no worker debug stream/turn update projection yet.
 
+# 2026-07-04 runtime-backed ADP task query
+  - user requirement: continue closing task/multi-agent gaps with real implementation, white-box and black-box verification, function map and mainline caller updates.
+  - owners: `ui.protocol`, `runtime.ui-command-dispatch`, app transport callers.
+  - implementation:
+    - added protocol-owned `QueryTaskList` and `QueryTaskHistory` commands plus UI-safe task list/history DTOs.
+    - added `UiRuntimeQueryPort` so app transports stay protocol-only while daemon/runtime can answer owner-backed read-only queries.
+    - added `RuntimeCommandDispatcher::query_runtime`, routing task list/history through `TaskRuntime::list_tasks` and `TaskRuntime::task_history` without duplicating task filtering or ledger ordering.
+    - wired WebUI/daemon ADP query handling to ask the runtime query port first, then protocol state only when no runtime owner handles the query.
+    - added `freehand-cli adp-task-query` for no-UI task list/history verification.
+    - updated feature map, function maps, test designs, mainline JSON, and generated wiki for touched features.
+  - verified:
+    - white-box: `cargo test -p freehand-runtime runtime_query_reads_task_truth_from_task_runtime -- --nocapture`.
+    - module black-box: `cargo test -p freehand-daemon daemon_adp_queries_runtime_task_truth -- --nocapture`.
+    - target packages: `cargo test -p freehand-ui-protocol`, `cargo test -p freehand-server`, `cargo test -p freehand-cli`, `cargo test -p freehand-task`, `cargo test -p freehand-runtime`, `cargo test -p freehand-daemon`.
+    - mainline/gates: `cargo run -p xtask -- mainlines generate`, `mainlines check`, `gates check`, `cargo test -p xtask`.
+    - online S daemon: `scripts/install-launchd.sh installS`, 4042 health ok, `freehand-cliS adp-smoke`, `freehand-cliS adp-task-query --status waiting_agent` returned `count=0`, and missing history returned `command_dispatch_target_not_found`.
+    - full regression: `cargo test --workspace` -> 416 passed; `cargo clippy --workspace --all-targets -- -D warnings` -> no issues; `cargo fmt --check` passed.
+  - remaining gaps:
+    - no real worker execution process/channel yet.
+    - no push subscription for task truth yet; current task visibility is ADP query only.
+    - no WebUI visual task management panel yet.
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

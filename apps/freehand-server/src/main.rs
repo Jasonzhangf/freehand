@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use freehand_server::{
     parse_bind_arg, render_webui_smoke, seed_webui_protocol_state, serve_webui_listener, usage,
 };
-use freehand_ui_protocol::StaticUiCommandDispatchPort;
+use freehand_ui_protocol::{StaticUiCommandDispatchPort, UiProtocolOnlyQueryPort};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -42,6 +42,7 @@ async fn run() -> Result<String, String> {
                 listener,
                 Arc::new(Mutex::new(seed_webui_protocol_state())),
                 Arc::new(StaticUiCommandDispatchPort::default()),
+                Arc::new(UiProtocolOnlyQueryPort),
                 pending::<()>(),
             )
             .await

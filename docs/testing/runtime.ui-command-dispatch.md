@@ -8,6 +8,7 @@
   - accepted command ingress becomes a dispatch envelope
   - submit commands may carry an optional selected session id and selected cwd and must create or continue that cwd-bound session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
+  - runtime-backed read-only task queries route to task owner APIs and return UI-safe projections without becoming task truth writers
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
   - live bootstrap restores persisted turn projection and next runtime turn ordinal from all persisted sessions when recovery truth exists
   - live bootstrap restores multi-round turn snapshots as separate derived UI session transcript cards after daemon restart
@@ -50,6 +51,8 @@
   - live bridge cancellation checkpoint coverage before provider output, tool execution, and terminal write
   - checkpoint rewind dispatch coverage
   - checkpoint rewind missing-manifest target-not-found coverage
+  - task list/history runtime query coverage
+  - missing task history query target-not-found coverage
 - live reason hook-to-ui-state coverage
 - live provider-request-built debug-to-model-waiting UI coverage
 - live completion-schema rejection feedback-to-client coverage, including no-schema missing tag feedback, invalid-schema missing field names, and retry index
@@ -75,12 +78,15 @@
   - config-selected live node-metadata-ledger bootstrap smoke
   - runtime checkpoint rewind receipt smoke
   - runtime session CRUD receipt smoke over the shared UI protocol state
+  - daemon ADP task list/history query smoke over the shared runtime query port
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/state/turns`
   - `~/.freehand/state/ui`
   - `~/.freehand/ledgers/reason`
+  - `~/.freehand/state/tasks`
+  - `~/.freehand/ledgers/tasks`
 - known gaps:
   - production daemon/process transport exists only as the current HTTP/SSE smoke host
   - real websocket pairing transport is not wired yet
@@ -110,4 +116,6 @@
   - missing `CancelTurn`, empty `CancelLatestActiveTurn`, and wrong-node direct-message dispatch failures are covered as explicit target-not-found
   - node-backed direct-message dispatch is covered
   - explicit unsupported resume dispatch is covered
+  - runtime task query bridge is covered by `runtime_query_reads_task_truth_from_task_runtime`
+  - daemon ADP task query bridge is covered by `daemon_adp_queries_runtime_task_truth`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

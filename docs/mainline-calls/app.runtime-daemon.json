@@ -13,6 +13,7 @@
     "runtime bootstrap consumes configured local and paired node topology before daemon transport starts",
     "if persisted runtime turn truth exists, daemon bootstrap restores it through the injected runtime owner before serving query and SSE routes",
     "daemon injects the runtime dispatcher and its shared UI state into the protocol-only HTTP and SSE transport",
+    "daemon injects the same runtime dispatcher as the protocol-owned runtime query port for ADP read-only owner queries",
     "daemon exposes the same runtime dispatcher and shared UI state through protocol-owned ADP WebSocket frames at /adp",
     "mutation commands travel through protocol-owned ingress validation and dispatch envelope building before runtime dispatch",
     "explicit checkpoint rewind can travel through the same HTTP command ingress without adding app-owned business logic"
@@ -23,7 +24,8 @@
     "daemon serves runtime-backed dispatch receipts over HTTP command ingress",
     "daemon can run as a launchd user service with fixed WebUI bind, RunAtLoad, KeepAlive, explicit FREEHAND_DAEMON_BIN, and stdout/stderr logs under ~/.freehand/logs",
     "daemon serves query and continuous SSE projections from the runtime-owned shared UI state",
-    "daemon serves ADP WebSocket command/query/subscribe frames from the same runtime-owned shared UI state, so WebUI, Android, and CLI automation can use one control/status path",
+    "daemon serves ADP WebSocket command/query/subscribe frames from the same runtime-owned shared UI state and runtime query port, so WebUI, Android, and CLI automation can use one control/status path",
+    "daemon serves task list/history ADP query results through runtime's task owner bridge without becoming task truth owner",
     "daemon restart can serve restored terminal projection before any new submit arrives",
     "daemon SSE subscriptions stay open across later runtime turn updates and observe the same protocol-owned projections as query consumers",
     "daemon can rewind a previously checkpointed writable-tool mutation through runtime owner dispatch while leaving turn/session/UI truth untouched",
@@ -38,6 +40,7 @@
     "corrupt checkpoint projection bootstrap truth returns explicit daemon startup error before transport serve",
     "runtime dispatch failures return protocol-mapped HTTP failures through the shared transport layer",
     "ADP command/query/subscribe misuse returns explicit protocol failure frames on the WebSocket connection",
+    "task query misses return explicit ADP target-not-found failure frames from the runtime query bridge",
     "missing checkpoint rewind manifests surface protocol-mapped target-not-found failure over the same HTTP command ingress",
     "slave-mode agent selection returns explicit daemon startup error",
     "async command ingress does not execute injected synchronous provider or runtime work inline; it returns explicit transport failure if the dispatch task itself fails"
@@ -202,6 +205,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "08a",
+      "symbol_path": "RuntimeCommandDispatcher::query_runtime",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "serve daemon-hosted read-only runtime query frames such as task list/history",
+      "input_semantic": "ADP query command",
+      "output_semantic": "ADP query result or failure frame",
+      "caller": "shared ADP transport",
+      "callee": "runtime owner query bridge",
+      "binding_status": "bound"
+    },
+    {
       "step": "09",
       "symbol_path": "run_launchd_wrapper",
       "file_path": "scripts/freehand-daemon-launchd.sh",
@@ -218,6 +232,7 @@
     "daemon now injects `RuntimeCommandDispatcher` into shared protocol-only HTTP and SSE transport",
     "provider-backed submit, query, continuous-SSE restore, provider-failure surfacing, restart resume of turn-id allocation, direct-message HTTP smoke, checkpoint rewind HTTP smoke, missing-checkpoint rewind HTTP failure smoke, and corrupt-checkpoint-bootstrap startup smoke are covered through the daemon app boundary",
     "ADP WebSocket command/query/subscribe control is covered through the daemon app boundary, including query-as-command rejection",
+    "ADP task list/history query control is covered through the daemon app boundary",
     "checkpoint query projection is covered through daemon HTTP after writable mutation and after rewind",
     "config-selected bootstrap is now bound in code and uses configured peer topology",
     "generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes"

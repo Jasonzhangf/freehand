@@ -48,9 +48,12 @@ fn run() -> Result<String, String> {
     if flag == "adp-session-manage" {
         return run_adp_session_manage(args.collect());
     }
+    if flag == "adp-task-query" {
+        return run_adp_task_query(args.collect());
+    }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]"
                 .to_owned(),
         );
     }
@@ -230,6 +233,53 @@ fn run_adp_session_manage(args: Vec<String>) -> Result<String, String> {
         .build()
         .map_err(|err| err.to_string())?;
     runtime.block_on(run_adp_session_manage_async(url, command))
+}
+
+fn run_adp_task_query(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]"
+            .to_owned();
+    let mut url = None::<String>;
+    let mut status = None::<String>;
+    let mut agent_id = None::<String>;
+    let mut history = None::<String>;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--url" if index + 1 < args.len() => {
+                url = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--status" if index + 1 < args.len() => {
+                status = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--agent" if index + 1 < args.len() => {
+                agent_id = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--history" if index + 1 < args.len() => {
+                history = Some(args[index + 1].clone());
+                index += 2;
+            }
+            _ => return Err(usage),
+        }
+    }
+    let url = url.ok_or_else(|| usage.clone())?;
+    let query = if let Some(task_id) = history {
+        UiCommand::QueryTaskHistory { task_id }
+    } else {
+        UiCommand::QueryTaskList {
+            status,
+            agent_id: agent_id.map(freehand_contracts::AgentId::new),
+        }
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_adp_task_query_async(url, query))
 }
 
 async fn run_adp_session_query_async(
@@ -424,6 +474,86 @@ async fn run_adp_session_manage_async(url: String, command: UiCommand) -> Result
             }
             _ => {}
         }
+    }
+}
+
+async fn run_adp_task_query_async(url: String, query: UiCommand) -> Result<String, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
+        .await
+        .map_err(|_| format!("ADP connect timeout: {url}"))?
+        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let request_id = "cli-task-query-1".to_owned();
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Query {
+            request_id: request_id.clone(),
+            query,
+        },
+    )
+    .await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let _ = socket.close(None).await;
+            return Err("ADP task query timeout".to_owned());
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| "ADP task query timeout".to_owned())??;
+        match response {
+            UiAdpResponse::QueryResult {
+                request_id: response_id,
+                result,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return summarize_task_query_result(&url, &result);
+            }
+            UiAdpResponse::Failure {
+                request_id: response_id,
+                failure,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Err(format!(
+                    "ADP task query failure {}: {}",
+                    failure.code, failure.message
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn summarize_task_query_result(
+    url: &str,
+    result: &freehand_ui_protocol::UiQueryResult,
+) -> Result<String, String> {
+    match result {
+        freehand_ui_protocol::UiQueryResult::TaskList(list) => Ok(format!(
+            "adp_task_query_ok url={} kind=list source_agent={} count={} tasks={}",
+            url,
+            list.source_agent_id.as_str(),
+            list.tasks.len(),
+            list.tasks
+                .iter()
+                .map(|task| format!("{}:{}:{}", task.task_id, task.status, task.priority))
+                .collect::<Vec<_>>()
+                .join(",")
+        )),
+        freehand_ui_protocol::UiQueryResult::TaskHistory(history) => Ok(format!(
+            "adp_task_query_ok url={} kind=history source_agent={} task_id={} events={} event_types={}",
+            url,
+            history.source_agent_id.as_str(),
+            history.task_id,
+            history.events.len(),
+            history
+                .events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        )),
+        _ => Err("ADP task query returned non-task result".to_owned()),
     }
 }
 

@@ -13,6 +13,7 @@
   - CLI ADP smoke verifies subscribe accepted, subscription event, query result, and query-as-command explicit failure
   - CLI runs no-UI ADP success/failure turn samples against a daemon `/adp` WebSocket URL
   - CLI ADP turn samples use an isolated sample session, verify command outcome plus matching terminal projection, then query the sample session transcript; the failure sample must show `Success` terminal status plus transcript evidence for at least two rounds and at least one unique failed tool activity
+  - CLI ADP task query sends task list/history query frames and reports task projection summaries without WebUI
 - white-box plan:
   - none in app crate beyond argument dispatch helpers
 - module black-box plan:
@@ -22,12 +23,14 @@
   - CLI ADP mock WebSocket smoke
   - CLI ADP success turn sample mock WebSocket smoke
   - CLI ADP failure turn sample mock WebSocket smoke with isolated-session transcript evidence and unique tool-call counting
+  - CLI ADP task query argument/result summary smoke
   - CLI ADP local `freehand-server webui-serve-smoke` smoke
 - project black-box impact:
   - one app entrypoint can now drive config + provider selection plus reason runtime E2E smoke
   - provider usage and recovery policy remain wired through the shared harness path
   - no-UI ADP smoke can diagnose status/control failures without WebUI or Android
   - no-UI ADP turn samples can populate and verify WebUI-visible success and failed-tool-result recovery projections without relying on manual DOM inspection, and the failure sample now rejects one-round or system-failure outcomes
+  - no-UI ADP task query can verify daemon task list/history visibility without WebUI DOM inspection
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - temp `HOME` with `~/.freehand/config.toml`
@@ -43,4 +46,5 @@
   - CLI smoke baseline is implemented in integration tests
   - CLI ADP smoke baseline is implemented in integration tests and verified against a real local `/adp` server
   - CLI ADP success/failure sample baseline is implemented in integration tests; failure means recovered failed tool result with `rounds>=2` transcript evidence, not ADP/system failure
+  - CLI ADP task query command is implemented for live daemon task list/history checks
   - migrated mainline-call source and generated wiki are kept in sync with this test design

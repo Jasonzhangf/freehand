@@ -10,6 +10,8 @@
   - `run_adp_smoke_async`
   - `run_adp_turn_sample`
   - `run_adp_turn_sample_async`
+  - `run_adp_task_query`
+  - `run_adp_task_query_async`
 
 ## Request Mainline
 
@@ -19,6 +21,7 @@
 - provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting
 - for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe/query/query-as-command frames
 - for ADP turn samples, CLI connects to the same daemon `/adp`, creates an isolated sample session, subscribes to latest-turn updates, submits a success sample prompt or a tool-result-failure recovery prompt, verifies the matching terminal projection, then queries the sample session transcript to prove round/tool evidence
+- for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis
 
 ## Response Mainline
 
@@ -27,6 +30,7 @@
 - CLI output remains a terminal-facing projection, not debug ledger raw payload
 - ADP smoke prints the observed `subscription_accepted`, `subscription_event`, `query_result`, and explicit failure frame sequence for no-UI diagnosis
 - ADP turn samples print the observed command outcome plus the matching latest-turn projection and transcript evidence; the failure sample proves a failed tool result can continue to a successful terminal turn with `rounds>=2`, one or more unique tool executions, and one or more unique failed tool results instead of becoming an ADP/system failure
+- ADP task query prints task list count/task ids or task history event counts from protocol-owned query results
 
 ## Error Mainline
 
@@ -37,6 +41,7 @@
 - ADP turn sample timeout, wrong terminal status, missing isolated-session transcript evidence, missing failed tool activity for the failure sample, or system/provider terminal failure returns explicit terminal errors
 - rewrite recovery block is reported as explicit blocked outcome, not disguised as success
 - ADP query-as-command must return `ingress_command_kind_mismatch`, proving command/query separation without mutation
+- ADP task query failures print explicit ADP failure code/message instead of treating missing task truth as an empty success
 
 ## Shared Multi-Reference Functions
 
@@ -66,6 +71,8 @@
 | 07 | `run_adp_smoke_async` | `apps/freehand-cli/src/main.rs` | connect to daemon ADP, send subscribe/query/query-as-command frames, and collect required responses | ADP WebSocket URL | observed frame sequence or explicit error | ADP smoke runner | daemon `/adp` | bound |
 | 08 | `run_adp_turn_sample` | `apps/freehand-cli/src/main.rs` | parse ADP sample URL and sample kind | `--url ws://.../adp --sample success\|failure` | terminal-facing sample result | CLI dispatcher | ADP sample runner | bound |
 | 09 | `run_adp_turn_sample_async` | `apps/freehand-cli/src/main.rs` | submit success/failure sample prompts over ADP into an isolated sample session, verify matching terminal projection, query transcript evidence, and reject system/provider terminal failure explicitly | ADP WebSocket URL + sample kind | observed success projection or recovered failed-tool-result projection with round/tool counts | ADP sample runner | daemon `/adp` | bound |
+| 10 | `run_adp_task_query` | `apps/freehand-cli/src/main.rs` | parse ADP task query URL and optional list/history filters | `--url ws://.../adp [--status <status>] [--agent <id>] [--history <task_id>]` | selected task query command | CLI dispatcher | ADP task query runner | bound |
+| 11 | `run_adp_task_query_async` | `apps/freehand-cli/src/main.rs` | send task list/history query over ADP and summarize the task projection | ADP WebSocket URL + task query command | terminal-facing task list/history summary or explicit ADP failure | ADP task query runner | daemon `/adp` | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -79,6 +86,7 @@
 - CLI reason E2E smoke path is implemented
 - CLI ADP no-UI smoke path is implemented
 - CLI ADP success/failure turn sample path is implemented; the failure sample requires isolated-session terminal success plus transcript evidence for `rounds>=2`, unique failed tool-result activity, and no system/provider terminal failure
+- CLI ADP task list/history query path is implemented for no-UI task truth diagnosis
 - harness-backed app E2E smoke now exists before production CLI/server runtime loop
 - remaining gap: production non-smoke command loop is still pending
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes

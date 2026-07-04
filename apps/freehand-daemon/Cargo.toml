@@ -12,6 +12,7 @@ freehand-ui-protocol = { path = "../../crates/freehand-ui-protocol" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync"] }
 
 [dev-dependencies]
+freehand-task = { path = "../../crates/freehand-task" }
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1"

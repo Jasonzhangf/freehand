@@ -22,7 +22,7 @@ use freehand_ui_protocol::{
     TurnProjectionInput, UiAdpFailure, UiAdpRequest, UiAdpResponse, UiCheckpointSnapshot,
     UiClientKind, UiCommand, UiCommandDispatchFailure, UiCommandDispatchPort,
     UiCommandDispatchReceipt, UiProjection, UiProtocolState, UiPublicTurnProjection, UiQueryResult,
-    UiSubscriptionEvent, UiTurnProjection, build_command_dispatch_envelope,
+    UiRuntimeQueryPort, UiSubscriptionEvent, UiTurnProjection, build_command_dispatch_envelope,
     checkpoint_projection_from_runtime_summary, dispatch_port_failure, protocol_rejection,
     public_turn_projection, subscription_matches, subscription_selector,
     turn_projection_for_client, turn_projection_from_events,
@@ -37,6 +37,7 @@ use tokio::sync::mpsc;
 struct WebUiState {
     protocol_state: Arc<Mutex<UiProtocolState>>,
     command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
+    runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
 }
 
 pub fn usage(binary_name: &str) -> String {
@@ -66,6 +67,7 @@ pub fn parse_bind_arg(mut args: impl Iterator<Item = String>) -> Result<SocketAd
 pub fn build_webui_router(
     protocol_state: Arc<Mutex<UiProtocolState>>,
     command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
+    runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
 ) -> Router {
     Router::new()
         .route("/", get(handle_root))
@@ -91,6 +93,7 @@ pub fn build_webui_router(
         .with_state(WebUiState {
             protocol_state,
             command_dispatch_port,
+            runtime_query_port,
         })
 }
 
@@ -98,6 +101,7 @@ pub async fn serve_webui_listener<F>(
     listener: TcpListener,
     protocol_state: Arc<Mutex<UiProtocolState>>,
     command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
+    runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
     shutdown: F,
 ) -> std::io::Result<()>
 where
@@ -105,7 +109,7 @@ where
 {
     axum::serve(
         listener,
-        build_webui_router(protocol_state, command_dispatch_port),
+        build_webui_router(protocol_state, command_dispatch_port, runtime_query_port),
     )
     .with_graceful_shutdown(shutdown)
     .await
@@ -479,6 +483,31 @@ async fn handle_adp_query(
     request_id: String,
     query: UiCommand,
 ) -> Result<(), String> {
+    let runtime_query_port = Arc::clone(&state.runtime_query_port);
+    let query_for_runtime = query.clone();
+    let runtime_result =
+        tokio::task::spawn_blocking(move || runtime_query_port.query_runtime(&query_for_runtime))
+            .await
+            .map_err(|err| format!("runtime query task failed: {err}"))?;
+    match runtime_result {
+        Ok(Some(result)) => {
+            let _ = outbound_tx.send(UiAdpResponse::QueryResult { request_id, result });
+            return Ok(());
+        }
+        Ok(None) => {}
+        Err(err) => {
+            let failure = dispatch_port_failure(err);
+            let _ = outbound_tx.send(UiAdpResponse::Failure {
+                request_id,
+                failure: UiAdpFailure {
+                    code: failure.code,
+                    message: failure.message,
+                    retryable: failure.retryable,
+                },
+            });
+            return Ok(());
+        }
+    };
     let result = {
         let state = state.protocol_state.lock().expect("lock protocol state");
         state.query(&query)
@@ -826,6 +855,7 @@ mod tests {
                     listener,
                     protocol_state_for_task,
                     command_dispatch_port_for_task,
+                    Arc::new(freehand_ui_protocol::UiProtocolOnlyQueryPort),
                     shutdown,
                 )
                 .await

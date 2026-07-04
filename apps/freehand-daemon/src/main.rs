@@ -44,9 +44,16 @@ async fn run() -> Result<String, String> {
             let ui_state = dispatcher.ui_state();
             let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> =
                 dispatcher.clone();
-            serve_webui_listener(listener, ui_state, dispatch_port, pending::<()>())
-                .await
-                .map_err(|err| format!("daemon server error: {err}"))?;
+            let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher.clone();
+            serve_webui_listener(
+                listener,
+                ui_state,
+                dispatch_port,
+                query_port,
+                pending::<()>(),
+            )
+            .await
+            .map_err(|err| format!("daemon server error: {err}"))?;
             Ok(String::new())
         }
         _ => Err(usage()),
@@ -69,6 +76,10 @@ fn build_runtime_dispatcher_from_default_config(
 mod tests {
     use super::*;
     use freehand_contracts::TurnId;
+    use freehand_task::{
+        TaskActor, TaskCreateRequest, TaskDispatchRequest, TaskParentRef, TaskRuntime,
+        TaskWatermark,
+    };
     use freehand_ui_protocol::{
         UiAdpRequest, UiAdpResponse, UiCheckpointSnapshot, UiClientKind, UiCommand,
         UiCommandDispatchFailure, UiCommandDispatchReceipt, UiPublicTurnProjection, UiQueryResult,
@@ -122,12 +133,13 @@ mod tests {
             let ui_state = dispatcher.ui_state();
             let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> =
                 dispatcher.clone();
+            let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher.clone();
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let task = tokio::spawn(async move {
                 let shutdown = async move {
                     let _ = shutdown_rx.await;
                 };
-                serve_webui_listener(listener, ui_state, dispatch_port, shutdown)
+                serve_webui_listener(listener, ui_state, dispatch_port, query_port, shutdown)
                     .await
                     .expect("serve");
             });
@@ -571,6 +583,136 @@ mod tests {
         let _ = socket.close(None).await;
         server.stop().await;
         provider_handle.join().expect("join provider");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn daemon_adp_queries_runtime_task_truth() {
+        let home =
+            write_test_home(&master_config_text("https://example.invalid")).expect("test home");
+        let runtime_home = home.join(".freehand");
+        let task_runtime =
+            TaskRuntime::boot(&runtime_home, freehand_contracts::AgentId::new("master"))
+                .expect("task runtime");
+        let outcome = task_runtime
+            .create_task(TaskCreateRequest {
+                task_id: Some(freehand_task::TaskId::new("adp-task-1")),
+                title: "ADP task query".to_owned(),
+                content: "Expose task truth through ADP".to_owned(),
+                goal: "ADP reads persisted task snapshots".to_owned(),
+                deliverables: vec!["task list projection".to_owned()],
+                acceptance: vec!["history projection".to_owned()],
+                priority: 80,
+                target_cwd: Some("/tmp".to_owned()),
+                dispatch: TaskDispatchRequest::None,
+                parent: TaskParentRef {
+                    session_id: None,
+                    turn_id: None,
+                    trace_id: None,
+                },
+                actor: TaskActor {
+                    agent_id: freehand_contracts::AgentId::new("master"),
+                    source: "daemon_adp_test".to_owned(),
+                    session_id: None,
+                    turn_id: None,
+                    trace_id: None,
+                },
+                watermark: TaskWatermark {
+                    metadata_id: None,
+                    hook: Some("daemon_adp_test".to_owned()),
+                    action_tool_call_id: None,
+                },
+            })
+            .expect("create task");
+        assert_eq!(outcome.task.task_id.as_str(), "adp-task-1");
+
+        let server = TestServer::spawn_existing_home(home, true).await;
+        let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
+        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Query {
+                    request_id: "task-list-1".to_owned(),
+                    query: UiCommand::QueryTaskList {
+                        status: Some("waiting_agent".to_owned()),
+                        agent_id: None,
+                    },
+                })
+                .expect("task list query json")
+                .into(),
+            ))
+            .await
+            .expect("send task list query");
+        match next_adp_response(&mut socket, "task list query").await {
+            UiAdpResponse::QueryResult {
+                request_id,
+                result: UiQueryResult::TaskList(list),
+            } => {
+                assert_eq!(request_id, "task-list-1");
+                assert_eq!(list.source_agent_id.as_str(), "master");
+                assert_eq!(list.tasks.len(), 1);
+                assert_eq!(list.tasks[0].task_id, "adp-task-1");
+                assert_eq!(list.tasks[0].status, "waiting_agent");
+                assert_eq!(list.tasks[0].priority, 80);
+            }
+            other => panic!("unexpected task list response: {other:?}"),
+        }
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Query {
+                    request_id: "task-history-1".to_owned(),
+                    query: UiCommand::QueryTaskHistory {
+                        task_id: "adp-task-1".to_owned(),
+                    },
+                })
+                .expect("task history query json")
+                .into(),
+            ))
+            .await
+            .expect("send task history query");
+        match next_adp_response(&mut socket, "task history query").await {
+            UiAdpResponse::QueryResult {
+                request_id,
+                result: UiQueryResult::TaskHistory(history),
+            } => {
+                assert_eq!(request_id, "task-history-1");
+                assert_eq!(history.task_id, "adp-task-1");
+                assert_eq!(history.events.len(), 2);
+                assert_eq!(history.events[0].event_type, "TaskCreated");
+                assert_eq!(history.events[1].event_type, "TaskWaitingAgent");
+            }
+            other => panic!("unexpected task history response: {other:?}"),
+        }
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Query {
+                    request_id: "task-missing-1".to_owned(),
+                    query: UiCommand::QueryTaskHistory {
+                        task_id: "missing-task".to_owned(),
+                    },
+                })
+                .expect("missing task history query json")
+                .into(),
+            ))
+            .await
+            .expect("send missing task history query");
+        match next_adp_response(&mut socket, "missing task history query").await {
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                assert_eq!(request_id, "task-missing-1");
+                assert_eq!(failure.code, "command_dispatch_target_not_found");
+                assert!(!failure.retryable);
+            }
+            other => panic!("unexpected missing task response: {other:?}"),
+        }
+
+        let _ = socket.close(None).await;
+        server.stop().await;
     }
 
     #[tokio::test]

@@ -17,6 +17,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
+- task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 - CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id
 - SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation
@@ -45,6 +46,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed public tool bodies expose protocol-projected tool result detail
 - cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn
 - session list and transcript projections expose cwd bound by runtime/session truth
+- task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
 
 ## Error Mainline
 
@@ -59,6 +61,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - cancelled terminal projection must stay explicit and must not be collapsed into failed or completed UI status
 - CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module
 - empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently
+- empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse
 
 ## Shared Multi-Reference Functions
 
@@ -110,6 +113,12 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
   - allowed callers: WebUI transport adapters, Android transport adapters, CLI automation transports
   - related tests: ADP frame roundtrip smoke, daemon ADP command/query/subscribe smoke
   - why shared: all UI and headless clients need one typed control/status frame shape instead of per-client transport envelopes
+- `UiRuntimeQueryPort::query_runtime`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: define a protocol-owned runtime query extension point for read-only owner-backed projections
+  - allowed callers: WebUI ADP query transport, daemon ADP query transport
+  - related tests: daemon_adp_queries_runtime_task_truth
+  - why shared: keeps app transports protocol-only while allowing runtime owner read models
 
 ## Function Call Table
 
@@ -135,6 +144,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 17 | `UiProtocolState::set_checkpoint_snapshot / checkpoint_projection_from_runtime_summary` | `crates/freehand-ui-protocol/src/lib.rs` | store and query read-only checkpoint summaries supplied by runtime owner | runtime checkpoint summary DTO | checkpoint query result | runtime dispatcher / app query handlers | protocol state | bound |
 | 18 | `UiAdpRequest` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP request frames for command/query/subscribe automation | ADP JSON frame | typed command/query/subscription request | WebUI/Android/CLI automation transports | protocol owner | bound |
 | 19 | `UiAdpResponse` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP response frames for command/query/subscribe/event/failure automation | protocol command/query/subscription result | ADP JSON response frame | protocol owner | WebUI/Android/CLI automation transports | bound |
+| 20 | `UiRuntimeQueryPort::query_runtime` | `crates/freehand-ui-protocol/src/lib.rs` | define runtime-backed read-only query port shape | UI query command | optional UI query result or dispatch failure | WebUI/daemon ADP query transport | runtime owner query implementation | bound |
 | 10b | `UiProtocolState::apply_terminal_event / turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text plus terminal status projection | runtime/app protocol consumers | protocol projector | bound |
 
 ## Sync Status Against Mainline Call
@@ -155,3 +165,4 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - public tool summaries preserve tool_call_id, duplicate same-id tool calls upsert into one public card, and completed/failed public tool bodies expose tool result detail
 - CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn
 - ADP request and response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
+- task list/history query command DTOs and runtime query-port shape are landed

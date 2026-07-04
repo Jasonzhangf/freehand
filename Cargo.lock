@@ -257,6 +257,7 @@ dependencies = [
  "freehand-contracts",
  "freehand-runtime",
  "freehand-server",
+ "freehand-task",
  "freehand-ui-protocol",
  "futures-util",
  "reqwest",

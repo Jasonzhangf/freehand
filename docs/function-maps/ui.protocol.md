@@ -23,6 +23,7 @@
   - `terminal_text_projection`
   - `UiProtocolState::subscribe`
   - `UiProtocolState::query`
+  - `UiRuntimeQueryPort::query_runtime`
 - `UiProtocolState::apply_semantic_event`
   - `UiProtocolState::apply_tool_call`
   - `UiProtocolState::apply_tool_result`
@@ -45,6 +46,7 @@
 - session management commands (`CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`) are mutation intents only; the protocol validates and routes them while `reason.persistence` owns durable session metadata truth
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
+- task list and task history queries are protocol-owned ADP/query command shapes, but the protocol only defines UI-safe DTOs and query-port routing; persisted task truth remains owned by `task.orchestration`
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 
 ## Response Mainline
@@ -64,6 +66,7 @@
 - public conversation session selection stays explicit: submit can target a selected session id, and session-level transcript queries stay separate from the global latest turn
 - session list and transcript projections expose session `cwd`, and turn projections carry `cwd` when the runtime owner has bound a session to a workspace
 - session list projections expose owner-supplied session `title` and `archived` metadata so WebUI, Android, CLI, and headless ADP clients share one CRUD truth
+- task list and task history query results expose UI-safe task snapshot and ledger-event projections supplied by runtime owner code through `UiRuntimeQueryPort`
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards; tool status/outcome is conveyed by the status field while the public body stays semantic and target-focused instead of echoing success/failure result text
 - public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/parameters/result without parsing raw tool terms
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
@@ -87,6 +90,8 @@
 - query commands sent as ADP command frames are explicit protocol misuse errors, not mutation attempts
 - `CancelLatestActiveTurn` without any active or persisted turn returns explicit target-not-found from the owner module
 - empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch
+- empty task history ids are rejected at the protocol boundary as `empty_task_id`
+- task list/history commands sent to command ingress are rejected as query-route misuse instead of mutating task truth
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
 - source identity fields remain explicit across success and error paths
 - cancelled terminal projection stays explicit and is not collapsed into failed or completed UI status
@@ -136,6 +141,12 @@
   - allowed callers: runtime dispatcher bridge, app query handlers through protocol state
   - related tests: checkpoint summary query smoke
   - why shared: keeps checkpoint UI projection single-sourced without letting UI parse runtime manifests
+- `UiRuntimeQueryPort::query_runtime`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: let app transports ask runtime owners for read-only query projections such as task list/history before falling back to protocol-state queries
+  - allowed callers: WebUI/daemon ADP query transport
+  - related tests: daemon ADP task query smoke
+  - why shared: keeps app transports protocol-bound while allowing runtime-owned read models without importing runtime into `freehand-server`
 - `project_tool_call_display` / `project_tool_result_display`
   - owner: `crates/freehand-blocks/src/tool_display.rs`
   - purpose: parse tool call/result contracts into UI-safe semantic display projection
@@ -172,6 +183,7 @@
 | 17 | `UiProtocolState::set_checkpoint_snapshot` / `checkpoint_projection_from_runtime_summary` | `crates/freehand-ui-protocol/src/lib.rs` | store and query read-only checkpoint summaries supplied by runtime owner | runtime checkpoint summary DTO | checkpoint query result | runtime dispatcher / app query handlers | protocol state | bound |
 | 18 | `UiAdpRequest` / `UiAdpResponse` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP frames for command/query/subscribe automation | ADP JSON frame | typed command/query/subscription response or failure | WebUI/Android/CLI automation transports | protocol owner | bound |
 | 19 | `validate_command` / `command_dispatch_target` | `crates/freehand-ui-protocol/src/lib.rs` | validate session-management mutation intents and route them to the session persistence owner | session CRUD command | owner-routed dispatch envelope or protocol rejection | WebUI/Android/CLI transports | runtime/reason persistence owner path | bound |
+| 20 | `UiRuntimeQueryPort::query_runtime` | `crates/freehand-ui-protocol/src/lib.rs` | define runtime-backed read-only query extension point without making app transports import runtime owners | UI query command | optional runtime-owned query result or explicit dispatch failure | WebUI/daemon ADP query transport | runtime query owner | bound |
 
 ## Sync Status Against Code
 
@@ -191,4 +203,5 @@
 - ADP request/response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
 - session cwd projection is landed for `UiTurnProjection`, `UiSessionSummary`, and `UiSessionTranscriptProjection`
 - session CRUD protocol routing is bound for create, rename, archive, restore, and delete-as-archive commands through `runtime.ui-command-dispatch` into `reason.persistence`
+- task list/history query DTOs and runtime query-port routing are protocol-bound; `UiProtocolState::query` rejects them so runtime owner code must supply task truth
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes
