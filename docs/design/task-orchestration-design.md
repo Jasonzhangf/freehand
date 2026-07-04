@@ -26,6 +26,8 @@ First implemented ops:
 - `pause`
 - `resume`
 - `heartbeat`
+- `assign`
+- `cancel`
 - `submit_review`
 - `approve`
 - `reject`
@@ -56,6 +58,7 @@ Running -> Blocked -> Running
 ReviewSubmitted -> Rejected -> Running
 Running -> Failed -> Running | Closed
 Running -> Cancelled -> Closed
+Assigned -> Cancelled
 ```
 
 `Draft` is intentionally absent. A model task action creates a real task.
@@ -160,6 +163,10 @@ Agent selection first version:
 - `self` and `auto` pick an available agent.
 - `none` creates `WaitingAgent`.
 - explicit `agent` requires the agent to exist and be available.
+- `assign` can bind `WaitingAgent`, `Created`, or `Interrupted` to an available agent.
+- `create_agent` creates an idle agent snapshot with declared capabilities.
+- `close_agent` closes only idle agents with no current task, queued task, or running task.
+- assigned tasks count as queued work; running tasks count as running work after heartbeat/resume.
 
 ## Startup And Recovery
 
@@ -194,6 +201,7 @@ Implemented:
 - self-agent registry skeleton
 - create with self/auto assignment or WaitingAgent
 - append, pause, resume, submit_review, approve, reject, close
+- assign, cancel, create_agent, close_agent
 - review-before-close transition validation
 - lease-backed Running state with heartbeat and boot interruption recovery
 - runtime task tool bridge

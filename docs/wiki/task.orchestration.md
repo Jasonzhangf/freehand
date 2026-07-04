@@ -17,6 +17,9 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - `TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance
 - create action writes append-only ledger events and atomic snapshots
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
+- `TaskRuntime::assign_task` binds waiting, created, or interrupted tasks to an available agent
+- `TaskRuntime::cancel_task` moves non-terminal tasks to Cancelled and releases assignee state
+- `TaskRuntime::create_agent` and `TaskRuntime::close_agent` manage persisted worker agent snapshots
 - lifecycle actions use explicit task mutation requests and validate state transitions before writing truth
 - `TaskRuntime::resume_task` enters `Running` and creates a lease-backed heartbeat record
 - `TaskRuntime::heartbeat_task` refreshes the lease for the assigned running agent
@@ -26,7 +29,8 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - `TaskRuntime::query_task` returns persisted task snapshot truth
 - `TaskRuntime::list_agents` returns current in-memory agent registry projection
 - `TaskRuntime::query_agent` returns one agent snapshot
-- append, pause, resume, heartbeat, submit_review, approve, reject, and close return event-backed mutation results
+- append, pause, resume, heartbeat, assign, cancel, submit_review, approve, reject, and close return event-backed mutation results
+- create_agent and close_agent return persisted agent snapshot summaries
 - task tool result returns semantic task ids, status, event names, sequence numbers, or JSON snapshots
 
 ## Error Mainline
@@ -36,6 +40,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - unknown agent id returns explicit agent-not-found
 - invalid lifecycle transitions return explicit invalid-transition errors
 - heartbeat for non-running or unassigned tasks returns invalid-transition and writes no lease
+- assigning to unavailable agents and closing busy agents return explicit errors without mutating task or agent truth
 - persistence failures return explicit task persistence errors
 - task failures become failed tool results and can be sent back to the model
 
@@ -59,6 +64,18 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
   - allowed callers: runtime task tool bridge
   - related tests: resume_creates_lease_and_heartbeat_extends_it, heartbeat_for_assigned_task_is_rejected_without_lease_write, task_tool_resume_and_heartbeat_persist_running_lease
   - why shared: keeps task execution liveness truth in task owner
+- `TaskRuntime::assign_task`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: bind waiting, created, or interrupted tasks to an available agent and persist assignment truth
+  - allowed callers: runtime task tool bridge
+  - related tests: waiting_task_assigns_to_available_agent_and_recovers, task_tool_agent_assign_cancel_close_lifecycle
+  - why shared: keeps agent selection mutation in task owner
+- `TaskRuntime::create_agent`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: create persisted idle worker agent snapshots with declared capabilities
+  - allowed callers: runtime task tool bridge
+  - related tests: create_agent_persists_recovers_and_closes_when_idle, task_tool_agent_assign_cancel_close_lifecycle
+  - why shared: keeps agent registry mutation in task owner
 
 ## Function Call Table
 
@@ -74,11 +91,16 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 08 | `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | close only approved or otherwise closeable tasks and release assignee state | task mutation request | closed task snapshot and event | runtime task bridge | task owner | bound |
 | 09 | `TaskRuntime::heartbeat_task` | `crates/freehand-task/src/lib.rs` | refresh the lease for an assigned running task | task heartbeat request | running task snapshot plus active lease | runtime task bridge | task owner | bound |
 | 10 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots plus lease snapshot | recovered runtime state | task boot | task owner | bound |
+| 11 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting, created, or interrupted tasks to an available agent | task assignment request | assigned task snapshot plus queued agent state | runtime task bridge | task owner | bound |
+| 12 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal tasks and release assignee state | task mutation request | cancelled task snapshot plus released agent state | runtime task bridge | task owner | bound |
+| 13 | `TaskRuntime::create_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents | agent create request | available agent snapshot | runtime task bridge | task owner | bound |
+| 14 | `TaskRuntime::close_agent` | `crates/freehand-task/src/lib.rs` | close only idle agents | agent mutation request | closed agent snapshot | runtime task bridge | task owner | bound |
 
 ## Sync Status Against Mainline Call
 
 - first implementation supports `create`, `query`, `list_agents`, and `query_agent`
-- current implementation supports `append`, `pause`, `resume`, `heartbeat`, `submit_review`, `approve`, `reject`, and `close`
+- current implementation supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`
 - review-before-close is locked by positive and negative tests
 - lease-backed Running recovery is locked by positive and negative tests
+- agent registry lifecycle is locked by positive and negative tests
 - real worker execution, UI task projection, and multi-agent dispatch are pending

@@ -203,6 +203,29 @@ pub struct TaskHeartbeatRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAssignRequest {
+    pub task_id: TaskId,
+    pub agent_id: AgentId,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentCreateRequest {
+    pub agent_id: AgentId,
+    pub capabilities: Vec<String>,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentMutationRequest {
+    pub agent_id: AgentId,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskReviewSubmission {
     pub task_id: TaskId,
     pub summary: String,
@@ -236,6 +259,11 @@ pub struct TaskMutationOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentMutationOutcome {
+    pub agent: AgentSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRuntimeSnapshot {
     pub status: String,
     pub tasks: Vec<TaskSnapshot>,
@@ -252,6 +280,15 @@ pub enum TaskError {
     TaskNotFound(String),
     #[error("agent `{0}` not found")]
     AgentNotFound(String),
+    #[error("agent `{0}` already exists")]
+    AgentAlreadyExists(String),
+    #[error("agent `{0}` is not available")]
+    AgentUnavailable(String),
+    #[error("invalid agent transition from `{from:?}` using `{event_type}`")]
+    InvalidAgentTransition {
+        from: AgentStatus,
+        event_type: &'static str,
+    },
     #[error("invalid task transition from `{from:?}` using `{event_type}`")]
     InvalidTransition {
         from: TaskStatus,
@@ -283,6 +320,9 @@ impl TaskRuntime {
         let store = TaskStore::new(runtime_home, owner_agent_id.clone());
         let mut state = TaskRuntimeState::default();
         let self_agent = store.load_or_create_self_agent(&owner_agent_id)?;
+        for agent in store.load_agent_snapshots()? {
+            state.agents.insert(agent.agent_id.clone(), agent);
+        }
         state.agents.insert(owner_agent_id, self_agent);
         for task in store.load_task_snapshots()? {
             state.tasks.insert(task.task_id.clone(), task);
@@ -374,7 +414,8 @@ impl TaskRuntime {
                     agent.status = AgentStatus::Busy;
                     agent.current_task_id = Some(task.task_id.clone());
                     agent.current_cwd = task.target_cwd.clone();
-                    agent.running_tasks = 1;
+                    agent.running_tasks = 0;
+                    agent.queued_tasks = agent.queued_tasks.saturating_add(1);
                     agent.last_seen_at = now_unix_seconds();
                     self.store.write_agent_snapshot(agent)?;
                 }
@@ -477,6 +518,83 @@ impl TaskRuntime {
         )
     }
 
+    pub fn assign_task(
+        &self,
+        request: TaskAssignRequest,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        let mut task = state
+            .tasks
+            .get(&request.task_id)
+            .cloned()
+            .ok_or_else(|| TaskError::TaskNotFound(request.task_id.as_str().to_owned()))?;
+        if !matches!(
+            task.status,
+            TaskStatus::WaitingAgent | TaskStatus::Created | TaskStatus::Interrupted
+        ) {
+            return Err(TaskError::InvalidTransition {
+                from: task.status,
+                event_type: "TaskAssigned",
+            });
+        }
+        let agent = state
+            .agents
+            .get_mut(&request.agent_id)
+            .ok_or_else(|| TaskError::AgentNotFound(request.agent_id.as_str().to_owned()))?;
+        if !matches!(agent.status, AgentStatus::Available) {
+            return Err(TaskError::AgentUnavailable(
+                request.agent_id.as_str().to_owned(),
+            ));
+        }
+        let from = task.status.clone();
+        task.assignee = Some(TaskAssignee {
+            agent_id: request.agent_id.clone(),
+            assignment_id: format!(
+                "assign-{}-{}",
+                task.task_id.as_str(),
+                task.last_event_seq.saturating_add(1)
+            ),
+        });
+        task.status = TaskStatus::Assigned;
+        let event = build_event(
+            &task,
+            Some(from),
+            TaskStatus::Assigned,
+            "TaskAssigned",
+            &request.actor,
+            &request.watermark,
+            json!({"agent_id": request.agent_id.as_str()}),
+        );
+        apply_event(&mut task, &event);
+        self.store.append_event_and_snapshot(&task, &event)?;
+        agent.status = AgentStatus::Busy;
+        agent.current_task_id = Some(task.task_id.clone());
+        agent.current_cwd = task.target_cwd.clone();
+        agent.running_tasks = 0;
+        agent.queued_tasks = agent.queued_tasks.saturating_add(1);
+        agent.last_seen_at = now_unix_seconds();
+        self.store.write_agent_snapshot(agent)?;
+        state.tasks.insert(task.task_id.clone(), task.clone());
+        Ok(TaskMutationOutcome { task, event })
+    }
+
+    pub fn cancel_task(
+        &self,
+        request: TaskMutationRequest,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        self.mutate_task(
+            &request.task_id,
+            "TaskCancelled",
+            Some(TaskStatus::Cancelled),
+            &request.actor,
+            &request.watermark,
+            json!({}),
+        )
+    }
+
     pub fn submit_review(
         &self,
         request: TaskReviewSubmission,
@@ -549,6 +667,73 @@ impl TaskRuntime {
             &request.watermark,
             json!({}),
         )
+    }
+
+    pub fn create_agent(
+        &self,
+        request: AgentCreateRequest,
+    ) -> Result<AgentMutationOutcome, TaskError> {
+        if request.capabilities.is_empty() {
+            return Err(TaskError::MissingField("capabilities"));
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        if state.agents.contains_key(&request.agent_id)
+            || self.store.agent_snapshot_path(&request.agent_id).is_file()
+        {
+            return Err(TaskError::AgentAlreadyExists(
+                request.agent_id.as_str().to_owned(),
+            ));
+        }
+        let now = now_unix_seconds();
+        let agent = AgentSnapshot {
+            schema_version: 1,
+            agent_id: request.agent_id.clone(),
+            status: AgentStatus::Available,
+            current_task_id: None,
+            current_cwd: None,
+            capabilities: request.capabilities,
+            last_seen_at: now,
+            running_tasks: 0,
+            queued_tasks: 0,
+        };
+        self.store.write_agent_snapshot(&agent)?;
+        state.agents.insert(agent.agent_id.clone(), agent.clone());
+        Ok(AgentMutationOutcome { agent })
+    }
+
+    pub fn close_agent(
+        &self,
+        request: AgentMutationRequest,
+    ) -> Result<AgentMutationOutcome, TaskError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        let agent = state
+            .agents
+            .get_mut(&request.agent_id)
+            .ok_or_else(|| TaskError::AgentNotFound(request.agent_id.as_str().to_owned()))?;
+        if !matches!(
+            agent.status,
+            AgentStatus::Available | AgentStatus::Paused | AgentStatus::Offline
+        ) || agent.current_task_id.is_some()
+            || agent.running_tasks > 0
+            || agent.queued_tasks > 0
+        {
+            return Err(TaskError::InvalidAgentTransition {
+                from: agent.status.clone(),
+                event_type: "AgentClosed",
+            });
+        }
+        agent.status = AgentStatus::Closed;
+        agent.last_seen_at = now_unix_seconds();
+        self.store.write_agent_snapshot(agent)?;
+        Ok(AgentMutationOutcome {
+            agent: agent.clone(),
+        })
     }
 
     pub fn list_agents(&self) -> Result<Vec<AgentSnapshot>, TaskError> {
@@ -650,14 +835,20 @@ impl TaskRuntime {
             self.store.remove_lease(task_id)?;
             state.leases.remove(task_id);
         }
-        if matches!(task.status, TaskStatus::Closed)
-            && let Some(assignee) = task.assignee.as_ref()
+        if matches!(
+            task.status,
+            TaskStatus::Closed
+                | TaskStatus::Cancelled
+                | TaskStatus::Failed
+                | TaskStatus::Paused
+                | TaskStatus::Blocked
+                | TaskStatus::ReviewSubmitted
+                | TaskStatus::Approved
+                | TaskStatus::Interrupted
+        ) && let Some(assignee) = task.assignee.as_ref()
             && let Some(agent) = state.agents.get_mut(&assignee.agent_id)
         {
-            agent.status = AgentStatus::Available;
-            agent.current_task_id = None;
-            agent.current_cwd = None;
-            agent.running_tasks = 0;
+            release_agent_task(agent, &task.status);
             agent.last_seen_at = now_unix_seconds();
             self.store.write_agent_snapshot(agent)?;
         }
@@ -734,6 +925,7 @@ impl TaskRuntime {
             agent.current_task_id = Some(task_id.clone());
             agent.current_cwd = task.target_cwd.clone();
             agent.running_tasks = 1;
+            agent.queued_tasks = agent.queued_tasks.saturating_sub(1);
             agent.last_seen_at = now;
             self.store.write_agent_snapshot(agent)?;
         }
@@ -802,6 +994,23 @@ impl TaskStore {
             }
         }
         Ok(tasks)
+    }
+
+    fn load_agent_snapshots(&self) -> Result<Vec<AgentSnapshot>, TaskError> {
+        let dir = self.agent_state_dir();
+        if !dir.is_dir() {
+            return Ok(Vec::new());
+        }
+        let mut agents = Vec::new();
+        for entry in fs::read_dir(&dir).map_err(io_err)? {
+            let path = entry.map_err(io_err)?.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("json")
+                && path.file_name().and_then(|name| name.to_str()) != Some("index.json")
+            {
+                agents.push(read_json(&path)?);
+            }
+        }
+        Ok(agents)
     }
 
     fn append_event_and_snapshot(
@@ -1014,10 +1223,7 @@ fn reconcile_running_leases(
         if let Some(assignee) = interrupted.assignee.as_ref()
             && let Some(agent) = state.agents.get_mut(&assignee.agent_id)
         {
-            agent.status = AgentStatus::Available;
-            agent.current_task_id = None;
-            agent.current_cwd = None;
-            agent.running_tasks = 0;
+            release_agent_task(agent, &TaskStatus::Interrupted);
             agent.last_seen_at = now;
             store.write_agent_snapshot(agent)?;
         }
@@ -1030,6 +1236,32 @@ fn reconcile_running_leases(
         store.write_leases(&state.leases)?;
     }
     Ok(())
+}
+
+fn release_agent_task(agent: &mut AgentSnapshot, task_status: &TaskStatus) {
+    agent.current_task_id = None;
+    agent.current_cwd = None;
+    match task_status {
+        TaskStatus::Paused | TaskStatus::Blocked => {
+            agent.status = AgentStatus::Paused;
+            agent.running_tasks = 0;
+            agent.queued_tasks = 0;
+        }
+        TaskStatus::ReviewSubmitted | TaskStatus::Approved => {
+            agent.status = AgentStatus::Available;
+            agent.running_tasks = 0;
+            agent.queued_tasks = 0;
+        }
+        TaskStatus::Interrupted
+        | TaskStatus::Cancelled
+        | TaskStatus::Failed
+        | TaskStatus::Closed => {
+            agent.status = AgentStatus::Available;
+            agent.running_tasks = 0;
+            agent.queued_tasks = 0;
+        }
+        _ => {}
+    }
 }
 
 fn validate_create_request(request: &TaskCreateRequest) -> Result<(), TaskError> {
@@ -1075,6 +1307,10 @@ fn validate_transition(
                 | TaskStatus::Paused
                 | TaskStatus::Blocked
                 | TaskStatus::Interrupted
+        ),
+        "TaskCancelled" => !matches!(
+            from,
+            TaskStatus::Closed | TaskStatus::Cancelled | TaskStatus::Approved
         ),
         "TaskHeartbeat" => matches!(from, TaskStatus::Running),
         "TaskInterrupted" => matches!(from, TaskStatus::Running),
@@ -1460,6 +1696,135 @@ mod tests {
                 .join("state/task-runtime/master/leases.json")
                 .is_file()
         );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn create_agent_persists_recovers_and_closes_when_idle() {
+        let runtime_home = temp_runtime_home("task-agent-create-close");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-a");
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+
+        let created = runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: worker_id.clone(),
+                capabilities: vec!["code_edit".to_owned(), "test_run".to_owned()],
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("create agent");
+        assert_eq!(created.agent.status, AgentStatus::Available);
+
+        let recovered = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("recover");
+        let worker = recovered.query_agent(&worker_id).expect("worker");
+        assert_eq!(worker.capabilities, vec!["code_edit", "test_run"]);
+
+        let closed = recovered
+            .close_agent(AgentMutationRequest {
+                agent_id: worker_id.clone(),
+                actor: sample_actor(owner_id),
+                watermark: sample_watermark(),
+            })
+            .expect("close idle worker");
+        assert_eq!(closed.agent.status, AgentStatus::Closed);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn waiting_task_assigns_to_available_agent_and_recovers() {
+        let runtime_home = temp_runtime_home("task-assign-waiting");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-b");
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: worker_id.clone(),
+                capabilities: vec!["code_edit".to_owned()],
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("create agent");
+        let mut request = sample_create_request(owner_id.clone());
+        request.task_id = Some(TaskId::new("task-waiting-assign"));
+        request.dispatch = TaskDispatchRequest::None;
+        let created = runtime.create_task(request).expect("create waiting");
+        assert_eq!(created.task.status, TaskStatus::WaitingAgent);
+
+        let assigned = runtime
+            .assign_task(TaskAssignRequest {
+                task_id: created.task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("assign");
+        assert_eq!(assigned.task.status, TaskStatus::Assigned);
+        assert_eq!(
+            assigned.task.assignee.as_ref().map(|a| a.agent_id.clone()),
+            Some(worker_id.clone())
+        );
+        let worker = runtime.query_agent(&worker_id).expect("worker");
+        assert_eq!(worker.status, AgentStatus::Busy);
+        assert_eq!(worker.queued_tasks, 1);
+
+        let recovered = TaskRuntime::boot(&runtime_home, owner_id).expect("recover");
+        let task = recovered.query_task(&created.task.task_id).expect("task");
+        assert_eq!(task.status, TaskStatus::Assigned);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn cancel_assigned_task_releases_agent_and_rejects_resume() {
+        let runtime_home = temp_runtime_home("task-cancel-release");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+        let task_id = outcome.task.task_id.clone();
+
+        let cancelled = runtime
+            .cancel_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("cancel assigned");
+        assert_eq!(cancelled.task.status, TaskStatus::Cancelled);
+        let agent = runtime.query_agent(&agent_id).expect("agent");
+        assert_eq!(agent.status, AgentStatus::Available);
+        assert_eq!(agent.queued_tasks, 0);
+
+        let err = runtime
+            .resume_task(TaskMutationRequest {
+                task_id,
+                actor: sample_actor(agent_id),
+                watermark: sample_watermark(),
+            })
+            .expect_err("cancelled task cannot resume");
+        assert!(matches!(err, TaskError::InvalidTransition { .. }));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn close_busy_agent_is_rejected() {
+        let runtime_home = temp_runtime_home("task-agent-close-busy");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+
+        let err = runtime
+            .close_agent(AgentMutationRequest {
+                agent_id: agent_id.clone(),
+                actor: sample_actor(agent_id),
+                watermark: sample_watermark(),
+            })
+            .expect_err("busy agent cannot close");
+
+        assert!(matches!(err, TaskError::InvalidAgentTransition { .. }));
         let _ = fs::remove_dir_all(runtime_home);
     }
 

@@ -174,10 +174,14 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - task runtime boot rebuilds memory state from persisted snapshot
   - self agent is registered as available on first boot
   - no-dispatch create becomes `WaitingAgent`
+  - agent create/close persists and recovers agent registry state
+  - assign moves waiting tasks to assigned state
+  - cancel releases agent state and blocks resume
 - required_module_black_box_tests:
   - runtime task tool create routes through task persistence
   - runtime task tool query reads persisted task truth
   - runtime task tool list_agents exposes self agent
+  - runtime task tool create_agent/assign/cancel/close_agent covers registry lifecycle
 - required_project_black_box_tests:
   - restart/reboot recovery query returns the same task truth
 - test_design_doc: `docs/testing/task.orchestration.md`
@@ -198,6 +202,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - task tool op surface changes
   - task persistence path changes
   - agent registry status changes
+  - agent lifecycle op changes
   - startup recovery behavior changes
 - lifecycle_checks:
   - task ledger remains append-only truth

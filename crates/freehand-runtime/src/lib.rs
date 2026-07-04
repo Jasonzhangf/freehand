@@ -59,9 +59,9 @@ use freehand_reason::{
     SessionHistory, TurnRecord, TurnStartInput,
 };
 use freehand_task::{
-    TaskActor, TaskAppendRequest, TaskCreateRequest, TaskDispatchRequest, TaskHeartbeatRequest,
-    TaskId, TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission,
-    TaskRuntime, TaskWatermark,
+    AgentCreateRequest, AgentMutationRequest, TaskActor, TaskAppendRequest, TaskAssignRequest,
+    TaskCreateRequest, TaskDispatchRequest, TaskHeartbeatRequest, TaskId, TaskMutationRequest,
+    TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime, TaskWatermark,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
@@ -3736,6 +3736,31 @@ fn execute_task_tool(
                 &outcome.event,
             ))
         }
+        "assign" => {
+            let outcome = task_runtime
+                .assign_task(TaskAssignRequest {
+                    task_id: TaskId::new(required_json_string(&args, "task_id")?),
+                    agent_id: AgentId::new(required_json_string(&args, "agent_id")?),
+                    actor: task_actor(turn),
+                    watermark: task_watermark(tool_call),
+                })
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task assigned",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
+        "cancel" => {
+            let outcome = task_runtime
+                .cancel_task(task_mutation_request(&args, turn, tool_call)?)
+                .map_err(|err| err.to_string())?;
+            Ok(task_mutation_result(
+                "Task cancelled",
+                &outcome.task,
+                &outcome.event,
+            ))
+        }
         "submit_review" => {
             let outcome = task_runtime
                 .submit_review(TaskReviewSubmission {
@@ -3801,6 +3826,35 @@ fn execute_task_tool(
                 .map_err(|err| err.to_string())?;
             Ok(serde_json::to_string(&agent)
                 .unwrap_or_else(|_| format!("Agent query: agent_id={}", agent.agent_id.as_str())))
+        }
+        "create_agent" => {
+            let outcome = task_runtime
+                .create_agent(AgentCreateRequest {
+                    agent_id: AgentId::new(required_json_string(&args, "agent_id")?),
+                    capabilities: required_json_string_array(&args, "capabilities")?,
+                    actor: task_actor(turn),
+                    watermark: task_watermark(tool_call),
+                })
+                .map_err(|err| err.to_string())?;
+            Ok(format!(
+                "Agent created: agent_id={} status={:?}",
+                outcome.agent.agent_id.as_str(),
+                outcome.agent.status
+            ))
+        }
+        "close_agent" => {
+            let outcome = task_runtime
+                .close_agent(AgentMutationRequest {
+                    agent_id: AgentId::new(required_json_string(&args, "agent_id")?),
+                    actor: task_actor(turn),
+                    watermark: task_watermark(tool_call),
+                })
+                .map_err(|err| err.to_string())?;
+            Ok(format!(
+                "Agent closed: agent_id={} status={:?}",
+                outcome.agent.agent_id.as_str(),
+                outcome.agent.status
+            ))
         }
         other => Err(format!("unsupported task op `{other}`")),
     }
@@ -6080,6 +6134,103 @@ mod tests {
                 .join("state/task-runtime/agent-task/leases.json")
                 .is_file()
         );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_tool_agent_assign_cancel_close_lifecycle() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-task"),
+                    turn_id: TurnId::new("turn-task"),
+                    trace_id: TraceId::new("trace-task"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-task"),
+                    user_text: "assign a task".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+        let create_agent = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("create_agent")),
+                ("agent_id", json!("worker-runtime")),
+                ("capabilities", json!(["code_edit"])),
+            ]),
+        )
+        .expect("create agent");
+        assert!(create_agent.contains("status=Available"));
+
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("create")),
+                ("task_id", json!("task-runtime-assign")),
+                ("title", json!("Assign lifecycle")),
+                ("content", json!("Exercise assign and cancel")),
+                ("goal", json!("Assigned task can be cancelled")),
+                ("deliverables", json!(["task"])),
+                ("acceptance", json!(["agent released"])),
+                ("dispatch", json!({"mode":"none"})),
+            ]),
+        )
+        .expect("create waiting task");
+
+        let assigned = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("assign")),
+                ("task_id", json!("task-runtime-assign")),
+                ("agent_id", json!("worker-runtime")),
+            ]),
+        )
+        .expect("assign");
+        assert!(assigned.contains("status=Assigned"));
+
+        let busy_close = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("close_agent")),
+                ("agent_id", json!("worker-runtime")),
+            ]),
+        )
+        .expect_err("busy worker cannot close");
+        assert!(busy_close.contains("invalid agent transition"));
+
+        let cancelled = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("cancel")),
+                ("task_id", json!("task-runtime-assign")),
+            ]),
+        )
+        .expect("cancel");
+        assert!(cancelled.contains("status=Cancelled"));
+
+        let closed = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("close_agent")),
+                ("agent_id", json!("worker-runtime")),
+            ]),
+        )
+        .expect("close idle worker");
+        assert!(closed.contains("status=Closed"));
         let _ = fs::remove_dir_all(runtime_home);
     }
 

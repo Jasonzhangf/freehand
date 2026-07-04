@@ -9,6 +9,9 @@
   - task runtime memory state is rebuilt on boot
   - running state is lease-backed and heartbeat-refreshable
   - boot recovery interrupts running tasks whose lease is missing or expired
+  - agent registry persists and recovers worker snapshots
+  - waiting tasks can be assigned to an available agent
+  - cancellation releases assigned agent state
   - query returns persisted task truth
   - agent registry exposes self agent
 
@@ -23,6 +26,10 @@
 - heartbeat refreshes an active running lease
 - boot changes running tasks with expired leases to `Interrupted`
 - heartbeat for a non-running task is rejected and writes no lease
+- create_agent persists, recovers, and closes an idle agent
+- assign moves `WaitingAgent` to `Assigned` and marks the assignee busy with queued work
+- cancel releases the assignee and prevents later resume
+- close_agent rejects busy agents
 
 ## Module Black-Box Coverage
 
@@ -32,6 +39,7 @@
 - runtime task tool close before approval returns failure
 - runtime task tool review submission, approval, and close return event-backed success
 - runtime task tool resume plus heartbeat persists a running lease
+- runtime task tool create_agent/assign/cancel/close_agent covers agent lifecycle and busy-close rejection
 - tool registry exposes `task` as one implemented built-in tool schema
 
 ## Project Black-Box Impact
@@ -47,6 +55,7 @@ cargo test -p freehand-tools
 cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --nocapture
 cargo test -p freehand-runtime task_tool_review_lifecycle_rejects_early_close_and_closes_after_approval -- --nocapture
 cargo test -p freehand-runtime task_tool_resume_and_heartbeat_persist_running_lease -- --nocapture
+cargo test -p freehand-runtime task_tool_agent_assign_cancel_close_lifecycle -- --nocapture
 cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```

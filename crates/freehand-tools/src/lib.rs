@@ -474,7 +474,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             json!({
                 "type": "object",
                 "properties": {
-                    "op": {"type": "string", "enum": ["create", "query", "append", "pause", "resume", "heartbeat", "submit_review", "approve", "reject", "close", "list_agents", "query_agent"]},
+                    "op": {"type": "string", "enum": ["create", "query", "append", "pause", "resume", "heartbeat", "assign", "cancel", "submit_review", "approve", "reject", "close", "list_agents", "query_agent", "create_agent", "close_agent"]},
                     "task_id": {"type": "string"},
                     "ttl_seconds": {"type": "integer", "minimum": 1},
                     "note": {"type": "string"},
@@ -498,7 +498,8 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                     "evidence": {"type": "array", "items": {"type": "string"}},
                     "reject_reason": {"type": "string"},
                     "next_requirements": {"type": "array", "items": {"type": "string"}},
-                    "agent_id": {"type": "string"}
+                    "agent_id": {"type": "string"},
+                    "capabilities": {"type": "array", "items": {"type": "string"}}
                 },
                 "required": ["op"]
             }),
