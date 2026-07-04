@@ -1,0 +1,2 @@
+{"run_id":"2026-07-04T00:00:00+08:00","pattern":"freehand-framework-loop","mode":"L1","items_found":0,"actions_taken":0,"escalations":0,"tests":[],"outcome":"initialized"}
+{"run_id":"2026-07-04T00:00:00+08:00-init-check","pattern":"freehand-framework-loop","mode":"L1","items_found":1,"actions_taken":0,"escalations":0,"tests":["cargo test -p xtask -- --nocapture -> passed","cargo fmt --check -> passed","cargo run -p xtask -- mainlines generate -> passed","cargo run -p xtask -- mainlines check -> passed","cargo run -p xtask -- gates check -> passed"],"outcome":"report-only"}

@@ -25,6 +25,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - launchd install script supports a coexisting symlink profile through installS and restartS with a separate label, env file, bind, binary, and logs
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
+- framework loop governance starts in L1 report-only under docs/loops/freehand-framework-loop and must not automate code/config changes until signal quality and checker gates are proven
 
 ## Response Mainline
 
@@ -41,6 +42,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - gate returns explicit failure with missing path, missing policy snippet, or stale generated wiki
 - mainline generation writes `docs/wiki/*.md` and `docs/wiki/README.md` from JSON truth
 - mainline freshness check returns success only when current generated wiki matches current JSON source
+- loop initialization returns an inspectable report-only control surface with purpose, state, constraints, budget, run log, kill switch path, and owner binding
 
 ## Error Mainline
 
@@ -56,6 +58,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - invalid JSON mainline source surfaces as generation/check failure
 - stale generated wiki surfaces as explicit freshness failure
 - no fallback path exists
+- loop overreach, missing owner mapping, active kill switch, or exhausted budget surfaces as escalation/no-op instead of automated action
 
 ## Shared Multi-Reference Functions
 
@@ -92,3 +95,4 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code
 - current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static data/control boundary checks
 - generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes
+- initial framework loop governance docs are bound under docs/loops/freehand-framework-loop in L1 report-only mode

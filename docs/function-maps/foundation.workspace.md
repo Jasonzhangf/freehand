@@ -17,6 +17,7 @@
   - `verify_ci_cd_gate_commands`
   - `verify_data_control_boundaries`
   - `verify_feature_map_unique_entries`
+  - `docs/loops/freehand-framework-loop/LOOP.md`
 
 ## Request Mainline
 
@@ -37,6 +38,7 @@
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 - generated wiki writer materializes `docs/wiki/*.md` and `docs/wiki/README.md` from the JSON truth
+- framework loop governance starts in `L1 report-only` under `docs/loops/freehand-framework-loop` and must not automate code/config changes until signal quality and checker gates are proven
 
 ## Response Mainline
 
@@ -55,6 +57,7 @@
 - gate returns explicit failure with missing path or missing policy snippet
 - mainline generation returns fresh wiki artifacts derived from machine-readable source
 - mainline freshness check returns explicit failure when any generated wiki is stale against current JSON truth
+- loop initialization returns an inspectable report-only control surface with purpose, state, constraints, budget, run log, kill switch path, and owner binding
 
 ## Error Mainline
 
@@ -72,6 +75,7 @@
 - invalid JSON mainline source surfaces as generation/check failure
 - stale generated wiki surfaces as explicit freshness failure
 - no fallback path exists
+- loop overreach, missing owner mapping, active kill switch, or exhausted budget surfaces as escalation/no-op instead of automated action
 
 ## Shared Multi-Reference Functions
 
@@ -109,4 +113,5 @@
 - workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code
 - current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static data/control boundary checks
 - release and global-install scripts are documented in `docs/release.md`
+- initial framework loop governance docs are bound under `docs/loops/freehand-framework-loop` in L1 report-only mode
 - generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes

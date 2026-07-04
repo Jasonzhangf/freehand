@@ -228,6 +228,22 @@
     - no real worker execution process/channel yet.
     - task history remains query-only; worker debug stream remains separate future scope.
 
+# 2026-07-04 freehand-framework-loop initialization
+  - user requirement: initialize project loop governance according to loop-governance, ask for missing decisions only if needed.
+  - owner: `foundation.workspace`.
+  - implementation:
+    - added `docs/loops/freehand-framework-loop/` with `LOOP.md`, `STATE.md`, `loop-constraints.md`, `loop-budget.md`, `loop-run-log.md`, and `README.md`.
+    - loop starts as `L1 report-only`, manual trigger only, with L2/L3 disabled until explicit approval.
+    - bound loop governance to feature map, function map, test design, mainline JSON, and generated wiki.
+  - verification:
+    - `cargo test -p xtask -- --nocapture`
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+  - finding:
+    - gate rejected a docs-only call-table row as a fake source binding; kept loop docs in mainline prose instead of call-table symbol binding.
+
 # 2026-07-04 development symlink launchd profile
   - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
   - owner: `foundation.workspace`.

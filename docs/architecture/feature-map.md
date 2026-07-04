@@ -77,7 +77,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `foundation.workspace`
 
 - owner: `xtask`, workspace root
-- allowed_paths: `Cargo.toml`, `Makefile`, `.github/workflows/**`, `.githooks/**`, `.agents/skills/freehand-dev/**`, `scripts/**`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `docs/release.md`, `CACHE.md`, `MEMORY.md`, `note.md`
+- allowed_paths: `Cargo.toml`, `Makefile`, `.github/workflows/**`, `.githooks/**`, `.agents/skills/freehand-dev/**`, `scripts/**`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `docs/loops/**`, `docs/release.md`, `CACHE.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: provider and reason implementation crates unless scaffold-related
 - required_checks:
   - `cargo test --workspace`
@@ -115,6 +115,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - mainline manifest cross-link policy changes
   - mainline call-table binding policy changes
   - metadata/request leak-gate policy changes
+  - loop governance docs or report-only loop policy changes
 - lifecycle_checks:
   - information sufficient
   - logic closed-loop

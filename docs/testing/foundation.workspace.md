@@ -19,6 +19,7 @@
   - gate command can reject data/control boundary leaks at the repo source level
   - mainline generation command can render wiki from JSON truth
   - mainline check command rejects stale wiki
+  - framework loop governance docs initialize in L1 report-only mode with state, constraints, budget, run log, owner binding, and kill switch path
 - white-box plan:
   - xtask rule-check logic
   - mainline JSON parse/render logic
@@ -35,6 +36,7 @@
   - launchd S-profile label/env/bin/bind/log separation
   - launchd release subprocess daemon-workdir env isolation
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
+  - loop governance docs include required L1 report-only files and deny automated action until explicit L2 approval
 - module black-box plan:
   - `xtask gates check` smoke from repo root
   - `xtask mainlines check` smoke from repo root
@@ -49,6 +51,7 @@
   - `bash -n scripts/uninstall-launchd.sh`
   - `cargo test -p xtask` data/control leak-gate positive and negative tests
   - `cargo test -p xtask` feature-map uniqueness positive and negative tests
+  - loop governance doc smoke validates required files are present and owner-bound through `foundation.workspace`
 - project black-box impact:
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
   - `scripts/release.sh` stages host and Android release artifacts under `dist/`
@@ -57,6 +60,7 @@
   - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
   - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`
   - machine-readable mainline truth remains the only source for generated wiki artifacts
+  - loop governance starts as report-only project control, not unattended automation
 - fixtures / replay inputs / runtime evidence paths:
   - repo filesystem layout
 - known gaps:
@@ -70,4 +74,5 @@
   - CI/CD command-alignment checks are implemented in `xtask`
   - release/global-install operator docs live in `docs/release.md`
   - data/control leak gate must stay implemented in `xtask`
+  - initial loop governance docs are landed under `docs/loops/freehand-framework-loop`
   - migrated mainline-call source and generated wiki are kept in sync with this test design
