@@ -15,8 +15,6 @@ const sessionDeleteSelectedButton = document.getElementById("session-delete-sele
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
-const successSampleButton = document.getElementById("success-sample-button");
-const failureSampleButton = document.getElementById("failure-sample-button");
 const debugDetailsToggle = document.getElementById("debug-details-toggle");
 const attachFileButton = document.getElementById("attach-file-button");
 const attachImageButton = document.getElementById("attach-image-button");
@@ -2119,15 +2117,23 @@ function renderMessages() {
 
 function uniqueChatFragments(fragments) {
   const seen = new Set();
+  let previousAssistantText = "";
   return fragments.filter((fragment) => {
     if (!fragment || !fragment.classList || !fragment.classList.contains("chat-message")) {
+      previousAssistantText = "";
       return true;
     }
-    const key = `${fragment.dataset.turnId || ""}:${normalizeVisibleText(fragment.innerText)}`;
+    const text = normalizeVisibleText(fragment.innerText);
+    const isAssistant = fragment.classList.contains("chat-message-assistant");
+    if (isAssistant && text && text === previousAssistantText) {
+      return false;
+    }
+    const key = `${fragment.dataset.turnId || ""}:${text}`;
     if (seen.has(key)) {
       return false;
     }
     seen.add(key);
+    previousAssistantText = isAssistant ? text : "";
     return true;
   });
 }
@@ -2768,8 +2774,6 @@ sessionClearSelectionButton.addEventListener("click", () => {
 sessionDeleteSelectedButton.addEventListener("click", () => {
   deleteSelectedSessions();
 });
-successSampleButton.addEventListener("click", () => loadSamplePrompt("success"));
-failureSampleButton.addEventListener("click", () => loadSamplePrompt("failure"));
 if (debugDetailsToggle) {
   debugDetailsToggle.addEventListener("click", () => {
     state.debugDetailsVisible = !state.debugDetailsVisible;

@@ -900,8 +900,8 @@ mod tests {
         assert!(html.contains("id=\"new-conversation-button\""));
         assert!(html.contains("id=\"new-task-button\""));
         assert!(html.contains("id=\"task-cwd-input\""));
-        assert!(html.contains("id=\"success-sample-button\""));
-        assert!(html.contains("id=\"failure-sample-button\""));
+        assert!(!html.contains("id=\"success-sample-button\""));
+        assert!(!html.contains("id=\"failure-sample-button\""));
         assert!(html.contains("composer-control-strip"));
         assert!(html.contains("id=\"attach-file-button\""));
         assert!(html.contains("id=\"attach-image-button\""));
@@ -1029,8 +1029,8 @@ mod tests {
         assert!(root_body.contains("id=\"session-delete-selected-button\""));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
         assert!(root_body.contains("id=\"debug-details-toggle\""));
-        assert!(root_body.contains(">Success</button>"));
-        assert!(root_body.contains(">Failure</button>"));
+        assert!(!root_body.contains(">Success</button>"));
+        assert!(!root_body.contains(">Failure</button>"));
         assert!(!root_body.contains("Success sample"));
         assert!(!root_body.contains("Failure sample"));
 
@@ -1165,6 +1165,7 @@ mod tests {
         assert!(js_body.contains("function uniqueChatFragments"));
         assert!(js_body.contains("uniqueChatFragments(fragments).forEach"));
         assert!(js_body.contains("fragment.dataset.turnId"));
+        assert!(js_body.contains("previousAssistantText"));
         assert!(
             js_body
                 .find("fragments.push(...turnChatCards(renderTurn))")

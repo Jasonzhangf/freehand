@@ -14,7 +14,7 @@
   - app boundary remains decoupled from reason/provider/node/config semantics
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
-  - WebUI exposes success/failure scenario buttons that fill the composer while preserving the normal ADP submit path
+  - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
   - WebUI control strip and session rail expose session switching, `/new` global conversation creation, `/task` cwd-bound task creation, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
   - WebUI attachment lifecycle keeps draft attachments session-scoped, clears them only after successful send, and preserves them across send failure for retry
   - WebUI transcript history renders attachment placeholders rather than raw payload blobs
@@ -36,7 +36,7 @@
   - WebUI ADP failure frame visible-card/status smoke
   - WebUI ADP request timeout visible-failure smoke
   - WebUI ADP failure card ordering smoke: failure card must not render ahead of the current conversation items
-  - WebUI success/failure scenario button asset smoke
+  - WebUI hidden success/failure diagnostic prompt asset smoke and no persistent sample-button smoke
   - WebUI keyboard shortcut smoke for submit, cancel, refresh, focus composer, and sample loading
   - WebUI slash command smoke for `/help`, `/sessions`, `/reload`, `/success`, `/failure`, `/cancel`, and `/clear`
   - WebUI attachment control smoke for add/remove/preview and session-scoped draft retention
@@ -77,7 +77,7 @@
   - app dependency boundary smoke
 - project black-box impact:
   - app boundary proves WebUI can consume `freehand-ui-protocol` without owning reason/provider semantics
-  - app boundary gives users a repeatable way to generate success/failure ADP scenarios from WebUI without a second transport path
+  - app boundary gives diagnostics a repeatable way to generate success/failure ADP scenarios from WebUI without a second transport path or persistent composer buttons
   - app boundary proves it does not need direct reason/provider/node/config imports
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
@@ -95,7 +95,7 @@
   - WebUI root shell now exposes `/adp`, and WebUI JS uses ADP WebSocket for command/query/subscription truth plus EventSource for latest-turn SSE display refresh
   - WebUI session rail now supports `/new` as global conversation creation, compact session summaries, and selected-session draft creation without inventing a separate navigation path
   - WebUI session rail task cwd selector and composer cwd input are landed; new task requires an explicit visible cwd and creates a cwd-bound session through ADP `CreateSession`, while new conversation can submit without cwd and rely on runtime default cwd
-  - WebUI root shell now exposes success/failure scenario buttons, and WebUI JS carries the paired scenario prompts
+  - WebUI root shell intentionally does not expose persistent success/failure buttons, while WebUI JS still carries paired diagnostic prompts for slash commands and shortcuts
   - WebUI terminal display defaults to summary-only; evidence, learned notes, and completion reason require debug details to be enabled
   - WebUI JS must keep shortcuts and slash commands as input-layer affordances that call existing ADP query/command helpers instead of mutating protocol truth directly
   - WebUI session creation and selection must remain input-layer affordances over ADP/query state, not local truth writers

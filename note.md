@@ -1070,3 +1070,25 @@ Current real root cause split:
     - running captures for second, pwd, and failed-tool submits all blue `rgb(47, 111, 237)` with live animation.
     - post-restart continuation plus second restart: final restore `cardCount=7`, `successCards=6`, `failedCards=1`, `pendingCards=0`, `liveCount=0`, latest `runtime-turn-11`.
     - ADP truth: `webui-session-20260704025459-e136d862:7:success`, `turn_ids=runtime-turn-7,runtime-turn-8,runtime-turn-9,runtime-turn-9-r2,runtime-turn-10,runtime-turn-10-r2,runtime-turn-11`.
+# 2026-07-04 WebUI duplicate/sample-button follow-up
+
+- owner: `app.webui-smoke`
+- user issue: selected-session chat view showed repeated assistant/final-looking cards and persistent `Success` / `Failure` composer buttons.
+- implementation:
+  - removed persistent sample buttons from `render_webui_smoke`, DOM bindings, click handlers, and CSS.
+  - kept success/failure diagnostics only through `/success`, `/failure`, and keyboard shortcuts.
+  - hardened `uniqueChatFragments()` with adjacent assistant visible-text de-duplication so duplicate assistant/final fragments from transcript/latest-turn refresh races do not render twice.
+  - updated `app.webui-smoke` function map and test design to lock "no persistent sample buttons".
+- verification:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `cargo test -p freehand-server -- --nocapture` -> 11 passed
+  - `scripts/install-launchd.sh installS`, `curl -4fsS http://127.0.0.1:4042/health`, `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp`
+  - served/workspace JS hash matched `fc95d9906aa760d16735c23711735498a6a710ba6e138e13a95b60a07b805ef5`
+  - Playwright artifact `artifacts/webui-online/20260704-duplicate-buttons-followup-1783144225304/summary.json`: no `success-sample-button`/`failure-sample-button`, no visible `Success`/`Failure` buttons, no adjacent duplicate assistant cards in the reported cross-workspace session.
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- follow-up gap for user item 3:
+  - current framework has session cwd binding and `SendDirectMessageToSlave`, plus `LocalNodeRuntime::delegate_task` status projection, but no protocol-owned "create task and dispatch to subagent for outside-workspace target" command/lifecycle.
+  - current cross-workspace path failure therefore reaches provider/tool blocked/error semantics instead of a framework routing decision.
