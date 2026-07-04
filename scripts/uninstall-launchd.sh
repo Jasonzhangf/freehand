@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-label="${FREEHAND_LAUNCHD_LABEL:-com.freehand.daemon}"
+command="${1:-uninstall}"
+
+case "$command" in
+  uninstall)
+    default_label="com.freehand.daemon"
+    ;;
+  uninstallS)
+    default_label="com.freehand.daemonS"
+    ;;
+  *)
+    echo "usage: $0 [uninstall|uninstallS]" >&2
+    exit 2
+    ;;
+esac
+
+label="${FREEHAND_LAUNCHD_LABEL:-$default_label}"
 plist_path="$HOME/Library/LaunchAgents/$label.plist"
 
 run_uninstall_launchd() {

@@ -1,4 +1,4 @@
-.PHONY: build fmt clippy test mainlines gates ci release install-global install-launchd restart-launchd uninstall-launchd launchd-status launchd-logs hooks
+.PHONY: build fmt clippy test mainlines gates ci release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks
 
 build:
 	cargo build --workspace
@@ -26,20 +26,38 @@ release:
 install-global:
 	scripts/install-global.sh
 
+install-symlink:
+	scripts/install-symlink.sh
+
 install-launchd:
 	scripts/install-launchd.sh install
+
+install-launchdS:
+	scripts/install-launchd.sh installS
 
 restart-launchd:
 	scripts/install-launchd.sh restart
 
+restart-launchdS:
+	scripts/install-launchd.sh restartS
+
 uninstall-launchd:
 	scripts/uninstall-launchd.sh
+
+uninstall-launchdS:
+	scripts/uninstall-launchd.sh uninstallS
 
 launchd-status:
 	launchctl print gui/$$(id -u)/com.freehand.daemon
 
+launchd-statusS:
+	launchctl print gui/$$(id -u)/com.freehand.daemonS
+
 launchd-logs:
 	tail -n 80 "$$HOME/.freehand/logs/daemon.stdout.log" "$$HOME/.freehand/logs/daemon.stderr.log"
+
+launchd-logsS:
+	tail -n 80 "$$HOME/.freehand/logs/daemonS.stdout.log" "$$HOME/.freehand/logs/daemonS.stderr.log"
 
 hooks:
 	git config core.hooksPath .githooks

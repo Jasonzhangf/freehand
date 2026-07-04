@@ -59,6 +59,25 @@ Ensure the install bin dir is on `PATH`:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
+## Development Symlink Install
+
+`scripts/install-symlink.sh` is the development install truth.
+
+It builds debug host binaries and installs S-suffixed symlinks into the same prefix:
+
+- `freehand-cliS` -> `target/debug/freehand-cli`
+- `freehand-serverS` -> `target/debug/freehand-server`
+- `freehand-daemonS` -> `target/debug/freehand-daemon`
+- `freehand-daemon-launchdS` is a copied launchd wrapper under the install prefix
+
+Install or refresh symlinks:
+
+```bash
+scripts/install-symlink.sh
+```
+
+This mode is for local development and unattended verification. Rebuilding the repo updates the symlink targets without replacing global release commands. Use the global install path only when promoting a stage to release.
+
 ## macOS Background Service
 
 `scripts/install-launchd.sh install` performs first-time launchd setup: it installs the host binaries, writes a user LaunchAgent, and starts the daemon in the background.
@@ -75,16 +94,38 @@ Default service truth:
 - stderr log: `~/.freehand/logs/daemon.stderr.log`
 - launchd policy: `RunAtLoad=true`, `KeepAlive=true`
 
+Development symlink service truth:
+
+- label: `com.freehand.daemonS`
+- fixed WebUI URL: `http://127.0.0.1:4042/`
+- plist: `~/Library/LaunchAgents/com.freehand.daemonS.plist`
+- daemon env: `~/.freehand/daemonS.env`
+- stdout log: `~/.freehand/logs/daemonS.stdout.log`
+- stderr log: `~/.freehand/logs/daemonS.stderr.log`
+- daemon binary: `$HOME/.local/bin/freehand-daemonS`
+
 First-time install and start:
 
 ```bash
 scripts/install-launchd.sh install
 ```
 
+First-time development symlink service install and start:
+
+```bash
+scripts/install-launchd.sh installS
+```
+
 Restart without reinstall:
 
 ```bash
 scripts/install-launchd.sh restart
+```
+
+Restart development symlink service without reinstall:
+
+```bash
+scripts/install-launchd.sh restartS
 ```
 
 Both `install` and `restart` wait for the daemon to answer `GET /health` on the configured fixed bind before they exit successfully.
@@ -107,6 +148,12 @@ Uninstall:
 scripts/uninstall-launchd.sh
 ```
 
+Uninstall development symlink service:
+
+```bash
+scripts/uninstall-launchd.sh uninstallS
+```
+
 The LaunchAgent runs `freehand-daemon-launchd`, which loads `~/.freehand/daemon.env` before execing:
 
 ```bash
@@ -120,6 +167,16 @@ FREEHAND_DAEMON_AGENT="master"
 FREEHAND_DAEMON_BIND="127.0.0.1:4041"
 FREEHAND_DAEMON_WORKDIR="<repo root at install time>"
 FREEHAND_DAEMON_BIN="$HOME/.local/bin/freehand-daemon"
+FREEHAND_PAIR_TOKEN_SHARED="<generated or existing value>"
+```
+
+Default `~/.freehand/daemonS.env` values created on first symlink install:
+
+```bash
+FREEHAND_DAEMON_AGENT="master"
+FREEHAND_DAEMON_BIND="127.0.0.1:4042"
+FREEHAND_DAEMON_WORKDIR="<repo root at install time>"
+FREEHAND_DAEMON_BIN="$HOME/.local/bin/freehand-daemonS"
 FREEHAND_PAIR_TOKEN_SHARED="<generated or existing value>"
 ```
 

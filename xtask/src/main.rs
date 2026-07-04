@@ -828,7 +828,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: build fmt clippy test mainlines gates ci release install-global install-launchd restart-launchd uninstall-launchd launchd-status launchd-logs hooks",
+        ".PHONY: build fmt clippy test mainlines gates ci release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -849,7 +849,17 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     )?;
     require_contains(
         &makefile,
+        "install-symlink:\n\tscripts/install-symlink.sh",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
         "install-launchd:\n\tscripts/install-launchd.sh",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "install-launchdS:\n\tscripts/install-launchd.sh installS",
         "Makefile",
     )?;
     require_contains(
@@ -859,7 +869,17 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     )?;
     require_contains(
         &makefile,
+        "restart-launchdS:\n\tscripts/install-launchd.sh restartS",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
         "uninstall-launchd:\n\tscripts/uninstall-launchd.sh",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS",
         "Makefile",
     )?;
 
@@ -1734,7 +1754,7 @@ mod tests {
         }
         let makefile = match mode {
             CiFixtureMode::Aligned | CiFixtureMode::CiWorkflowPartialGate => {
-                ".PHONY: build fmt clippy test mainlines gates ci release install-global install-launchd restart-launchd uninstall-launchd launchd-status launchd-logs hooks\n\
+                ".PHONY: build fmt clippy test mainlines gates ci release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
@@ -1744,12 +1764,16 @@ gates:\n\tcargo run -p xtask -- gates check\n\
 ci: build fmt clippy test mainlines gates\n\
 release:\n\tscripts/release.sh\n\
 install-global:\n\tscripts/install-global.sh\n\
+install-symlink:\n\tscripts/install-symlink.sh\n\
 install-launchd:\n\tscripts/install-launchd.sh\n\
+install-launchdS:\n\tscripts/install-launchd.sh installS\n\
 restart-launchd:\n\tscripts/install-launchd.sh restart\n\
-uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n"
+restart-launchdS:\n\tscripts/install-launchd.sh restartS\n\
+uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n\
+uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n"
             }
             CiFixtureMode::MakeCiMissingMainlines => {
-                ".PHONY: build fmt clippy test gates ci release install-global install-launchd restart-launchd uninstall-launchd launchd-status launchd-logs hooks\n\
+                ".PHONY: build fmt clippy test gates ci release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
@@ -1758,9 +1782,13 @@ gates:\n\tcargo run -p xtask -- gates check\n\
 ci: build fmt clippy test gates\n\
 release:\n\tscripts/release.sh\n\
 install-global:\n\tscripts/install-global.sh\n\
+install-symlink:\n\tscripts/install-symlink.sh\n\
 install-launchd:\n\tscripts/install-launchd.sh\n\
+install-launchdS:\n\tscripts/install-launchd.sh installS\n\
 restart-launchd:\n\tscripts/install-launchd.sh restart\n\
-uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n"
+restart-launchdS:\n\tscripts/install-launchd.sh restartS\n\
+uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n\
+uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n"
             }
         };
         fs::write(root.join("Makefile"), makefile).expect("write Makefile fixture");

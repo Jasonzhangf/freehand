@@ -11,7 +11,9 @@
   - release script runs full regression, Rust release build, Android JVM regression, Android release build, and artifact staging
   - Android release artifact packaging disables Android release lint checks in Gradle config; release regression truth is `make ci` plus Android JVM tests, not the failing Android Lint Vital task
   - global install script installs release host binaries into the configured prefix
+  - symlink install script builds debug host binaries, exposes S-suffixed development commands, and installs a prefix-local launchd wrapper without replacing global release commands
   - launchd install script installs release host binaries, writes `~/Library/LaunchAgents/com.freehand.daemon.plist`, writes `~/.freehand/daemon.env` with explicit daemon binary path, starts the user service, and exposes fixed logs/WebUI
+  - launchd symlink profile writes `~/Library/LaunchAgents/com.freehand.daemonS.plist`, writes `~/.freehand/daemonS.env`, uses `freehand-daemonS`, and exposes `127.0.0.1:4042` plus separate `daemonS.*.log` files
   - launchd install script does not leak daemon workspace root overrides into release/global-install regression subprocesses
   - gate command can validate policy locks
   - gate command can reject data/control boundary leaks at the repo source level
@@ -28,7 +30,9 @@
   - release script prerequisite and artifact path logic
   - Android release packaging config disables Android release lint checks explicitly
   - global install prefix logic
+  - symlink install S-suffix command, symlink target logic, and prefix-local launchd wrapper copy
   - launchd daemon binary prefix mismatch rejection
+  - launchd S-profile label/env/bin/bind/log separation
   - launchd release subprocess daemon-workdir env isolation
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
 - module black-box plan:
@@ -39,6 +43,7 @@
   - `cargo test -p xtask` CI/CD command-alignment positive and negative tests
   - `bash -n scripts/release.sh`
   - `bash -n scripts/install-global.sh`
+  - `bash -n scripts/install-symlink.sh`
   - `bash -n scripts/freehand-daemon-launchd.sh`
   - `bash -n scripts/install-launchd.sh`
   - `bash -n scripts/uninstall-launchd.sh`
@@ -48,7 +53,9 @@
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
   - `scripts/release.sh` stages host and Android release artifacts under `dist/`
   - `scripts/install-global.sh` installs `freehand-cli`, `freehand-server`, and `freehand-daemon`
+  - `scripts/install-symlink.sh` installs `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` as symlinks
   - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
+  - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - repo filesystem layout

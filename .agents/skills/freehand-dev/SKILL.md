@@ -213,9 +213,11 @@ Use this skill for any non-trivial work in this repo.
 - Do not add implementation without first making the test-design path inspectable in docs.
 - Before claiming completion, run the feature's required checks.
 - Before claiming completion, satisfy the feature's `lifecycle_checks`.
-- After any code/config/doc change in this repo, do not report completion from local tests alone. If the feature has a live surface, install/restart the fixed `127.0.0.1:4041` daemon when relevant and verify the changed behavior online through ADP/WebUI/browser evidence before claiming the change works.
+- After any code/config/doc change in this repo, do not report completion from local tests alone. If the feature has a live surface, verify the changed behavior online through ADP/WebUI/browser evidence before claiming the change works.
+- For development validation, prefer the symlink service profile: `scripts/install-launchd.sh installS` for first setup and `scripts/install-launchd.sh restartS` after rebuilds. This runs `com.freehand.daemonS` on `127.0.0.1:4042` through `freehand-*S` commands and keeps global release service `com.freehand.daemon` on `127.0.0.1:4041` untouched.
+- Use the global `scripts/install-global.sh` plus `scripts/install-launchd.sh restart` path only for release/promotion closeout or when explicitly validating the installed release surface.
 - For any WebUI, ADP, reasoning, stream, turn lifecycle, session, tool rendering, schema retry, composer, or status/progress change, online verification is mandatory before reporting success. The minimum proof is:
-  - start or restart the real daemon on fixed port `127.0.0.1:4041`
+  - start or restart the real daemon on the chosen validation port, normally symlink dev `127.0.0.1:4042`; use release `127.0.0.1:4041` only for release closeout
   - drive the real WebUI in a browser, not only unit tests or static DOM inspection
   - submit at least one real request through the UI path that was changed
   - query ADP state for the same session/turn and compare it with visible UI state
@@ -242,7 +244,7 @@ Use this skill for any non-trivial work in this repo.
   - `cargo run -p xtask -- gates check`
 - For state machine, stream, timeout, retry, error projection, or resource cleanup changes, add both positive and negative tests.
 - For live bridge error projection repairs, do not stop at persistence truth. Also verify runtime dispatch refreshes `UiProtocolState`, UI protocol marks user-visible activity status correctly, and fixed-port query plus SSE expose the same terminal/error state.
-- For WebUI/ADP state projection checks, use paired samples before claiming UI correctness: `freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample success` and `--sample failure`, then verify WebUI/latest-turn projection shows the expected terminal status.
+- For WebUI/ADP state projection checks, use paired samples before claiming UI correctness. In dev mode prefer `freehand-cliS ... --url ws://127.0.0.1:4042/adp`; for release closeout use `freehand-cli ... --url ws://127.0.0.1:4041/adp`.
 - For multi-round tool-loop claims, one-round success is invalid evidence. Use `freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample failure` and require `rounds>=2`, `tool_executions>=1`, `failed_tools>=1`, plus terminal success from ADP/session truth before claiming closure.
 - For schema-retry/live-tool bugs, verify the provider finish reason gate before UI work: completion schema retry may run only on terminal-candidate finish reasons such as `stop` / `end_turn`; `tool_use` and incomplete tool calls must become paired tool results back to the model, not schema retries or terminal failures.
 - For WebUI multi-round rendering, never collapse `runtime-turn-N` / `runtime-turn-N-rM` into one all-in summary card. Render chronological per-round lifecycle cards, hide duplicate/internal continuation prompts after the first round, mark superseded rounds as continued, and keep the final summary at the bottom terminal row.

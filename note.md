@@ -1,5 +1,23 @@
 # note.md
 
+# 2026-07-04 development symlink launchd profile
+  - user requirement: development validation must not repeatedly reinstall/replace the global release binary or trigger the same macOS permission path; global release mode and development symlink mode must coexist with S-suffixed names.
+  - owner: `foundation.workspace`.
+  - implementation:
+    - added `scripts/install-symlink.sh`, which builds debug host binaries and exposes `freehand-cliS`, `freehand-serverS`, and `freehand-daemonS` as symlinks to `target/debug/*`.
+    - `freehand-daemon-launchdS` is installed as a prefix-local wrapper copy instead of a symlink because launchd refused to execute a symlink wrapper with `Operation not permitted`.
+    - `scripts/install-launchd.sh installS/restartS` manages `com.freehand.daemonS`, `~/.freehand/daemonS.env`, `127.0.0.1:4042`, and `daemonS.*.log`.
+    - existing `install/restart` still manage global `com.freehand.daemon`, `~/.freehand/daemon.env`, and `127.0.0.1:4041`.
+    - Makefile adds `install-symlink`, `install-launchdS`, `restart-launchdS`, `uninstall-launchdS`, `launchd-statusS`, and `launchd-logsS`.
+  - verification:
+    - `scripts/install-launchd.sh installS` created S commands and started `com.freehand.daemonS`.
+    - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+    - `~/.local/bin/freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+    - `scripts/install-launchd.sh restartS` restarted only `com.freehand.daemonS`.
+    - `curl -4fsS http://127.0.0.1:4041/health` and `~/.local/bin/freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp` still passed, proving global service stayed available.
+    - `make ci` -> exit 0.
+  - durable workflow: normal development online validation should use S mode on `127.0.0.1:4042`; global `127.0.0.1:4041` is for release/promotion closeout.
+
 # 2026-07-01 WebUI submitted input/history disappearance trace
   - user live feedback: after submitting a request, the composer text disappeared and the conversation area showed no user-visible history while the top status still showed live model/tool-result state.
   - correction: clearing the composer after send is acceptable only if the submitted input is immediately preserved in the conversation transcript or pending render projection. Already-observed history must never be removed or hidden by later live status transitions.
