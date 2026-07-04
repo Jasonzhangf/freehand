@@ -1,0 +1,118 @@
+{
+  "feature_id": "error.center",
+  "owner_crate": "crates/freehand-control",
+  "owner_module": "crates/freehand-control/src/lib.rs",
+  "function_map_doc": "docs/function-maps/error.center.md",
+  "test_design_doc": "docs/testing/error.center.md",
+  "mainline_call_doc": "docs/mainline-calls/error.center.json",
+  "generated_wiki_doc": "docs/wiki/error.center.md",
+  "request_mainline": [
+    "runtime observes an owner/provider/tool/schema failure at a fixed pipeline node",
+    "runtime constructs `ErrorCenterObservedFailure` with source owner, source pipeline node, code, message, retry index, and retry cap",
+    "`classify_error_center_failure` maps the observed failure to one domain, class, recovery action, public visibility, owner target, and repair fields",
+    "runtime writes the accepted decision to metadata.core with writer owner `error.center`",
+    "provider/tool/schema flow may continue, repair, or fail only after the error-center metadata write succeeds"
+  ],
+  "response_mainline": [
+    "schema validation failures classify as schema/validation/repair_schema until retry cap",
+    "schema validation failures at retry cap classify to stop_turn",
+    "provider executor failures classify as provider/recoverable/fail_turn",
+    "tool execution failures classify as tool/validation/repair_schema",
+    "metadata rows carry domain, class, code, source owner, source pipeline node, recovery action, retry index, retry cap, public visibility, owner target, repair fields, and raw hash"
+  ],
+  "error_mainline": [
+    "unknown error sources classify as runtime/fatal/escalate_to_user",
+    "metadata write failure returns explicit runtime metadata failure and blocks the originating state transition",
+    "error metadata stores hashes for raw error messages and must not store provider body, tool output, user prompt, assistant text, request payload, or message content"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "classify_error_center_failure",
+      "owner": "crates/freehand-control/src/lib.rs",
+      "purpose": "single owner for framework error domain/class/recovery decisions",
+      "allowed_callers": [
+        "runtime live bridge",
+        "tests"
+      ],
+      "related_tests": [
+        "classifies_schema_error_as_repair_until_retry_cap",
+        "classifies_provider_and_tool_errors_with_distinct_actions"
+      ],
+      "why_shared": "prevents provider/tool/schema paths from hand-rolling retry/fail/repair policy"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "ErrorCenterObservedFailure",
+      "file_path": "crates/freehand-control/src/lib.rs",
+      "responsibility": "capture source owner/node/code/message/retry facts before policy",
+      "input_semantic": "observed failure",
+      "output_semantic": "typed error-center input",
+      "caller": "runtime live bridge",
+      "callee": "error center contract",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "classify_error_center_failure",
+      "file_path": "crates/freehand-control/src/lib.rs",
+      "responsibility": "classify domain/class/recovery/public visibility",
+      "input_semantic": "observed failure",
+      "output_semantic": "error-center decision",
+      "caller": "runtime live bridge",
+      "callee": "error center owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "ErrorCenterDecision",
+      "file_path": "crates/freehand-control/src/lib.rs",
+      "responsibility": "carry classified recovery decision fields",
+      "input_semantic": "classifier result",
+      "output_semantic": "serializable decision",
+      "caller": "error center owner",
+      "callee": "runtime metadata writer",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "write_error_center_metadata",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "write watermarked error decision metadata and block on write failure",
+      "input_semantic": "error-center decision",
+      "output_semantic": "durable metadata row or explicit failure",
+      "caller": "runtime live bridge",
+      "callee": "metadata center",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "record_provider_error_metadata",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "route provider executor failure through error center before terminal failure materialization",
+      "input_semantic": "provider executor failure",
+      "output_semantic": "error-center row plus provider row",
+      "caller": "runtime live bridge",
+      "callee": "error center metadata writer",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "run_live_anthropic_reason_turn",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "routes schema rejections and failed tool results through error center before repair/re-entry",
+      "input_semantic": "schema/tool failure",
+      "output_semantic": "repair/re-entry after metadata admission",
+      "caller": "runtime live bridge",
+      "callee": "error center metadata writer",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "first implementation covers schema rejection, failed tool result, and provider executor failure",
+    "error-center metadata admission is locked by runtime tests for schema, tool, and provider paths",
+    "metadata write failure blocks the originating decision through the shared metadata failure path",
+    "task/node/UI error policy, ADP query surfaces, and public error cards are pending"
+  ]
+}

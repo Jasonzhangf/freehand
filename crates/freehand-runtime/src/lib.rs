@@ -29,8 +29,9 @@ use freehand_contracts::{
     TraceId, TurnId,
 };
 use freehand_control::{
-    ControlRhythmDecision, ControlStatusRejection, ControlStatusSubmission,
-    control_status_rhythm_decision, parse_control_status_block, strip_control_status_block,
+    ControlRhythmDecision, ControlStatusRejection, ControlStatusSubmission, ErrorCenterDecision,
+    ErrorCenterObservedFailure, classify_error_center_failure, control_status_rhythm_decision,
+    parse_control_status_block, strip_control_status_block,
 };
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
@@ -698,6 +699,15 @@ fn now_unix_seconds() -> u64 {
         .as_secs()
 }
 
+fn fnv1a_hex(input: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in input.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
 fn write_text_atomic(path: &Path, content: &str) -> Result<(), RuntimeCheckpointError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -1209,6 +1219,31 @@ where
                     &tool_call,
                 )?;
                 let tool_result = executed_tool_result.result.clone();
+                if tool_result.tool_result.status == ToolResultStatus::Failed {
+                    write_error_center_metadata(
+                        &metadata_center,
+                        &agent_id,
+                        &request.session_id,
+                        RuntimeErrorCenterWriteSpec {
+                            turn_id: Some(&turn.request.turn_id),
+                            trace_id: &turn.request.trace_id,
+                            pipeline_node: "RuntimeLive03ToolExecuted",
+                            metadata_suffix: format!(
+                                "tool_result_failed:{}",
+                                tool_call.tool_call.tool_call_id.as_str()
+                            ),
+                            symbol_path: "run_live_anthropic_reason_turn",
+                            observed: ErrorCenterObservedFailure {
+                                source_owner: "tool.registry".to_owned(),
+                                source_pipeline_node: "RuntimeLive03ToolExecuted".to_owned(),
+                                code: "tool_result_failed".to_owned(),
+                                message: tool_result.tool_result.output.clone(),
+                                retry_index: 0,
+                                retry_cap: 0,
+                            },
+                        },
+                    )?;
+                }
                 write_control_hook_metadata(
                     &metadata_center,
                     &agent_id,
@@ -1687,6 +1722,29 @@ where
                 let feedback = completion_schema_rejection_feedback(&rejection);
                 schema_rejections.push(rejection.clone());
                 consecutive_schema_rejections = consecutive_schema_rejections.saturating_add(1);
+                write_error_center_metadata(
+                    &metadata_center,
+                    &agent_id,
+                    &request.session_id,
+                    RuntimeErrorCenterWriteSpec {
+                        turn_id: Some(&turn.request.turn_id),
+                        trace_id: &turn.request.trace_id,
+                        pipeline_node: "ReasonResp04CompletionSchemaRejected",
+                        metadata_suffix: format!(
+                            "schema_rejected:{}",
+                            consecutive_schema_rejections
+                        ),
+                        symbol_path: "run_live_anthropic_reason_turn",
+                        observed: ErrorCenterObservedFailure {
+                            source_owner: "reason.turn".to_owned(),
+                            source_pipeline_node: "ReasonResp04CompletionSchemaRejected".to_owned(),
+                            code: "completion_schema_rejected".to_owned(),
+                            message: feedback.clone(),
+                            retry_index: consecutive_schema_rejections as u32,
+                            retry_cap: 3,
+                        },
+                    },
+                )?;
                 persistence
                     .record_completion_rejected(
                         &history,
@@ -3201,6 +3259,15 @@ struct RuntimeControlHookWriteSpec<'a> {
     entries: Vec<MetadataEntry>,
 }
 
+struct RuntimeErrorCenterWriteSpec<'a> {
+    turn_id: Option<&'a TurnId>,
+    trace_id: &'a TraceId,
+    pipeline_node: &'a str,
+    metadata_suffix: String,
+    symbol_path: &'a str,
+    observed: ErrorCenterObservedFailure,
+}
+
 struct RuntimeDebugEmitSpec<'a> {
     turn_id: &'a TurnId,
     trace_id: &'a TraceId,
@@ -3261,6 +3328,98 @@ fn write_control_hook_metadata(
         })?
         .write(envelope)
         .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))
+}
+
+fn write_error_center_metadata(
+    center: &Arc<Mutex<MetadataCenter>>,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    spec: RuntimeErrorCenterWriteSpec<'_>,
+) -> Result<ErrorCenterDecision, RuntimeLiveBridgeError> {
+    let decision = classify_error_center_failure(&spec.observed);
+    let envelope = MetadataEnvelope::new(
+        MetadataId::new(format!(
+            "error.center:{}:{}",
+            spec.trace_id.as_str(),
+            spec.metadata_suffix
+        )),
+        MetadataKind::RuntimeState,
+        MetadataWriteOwner {
+            feature_id: FeatureId::new("error.center"),
+            crate_name: "freehand-control".to_owned(),
+            module_path: "freehand_control".to_owned(),
+            symbol_path: spec.symbol_path.to_owned(),
+        },
+        MetadataWriteNode {
+            pipeline_node: spec.pipeline_node.to_owned(),
+            runtime_node_id: None,
+        },
+        MetadataSubject {
+            agent_id: Some(agent_id.clone()),
+            session_id: Some(session_id.clone()),
+            turn_id: spec.turn_id.cloned(),
+            trace_id: spec.trace_id.clone(),
+        },
+        vec![
+            MetadataEntry {
+                key: "error.domain".to_owned(),
+                value: json!(decision.domain.as_str()),
+            },
+            MetadataEntry {
+                key: "error.class".to_owned(),
+                value: json!(decision.class.as_str()),
+            },
+            MetadataEntry {
+                key: "error.code".to_owned(),
+                value: json!(spec.observed.code),
+            },
+            MetadataEntry {
+                key: "error.source_owner".to_owned(),
+                value: json!(spec.observed.source_owner),
+            },
+            MetadataEntry {
+                key: "error.source_pipeline_node".to_owned(),
+                value: json!(spec.observed.source_pipeline_node),
+            },
+            MetadataEntry {
+                key: "error.recovery_action".to_owned(),
+                value: json!(decision.recovery_action.as_str()),
+            },
+            MetadataEntry {
+                key: "error.retry_index".to_owned(),
+                value: json!(decision.retry_index),
+            },
+            MetadataEntry {
+                key: "error.retry_cap".to_owned(),
+                value: json!(decision.retry_cap),
+            },
+            MetadataEntry {
+                key: "error.public_visibility".to_owned(),
+                value: json!(decision.public_visibility.as_str()),
+            },
+            MetadataEntry {
+                key: "error.owner_target".to_owned(),
+                value: json!(decision.owner_target),
+            },
+            MetadataEntry {
+                key: "error.repair_fields".to_owned(),
+                value: json!(decision.repair_fields),
+            },
+            MetadataEntry {
+                key: "error.raw_hash".to_owned(),
+                value: json!(fnv1a_hex(&spec.observed.message)),
+            },
+        ],
+    )
+    .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))?;
+    center
+        .lock()
+        .map_err(|err: std::sync::PoisonError<_>| {
+            RuntimeLiveBridgeError::MetadataFailed(err.to_string())
+        })?
+        .write(envelope)
+        .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))?;
+    Ok(decision)
 }
 
 fn write_live_bridge_metadata(
@@ -3424,6 +3583,26 @@ fn record_provider_error_metadata(
     turn: &TurnRecord,
     error: &RuntimeLiveBridgeError,
 ) -> Result<(), RuntimeLiveBridgeError> {
+    write_error_center_metadata(
+        center,
+        agent_id,
+        session_id,
+        RuntimeErrorCenterWriteSpec {
+            turn_id: Some(&turn.request.turn_id),
+            trace_id: &turn.request.trace_id,
+            pipeline_node: "RuntimeLive05ProviderError",
+            metadata_suffix: "provider_error".to_owned(),
+            symbol_path: "run_live_anthropic_reason_turn",
+            observed: ErrorCenterObservedFailure {
+                source_owner: "provider.reason-live-bridge".to_owned(),
+                source_pipeline_node: "RuntimeLive05ProviderError".to_owned(),
+                code: "provider_executor_failure".to_owned(),
+                message: error.to_string(),
+                retry_index: 0,
+                retry_cap: 0,
+            },
+        },
+    )?;
     write_live_bridge_metadata(
         center,
         agent_id,
@@ -4752,9 +4931,11 @@ mod tests {
             ],
         );
 
+        let request = live_request(false);
+
         let outcome = run_live_reason_turn(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            live_request(false),
+            request,
         )
         .expect("live bridge");
         let first_request = rx.recv().expect("first request");
@@ -6879,9 +7060,11 @@ mod tests {
         let (base_url, _rx, handle) =
             spawn_mock_server(200, "application/json", complete_single_response("pong"));
 
+        let request = live_request(false);
+
         let outcome = run_live_reason_turn(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            live_request(false),
+            request,
         )
         .expect("live bridge");
         handle.join().expect("join");
@@ -7139,7 +7322,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
-    fn live_bridge_retries_invalid_schema_then_completes() {
+    fn live_bridge_records_error_center_metadata_for_schema_repair() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -7151,9 +7334,13 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             ],
         );
 
+        let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
+
         let outcome = run_live_reason_turn(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            live_request(false),
+            request,
         )
         .expect("live bridge");
         let first_request = rx.recv().expect("first request");
@@ -7184,6 +7371,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 .map(|event| event.status.clone()),
             Some(TerminalStatus::Success)
         );
+        let metadata = metadata_ledger_records(&runtime_home, "agent-live", &session_id);
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "error.center"
+                && record.write_node.pipeline_node == "ReasonResp04CompletionSchemaRejected"
+                && record.entries.iter().any(|entry| {
+                    entry.key == "error.recovery_action" && entry.value == json!("repair_schema")
+                })
+                && record
+                    .entries
+                    .iter()
+                    .any(|entry| entry.key == "error.domain" && entry.value == json!("schema"))
+        }));
     }
 
     #[test]
@@ -7495,6 +7694,8 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             ],
         );
         let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
 
         let outcome = run_live_reason_turn(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
@@ -7519,6 +7720,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 .map(|event| event.status.clone()),
             Some(TerminalStatus::Success)
         );
+        let metadata = metadata_ledger_records(&runtime_home, "agent-live", &session_id);
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "error.center"
+                && record.write_node.pipeline_node == "RuntimeLive03ToolExecuted"
+                && record
+                    .entries
+                    .iter()
+                    .any(|entry| entry.key == "error.domain" && entry.value == json!("tool"))
+                && record.entries.iter().any(|entry| {
+                    entry.key == "error.recovery_action" && entry.value == json!("repair_schema")
+                })
+        }));
+        assert!(metadata.iter().all(|record| {
+            let encoded = serde_json::to_string(record).expect("metadata json");
+            !encoded.contains("unknown tool `totally_unknown_tool`")
+        }));
     }
 
     #[test]
@@ -7815,6 +8032,26 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     .iter()
                     .any(|e| e.key == "error.kind" && e.value == json!("executor_failure"))
         }));
+        assert!(records.iter().any(|record| {
+            record.owner.feature_id.as_str() == "error.center"
+                && record.write_node.pipeline_node == "RuntimeLive05ProviderError"
+                && record
+                    .entries
+                    .iter()
+                    .any(|entry| entry.key == "error.domain" && entry.value == json!("provider"))
+                && record.entries.iter().any(|entry| {
+                    entry.key == "error.recovery_action" && entry.value == json!("fail_turn")
+                })
+        }));
+        assert!(
+            records
+                .iter()
+                .filter(|record| record.owner.feature_id.as_str() == "error.center")
+                .all(|record| {
+                    let encoded = serde_json::to_string(record).expect("metadata json");
+                    !encoded.contains("server exploded")
+                })
+        );
 
         let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
             .restore(&session_id)

@@ -1,4 +1,4 @@
-//! Passive control-center semantics for Freehand status blocks.
+//! Passive control and error-center semantics for Freehand status blocks.
 //!
 //! This crate parses and validates hidden model status feedback. It does not
 //! execute task mutations, write turn truth, or render UI.
@@ -54,6 +54,182 @@ pub enum ControlRhythmDecision {
     ContinueWithNextStep(String),
     StopBlocked(String),
     StopForUserOptions(Vec<String>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ErrorCenterDomain {
+    Schema,
+    Provider,
+    Tool,
+    Task,
+    Node,
+    Runtime,
+    Persistence,
+    Metadata,
+    UiProtocol,
+}
+
+impl ErrorCenterDomain {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Schema => "schema",
+            Self::Provider => "provider",
+            Self::Tool => "tool",
+            Self::Task => "task",
+            Self::Node => "node",
+            Self::Runtime => "runtime",
+            Self::Persistence => "persistence",
+            Self::Metadata => "metadata",
+            Self::UiProtocol => "ui_protocol",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ErrorCenterClass {
+    Validation,
+    Recoverable,
+    PeriodicRecoverable,
+    Blocked,
+    Cancelled,
+    Fatal,
+}
+
+impl ErrorCenterClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Validation => "validation",
+            Self::Recoverable => "recoverable",
+            Self::PeriodicRecoverable => "periodic_recoverable",
+            Self::Blocked => "blocked",
+            Self::Cancelled => "cancelled",
+            Self::Fatal => "fatal",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ErrorCenterRecoveryAction {
+    RepairSchema,
+    RetrySameStep,
+    WaitUntil,
+    StopTurn,
+    FailTurn,
+    BlockTask,
+    CancelTask,
+    EscalateToUser,
+}
+
+impl ErrorCenterRecoveryAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RepairSchema => "repair_schema",
+            Self::RetrySameStep => "retry_same_step",
+            Self::WaitUntil => "wait_until",
+            Self::StopTurn => "stop_turn",
+            Self::FailTurn => "fail_turn",
+            Self::BlockTask => "block_task",
+            Self::CancelTask => "cancel_task",
+            Self::EscalateToUser => "escalate_to_user",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ErrorCenterPublicVisibility {
+    HiddenControl,
+    StatusLine,
+    TaskCard,
+    TerminalSummary,
+}
+
+impl ErrorCenterPublicVisibility {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HiddenControl => "hidden_control",
+            Self::StatusLine => "status_line",
+            Self::TaskCard => "task_card",
+            Self::TerminalSummary => "terminal_summary",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorCenterObservedFailure {
+    pub source_owner: String,
+    pub source_pipeline_node: String,
+    pub code: String,
+    pub message: String,
+    pub retry_index: u32,
+    pub retry_cap: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorCenterDecision {
+    pub domain: ErrorCenterDomain,
+    pub class: ErrorCenterClass,
+    pub recovery_action: ErrorCenterRecoveryAction,
+    pub public_visibility: ErrorCenterPublicVisibility,
+    pub retry_index: u32,
+    pub retry_cap: u32,
+    pub repair_fields: Vec<String>,
+    pub owner_target: String,
+}
+
+pub fn classify_error_center_failure(observed: &ErrorCenterObservedFailure) -> ErrorCenterDecision {
+    let source = observed.source_owner.as_str();
+    let node = observed.source_pipeline_node.as_str();
+    let code = observed.code.as_str();
+    if source == "reason.turn" && code == "completion_schema_rejected" {
+        return ErrorCenterDecision {
+            domain: ErrorCenterDomain::Schema,
+            class: ErrorCenterClass::Validation,
+            recovery_action: if observed.retry_index >= observed.retry_cap {
+                ErrorCenterRecoveryAction::StopTurn
+            } else {
+                ErrorCenterRecoveryAction::RepairSchema
+            },
+            public_visibility: ErrorCenterPublicVisibility::StatusLine,
+            retry_index: observed.retry_index,
+            retry_cap: observed.retry_cap,
+            repair_fields: schema_repair_fields(&observed.message),
+            owner_target: "provider.reason-live-bridge".to_owned(),
+        };
+    }
+    if source == "provider.reason-live-bridge" && node == "RuntimeLive05ProviderError" {
+        return ErrorCenterDecision {
+            domain: ErrorCenterDomain::Provider,
+            class: ErrorCenterClass::Recoverable,
+            recovery_action: ErrorCenterRecoveryAction::FailTurn,
+            public_visibility: ErrorCenterPublicVisibility::TerminalSummary,
+            retry_index: observed.retry_index,
+            retry_cap: observed.retry_cap,
+            repair_fields: Vec::new(),
+            owner_target: "provider.reason-live-bridge".to_owned(),
+        };
+    }
+    if source == "tool.registry" || node == "RuntimeLive03ToolExecuted" {
+        return ErrorCenterDecision {
+            domain: ErrorCenterDomain::Tool,
+            class: ErrorCenterClass::Validation,
+            recovery_action: ErrorCenterRecoveryAction::RepairSchema,
+            public_visibility: ErrorCenterPublicVisibility::TaskCard,
+            retry_index: observed.retry_index,
+            retry_cap: observed.retry_cap,
+            repair_fields: Vec::new(),
+            owner_target: "provider.reason-live-bridge".to_owned(),
+        };
+    }
+    ErrorCenterDecision {
+        domain: ErrorCenterDomain::Runtime,
+        class: ErrorCenterClass::Fatal,
+        recovery_action: ErrorCenterRecoveryAction::EscalateToUser,
+        public_visibility: ErrorCenterPublicVisibility::TerminalSummary,
+        retry_index: observed.retry_index,
+        retry_cap: observed.retry_cap,
+        repair_fields: Vec::new(),
+        owner_target: "provider.reason-live-bridge".to_owned(),
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -355,6 +531,24 @@ fn value_type_label(value: &Value) -> &'static str {
     }
 }
 
+fn schema_repair_fields(message: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    for candidate in [
+        "claim",
+        "completion_reason",
+        "evidence",
+        "summary",
+        "learned",
+        "next_step",
+        "blocked_reason",
+    ] {
+        if message.contains(candidate) {
+            fields.push(candidate.to_owned());
+        }
+    }
+    fields
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,6 +598,75 @@ mod tests {
             Ok(ControlRhythmDecision::ContinueWithNextStep(
                 "inspect owner map".to_owned()
             ))
+        );
+    }
+
+    #[test]
+    fn classifies_schema_error_as_repair_until_retry_cap() {
+        let decision = classify_error_center_failure(&ErrorCenterObservedFailure {
+            source_owner: "reason.turn".to_owned(),
+            source_pipeline_node: "ReasonResp04CompletionSchemaRejected".to_owned(),
+            code: "completion_schema_rejected".to_owned(),
+            message: "evidence is required; summary is required".to_owned(),
+            retry_index: 1,
+            retry_cap: 3,
+        });
+
+        assert_eq!(decision.domain, ErrorCenterDomain::Schema);
+        assert_eq!(decision.class, ErrorCenterClass::Validation);
+        assert_eq!(
+            decision.recovery_action,
+            ErrorCenterRecoveryAction::RepairSchema
+        );
+        assert_eq!(
+            decision.repair_fields,
+            vec!["evidence".to_owned(), "summary".to_owned()]
+        );
+
+        let capped = classify_error_center_failure(&ErrorCenterObservedFailure {
+            retry_index: 3,
+            ..ErrorCenterObservedFailure {
+                source_owner: "reason.turn".to_owned(),
+                source_pipeline_node: "ReasonResp04CompletionSchemaRejected".to_owned(),
+                code: "completion_schema_rejected".to_owned(),
+                message: "evidence is required".to_owned(),
+                retry_index: 0,
+                retry_cap: 3,
+            }
+        });
+        assert_eq!(capped.recovery_action, ErrorCenterRecoveryAction::StopTurn);
+    }
+
+    #[test]
+    fn classifies_provider_and_tool_errors_with_distinct_actions() {
+        let provider = classify_error_center_failure(&ErrorCenterObservedFailure {
+            source_owner: "provider.reason-live-bridge".to_owned(),
+            source_pipeline_node: "RuntimeLive05ProviderError".to_owned(),
+            code: "provider_executor_failure".to_owned(),
+            message: "http 500".to_owned(),
+            retry_index: 0,
+            retry_cap: 0,
+        });
+        assert_eq!(provider.domain, ErrorCenterDomain::Provider);
+        assert_eq!(provider.class, ErrorCenterClass::Recoverable);
+        assert_eq!(
+            provider.recovery_action,
+            ErrorCenterRecoveryAction::FailTurn
+        );
+
+        let tool = classify_error_center_failure(&ErrorCenterObservedFailure {
+            source_owner: "tool.registry".to_owned(),
+            source_pipeline_node: "RuntimeLive03ToolExecuted".to_owned(),
+            code: "tool_result_failed".to_owned(),
+            message: "unknown tool".to_owned(),
+            retry_index: 0,
+            retry_cap: 0,
+        });
+        assert_eq!(tool.domain, ErrorCenterDomain::Tool);
+        assert_eq!(tool.class, ErrorCenterClass::Validation);
+        assert_eq!(
+            tool.recovery_action,
+            ErrorCenterRecoveryAction::RepairSchema
         );
     }
 }

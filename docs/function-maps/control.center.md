@@ -53,5 +53,5 @@
 ## Sync Status Against Code
 
 - first implementation is a skeleton plus basic stopHook
-- task action tools and task lifecycle orchestration are not implemented in this feature slice
+- task action tool execution and task lifecycle orchestration are implemented under `task.orchestration`, not inside `control.center`
 - status-driven user option rendering is represented as a rhythm decision but does not yet have a selectable UI projection

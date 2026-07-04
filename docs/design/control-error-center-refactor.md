@@ -10,13 +10,15 @@ Landed slice:
 - fixed hook metadata writes exist for the basic status stopHook path
 - `<<<freehand_status>>>` schema v1 parsing and validation exists for simple stop, task-complete stop, blocked, user options, and next-step rhythm decisions
 - UI public projection strips hidden status blocks
+- compact `task` action tool and task lifecycle persistence exist as `task.orchestration`
+- `error.center` first skeleton classifies schema, tool, and provider failures and writes watermarked metadata before runtime repair/re-entry/failure paths
 
 Still pending:
 
-- compact `task` action tool and task lifecycle persistence
 - full schema repair loop for rejected status
-- centralized `error.center`
 - selectable user-option projection
+- task/node/UI error-center routing
+- ADP/UI query and render surfaces for error-center decisions
 
 ## Problem
 
@@ -622,11 +624,11 @@ UI and public conversation projection must:
 | Gap | Current state | Required change |
 | --- | --- | --- |
 | Control owner | no central owner; completion schema parser exists in blocks/reason path only | add `control.center` owner and docs/function map/test design before implementation |
-| Error owner | shared error contracts exist, but classification/recovery is local in runtime/provider/tool paths | add `error.center` policy and route owner failures through it |
-| Metadata admission | metadata center exists but control/error records are not first-class schema-watermarked records | add control/error watermark entry schema and validation/gates |
-| Task control | no task owner; node delegated task is progress text, WebUI task is cwd-bound session only | add `task.orchestration` state machine after control center |
-| Model status block | only `<freehand_completion>` terminal block exists | add `<<<freehand_status>>>` status parser and projection stripping |
-| Built-in task action | no compact task tool surface exists | add one `task` tool with operation arguments, maximum three framework tools total |
+| Error owner | first skeleton classifies schema/tool/provider failures; task/node/UI error policy is still local or pending | route remaining owner failures through `error.center` and add ADP/UI query surfaces |
+| Metadata admission | control and error skeletons write metadata rows, but cross-index/query surfaces are still missing | add query indexes by trace/session/turn/action/error code |
+| Task control | `task.orchestration` owns task ledger/snapshot/lifecycle and ADP task query/subscribe; real worker execution is pending | add worker process/channel dispatch and task recovery |
+| Model status block | `<<<freehand_status>>>` v1 parser and projection stripping exist | add full status repair loop and selectable user option projection |
+| Built-in task action | one compact `task` tool exists with op arguments | route task action admission through control metadata before every task transition |
 | Schema repair | completion schema repair exists; status schema repair does not | add status schema repair loop with retry cap |
 | Runtime rhythm | runtime live loop makes some retry/failure decisions locally | move retry/repair/stop/block decisions to error center decisions |
 | UI projection | UI strips completion block, not future status block | add public projection tests for status-block stripping |

@@ -39,7 +39,7 @@ cargo run -p xtask -- gates check
 
 ## Known Gaps
 
-- built-in task action tool is not implemented
-- task lifecycle persistence and subagent dispatch are still design work
-- error.center is not implemented
+- built-in task action tool and task lifecycle persistence are implemented under `task.orchestration`
+- subagent/worker dispatch is still pending
+- error.center first skeleton is implemented separately for schema/tool/provider failures
 - selectable options projection is not implemented

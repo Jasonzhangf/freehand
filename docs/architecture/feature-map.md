@@ -55,6 +55,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | independent debug/trace contracts, snapshots, hub/sinks | `debug.core` | `crates/freehand-debug` | `docs/function-maps/debug.core.md` | `docs/testing/debug.core.md` |
 | internal control metadata center, writer ownership, write-node provenance, metadata/request isolation | `metadata.core` | `crates/freehand-metadata` | `docs/function-maps/metadata.core.md` | `docs/testing/metadata.core.md` |
 | passive framework control status parsing, fixed control hooks, and rhythm decisions | `control.center` | `crates/freehand-control` | `docs/function-maps/control.center.md` | `docs/testing/control.center.md` |
+| centralized framework error classification, recovery decisions, and error watermark metadata | `error.center` | `crates/freehand-control` | `docs/function-maps/error.center.md` | `docs/testing/error.center.md` |
 | task lifecycle, task persistence, task runtime recovery, and agent registry skeleton | `task.orchestration` | `crates/freehand-task` | `docs/function-maps/task.orchestration.md` | `docs/testing/task.orchestration.md` |
 | master/slave pairing, node status, delegation, slave turn publication | `node.master-slave` | `crates/freehand-node` | `docs/function-maps/node.master-slave.md` | `docs/testing/node.master-slave.md` |
 | UI commands, query/subscribe, UI projections | `ui.protocol` | `crates/freehand-ui-protocol` | `docs/function-maps/ui.protocol.md` | `docs/testing/ui.protocol.md` |
@@ -157,6 +158,48 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - every hook write carries writer owner and node provenance
   - public projection strips hidden control blocks
   - task mutations remain action-tool owned, not status-owned
+
+### `error.center`
+
+- owner: `crates/freehand-control`
+- allowed_paths: `crates/freehand-control/**`, `crates/freehand-runtime/**`, `docs/design/**`, `docs/function-maps/error.center.md`, `docs/testing/error.center.md`, `docs/mainline-calls/error.center.json`, `docs/wiki/error.center.md`, `docs/architecture/feature-map.md`, `MEMORY.md`, `note.md`
+- forbidden_paths: provider adapter wire DTO internals, UI app-local error policy, task state mutation without accepted action metadata
+- required_checks:
+  - `cargo test -p freehand-control`
+  - `cargo test -p freehand-runtime live_bridge_records_error_center_metadata_for_schema_repair -- --nocapture`
+  - `cargo test -p freehand-runtime live_bridge_returns_unknown_tool_as_failed_tool_result_without_terminalizing -- --nocapture`
+  - `cargo test -p freehand-runtime live_bridge_writes_provider_error_metadata_on_executor_failure -- --nocapture`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - schema validation errors classify as schema/validation/repair_schema until retry cap
+  - retry cap changes schema recovery action to stop_turn
+  - provider executor failures classify as provider/recoverable/fail_turn
+  - tool failures classify as tool/validation/repair_schema
+- required_module_black_box_tests:
+  - runtime writes `error.center` metadata for completion schema rejection
+  - runtime writes `error.center` metadata for failed tool result before provider re-entry
+  - runtime writes `error.center` metadata for provider executor failure before materializing terminal failure
+  - metadata write failure blocks the originating decision
+- required_project_black_box_tests:
+  - none for this skeleton; online ADP/UI error status projection is future scope
+- test_design_doc: `docs/testing/error.center.md`
+- function_map_doc: `docs/function-maps/error.center.md`
+- mainline_call_doc: `docs/mainline-calls/error.center.json`
+- generated_wiki_doc: `docs/wiki/error.center.md`
+- debug_artifacts:
+  - error center metadata ledger rows
+- runtime_paths:
+  - `~/.freehand/ledgers/metadata`
+- update_triggers:
+  - error domain/class/recovery policy changes
+  - schema repair rhythm changes
+  - provider/tool/task/node failure routing changes
+  - error metadata watermark fields change
+- lifecycle_checks:
+  - every classified decision carries `error.center` writer owner and write-node provenance
+  - runtime does not convert provider/tool/schema failures to owner state changes before error-center metadata admission
+  - public/request payload text is hashed only, not written into error metadata entries
 
 ### `config.core`
 

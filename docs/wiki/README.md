@@ -10,6 +10,7 @@ Generated wiki artifacts from machine-readable mainline call source files. Do no
 - [config.core](./config.core.md) mainline call source `docs/mainline-calls/config.core.json`
 - [contracts.core](./contracts.core.md) mainline call source `docs/mainline-calls/contracts.core.json`
 - [debug.core](./debug.core.md) mainline call source `docs/mainline-calls/debug.core.json`
+- [error.center](./error.center.md) mainline call source `docs/mainline-calls/error.center.json`
 - [foundation.workspace](./foundation.workspace.md) mainline call source `docs/mainline-calls/foundation.workspace.json`
 - [metadata.core](./metadata.core.md) mainline call source `docs/mainline-calls/metadata.core.json`
 - [node.master-slave](./node.master-slave.md) mainline call source `docs/mainline-calls/node.master-slave.json`

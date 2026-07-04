@@ -1,5 +1,33 @@
 # note.md
 
+# 2026-07-04 error.center first skeleton
+  - user requirement: implement the first `error.center` skeleton with feature/function/test/mainline/wiki truth, classify schema/tool/provider errors, write watermarked metadata decisions, and prevent runtime-local bypass for those paths.
+  - owner: `error.center`.
+  - implementation:
+    - added `ErrorCenterObservedFailure`, `ErrorCenterDecision`, error domain/class/recovery/visibility enums, and `classify_error_center_failure` in `crates/freehand-control`.
+    - runtime now writes `error.center` metadata for completion schema rejection, failed tool result, and provider executor failure before repair/re-entry/failure materialization continues.
+    - error-center metadata uses writer owner `error.center`, write-node provenance, retry fields, public visibility, owner target, repair fields, and raw hash; raw error text is not written into `error.center` rows.
+    - added `docs/function-maps/error.center.md`, `docs/testing/error.center.md`, `docs/mainline-calls/error.center.json`, and generated `docs/wiki/error.center.md`.
+    - updated feature map, control/error design truth, and adjacent control/task docs.
+  - verified:
+    - `cargo test -p freehand-control -- --nocapture`
+    - `cargo test -p freehand-runtime live_bridge_records_error_center_metadata_for_schema_repair -- --nocapture`
+    - `cargo test -p freehand-runtime live_bridge_returns_unknown_tool_as_failed_tool_result_without_terminalizing -- --nocapture`
+    - `cargo test -p freehand-runtime live_bridge_writes_provider_error_metadata_on_executor_failure -- --nocapture`
+    - `cargo test -p freehand-runtime -- --nocapture`
+    - `cargo test -p xtask -- --nocapture`
+    - `cargo fmt --check`
+    - `cargo run -p xtask -- mainlines generate`
+    - `cargo run -p xtask -- mainlines check`
+    - `cargo run -p xtask -- gates check`
+    - `cargo test --workspace`
+    - `cargo clippy --workspace --all-targets -- -D warnings`
+  - remaining gaps:
+    - task/node/UI error policy is not routed through error center yet.
+    - ADP query/subscribe projection for error-center metadata is not implemented.
+    - WebUI error-center cards are not implemented.
+    - full status schema repair loop and selectable user option projection remain pending.
+
 # 2026-07-04 control.center basic status stopHook
   - user requirement: implement the basic status stopHook on the fixed four-hook skeleton, while keeping task dispatch built-in tool lifecycle as a separate review topic.
   - owner: `control.center`.

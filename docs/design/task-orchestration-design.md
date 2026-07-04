@@ -222,4 +222,4 @@ Not implemented:
 - real worker execution
 - queue selection loop
 - UI task projection
-- error.center classification
+- full task/node/UI error.center classification beyond the first schema/tool/provider skeleton
