@@ -1735,3 +1735,18 @@ Current real root cause split:
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
   - `git diff --check`
+
+# 2026-07-06 Android device verifier retry
+
+- active goal audit:
+  - goal file remains `/Users/fanzhang/.codex/attachments/75141fb8-5139-49b6-ac44-ffc7f7608b3a/pasted-text-1.txt`.
+  - WebUI responsive/mobile proof remains available from prior S-profile online verifier evidence; Android true-device UI/WebView acceptance is still the open closeout item.
+- device attempt:
+  - `adb devices -l` returned no devices.
+  - `adb connect 100.104.163.65:5555` did not return within 30 seconds and was interrupted as a single explicit command session.
+  - `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` exited blocked with `adb_state_unavailable`.
+  - blocker evidence: `artifacts/android-device/20260705T180437Z-100.104.163.65_5555/summary.json`.
+- current-head Android code evidence:
+  - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest assembleDebug` -> `BUILD SUCCESSFUL`.
+- conclusion:
+  - do not mark the mobile WebUI / Android closeout goal complete until the Android device is connected/unlocked and `verify-device-ui.sh` passes with Freehand foreground screenshot and no fatal logcat, or Jason explicitly accepts the remaining Android device risk.
