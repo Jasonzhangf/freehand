@@ -1625,3 +1625,13 @@ Current real root cause split:
   - `cargo run -p xtask -- mainlines check` -> ok.
   - `cargo run -p xtask -- gates check` -> ok.
   - `git diff --check` -> ok.
+
+# 2026-07-05 mobile WebUI goal prompt plan
+
+- user asked whether L1 audit was done and requested a complete implementation `/goal` prompt.
+- answer basis:
+  - scoped L1 report-only audit was completed in commit `3a5b461`.
+  - it was not a recurring unattended loop, so no `LOOP.md` / `STATE.md` / `loop-budget.md` files were required.
+- implementation plan:
+  - added `docs/goals/mobile-webui-responsive-plan.md` with L1 audit status, goals, scope, design principles, implementation slices, verification matrix, risks, and DoD.
+  - linked the goal plan from `docs/design/design-doc-index.md`.
