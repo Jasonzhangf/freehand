@@ -1585,3 +1585,26 @@ Current real root cause split:
   - temp-HOME CLI live provider fixture -> `artifacts/provider-retry/20260705-provider-retry-1783252973529124000/summary.json`, `requestCount=5`, stderr contains `anthropic_http_status_500`
 - exclusions:
   - old wrong-profile `artifacts/webui-online/20260705-verify-4041-*` remain untracked and are not staged.
+
+# 2026-07-05 same-session continuation clippy closeout
+
+- context:
+  - after commit `0e19a45 fix(runtime): restore follow-up history`, full `make ci` exposed `clippy::too_many_arguments` in `record_provider_error_metadata`.
+  - this was an implementation-shape issue in `provider.reason-live-bridge`, not a behavior change.
+- implementation:
+  - grouped provider error metadata inputs into `ProviderErrorMetadataSpec<'_>`.
+  - kept retry index/cap, concrete provider error code, error-center metadata, and runtime metadata write semantics unchanged.
+- validation:
+  - `cargo test -p freehand-runtime -- --nocapture --test-threads=1` -> 74 passed.
+  - `cargo clippy -p freehand-runtime --all-targets -- -D warnings` -> no issues.
+  - `make ci` -> exit 0.
+  - `scripts/install-launchd.sh restartS` refreshed S profile on `127.0.0.1:4042`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> ok.
+  - `make verify-webui-online` -> `artifacts/webui-online/20260705-verify-4042-1783258042728/summary.json`.
+- online evidence:
+  - session `webui-session-20260705132723-566c48e2`.
+  - ADP reported `turn_ids=runtime-turn-66,runtime-turn-67,runtime-turn-67-r2`.
+  - browser checks true: submitted prompts stay visible, composer clears, second turn observes progress, failed read_file result returns to model, terminal has `liveCount=0`, refresh preserves both turns.
+- exclusions:
+  - pre-existing untracked wrong-profile or intermediate evidence directories remain untouched.

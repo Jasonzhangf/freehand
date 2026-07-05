@@ -1,0 +1,150 @@
+{
+  "runId": "20260705-verify-4042-1783258042728",
+  "artifactDir": "/Volumes/extension/code/freehand/artifacts/webui-online/20260705-verify-4042-1783258042728",
+  "baseUrl": "http://127.0.0.1:4042/",
+  "adpUrl": "ws://127.0.0.1:4042/adp",
+  "cliPath": "/Users/fanzhang/.local/bin/freehand-cliS",
+  "sessionId": "webui-session-20260705132723-566c48e2",
+  "checks": {
+    "firstSubmitComposerCleared": true,
+    "firstPromptVisibleAfterSubmit": true,
+    "secondSubmitComposerCleared": true,
+    "secondProgressObserved": true,
+    "staleHistoricalLiveAfterSecondSubmit": 0,
+    "refreshPreservedFirstPrompt": true,
+    "refreshPreservedFailurePrompt": true,
+    "terminal2NoLive": true
+  },
+  "snapshots": {
+    "postSubmit1": {
+      "label": "02-after-first-submit",
+      "state": {
+        "selectedSession": "webui-session-20260705132723-566c48e2",
+        "selectedTurn": "runtime-turn-66",
+        "composer": "",
+        "commandStatus": "dispatching... 0s",
+        "turnStatus": "dispatching... 0s",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 1,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783258043639",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "materialized1": {
+      "label": "03-first-materialized",
+      "state": {
+        "selectedSession": "webui-session-20260705132723-566c48e2",
+        "selectedTurn": "runtime-turn-66",
+        "composer": "",
+        "commandStatus": "dispatching... 0s",
+        "turnStatus": "dispatching... 0s",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 1,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783258043639",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "terminal1": {
+      "label": "04-first-terminal",
+      "state": {
+        "selectedSession": "webui-session-20260705132723-566c48e2",
+        "selectedTurn": "runtime-turn-66",
+        "composer": "",
+        "commandStatus": "turn completed",
+        "turnStatus": "completed",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 2,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783258043639\n\nAssistant\ncompleted\n\nADP success sample confirmed: pending input 1783258043639 verified successfully.\n\nFinal\ncompleted\n\nProvided one short sentence confirming ADP success sample verification.",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "postSubmit2": {
+      "label": "05-after-second-submit",
+      "state": {
+        "selectedSession": "webui-session-20260705132723-566c48e2",
+        "selectedTurn": "runtime-turn-67",
+        "composer": "",
+        "commandStatus": "dispatching... 0s",
+        "turnStatus": "dispatching... 0s",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 3,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783258043639\n\nAssistant\ncompleted\n\nADP success sample confirmed: pending input 1783258043639 verified successfully.\n\nFinal\ncompleted\n\nProvided one short sentence confirming ADP success sample verification.\n\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "running2": {
+      "label": "06-second-running",
+      "state": {
+        "selectedSession": "webui-session-20260705132723-566c48e2",
+        "selectedTurn": "runtime-turn-67",
+        "composer": "",
+        "commandStatus": "thinking after tool result... 0s",
+        "turnStatus": "thinking after tool result... 0s",
+        "workspaceStatus": "connected",
+        "liveCount": 1,
+        "nonLastLiveCount": 0,
+        "messageCount": 4,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783258043639\n\nAssistant\ncompleted\n\nADP success sample confirmed: pending input 1783258043639 verified successfully.\n\nFinal\ncompleted\n\nProvided one short sentence confirming ADP success sample verification.\n\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.\n\nAssistant\ntool failed\n\nI'll call the read_file tool once with the specified path to demonstrate the failure handling.\n\nRead file\n执行失败 · 0s\ntype: read file\ntarget: definitely-missing-freehand-file.txt\npath=definitely-missing-freehand-file.txt\nModel\n0s\n\ntool result returned: 1 failed / 1 total · waiting model",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "terminal2": {
+      "label": "07-second-terminal",
+      "state": {
+        "selectedSession": "webui-session-20260705132723-566c48e2",
+        "selectedTurn": "runtime-turn-67-r2",
+        "composer": "",
+        "commandStatus": "turn completed",
+        "turnStatus": "completed",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 5,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783258043639\n\nAssistant\ncompleted\n\nADP success sample confirmed: pending input 1783258043639 verified successfully.\n\nFinal\ncompleted\n\nProvided one short sentence confirming ADP success sample verification.\n\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.\n\nAssistant\ntool failed\n\nI'll call the read_file tool once with the specified path to demonstrate the failure handling.\n\nRead file\n执行失败 · 0s\ntype: read file\ntarget: definitely-missing-freehand-file.txt\npath=definitely-missing-freehand-file.txt\nAssistant\ncompleted\n\nThe read_file tool failed as expected with \"No such file or directory\" because the path `definitely-missing-freehand-file.txt` does not exist. This demonstrates a tool execution failure that I can now report through the Freehand completion schema.\n\nFinal\ncompleted\n\nDemonstrated ADP failure-sample handling: invoked read_file once against a missing path, observed the tool failure, and acknowledged the failure in a valid Freehand completion schema.",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "refreshed": {
+      "label": "08-after-refresh",
+      "state": {
+        "selectedSession": "webui-session-20260705132723-566c48e2",
+        "selectedTurn": "runtime-turn-67-r2",
+        "composer": "",
+        "commandStatus": "turn completed",
+        "turnStatus": "completed",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 5,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783258043639\n\nAssistant\ncompleted\n\nADP success sample confirmed: pending input 1783258043639 verified successfully.\n\nFinal\ncompleted\n\nProvided one short sentence confirming ADP success sample verification.\n\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.\n\nAssistant\ntool failed\n\nI'll call the read_file tool once with the specified path to demonstrate the failure handling.\n\nRead file\n执行失败 · 0s\ntype: read file\ntarget: definitely-missing-freehand-file.txt\npath=definitely-missing-freehand-file.txt\nAssistant\ncompleted\n\nThe read_file tool failed as expected with \"No such file or directory\" because the path `definitely-missing-freehand-file.txt` does not exist. This demonstrates a tool execution failure that I can now report through the Freehand completion schema.\n\nFinal\ncompleted\n\nDemonstrated ADP failure-sample handling: invoked read_file once against a missing path, observed the tool failure, and acknowledged the failure in a valid Freehand completion schema.",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    }
+  },
+  "adpQuery": {
+    "code": 0,
+    "stdout": "adp_session_query_ok url=ws://127.0.0.1:4042/adp sessions=7 ids=cli-adp-sample-success-1783252973529124000:1:success,runtime-session-master:16:blocked,webui-session-20260705115940-de3b7e5c:3:success,webui-session-20260705123221-8ed193a1:2:success,webui-session-20260705123342-4fd705e4:3:success,webui-session-20260705123503-9d9824e6:2:success,webui-session-20260705132723-566c48e2:3:success selected_session=webui-session-20260705132723-566c48e2 turns=3 turn_ids=runtime-turn-66,runtime-turn-67,runtime-turn-67-r2",
+    "stderr": ""
+  },
+  "chromeProfileDir": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/freehand-webui-verify-3rqhjy",
+  "chromeLog": [
+    "[stderr] \nDevTools listening on ws://127.0.0.1:9223/devtools/browser/1a21400d-79dc-4090-97a2-a6846baf7f8d\n",
+    "[stderr] Trying to load the allocator multiple times. This is *not* supported.\n",
+    "[stderr] [64307:1371116:0705/212728.593919:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: QUOTA_EXCEEDED\n"
+  ]
+}

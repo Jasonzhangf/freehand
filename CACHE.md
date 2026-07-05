@@ -6,6 +6,7 @@
   - Runtime live submit failure projection now preserves unrelated session transcripts while replacing only the failed session turns.
   - Online S-profile proof: `artifacts/webui-online/20260705-history-4042-1783254901868/summary.json`, session `webui-session-20260705123503-9d9824e6`, turns `runtime-turn-64,runtime-turn-65`, token `FHCTX-1783254901867` recovered in second answer after first-turn-only context.
   - General WebUI online gate proof: `artifacts/webui-online/20260705-verify-4042-1783254821320/summary.json`.
+  - Clippy closeout proof after `0e19a45`: provider error metadata inputs are grouped into `ProviderErrorMetadataSpec<'_>` with unchanged behavior; online S-profile proof `artifacts/webui-online/20260705-verify-4042-1783258042728/summary.json`, session `webui-session-20260705132723-566c48e2`, turns `runtime-turn-66,runtime-turn-67,runtime-turn-67-r2`, failed read_file result returned to model and terminal refresh had `liveCount=0`.
   - verification: `cargo fmt --check`; `cargo test -p freehand-runtime -- --nocapture`; `node --check scripts/webui_verify_online.mjs`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `scripts/install-launchd.sh restartS`; 4042 health; `freehand-cliS adp-smoke`; `make verify-webui-online`.
 
 - Current verified WebUI render projection closeout:

@@ -172,6 +172,17 @@ struct ProviderExecutorRetryPlan {
     max_backoff_ms: u64,
 }
 
+struct ProviderErrorMetadataSpec<'a> {
+    center: &'a Arc<Mutex<MetadataCenter>>,
+    agent_id: &'a AgentId,
+    session_id: &'a SessionId,
+    turn: &'a TurnRecord,
+    error: &'a RuntimeLiveBridgeError,
+    error_code: &'a str,
+    retry_index: u32,
+    retry_cap: u32,
+}
+
 impl ProviderExecutorRetryPlan {
     fn production() -> Self {
         Self {
@@ -1156,16 +1167,16 @@ where
                 let info = classify_anthropic_executor_error(&err);
                 let mapped =
                     RuntimeLiveBridgeError::AnthropicExecutorFailed(info.terminal_message());
-                record_provider_error_metadata(
-                    &metadata_center,
-                    &agent_id,
-                    &request.session_id,
-                    &turn,
-                    &mapped,
-                    &info.code,
-                    1,
-                    1,
-                )?;
+                record_provider_error_metadata(ProviderErrorMetadataSpec {
+                    center: &metadata_center,
+                    agent_id: &agent_id,
+                    session_id: &request.session_id,
+                    turn: &turn,
+                    error: &mapped,
+                    error_code: &info.code,
+                    retry_index: 1,
+                    retry_cap: 1,
+                })?;
                 emit_provider_retry_debug(
                     &debug_hub,
                     &agent_id,
@@ -1233,16 +1244,16 @@ where
                         let mapped = RuntimeLiveBridgeError::AnthropicExecutorFailed(
                             info.terminal_message(),
                         );
-                        record_provider_error_metadata(
-                            &metadata_center,
-                            &agent_id,
-                            &request.session_id,
-                            &turn,
-                            &mapped,
-                            &info.code,
+                        record_provider_error_metadata(ProviderErrorMetadataSpec {
+                            center: &metadata_center,
+                            agent_id: &agent_id,
+                            session_id: &request.session_id,
+                            turn: &turn,
+                            error: &mapped,
+                            error_code: &info.code,
                             retry_index,
-                            retry_plan.cap,
-                        )?;
+                            retry_cap: retry_plan.cap,
+                        })?;
                         emit_provider_retry_debug(
                             &debug_hub,
                             &agent_id,
@@ -3916,45 +3927,38 @@ fn sleep_provider_retry(duration: Duration) {
 }
 
 fn record_provider_error_metadata(
-    center: &Arc<Mutex<MetadataCenter>>,
-    agent_id: &AgentId,
-    session_id: &SessionId,
-    turn: &TurnRecord,
-    error: &RuntimeLiveBridgeError,
-    error_code: &str,
-    retry_index: u32,
-    retry_cap: u32,
+    spec: ProviderErrorMetadataSpec<'_>,
 ) -> Result<(), RuntimeLiveBridgeError> {
     write_error_center_metadata(
-        center,
-        agent_id,
-        session_id,
+        spec.center,
+        spec.agent_id,
+        spec.session_id,
         RuntimeErrorCenterWriteSpec {
-            turn_id: Some(&turn.request.turn_id),
-            trace_id: &turn.request.trace_id,
+            turn_id: Some(&spec.turn.request.turn_id),
+            trace_id: &spec.turn.request.trace_id,
             pipeline_node: "RuntimeLive05ProviderError",
-            metadata_suffix: format!("provider_error:{retry_index}"),
+            metadata_suffix: format!("provider_error:{}", spec.retry_index),
             symbol_path: "run_live_anthropic_reason_turn",
             observed: ErrorCenterObservedFailure {
                 source_owner: "provider.reason-live-bridge".to_owned(),
                 source_pipeline_node: "RuntimeLive05ProviderError".to_owned(),
-                code: error_code.to_owned(),
-                message: error.to_string(),
-                retry_index,
-                retry_cap,
+                code: spec.error_code.to_owned(),
+                message: spec.error.to_string(),
+                retry_index: spec.retry_index,
+                retry_cap: spec.retry_cap,
             },
         },
     )?;
     write_live_bridge_metadata(
-        center,
-        agent_id,
-        session_id,
+        spec.center,
+        spec.agent_id,
+        spec.session_id,
         RuntimeMetadataWriteSpec {
-            turn_id: Some(&turn.request.turn_id),
-            trace_id: &turn.request.trace_id,
+            turn_id: Some(&spec.turn.request.turn_id),
+            trace_id: &spec.turn.request.trace_id,
             kind: MetadataKind::Provider,
             pipeline_node: "RuntimeLive05ProviderError",
-            metadata_suffix: format!("provider_error:{retry_index}"),
+            metadata_suffix: format!("provider_error:{}", spec.retry_index),
             symbol_path: "run_live_anthropic_reason_turn",
             entries: vec![
                 MetadataEntry {
@@ -3963,19 +3967,19 @@ fn record_provider_error_metadata(
                 },
                 MetadataEntry {
                     key: "error.code".to_owned(),
-                    value: json!(error_code),
+                    value: json!(spec.error_code),
                 },
                 MetadataEntry {
                     key: "error.summary".to_owned(),
-                    value: json!(error.to_string()),
+                    value: json!(spec.error.to_string()),
                 },
                 MetadataEntry {
                     key: "error.retry_index".to_owned(),
-                    value: json!(retry_index),
+                    value: json!(spec.retry_index),
                 },
                 MetadataEntry {
                     key: "error.retry_cap".to_owned(),
-                    value: json!(retry_cap),
+                    value: json!(spec.retry_cap),
                 },
             ],
         },
