@@ -54,6 +54,7 @@ fn run_gates_check() -> Result<(), String> {
         &root,
         &[
             "AGENTS.md",
+            ".ignore",
             "CACHE.md",
             "MEMORY.md",
             "note.md",
@@ -198,6 +199,7 @@ fn run_gates_check() -> Result<(), String> {
             "docs/references/provider-protocols/openai-responses.md",
             "docs/references/provider-protocols/openai-chat-completions.md",
             "docs/references/provider-protocols/anthropic-messages.md",
+            "scripts/source-search.sh",
             ".agents/skills/freehand-dev/SKILL.md",
             ".agents/skills/freehand-dev/agents/openai.yaml",
             ".agents/skills/provider-protocols/SKILL.md",
@@ -216,6 +218,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_mainline_manifest_links(&root)?;
     verify_mainline_call_table_bindings(&root)?;
     verify_ci_cd_gate_commands(&root)?;
+    verify_source_search_policy(&root)?;
     verify_data_control_boundaries(&root)?;
     verify_webui_app_boundary(&root)?;
     verify_runtime_daemon_boundary(&root)?;
@@ -299,6 +302,8 @@ fn verify_skill_rules(root: &Path) -> Result<(), String> {
         "cargo run -p xtask -- gates check",
         "CI/CD command alignment",
         "make ci",
+        "scripts/source-search.sh",
+        "Do not search generated or runtime output when locating implementation truth",
     ];
     for snippet in required_skill_snippets {
         if !skill.contains(snippet) {
@@ -978,6 +983,92 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         "run: scripts/release.sh",
         ".github/workflows/release.yml",
     )?;
+
+    Ok(())
+}
+
+fn verify_source_search_policy(root: &Path) -> Result<(), String> {
+    let ignore =
+        fs::read_to_string(root.join(".ignore")).map_err(|err| format!("read .ignore: {err}"))?;
+    for snippet in [
+        "target/",
+        "dist/",
+        "artifacts/",
+        "docs/wiki/",
+        ".mempalace/",
+        "memory/*-mempalace-corpus/",
+        "test-palaces/",
+        "**/build/",
+        "**/.gradle/",
+        "**/node_modules/",
+    ] {
+        require_contains(&ignore, snippet, ".ignore")?;
+    }
+
+    let script = fs::read_to_string(root.join("scripts/source-search.sh"))
+        .map_err(|err| format!("read scripts/source-search.sh: {err}"))?;
+    for snippet in [
+        "exec rg --hidden",
+        "--glob=!artifacts/**",
+        "--glob=!target/**",
+        "--glob=!dist/**",
+        "--glob=!docs/wiki/**",
+        "--glob=!.mempalace/**",
+        "--glob=!memory/*-mempalace-corpus/**",
+        "--glob=!test-palaces/**",
+        "docs/architecture",
+        "docs/function-maps",
+        "docs/mainline-calls",
+        "docs/testing",
+        "crates",
+        "apps",
+        "xtask",
+    ] {
+        require_contains(&script, snippet, "scripts/source-search.sh")?;
+    }
+    for forbidden in ["CACHE.md", "MEMORY.md", "note.md", "artifacts"] {
+        if script.contains(&format!("\"{forbidden}\"")) {
+            return Err(format!(
+                "scripts/source-search.sh must not include `{forbidden}` as an implementation-search root"
+            ));
+        }
+    }
+
+    let skill = fs::read_to_string(root.join(".agents/skills/freehand-dev/SKILL.md"))
+        .map_err(|err| format!("read .agents/skills/freehand-dev/SKILL.md: {err}"))?;
+    for snippet in [
+        "Debug/search truth is source-first",
+        "Do not search generated or runtime output when locating implementation truth",
+        "Generated artifacts may be opened only as verification evidence",
+        "scripts/source-search.sh",
+    ] {
+        require_contains(&skill, snippet, ".agents/skills/freehand-dev/SKILL.md")?;
+    }
+
+    let debug_workflow =
+        fs::read_to_string(root.join("docs/architecture/dev-debug-workflow.md"))
+            .map_err(|err| format!("read docs/architecture/dev-debug-workflow.md: {err}"))?;
+    for snippet in [
+        "Source-Only Search Rule",
+        "scripts/source-search.sh",
+        "not as implementation search roots",
+    ] {
+        require_contains(
+            &debug_workflow,
+            snippet,
+            "docs/architecture/dev-debug-workflow.md",
+        )?;
+    }
+
+    let dev_gates = fs::read_to_string(root.join("docs/architecture/dev-gates.md"))
+        .map_err(|err| format!("read docs/architecture/dev-gates.md: {err}"))?;
+    for snippet in [
+        "Source Search Boundary Gate",
+        "`xtask gates check` validates source-only search policy",
+        "generated outputs remain excluded from default implementation search",
+    ] {
+        require_contains(&dev_gates, snippet, "docs/architecture/dev-gates.md")?;
+    }
 
     Ok(())
 }
@@ -1731,6 +1822,24 @@ mod tests {
         assert!(err.contains("RuntimeCheckpoint"), "{err}");
     }
 
+    #[test]
+    fn source_search_policy_accepts_source_only_configuration() {
+        let root = test_repo_root("source-search-policy-aligned");
+        write_source_search_policy_fixture(&root, SourceSearchPolicyFixtureMode::Aligned);
+
+        verify_source_search_policy(&root).expect("aligned source search policy should pass");
+    }
+
+    #[test]
+    fn source_search_policy_rejects_missing_artifact_exclusion() {
+        let root = test_repo_root("source-search-policy-missing-artifacts");
+        write_source_search_policy_fixture(&root, SourceSearchPolicyFixtureMode::MissingArtifacts);
+
+        let err =
+            verify_source_search_policy(&root).expect_err("missing artifact exclusion must fail");
+        assert!(err.contains("artifacts"), "{err}");
+    }
+
     enum FixtureMode {
         Aligned,
         WrongFunctionMapPath,
@@ -1757,6 +1866,11 @@ mod tests {
         MetadataPromptField,
         MetadataRequestType,
         MetadataControlType,
+    }
+
+    enum SourceSearchPolicyFixtureMode {
+        Aligned,
+        MissingArtifacts,
     }
 
     fn test_repo_root(name: &str) -> PathBuf {
@@ -2024,5 +2138,53 @@ pub struct MetadataCenter {{\n    records: Vec<MetadataEnvelope>,\n}}\n"
         .expect("write app fixture");
         fs::write(root.join("xtask/src/lib.rs"), "pub fn helper() {}\n")
             .expect("write xtask fixture");
+    }
+
+    fn write_source_search_policy_fixture(root: &Path, mode: SourceSearchPolicyFixtureMode) {
+        for rel in [
+            "scripts",
+            ".agents/skills/freehand-dev",
+            "docs/architecture",
+        ] {
+            fs::create_dir_all(root.join(rel)).expect("create source search fixture dir");
+        }
+
+        let artifact_ignore = match mode {
+            SourceSearchPolicyFixtureMode::Aligned => "artifacts/\n",
+            SourceSearchPolicyFixtureMode::MissingArtifacts => "",
+        };
+        let artifact_glob = match mode {
+            SourceSearchPolicyFixtureMode::Aligned => "  \"--glob=!artifacts/**\"\n",
+            SourceSearchPolicyFixtureMode::MissingArtifacts => "",
+        };
+        fs::write(
+            root.join(".ignore"),
+            format!(
+                "target/\ndist/\n{artifact_ignore}docs/wiki/\n.mempalace/\nmemory/*-mempalace-corpus/\ntest-palaces/\n**/build/\n**/.gradle/\n**/node_modules/\n"
+            ),
+        )
+        .expect("write .ignore fixture");
+        fs::write(
+            root.join("scripts/source-search.sh"),
+            format!(
+                "#!/usr/bin/env bash\nexec rg --hidden \\\n  \"--glob=!target/**\" \\\n  \"--glob=!dist/**\" \\\n{artifact_glob}  \"--glob=!docs/wiki/**\" \\\n  \"--glob=!.mempalace/**\" \\\n  \"--glob=!memory/*-mempalace-corpus/**\" \\\n  \"--glob=!test-palaces/**\" \\\n  \"$@\" docs/architecture docs/function-maps docs/mainline-calls docs/testing crates apps xtask\n"
+            ),
+        )
+        .expect("write source-search fixture");
+        fs::write(
+            root.join(".agents/skills/freehand-dev/SKILL.md"),
+            "Debug/search truth is source-first.\nDo not search generated or runtime output when locating implementation truth.\nGenerated artifacts may be opened only as verification evidence.\nUse scripts/source-search.sh.\n",
+        )
+        .expect("write skill fixture");
+        fs::write(
+            root.join("docs/architecture/dev-debug-workflow.md"),
+            "## Source-Only Search Rule\nUse scripts/source-search.sh. Generated outputs are evidence, not as implementation search roots.\n",
+        )
+        .expect("write debug workflow fixture");
+        fs::write(
+            root.join("docs/architecture/dev-gates.md"),
+            "## Source Search Boundary Gate\n`xtask gates check` validates source-only search policy so generated outputs remain excluded from default implementation search.\n",
+        )
+        .expect("write dev gates fixture");
     }
 }

@@ -1,0 +1,15 @@
+# Runtime/build/generated output. Keep default ripgrep searches source-only.
+target/
+dist/
+artifacts/
+docs/wiki/
+.mempalace/
+memory/*-mempalace-corpus/
+test-palaces/
+tmp/
+
+# Platform/package build caches.
+**/build/
+**/.gradle/
+**/node_modules/
+**/coverage/

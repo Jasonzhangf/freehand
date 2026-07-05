@@ -16,6 +16,7 @@
   - launchd symlink profile writes `~/Library/LaunchAgents/com.freehand.daemonS.plist`, writes `~/.freehand/daemonS.env`, uses `freehand-daemonS-bin` for launchd execution, refreshes that debug binary copy during `restartS`, and exposes `127.0.0.1:4042` plus separate `daemonS.*.log` files
   - launchd install script does not leak daemon workspace root overrides into release/global-install regression subprocesses
   - gate command can validate policy locks
+  - source-only search policy keeps implementation search out of generated/runtime outputs
   - gate command can reject data/control boundary leaks at the repo source level
   - mainline generation command can render wiki from JSON truth
   - mainline check command rejects stale wiki
@@ -37,6 +38,7 @@
   - launchd S-profile label/env/bin/bind/log separation
   - launchd `restartS` debug daemon binary refresh before kickstart
   - launchd release subprocess daemon-workdir env isolation
+  - source-only search policy checks `.ignore`, `scripts/source-search.sh`, debug docs, and local skill snippets
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
   - loop governance docs include required L1 report-only files and deny automated action until explicit L2 approval
 - module black-box plan:
@@ -45,7 +47,9 @@
   - `cargo test -p xtask` manifest-link positive and negative tests
   - `cargo test -p xtask` call-table binding positive and negative tests
   - `cargo test -p xtask` CI/CD command-alignment positive and negative tests
+  - `cargo test -p xtask` source-search boundary positive and negative tests
   - `bash -n scripts/release.sh`
+  - `bash -n scripts/source-search.sh`
   - `bash -n scripts/verify-webui-online.sh`
   - `bash -n scripts/install-global.sh`
   - `bash -n scripts/install-symlink.sh`
@@ -77,6 +81,7 @@
   - mainline manifest cross-link checks are implemented in `xtask`
   - mainline call-table binding checks are implemented in `xtask`
   - CI/CD command-alignment checks are implemented in `xtask`
+  - source-search boundary checks are implemented in `xtask`
   - release/global-install operator docs live in `docs/release.md`
   - data/control leak gate must stay implemented in `xtask`
   - initial loop governance docs are landed under `docs/loops/freehand-framework-loop`

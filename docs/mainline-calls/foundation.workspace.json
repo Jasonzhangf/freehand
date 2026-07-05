@@ -15,6 +15,7 @@
     "gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path",
     "gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols",
     "gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness",
+    "gate runner verifies source-only search policy so implementation searches use source code, tests, maintained scripts, and canonical docs rather than generated/runtime output",
     "release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging",
     "WebUI online verification wrapper checks fixed S-profile 127.0.0.1:4042 daemon health and invokes the real browser WebUI plus ADP proof for alpha promotion; release-profile 127.0.0.1:4041 proof is a separate explicit target",
     "global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth",
@@ -31,6 +32,7 @@
     "gate returns success when migrated mainline manifests are deterministically linked to their owner docs",
     "gate returns success when migrated mainline call-table bindings resolve to source files and source symbols",
     "gate returns success when local and remote automation routes through the same full gate stack",
+    "gate returns success when `.ignore`, `scripts/source-search.sh`, debug docs, and local skill keep generated/runtime output excluded from implementation search",
     "S-profile WebUI online verification writes screenshots and summary.json under artifacts/webui-online/<run-id>/, proving composer clear, visible submitted input, multi-round failed-tool continuation, no stale historical animation, refresh persistence, and ADP session truth alignment",
     "global install exposes freehand-cli, freehand-server, freehand-daemon, and freehand-daemon-launchd on the chosen install prefix",
     "symlink install exposes freehand-cliS, freehand-serverS, freehand-daemonS, and freehand-daemon-launchdS on the chosen install prefix, with host commands pointing at repo debug binaries and the launchd wrapper installed as a prefix-local file",
@@ -48,6 +50,7 @@
     "mismatched mainline manifest source path, function map path, test design path, generated wiki path, or feature-map link surfaces as gate failure",
     "missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure",
     "missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure",
+    "missing source-only search exclusions or missing `scripts/source-search.sh` policy snippets surface as gate failure",
     "missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surfaces as online verification failure before alpha success is claimed",
     "launchd bootstrap, kickstart, or daemon binary prefix mismatch failure surfaces as script failure before background service success is claimed",
     "symlink install failure surfaces before launchd symlink service success is claimed",
@@ -227,6 +230,17 @@
     },
     {
       "step": "16",
+      "symbol_path": "verify_source_search_policy",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "validate source-only implementation search boundaries",
+      "input_semantic": "ignore file, source search script, debug docs, and local skill",
+      "output_semantic": "pass/fail",
+      "caller": "run_gates_check",
+      "callee": "filesystem and policy snippets",
+      "binding_status": "bound"
+    },
+    {
+      "step": "17",
       "symbol_path": "verify_data_control_boundaries",
       "file_path": "xtask/src/main.rs",
       "responsibility": "validate static data/control isolation rules on source-owned request and metadata types",
@@ -237,7 +251,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "17",
+      "step": "18",
       "symbol_path": "verify_feature_map_unique_entries",
       "file_path": "xtask/src/main.rs",
       "responsibility": "validate that docs/architecture/feature-map.md keeps one seed entry per feature_id",
@@ -248,7 +262,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "18",
+      "step": "19",
       "symbol_path": "run_release",
       "file_path": "scripts/release.sh",
       "responsibility": "run release regressions and build/stage host + Android artifacts",
@@ -259,7 +273,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "19",
+      "step": "20",
       "symbol_path": "run_verify_webui_online",
       "file_path": "scripts/verify-webui-online.sh",
       "responsibility": "run fixed-port S-profile real browser WebUI plus ADP alpha proof",
@@ -270,7 +284,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "20",
+      "step": "21",
       "symbol_path": "run_install_global",
       "file_path": "scripts/install-global.sh",
       "responsibility": "run release script and install host binaries to a global prefix",
@@ -281,7 +295,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "21",
+      "step": "22",
       "symbol_path": "run_install_launchd",
       "file_path": "scripts/install-launchd.sh",
       "responsibility": "install global binaries or refresh S debug binaries and bootstrap/restart the macOS user LaunchAgent",
@@ -292,7 +306,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "22",
+      "step": "23",
       "symbol_path": "run_uninstall_launchd",
       "file_path": "scripts/uninstall-launchd.sh",
       "responsibility": "stop and remove the macOS user LaunchAgent plist",
@@ -303,7 +317,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "23",
+      "step": "24",
       "symbol_path": "run_install_symlink",
       "file_path": "scripts/install-symlink.sh",
       "responsibility": "build debug host binaries and expose S-suffixed symlinks for development",
@@ -316,7 +330,7 @@
   ],
   "sync_status": [
     "workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code",
-    "current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static data/control boundary checks",
+    "current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, source-search boundaries, and static data/control boundary checks",
     "generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes",
     "initial framework loop governance docs are bound under docs/loops/freehand-framework-loop in L1 report-only mode",
     "alpha WebUI online verification defaults to S-profile 4042 and is documented in docs/release.md; release 4041 proof is explicit via make verify-webui-release-online"

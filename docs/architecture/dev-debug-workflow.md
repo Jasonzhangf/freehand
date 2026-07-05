@@ -57,6 +57,14 @@
 - If any mapping is missing, update the map before implementation.
 - Do not use grep as the first owner decision; grep is only evidence after routing.
 
+## Source-Only Search Rule
+
+- Use `scripts/source-search.sh <pattern>` for implementation searches after owner routing.
+- Source search targets are source code, tests, maintained scripts, and canonical docs/function maps/test designs/mainline JSON.
+- Generated/runtime output directories are verification evidence only, not as implementation search roots.
+- Excluded implementation-search roots include `artifacts/**`, `target/**`, `dist/**`, `docs/wiki/**`, `.mempalace/**`, `memory/*-mempalace-corpus/**`, `test-palaces/**`, package build caches, and captured screenshots/reports.
+- If generated evidence is needed, first run or identify the producer command, then open the specific evidence file directly instead of adding generated directories to source search.
+
 ## Required Update When Truth Changes
 
 - update `docs/architecture/feature-map.md`

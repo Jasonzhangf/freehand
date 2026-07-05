@@ -7,3 +7,8 @@
 /tmp
 /dist
 /artifacts
+/.mempalace
+/test-palaces
+/memory/*-mempalace-corpus
+/apps/freehand-android/.gradle
+/apps/freehand-android/app/build

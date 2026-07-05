@@ -1673,3 +1673,21 @@ Current real root cause split:
   - `cargo clippy --workspace --all-targets -- -D warnings`
   - `cargo test --workspace` -> `437 passed`.
   - `make ci` -> exit 0.
+
+# 2026-07-06 source-only search boundary
+
+- user correction: implementation/debug searches must not include generated output, runtime artifacts, build products, generated wiki, or MemoryPalace corpora; only source code, tests, maintained scripts, and canonical docs should be searched.
+- implementation:
+  - added `.ignore` so default `rg` skips `target/`, `dist/`, `artifacts/`, `docs/wiki/`, `.mempalace/`, `memory/*-mempalace-corpus/`, `test-palaces/`, and package build caches.
+  - added `scripts/source-search.sh` as the source-only implementation search wrapper; it excludes generated/runtime paths and does not include `CACHE.md`, `MEMORY.md`, or `note.md` as search roots.
+  - added `verify_source_search_policy` to `xtask gates check` with positive and negative tests.
+  - updated `foundation.workspace` function map/test design/mainline JSON, debug workflow docs, dev gates docs, feature map, and local `freehand-dev` skill.
+- verification:
+  - `bash -n scripts/source-search.sh`
+  - `scripts/source-search.sh "20260705-verify-4042"` -> no matches, proving generated evidence and memory notes are excluded from source-search roots.
+  - `cargo fmt --check`
+  - `cargo test -p xtask -- --nocapture` -> 20 passed.
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`

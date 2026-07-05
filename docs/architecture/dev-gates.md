@@ -111,6 +111,17 @@ This keeps mainline call maps code-bound instead of becoming stale review prose.
 
 This prevents pre-push, CI, and release from silently drifting into partial gate stacks.
 
+## Source Search Boundary Gate
+
+`xtask gates check` validates source-only search policy:
+
+- `.ignore` must exclude generated/runtime outputs from default `rg` searches
+- `scripts/source-search.sh` must search only source code, tests, maintained scripts, and canonical docs while excluding generated/runtime outputs
+- `.agents/skills/freehand-dev/SKILL.md` and debug docs must preserve the source-first search rule
+- generated outputs remain excluded from default implementation search and may only be opened as direct verification evidence
+
+This prevents artifacts, generated wiki, build output, or MemoryPalace corpora from becoming accidental implementation truth.
+
 ## Metadata/Request Isolation Gate
 
 `xtask gates check` validates one low-noise static boundary for data/control separation:

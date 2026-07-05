@@ -79,7 +79,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `foundation.workspace`
 
 - owner: `xtask`, workspace root
-- allowed_paths: `Cargo.toml`, `Makefile`, `.github/workflows/**`, `.githooks/**`, `.agents/skills/freehand-dev/**`, `scripts/**`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `docs/loops/**`, `docs/release.md`, `CACHE.md`, `MEMORY.md`, `note.md`
+- allowed_paths: `.ignore`, `Cargo.toml`, `Makefile`, `.github/workflows/**`, `.githooks/**`, `.agents/skills/freehand-dev/**`, `scripts/**`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `docs/loops/**`, `docs/release.md`, `CACHE.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: provider and reason implementation crates unless scaffold-related
 - required_checks:
   - `cargo test --workspace`
@@ -91,6 +91,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - xtask mainline manifest cross-link tests
   - xtask mainline call-table binding tests
   - xtask CI/CD command-alignment tests
+  - xtask source-search boundary tests
   - xtask metadata/request leak-gate tests
 - required_module_black_box_tests:
   - xtask gate smoke
@@ -110,6 +111,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - gate policy changes
   - repo workflow changes
   - CI/CD full-gate alignment changes
+  - source-only search boundary changes
   - release or global-install script changes
   - launchd service install/uninstall script changes
   - mainline generation shape changes
