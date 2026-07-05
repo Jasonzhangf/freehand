@@ -29,6 +29,7 @@
   - mainline call-table file and symbol binding logic for migrated `bound` rows
   - CI/CD and local hook command-alignment logic
   - release script prerequisite and artifact path logic
+  - WebUI online verification wrapper checks fixed-port health before invoking the real browser verifier
   - Android release packaging config disables Android release lint checks explicitly
   - global install prefix logic
   - symlink install S-suffix command, symlink target logic, and prefix-local launchd wrapper copy
@@ -45,6 +46,7 @@
   - `cargo test -p xtask` call-table binding positive and negative tests
   - `cargo test -p xtask` CI/CD command-alignment positive and negative tests
   - `bash -n scripts/release.sh`
+  - `bash -n scripts/verify-webui-online.sh`
   - `bash -n scripts/install-global.sh`
   - `bash -n scripts/install-symlink.sh`
   - `bash -n scripts/freehand-daemon-launchd.sh`
@@ -61,6 +63,7 @@
   - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
   - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`
   - `scripts/install-launchd.sh restartS` refreshes S debug binaries and restarts only `com.freehand.daemonS`
+  - `make verify-webui-online` runs the fixed `127.0.0.1:4041` real-browser WebUI + ADP proof after global install/restart and saves screenshots plus `summary.json` under `artifacts/webui-online/`
   - machine-readable mainline truth remains the only source for generated wiki artifacts
   - loop governance starts as report-only project control, not unattended automation
 - fixtures / replay inputs / runtime evidence paths:

@@ -24,6 +24,41 @@ Release artifacts:
 
 The GitHub release workflow calls the same script after the full gate, then uploads `dist/bin/*` and `dist/android/*`.
 
+## Alpha Closeout Gate
+
+Alpha promotion requires the release build plus one fixed-port WebUI online proof against the globally installed daemon.
+
+Run the alpha closeout sequence from the repo root:
+
+```bash
+scripts/install-global.sh
+scripts/install-launchd.sh restart
+make verify-webui-online
+```
+
+`make verify-webui-online` is intentionally separate from `make ci` because it requires a running local daemon on `127.0.0.1:4041` and a local Chrome binary for real browser evidence. It is mandatory for alpha promotion and for WebUI/ADP/session lifecycle changes, but it is not a CI-safe static gate.
+
+The online gate performs a real browser flow through `http://127.0.0.1:4041/` and compares it with ADP truth:
+
+1. creates a new WebUI conversation
+2. submits a success sample and verifies the composer clears while the user input remains visible
+3. waits for terminal success
+4. submits a failed `read_file` sample that must continue through a second model round
+5. verifies only the current live card animates and historical turns are static
+6. waits for terminal success with `runtime-turn-N-r2`
+7. refreshes the page and verifies both prompts remain visible
+8. runs `freehand-cli adp-session-query` for the same session
+9. writes screenshots and `summary.json` under `artifacts/webui-online/<run-id>/`
+
+Alpha cannot be claimed from `node --check`, unit tests, or static screenshots alone. The required evidence is the final `summary.json`, screenshots, fixed `4041` health, and matching served WebUI asset hash when code changed.
+
+Current alpha blockers that are explicitly outside the single-agent WebUI alpha scope must remain documented in `docs/architecture/architecture-gaps.md`:
+
+- `control.center` / `error.center` / `task.orchestration` full framework orchestration
+- `metadata.core` broader provider/debug producer coverage
+
+If alpha scope expands to master/worker task delegation, `task.orchestration` stops being a documented gap and becomes a release blocker.
+
 ## Global Install
 
 `scripts/install-global.sh` is the host global-install truth.

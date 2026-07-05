@@ -1,0 +1,14 @@
+{
+  "selectedSession": "webui-session-20260705102934-ec7ca170",
+  "selectedTurn": "runtime-turn-51",
+  "composer": "",
+  "commandStatus": "turn completed",
+  "turnStatus": "completed",
+  "workspaceStatus": "connected",
+  "liveCount": 0,
+  "nonLastLiveCount": 0,
+  "messageCount": 2,
+  "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783247375156\n\nAssistant\ncompleted\n\nPending input verified successfully for marker 1783247375156.\n\nFinal\ncompleted\n\nADP success sample acknowledged with one short sentence and valid completion schema.",
+  "pageErrors": [],
+  "consoleErrors": []
+}

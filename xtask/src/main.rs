@@ -839,7 +839,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: build fmt clippy test mainlines gates ci release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks",
+        ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -853,6 +853,11 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         "Makefile",
     )?;
     require_contains(&makefile, "release:\n\tscripts/release.sh", "Makefile")?;
+    require_contains(
+        &makefile,
+        "verify-webui-online:\n\tscripts/verify-webui-online.sh",
+        "Makefile",
+    )?;
     require_contains(
         &makefile,
         "install-global:\n\tscripts/install-global.sh",
@@ -1765,7 +1770,7 @@ mod tests {
         }
         let makefile = match mode {
             CiFixtureMode::Aligned | CiFixtureMode::CiWorkflowPartialGate => {
-                ".PHONY: build fmt clippy test mainlines gates ci release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
+                ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
@@ -1773,6 +1778,7 @@ test:\n\tcargo test --workspace\n\
 mainlines:\n\tcargo run -p xtask -- mainlines check\n\
 gates:\n\tcargo run -p xtask -- gates check\n\
 ci: build fmt clippy test mainlines gates\n\
+verify-webui-online:\n\tscripts/verify-webui-online.sh\n\
 release:\n\tscripts/release.sh\n\
 install-global:\n\tscripts/install-global.sh\n\
 install-symlink:\n\tscripts/install-symlink.sh\n\
@@ -1784,13 +1790,14 @@ uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n\
 uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n"
             }
             CiFixtureMode::MakeCiMissingMainlines => {
-                ".PHONY: build fmt clippy test gates ci release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
+                ".PHONY: build fmt clippy test gates ci verify-webui-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
 test:\n\tcargo test --workspace\n\
 gates:\n\tcargo run -p xtask -- gates check\n\
 ci: build fmt clippy test gates\n\
+verify-webui-online:\n\tscripts/verify-webui-online.sh\n\
 release:\n\tscripts/release.sh\n\
 install-global:\n\tscripts/install-global.sh\n\
 install-symlink:\n\tscripts/install-symlink.sh\n\

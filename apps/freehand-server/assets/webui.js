@@ -61,6 +61,8 @@ const state = {
   toolTimings: new Map(),
   lifecycleClocks: new Map(),
   pendingUserInput: null,
+  pendingSubmitId: null,
+  pendingSubmitSessionId: null,
   pendingAttachments: [],
   inputHistory: [],
   inputHistoryIndex: null,
@@ -824,20 +826,45 @@ function chatAssistantSection(row) {
     section.classList.add("chat-section-reasoning");
   }
 
-  const heading = document.createElement("div");
-  heading.className = "chat-section-heading";
-  heading.textContent = row.kind === "final" ? "Final" : row.title || "Assistant";
-  if (row.status) {
-    const status = document.createElement("span");
-    status.className = "chat-row-status";
-    status.textContent = row.status;
-    heading.appendChild(status);
-  }
   const body = document.createElement("div");
   body.className = row.kind === "system" ? "chat-reasoning-body" : "chat-message-body";
+  const headingLabel = assistantSectionHeadingLabel(row);
+  const showSectionStatus = row.kind !== "assistant" && row.status;
+  if (headingLabel || showSectionStatus) {
+    const heading = document.createElement("div");
+    heading.className = "chat-section-heading";
+    if (headingLabel) {
+      heading.textContent = headingLabel;
+    }
+    if (showSectionStatus) {
+      const status = document.createElement("span");
+      status.className = "chat-row-status";
+      status.textContent = row.status;
+      heading.appendChild(status);
+    }
+    section.appendChild(heading);
+  }
   renderTextLines(body, row.body || []);
-  section.append(heading, body);
+  section.appendChild(body);
   return section;
+}
+
+function assistantSectionHeadingLabel(row) {
+  if (!row) {
+    return "";
+  }
+  if (row.kind === "final") {
+    return "Final";
+  }
+  if (row.kind === "system") {
+    return row.title || "Model";
+  }
+  if (row.kind === "error") {
+    return row.title || "Error";
+  }
+  // Plain assistant text already lives inside an assistant bubble with a meta header.
+  // Repeating an inner "Assistant" heading adds no new semantics and renders as duplication.
+  return "";
 }
 
 function renderTextLines(container, lines) {
@@ -1635,9 +1662,17 @@ function pendingUserInputIsMaterialized() {
   if (!state.pendingUserInput) {
     return false;
   }
-  return conversationTurnsForRender().some((turn) =>
-    turnContainsVisibleUserText(turn, state.pendingUserInput),
-  );
+  const submitId = state.pendingSubmitId;
+  const submitSessionId = state.pendingSubmitSessionId;
+  return conversationTurnsForRender().some((turn) => {
+    if (submitSessionId && turn.session_id !== submitSessionId) {
+      return false;
+    }
+    if (submitId && turn.submit_id !== submitId) {
+      return false;
+    }
+    return turnContainsVisibleUserText(turn, state.pendingUserInput);
+  });
 }
 
 function clearPendingUserInputIfMaterialized() {
@@ -1645,6 +1680,8 @@ function clearPendingUserInputIfMaterialized() {
     return;
   }
   state.pendingUserInput = null;
+  state.pendingSubmitId = null;
+  state.pendingSubmitSessionId = null;
   state.pendingAttachments = [];
 }
 
@@ -1759,6 +1796,8 @@ function resetLocalConversationState(sessionId) {
   state.turn = null;
   state.publicConversation = [];
   state.pendingUserInput = null;
+  state.pendingSubmitId = null;
+  state.pendingSubmitSessionId = null;
   state.pendingAttachments = [];
   state.lifecycleClocks.clear();
   state.toolTimings.clear();
@@ -2654,6 +2693,8 @@ async function cancelActiveTurn() {
   if (!turnId && !state.submitInFlight && !state.pendingUserInput) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.pendingSubmitId = null;
+    state.pendingSubmitSessionId = null;
     state.pendingAttachments = [];
     state.lifecycleClocks.clear();
     state.submitStartedAt = null;
@@ -2673,6 +2714,8 @@ async function cancelActiveTurn() {
     return;
   }
   state.pendingUserInput = null;
+  state.pendingSubmitId = null;
+  state.pendingSubmitSessionId = null;
   state.pendingAttachments = [];
   state.lifecycleClocks.clear();
   state.submitStartedAt = null;
@@ -2702,6 +2745,8 @@ async function runSlashCommand(rawText) {
   if (command.startsWith("/")) {
     composerInput.value = "";
     state.pendingUserInput = null;
+    state.pendingSubmitId = null;
+    state.pendingSubmitSessionId = null;
     state.pendingAttachments = [];
     state.lifecycleClocks.clear();
     state.submitStartedAt = null;
@@ -2747,6 +2792,8 @@ async function runSlashCommand(rawText) {
     case "/clear":
       composerInput.value = "";
       state.pendingUserInput = null;
+      state.pendingSubmitId = null;
+      state.pendingSubmitSessionId = null;
       state.pendingAttachments = [];
       state.lifecycleClocks.clear();
       state.submitStartedAt = null;
@@ -2830,6 +2877,8 @@ composerForm.addEventListener("submit", async (event) => {
   const commandText = textWithAttachmentPlaceholders(text, attachments);
   rememberInputHistory(text);
   state.pendingUserInput = text;
+  state.pendingSubmitId = null;
+  state.pendingSubmitSessionId = state.selectedSessionId;
   state.pendingAttachments = attachments;
   state.submitStartedAt = Date.now();
   state.submitInFlight = true;
@@ -2838,6 +2887,7 @@ composerForm.addEventListener("submit", async (event) => {
   renderMessages();
   try {
     const receipt = await submitUserInput(commandText);
+    state.pendingSubmitId = receipt && receipt.ingress ? receipt.ingress.submit_id : null;
     clearCurrentAttachments();
     state.submitInFlight = false;
     state.submitStartedAt = null;
@@ -2851,6 +2901,8 @@ composerForm.addEventListener("submit", async (event) => {
   } catch (error) {
     state.submitInFlight = false;
     state.pendingUserInput = null;
+    state.pendingSubmitId = null;
+    state.pendingSubmitSessionId = null;
     state.pendingAttachments = [];
     state.submitStartedAt = null;
     composerInput.value = "";

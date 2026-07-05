@@ -1,0 +1,14 @@
+{
+  "selectedSession": "webui-session-20260705102934-ec7ca170",
+  "selectedTurn": "-",
+  "composer": "",
+  "commandStatus": "new conversation ready",
+  "turnStatus": "waiting",
+  "workspaceStatus": "connected",
+  "liveCount": 0,
+  "nonLastLiveCount": 0,
+  "messageCount": 0,
+  "messageText": "New conversation\nSend a message to start this session.",
+  "pageErrors": [],
+  "consoleErrors": []
+}

@@ -1317,6 +1317,10 @@ mod tests {
         assert!(js_body.contains("display.parameter_summary"));
         assert!(js_body.contains("elapsedSince"));
         assert!(js_body.contains("submitStartedAt"));
+        assert!(js_body.contains("pendingSubmitId"));
+        assert!(js_body.contains("pendingSubmitSessionId"));
+        assert!(js_body.contains("turn.submit_id !== submitId"));
+        assert!(js_body.contains("turn.session_id !== submitSessionId"));
         assert!(js_body.contains("modelRequestTimingKey"));
         assert!(js_body.contains("modelRequestKind"));
         assert!(js_body.contains("function modelRequestPhase"));
@@ -1352,6 +1356,13 @@ mod tests {
         assert!(!js_body.contains("display.result_summary"));
         assert!(js_body.contains("compact-tool-state"));
         assert!(js_body.contains("display.fields"));
+        assert!(js_body.contains("function assistantSectionHeadingLabel"));
+        assert!(js_body.contains("if (row.kind === \"final\")"));
+        assert!(js_body.contains("if (row.kind === \"system\")"));
+        assert!(
+            js_body.contains("const showSectionStatus = row.kind !== \"assistant\" && row.status;")
+        );
+        assert!(js_body.contains("if (headingLabel || showSectionStatus)"));
         assert!(js_body.contains("formatDuration"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("tool_call_id"));

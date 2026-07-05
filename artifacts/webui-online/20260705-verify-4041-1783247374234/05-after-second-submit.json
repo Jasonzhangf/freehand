@@ -1,0 +1,14 @@
+{
+  "selectedSession": "webui-session-20260705102934-ec7ca170",
+  "selectedTurn": "runtime-turn-52",
+  "composer": "",
+  "commandStatus": "dispatching... 0s",
+  "turnStatus": "dispatching... 0s",
+  "workspaceStatus": "connected",
+  "liveCount": 0,
+  "nonLastLiveCount": 0,
+  "messageCount": 3,
+  "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783247375156\n\nAssistant\ncompleted\n\nPending input verified successfully for marker 1783247375156.\n\nFinal\ncompleted\n\nADP success sample acknowledged with one short sentence and valid completion schema.\n\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.",
+  "pageErrors": [],
+  "consoleErrors": []
+}

@@ -16,6 +16,7 @@
     "gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols",
     "gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness",
     "release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging",
+    "WebUI online verification wrapper checks fixed 127.0.0.1:4041 daemon health and invokes the real browser WebUI plus ADP proof for alpha promotion",
     "global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth",
     "symlink install script builds debug host binaries, exposes S-suffixed development commands, and installs a prefix-local launchd wrapper without replacing global release commands",
     "launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths",
@@ -30,6 +31,7 @@
     "gate returns success when migrated mainline manifests are deterministically linked to their owner docs",
     "gate returns success when migrated mainline call-table bindings resolve to source files and source symbols",
     "gate returns success when local and remote automation routes through the same full gate stack",
+    "WebUI online verification writes screenshots and summary.json under artifacts/webui-online/<run-id>/, proving composer clear, visible submitted input, multi-round failed-tool continuation, no stale historical animation, refresh persistence, and ADP session truth alignment",
     "global install exposes freehand-cli, freehand-server, freehand-daemon, and freehand-daemon-launchd on the chosen install prefix",
     "symlink install exposes freehand-cliS, freehand-serverS, freehand-daemonS, and freehand-daemon-launchdS on the chosen install prefix, with host commands pointing at repo debug binaries and the launchd wrapper installed as a prefix-local file",
     "launchd install exposes com.freehand.daemon as a user LaunchAgent with RunAtLoad, KeepAlive, explicit FREEHAND_DAEMON_BIN, fixed 127.0.0.1:4041 WebUI, and logs under ~/.freehand/logs",
@@ -46,6 +48,7 @@
     "mismatched mainline manifest source path, function map path, test design path, generated wiki path, or feature-map link surfaces as gate failure",
     "missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure",
     "missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure",
+    "missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surfaces as online verification failure before alpha success is claimed",
     "launchd bootstrap, kickstart, or daemon binary prefix mismatch failure surfaces as script failure before background service success is claimed",
     "symlink install failure surfaces before launchd symlink service success is claimed",
     "request-node structs that introduce metadata/debug/cache/control payload fields or types surface as gate failure",
@@ -257,6 +260,17 @@
     },
     {
       "step": "19",
+      "symbol_path": "run_verify_webui_online",
+      "file_path": "scripts/verify-webui-online.sh",
+      "responsibility": "run fixed-port real browser WebUI plus ADP alpha proof",
+      "input_semantic": "running daemon on 127.0.0.1:4041",
+      "output_semantic": "screenshots, summary JSON, ADP session alignment",
+      "caller": "operator / make verify-webui-online",
+      "callee": "curl, scripts/webui_verify_4041.mjs, Chrome CDP, WebUI, freehand-cli adp-session-query",
+      "binding_status": "bound"
+    },
+    {
+      "step": "20",
       "symbol_path": "run_install_global",
       "file_path": "scripts/install-global.sh",
       "responsibility": "run release script and install host binaries to a global prefix",
@@ -267,7 +281,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "20",
+      "step": "21",
       "symbol_path": "run_install_launchd",
       "file_path": "scripts/install-launchd.sh",
       "responsibility": "install global binaries or refresh S debug binaries and bootstrap/restart the macOS user LaunchAgent",
@@ -278,7 +292,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "21",
+      "step": "22",
       "symbol_path": "run_uninstall_launchd",
       "file_path": "scripts/uninstall-launchd.sh",
       "responsibility": "stop and remove the macOS user LaunchAgent plist",
@@ -289,7 +303,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "22",
+      "step": "23",
       "symbol_path": "run_install_symlink",
       "file_path": "scripts/install-symlink.sh",
       "responsibility": "build debug host binaries and expose S-suffixed symlinks for development",
@@ -304,6 +318,7 @@
     "workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code",
     "current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static data/control boundary checks",
     "generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes",
-    "initial framework loop governance docs are bound under docs/loops/freehand-framework-loop in L1 report-only mode"
+    "initial framework loop governance docs are bound under docs/loops/freehand-framework-loop in L1 report-only mode",
+    "alpha WebUI online verification is documented in docs/release.md and exposed as make verify-webui-online"
   ]
 }

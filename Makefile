@@ -1,4 +1,4 @@
-.PHONY: build fmt clippy test mainlines gates ci release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks
+.PHONY: build fmt clippy test mainlines gates ci verify-webui-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks
 
 build:
 	cargo build --workspace
@@ -19,6 +19,9 @@ gates:
 	cargo run -p xtask -- gates check
 
 ci: build fmt clippy test mainlines gates
+
+verify-webui-online:
+	scripts/verify-webui-online.sh
 
 release:
 	scripts/release.sh
