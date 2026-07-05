@@ -1298,9 +1298,11 @@ mod tests {
         assert!(js_body.contains("logicalSessionTurns(state.sessionTurns)"));
         assert!(js_body.contains("stripFreehandCompletionBlock"));
         assert!(js_body.contains("stripped.includes(\"</freehand_completion>\")"));
-        assert!(
-            js_body.contains("isInternalRuntimePrompt(left) || isInternalRuntimePrompt(right)")
-        );
+        assert!(js_body.contains("const leftInternal = isInternalRuntimePrompt(left);"));
+        assert!(js_body.contains("return leftInternal && rightInternal;"));
+        assert!(!js_body.contains(
+            "left.session_id &&\n    right.session_id &&\n    left.session_id === right.session_id"
+        ));
         assert!(js_body.contains("terminalBodyForDisplay"));
         assert!(js_body.contains("terminalSummaryLine"));
         assert!(js_body.contains("stripDebugTerminalLines"));

@@ -1652,13 +1652,10 @@ function sameRenderableTurn(left, right) {
   if (!left || !right || left.turn_id !== right.turn_id) {
     return false;
   }
-  if (
-    left.session_id &&
-    right.session_id &&
-    left.session_id === right.session_id &&
-    (isInternalRuntimePrompt(left) || isInternalRuntimePrompt(right))
-  ) {
-    return true;
+  const leftInternal = isInternalRuntimePrompt(left);
+  const rightInternal = isInternalRuntimePrompt(right);
+  if (leftInternal || rightInternal) {
+    return leftInternal && rightInternal;
   }
   return normalizeVisibleText(left.user_text) === normalizeVisibleText(right.user_text);
 }
