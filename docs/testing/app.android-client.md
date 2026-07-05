@@ -35,11 +35,19 @@
 24. `MainActivity::selectPreferredHost` overrides same host with legacy port 4040
 25. `bridge.html` JS `applySnapshot` renders `public_conversation` items as DOM cards
 26. `handle_android_mock` serves `mobile-mock.html` with HTTP 200
+27. target mobile closeout: file-backed daemon config bootstraps from bundled `assets/config/client.json` on first run
+28. target mobile closeout: file-backed daemon config persists user-edited active profile to an app-owned JSON file, not only SharedPreferences
+29. target mobile closeout: default active profile is `tailscale` and builds health + ADP endpoints from configured host/port/path
+30. target mobile closeout: relay config fields are parsed but remain disabled unless explicitly selected by a future relay design
+31. target mobile closeout: connection failure projection includes active profile, endpoint, and concrete failure class
+32. target mobile closeout: aspect-ratio shape selection maps phone portrait, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop-like WebView into the expected layout mode without changing session/protocol truth
 
 ## White-Box Plan
 
 - `TimelineProjectorTest`: covers turn event parsing (running/success/error/null terminal_status), ADP subscription_event projection including low-noise status-only tool summaries, ADP failure projection, progress, node_status (healthy/unhealthy), error, terminal, empty state, snapshot JSON, connection state, fallbackTurnsJson, latestTurnProjectionJson preservation
 - `HostConfigTest`: covers URL construction for different hosts/ports, including `adpUrl`
+- file-backed config tests: bootstrap bundled Tailscale profile, write/read app-owned JSON config, reject malformed config explicitly, keep relay disabled by default
+- aspect-ratio layout classifier tests: map viewport width/height pairs to mobile/foldable/tablet/desktop layout modes without mutating selected session or draft state
 - `CommandIngressProtocolTest`: covers SubmitUserInput shape, CancelLatestActiveTurn shape, ADP command frame shape, ADP subscribe frame shape, query-as-command negative frame shape, old type-field negative, special characters, empty text
 
 ### Protocol Replay Harness
@@ -55,6 +63,8 @@
 - `cd apps/freehand-android && ./gradlew testDebugUnitTest` runs the JVM-level Android owner tests
 - `ClientConfig::load` parses real bundled `assets/config/client.json` and produces correct `ClientConfig` values
 - `HostStore` round-trips host:port through SharedPreferences
+- file-backed daemon config round-trips an edited Tailscale profile through an app-owned JSON file and rebuilds `HostConfig.adpUrl`
+- relay profile remains inert unless explicitly selected by the future relay flow
 - `AdpEventStream::buildFrame` produces correct ADP command/subscribe/query misuse frame shapes (verified by protocol shape tests)
 - `ProtocolClient::postCommand` remains a compatibility HTTP request body path
 - `handle_android_mock` returns HTTP 200 with `mock-mobile` class (existing server test)
@@ -65,11 +75,15 @@
 - Android app boundary proves no direct import of `freehand-reason`, `freehand-provider-*`, `freehand-node`, `freehand-config`, or `freehand-runtime`
 - Android app boundary proves Gson JsonNull safety in `TimelineProjector` (JSON null values do not crash)
 - Android app boundary proves `bridge.html` renders the same public conversation projection as the server-side design preview
+- Android app boundary proves daemon connection setup is file-backed, Tailscale-first, explicit on failure, and does not silently fall back to LAN scan/localhost/relay
+- Android/WebUI visual evidence must cover at least phone portrait, phone landscape, tablet portrait, tablet landscape, and foldable-like aspect ratios
 
 ## Known Gaps
 
 - no Espresso / instrumented tests yet (device-dependent; requires ADB-connected device)
 - no integration smoke against live daemon from a real Android device yet (requires daemon running + device connected)
+- file-backed daemon config is not implemented yet; current code still uses bundled JSON plus SharedPreferences host/port overrides
+- aspect-ratio layout classifier and visual verification are not implemented yet
 - `bridge.html` JS rendering is not unit-testable from JVM; requires WebView instrumented test
 - `MainActivity` lifecycle (onCreate, onResume, onPause, onKeyDown) not unit-testable without Android framework; covered by design + future instrumented tests
 

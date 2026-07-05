@@ -39,11 +39,13 @@
 - Android client surfaces the connection state (connecting / connected / offline) as a local banner
 - Android client surfaces agent status and turn status through protocol-projected status pills
 - Android client respects light and dark themes via `mobile-mock.css` tokens
+- target mobile closeout requires daemon connection config to be file-backed and Tailscale-first; the current `SharedPreferences` host/port persistence is a scaffold gap, not final connection truth
 
 ## Error Mainline
 
 - invalid command ingress returns explicit ADP failure to the user; the Android client does not invent success
 - network or ADP drop returns explicit client-visible connection state; no silent re-render and no fallback projection
+- connection profile failures must expose active profile, endpoint, and concrete failure class; the client must not silently fall back to localhost, LAN scan, relay, or another profile
 - provider / reason / debug error from `ui.protocol` is rendered as a red status pill; never re-projected as success
 - cancel-without-active-turn clears only local input draft; does not invent a runtime mutation
 
@@ -87,6 +89,8 @@
 
 - all 17 call table rows are bound to real file paths and symbol names
 - Android live shell now defaults to `AdpEventStream` for status/control; `ProtocolClient` and `SseEventStream` remain compatibility transport classes but are not the default `MainActivity` live path
+- current config code reads bundled `assets/config/client.json` and stores host/port overrides in `SharedPreferences`; upcoming mobile closeout must replace this with an app-owned JSON config file while keeping `HostConfig::adpUrl` as the endpoint builder
+- default remote access direction is Tailscale; relay profile support is schema-reserved and must stay inactive until relay protocol/auth is designed
 - step 17 is code-bound to `apps/freehand-server/src/lib.rs::handle_android_mock`
 - mainline call JSON and generated wiki must be regenerated from this function map
 - mainline call source: `docs/mainline-calls/app.android-client.json`

@@ -71,6 +71,10 @@ Use this directory family for durable design truth.
   - CLI/WebUI scope, commands, projections, subscription model, black-box targets
 - `webui-console-proposal.md`
   - proposal-only WebUI information architecture, visual direction, and binding matrix for a static review prototype
+- `multi-platform-ui-architecture.md`
+  - shared WebUI/mobile/Android responsive architecture, ADP-first transport, aspect-ratio layout matrix, and mobile daemon connection config direction
+- `android-client-v1-execution.md`
+  - Android WebView shell execution plan, protocol-only client boundary, ADP default path, and file-backed daemon config gap
 - `runtime-command-dispatch-design.md`
   - runtime-owned command dispatch wiring from UI protocol ingress to reason/node owner adapters
 - `runtime-checkpoint-rewind-design.md`

@@ -1608,3 +1608,20 @@ Current real root cause split:
   - browser checks true: submitted prompts stay visible, composer clears, second turn observes progress, failed read_file result returns to model, terminal has `liveCount=0`, refresh preserves both turns.
 - exclusions:
   - pre-existing untracked wrong-profile or intermediate evidence directories remain untouched.
+
+# 2026-07-05 mobile WebUI responsive direction
+
+- user direction:
+  - mobile/WebUI layout switching should use aspect-ratio plus width, not width-only breakpoints.
+  - mobile clients need an independent daemon connection config location.
+  - daemon connection config must be file-backed and persistent.
+  - default remote access mode is Tailscale; relay server is a later extension.
+- design updates:
+  - `docs/design/multi-platform-ui-architecture.md` now documents ADP-first transport, aspect-ratio shape matrix, mobile daemon config schema, Tailscale default, relay-disabled placeholder, and no silent fallback rule.
+  - `docs/design/android-client-v1-execution.md` now marks ADP as default Android live transport and records file-backed config as required next slice.
+  - `docs/testing/app.android-client.md` now adds file-backed config and aspect-ratio layout verification targets while preserving current SharedPreferences implementation as a gap.
+  - `docs/function-maps/app.android-client.md` now states current SharedPreferences host/port persistence is scaffold-only and the target is app-owned JSON config.
+- validation:
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `git diff --check` -> ok.

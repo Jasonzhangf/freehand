@@ -40,9 +40,10 @@ The shell uses a local WebView host for the rendered surface, but all truth stil
 - native Android app shell
 - local `bridge.html` render host inside the APK
 - shared UI protocol semantics
-- protocol query/subscribe over HTTP + SSE
-- command ingress over HTTP POST
+- protocol query/subscribe/command over ADP WebSocket `/adp`
+- HTTP query, SSE subscribe, and HTTP POST remain compatibility paths
 - local drawer/state rendering for agent/session switching
+- daemon connection profile loaded from file-backed client config, defaulting to Tailscale
 
 ## 4. Client Boundary
 
@@ -74,20 +75,23 @@ Android client forbidden responsibilities:
 | `ui/components/InputBarController` | bottom input bar + submit callback | `ui.protocol` command ingress |
 | `ui/components/DrawerController` | agent/session switching, host selection | local UI state |
 | `data/ProtocolClient` | HTTP query + command POST | `ui.protocol` |
-| `data/SseEventStream` | SSE subscribe / disconnect | `ui.protocol` |
+| `data/AdpEventStream` | ADP WebSocket query / subscribe / command | `ui.protocol` |
+| `data/SseEventStream` | compatibility SSE subscribe / disconnect | `ui.protocol` |
 | `data/TimelineProjector` | turn/status/debug/session projection cache | `ui.protocol` outputs |
 | `data/CommandIngress` | submit / cancel entry points | `ui.protocol` command ingress |
 | `bridge.html` | render host for `UiPublicTurnProjection` | `ui.protocol` outputs |
+| file-backed client config | daemon connection profile and endpoint shape | local client config only |
 
 ### 5.2 Data flow modules
 
 | Flow | Source | Sink | Notes |
 |---|---|---|---|
 | command ingress | user text / action | `ui.protocol` → runtime dispatch | mutation intent only; `CancelLatestActiveTurn` remains explicit |
-| latest snapshot query | `ui.protocol` | projection store | first paint / refresh before SSE catch-up |
-| incremental subscribe | SSE | projection store | no back-pressure semantics in v1 UI |
+| latest snapshot query | ADP query | projection store | first paint / refresh before subscribe catch-up |
+| incremental subscribe | ADP subscribe | projection store | no second truth source |
 | agent/session switch | local selection | protocol query/subscribe selector | selection changes view, not truth |
 | status animation | turn / connection changes | card / badge / banner | transient presentation only |
+| daemon connection config | app-owned config file | `HostConfig` / ADP URL | default Tailscale profile; relay reserved |
 
 ## 6. Mainline Call Skeleton
 
@@ -97,14 +101,14 @@ This is the Android client call skeleton already present in the scaffold.
 
 1. `MainActivity` receives input from `InputBarController`
 2. `CommandIngress::submit` / `cancelLatest` wraps the protocol-owned command
-3. `ProtocolClient::postCommand` sends `SubmitUserInput` or `CancelLatestActiveTurn`
-4. `ui.protocol` validates ingress and emits an explicit dispatch receipt or error
-5. Android client waits for `UiSubscriptionEvent` projections and updates the WebView snapshot
+3. `AdpEventStream::sendCommand` sends `SubmitUserInput` or `CancelLatestActiveTurn` in an ADP command frame
+4. `ui.protocol` validates ingress and emits an explicit command receipt or failure frame
+5. Android client waits for ADP `UiSubscriptionEvent` projections and updates the WebView snapshot
 
 ### Response mainline
 
-1. client loads latest snapshot from `ui/query/latest-active-turn`
-2. client subscribes to `ui/subscribe/turn/latest`
+1. client loads latest snapshot through ADP query
+2. client subscribes through ADP subscribe
 3. protocol emits incremental projections
 4. `TimelineProjector` updates cards, badges, drawer, and debug views
 5. `bridge.html` renders `UiPublicTurnProjection.public_conversation`
@@ -113,9 +117,17 @@ This is the Android client call skeleton already present in the scaffold.
 
 1. invalid command -> explicit protocol error
 2. missing turn / bad selector -> explicit query error
-3. network / SSE drop -> explicit client-visible connection state
+3. network / ADP drop -> explicit client-visible connection state
 4. bridge failure -> explicit native bridge error
 5. no fallback path hides the failure
+
+### Connection config mainline
+
+1. bundled `assets/config/client.json` provides the default Tailscale profile
+2. first app startup copies the bundled config into an app-owned editable config file
+3. subsequent startups read the app-owned file as the active source
+4. user edits update that file and then reconnect ADP from the selected profile
+5. relay profile fields may exist in schema but stay disabled until relay protocol/auth is designed
 
 ## 7. State Semantics
 
@@ -140,6 +152,24 @@ Local state may only cover:
 - temporary input draft
 - transient connection banner
 - cached host selection
+
+Host/endpoint selection is local client state, but it must be file-backed. `SharedPreferences` may cache UI hints, but it is not the authoritative long-term daemon connection config.
+
+### 7.2.1 Daemon connection config
+
+Required direction:
+
+- `assets/config/client.json` remains the bundled bootstrap default.
+- The app must persist user-edited daemon connection config into an app-owned JSON file.
+- Default connection mode is `tailscale` with a fixed daemon port, normally release `4041` unless the user selects a development profile.
+- The config schema keeps an explicit relay section for future server-mediated access, but relay is disabled by default and must not silently activate.
+- Connection failure must show the active profile, endpoint, and error class.
+
+Current implementation gap:
+
+- `ClientConfig::load` reads bundled JSON and merges `SharedPreferences` overrides.
+- `HostStore` persists host/port through `SharedPreferences`.
+- This is acceptable as an existing scaffold, but does not satisfy the file-backed config requirement for the mobile closeout slice.
 
 ### 7.3 Status mapping
 
@@ -170,6 +200,8 @@ Local state may only cover:
 6. add debug / tool detail projection
 7. add lifecycle reconnect and foreground/background handling
 8. add native bridge only where system integration requires it
+9. replace SharedPreferences-only host persistence with file-backed daemon connection config
+10. add aspect-ratio aware WebView/WebUI layout verification for phone, foldable, and tablet shapes
 
 ## 9. Testing Strategy
 
