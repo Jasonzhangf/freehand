@@ -1016,6 +1016,10 @@ fn verify_source_search_policy(root: &Path) -> Result<(), String> {
         "--glob=!.mempalace/**",
         "--glob=!memory/*-mempalace-corpus/**",
         "--glob=!test-palaces/**",
+        "for arg in \"$@\"; do",
+        "--no-ignore",
+        "--unrestricted",
+        "exec rg --hidden \"$@\" \"${exclude_globs[@]}\" \"${search_roots[@]}\"",
         "docs/architecture",
         "docs/function-maps",
         "docs/mainline-calls",
@@ -1026,7 +1030,19 @@ fn verify_source_search_policy(root: &Path) -> Result<(), String> {
     ] {
         require_contains(&script, snippet, "scripts/source-search.sh")?;
     }
-    for forbidden in ["CACHE.md", "MEMORY.md", "note.md", "artifacts"] {
+    for forbidden in [
+        "CACHE.md",
+        "MEMORY.md",
+        "note.md",
+        "artifacts",
+        "target",
+        "dist",
+        "docs/wiki",
+        ".mempalace",
+        "memory",
+        "test-palaces",
+        "tmp",
+    ] {
         if script.contains(&format!("\"{forbidden}\"")) {
             return Err(format!(
                 "scripts/source-search.sh must not include `{forbidden}` as an implementation-search root"
@@ -1840,6 +1856,19 @@ mod tests {
         assert!(err.contains("artifacts"), "{err}");
     }
 
+    #[test]
+    fn source_search_policy_rejects_missing_unsafe_arg_guard() {
+        let root = test_repo_root("source-search-policy-missing-unsafe-arg-guard");
+        write_source_search_policy_fixture(
+            &root,
+            SourceSearchPolicyFixtureMode::MissingUnsafeArgGuard,
+        );
+
+        let err = verify_source_search_policy(&root)
+            .expect_err("missing unsafe argument guard must fail");
+        assert!(err.contains("for arg in \"$@\"; do"), "{err}");
+    }
+
     enum FixtureMode {
         Aligned,
         WrongFunctionMapPath,
@@ -1871,6 +1900,7 @@ mod tests {
     enum SourceSearchPolicyFixtureMode {
         Aligned,
         MissingArtifacts,
+        MissingUnsafeArgGuard,
     }
 
     fn test_repo_root(name: &str) -> PathBuf {
@@ -2150,12 +2180,23 @@ pub struct MetadataCenter {{\n    records: Vec<MetadataEnvelope>,\n}}\n"
         }
 
         let artifact_ignore = match mode {
-            SourceSearchPolicyFixtureMode::Aligned => "artifacts/\n",
+            SourceSearchPolicyFixtureMode::Aligned
+            | SourceSearchPolicyFixtureMode::MissingUnsafeArgGuard => "artifacts/\n",
             SourceSearchPolicyFixtureMode::MissingArtifacts => "",
         };
         let artifact_glob = match mode {
-            SourceSearchPolicyFixtureMode::Aligned => "  \"--glob=!artifacts/**\"\n",
+            SourceSearchPolicyFixtureMode::Aligned
+            | SourceSearchPolicyFixtureMode::MissingUnsafeArgGuard => {
+                "  \"--glob=!artifacts/**\"\n"
+            }
             SourceSearchPolicyFixtureMode::MissingArtifacts => "",
+        };
+        let unsafe_arg_guard = match mode {
+            SourceSearchPolicyFixtureMode::Aligned
+            | SourceSearchPolicyFixtureMode::MissingArtifacts => {
+                "for arg in \"$@\"; do\n  case \"$arg\" in\n    --no-ignore|--unrestricted)\n      exit 2\n      ;;\n  esac\ndone\n"
+            }
+            SourceSearchPolicyFixtureMode::MissingUnsafeArgGuard => "",
         };
         fs::write(
             root.join(".ignore"),
@@ -2167,7 +2208,7 @@ pub struct MetadataCenter {{\n    records: Vec<MetadataEnvelope>,\n}}\n"
         fs::write(
             root.join("scripts/source-search.sh"),
             format!(
-                "#!/usr/bin/env bash\nexec rg --hidden \\\n  \"--glob=!target/**\" \\\n  \"--glob=!dist/**\" \\\n{artifact_glob}  \"--glob=!docs/wiki/**\" \\\n  \"--glob=!.mempalace/**\" \\\n  \"--glob=!memory/*-mempalace-corpus/**\" \\\n  \"--glob=!test-palaces/**\" \\\n  \"$@\" docs/architecture docs/function-maps docs/mainline-calls docs/testing crates apps xtask\n"
+                "#!/usr/bin/env bash\nreadonly -a exclude_globs=(\n  \"--glob=!target/**\"\n  \"--glob=!dist/**\"\n{artifact_glob}  \"--glob=!docs/wiki/**\"\n  \"--glob=!.mempalace/**\"\n  \"--glob=!memory/*-mempalace-corpus/**\"\n  \"--glob=!test-palaces/**\"\n)\n{unsafe_arg_guard}readonly -a search_roots=(docs/architecture docs/function-maps docs/mainline-calls docs/testing crates apps xtask)\nexec rg --hidden \"$@\" \"${{exclude_globs[@]}}\" \"${{search_roots[@]}}\"\n"
             ),
         )
         .expect("write source-search fixture");

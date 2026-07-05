@@ -1712,3 +1712,26 @@ Current real root cause split:
   - `git diff --check`
 - remaining blocker:
   - `adb devices -l` currently returns no device, so true-device UI screenshot/logcat acceptance is not complete.
+
+# 2026-07-06 source-search bypass hardening
+
+- user correction: implementation/debug search must never include generated outputs; only code and canonical docs are valid search corpus.
+- implementation:
+  - `scripts/source-search.sh` now rejects unsafe `rg` ignore-bypass options including `--no-ignore`, `--unrestricted`, and `-u`.
+  - hard generated-output exclude globs now run after caller-provided args, so a caller-provided include glob such as `--glob=artifacts/**` cannot re-include generated evidence.
+  - `xtask verify_source_search_policy` now gates the unsafe-argument guard, hard exclude order, and forbidden implementation-search roots.
+  - added a negative xtask test for missing unsafe-argument guard.
+  - synchronized `foundation.workspace` function map, test design, mainline JSON/generated wiki, dev docs, and local `freehand-dev` skill.
+- verification:
+  - `bash -n scripts/source-search.sh`
+  - `scripts/source-search.sh "20260705-verify-4042"` -> no matches
+  - `scripts/source-search.sh --glob 'artifacts/**' "20260705-verify-4042"` -> no matches
+  - `scripts/source-search.sh --no-ignore "anything"` -> refused with exit 2
+  - `scripts/source-search.sh -u "anything"` -> refused with exit 2
+  - `cargo fmt --check`
+  - `cargo test -p xtask source_search -- --nocapture` -> 3 passed
+  - `cargo test -p xtask -- --nocapture` -> 21 passed
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`

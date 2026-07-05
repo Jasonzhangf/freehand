@@ -18,7 +18,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
-- gate runner verifies source-only search policy so implementation searches use source code, tests, maintained scripts, and canonical docs rather than generated/runtime output
+- gate runner verifies source-only search policy so implementation searches use source code, tests, maintained scripts, and canonical docs rather than generated/runtime output; the wrapper rejects unsafe rg ignore-bypass options and keeps hard generated-output exclusions after caller args
 - release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
 - WebUI online verification wrapper checks fixed S-profile 127.0.0.1:4042 daemon health and invokes the real browser WebUI plus ADP proof for alpha promotion; release-profile 127.0.0.1:4041 proof is a separate explicit target
 - global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
@@ -36,7 +36,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - gate returns success when migrated mainline manifests are deterministically linked to their owner docs
 - gate returns success when migrated mainline call-table bindings resolve to source files and source symbols
 - gate returns success when local and remote automation routes through the same full gate stack
-- gate returns success when `.ignore`, `scripts/source-search.sh`, debug docs, and local skill keep generated/runtime output excluded from implementation search
+- gate returns success when `.ignore`, `scripts/source-search.sh`, debug docs, and local skill keep generated/runtime output excluded from implementation search, including wrapper-level rejection of unsafe rg ignore-bypass options
 - S-profile WebUI online verification writes screenshots and summary.json under artifacts/webui-online/<run-id>/, proving composer clear, visible submitted input, multi-round failed-tool continuation, no stale historical animation, refresh persistence, and ADP session truth alignment
 - global install exposes freehand-cli, freehand-server, freehand-daemon, and freehand-daemon-launchd on the chosen install prefix
 - symlink install exposes freehand-cliS, freehand-serverS, freehand-daemonS, and freehand-daemon-launchdS on the chosen install prefix, with host commands pointing at repo debug binaries and the launchd wrapper installed as a prefix-local file
@@ -55,7 +55,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - mismatched mainline manifest source path, function map path, test design path, generated wiki path, or feature-map link surfaces as gate failure
 - missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure
 - missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
-- missing source-only search exclusions or missing `scripts/source-search.sh` policy snippets surface as gate failure
+- missing source-only search exclusions, missing unsafe-argument guards, or missing `scripts/source-search.sh` policy snippets surface as gate failure
 - missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surfaces as online verification failure before alpha success is claimed
 - launchd bootstrap, kickstart, or daemon binary prefix mismatch failure surfaces as script failure before background service success is claimed
 - symlink install failure surfaces before launchd symlink service success is claimed
@@ -88,7 +88,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 | 13 | `verify_mainline_manifest_links` | `xtask/src/main.rs` | validate migrated mainline manifest cross-links | JSON mainline truth plus feature/function/testing docs | pass/fail | run_gates_check | filesystem and mainline loader | bound |
 | 14 | `verify_mainline_call_table_bindings` | `xtask/src/main.rs` | validate migrated mainline call-table file and symbol bindings | JSON mainline truth plus source files | pass/fail | run_gates_check | filesystem and symbol resolver | bound |
 | 15 | `verify_ci_cd_gate_commands` | `xtask/src/main.rs` | validate local hook, Makefile, CI, and release full-gate command alignment | automation config files | pass/fail | run_gates_check | filesystem and policy snippets | bound |
-| 16 | `verify_source_search_policy` | `xtask/src/main.rs` | validate source-only implementation search boundaries | ignore file, source search script, debug docs, and local skill | pass/fail | run_gates_check | filesystem and policy snippets | bound |
+| 16 | `verify_source_search_policy` | `xtask/src/main.rs` | validate source-only implementation search boundaries, including unsafe rg option rejection | ignore file, source search script, debug docs, and local skill | pass/fail | run_gates_check | filesystem and policy snippets | bound |
 | 17 | `verify_data_control_boundaries` | `xtask/src/main.rs` | validate static data/control isolation rules on source-owned request and metadata types | Rust source files for contracts and metadata owners | pass/fail | run_gates_check | source scanners | bound |
 | 18 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that docs/architecture/feature-map.md keeps one seed entry per feature_id | feature-map markdown | pass/fail | run_gates_check | feature-map scanner | bound |
 | 19 | `run_release` | `scripts/release.sh` | run release regressions and build/stage host + Android artifacts | repo root state | dist/ artifacts | operator / GitHub release workflow | make ci, Cargo, Gradle | bound |

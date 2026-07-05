@@ -117,6 +117,7 @@ This prevents pre-push, CI, and release from silently drifting into partial gate
 
 - `.ignore` must exclude generated/runtime outputs from default `rg` searches
 - `scripts/source-search.sh` must search only source code, tests, maintained scripts, and canonical docs while excluding generated/runtime outputs
+- `scripts/source-search.sh` must reject unsafe ignore-bypass options such as `--no-ignore`, `--unrestricted`, and `-u`
 - `.agents/skills/freehand-dev/SKILL.md` and debug docs must preserve the source-first search rule
 - generated outputs remain excluded from default implementation search and may only be opened as direct verification evidence
 

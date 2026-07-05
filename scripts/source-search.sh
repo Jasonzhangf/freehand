@@ -19,6 +19,15 @@ readonly -a exclude_globs=(
   "--glob=!**/coverage/**"
 )
 
+for arg in "$@"; do
+  case "$arg" in
+    --no-ignore|--no-ignore=*|--no-ignore-vcs|--no-ignore-vcs=*|--no-ignore-parent|--no-ignore-parent=*|--no-ignore-global|--no-ignore-global=*|--ignore-file|--ignore-file=*|-u|-uu|-uuu|--unrestricted)
+      printf 'source-search: refusing unsafe rg option `%s`\n' "$arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
 readonly -a candidate_roots=(
   "AGENTS.md"
   "Cargo.toml"
@@ -51,4 +60,5 @@ for root in "${candidate_roots[@]}"; do
   fi
 done
 
-exec rg --hidden "${exclude_globs[@]}" "$@" "${search_roots[@]}"
+# Keep hard excludes after caller-provided args so generated/runtime globs cannot be re-included.
+exec rg --hidden "$@" "${exclude_globs[@]}" "${search_roots[@]}"
