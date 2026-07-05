@@ -53,6 +53,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | context planning, cache shape, segment admission | `reason.context-planner` | `crates/freehand-blocks` | `docs/function-maps/reason.context-planner.md` | `docs/testing/reason.context-planner.md` |
 | compaction/rewrite/recovery trigger policy | `reason.rewrite-policy` | `crates/freehand-blocks` | `docs/function-maps/reason.rewrite-policy.md` | `docs/testing/reason.rewrite-policy.md` |
 | independent debug/trace contracts, snapshots, hub/sinks | `debug.core` | `crates/freehand-debug` | `docs/function-maps/debug.core.md` | `docs/testing/debug.core.md` |
+| AGENTS.md and skills capability discovery, validation, and deterministic manifest indexing | `instruction.capability-loader` | `crates/freehand-instructions` | `docs/function-maps/instruction.capability-loader.md` | `docs/testing/instruction.capability-loader.md` |
 | internal control metadata center, writer ownership, write-node provenance, metadata/request isolation | `metadata.core` | `crates/freehand-metadata` | `docs/function-maps/metadata.core.md` | `docs/testing/metadata.core.md` |
 | passive framework control status parsing, fixed control hooks, and rhythm decisions | `control.center` | `crates/freehand-control` | `docs/function-maps/control.center.md` | `docs/testing/control.center.md` |
 | centralized framework error classification, recovery decisions, and error watermark metadata | `error.center` | `crates/freehand-control` | `docs/function-maps/error.center.md` | `docs/testing/error.center.md` |
@@ -206,6 +207,52 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - runtime does not convert provider/tool/schema failures to owner state changes before error-center metadata admission
   - public/request payload text is hashed only, not written into error metadata entries
   - ADP projection remains read-only and does not repair malformed metadata into invented error semantics
+
+### `instruction.capability-loader`
+
+- owner: `crates/freehand-instructions`
+- allowed_paths: `crates/freehand-instructions/**`, `Cargo.toml`, `xtask/**`, `docs/design/instruction-capability-loader-design.md`, `docs/design/design-doc-index.md`, `docs/function-maps/instruction.capability-loader.md`, `docs/testing/instruction.capability-loader.md`, `docs/mainline-calls/instruction.capability-loader.json`, `docs/wiki/instruction.capability-loader.md`, `docs/architecture/feature-map.md`, `MEMORY.md`, `note.md`
+- forbidden_paths: provider adapter wire DTO internals, UI app-local prompt assembly, runtime loose directory scanning, direct provider payload mutation
+- required_checks:
+  - `cargo test -p freehand-instructions`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - global `~/.freehand/AGENTS.md` index entry
+  - local `AGENTS.md` entries from project root to cwd
+  - global `~/.freehand/skills/**/SKILL.md` skill entries
+  - local `.agents/skills/**/SKILL.md` entries from project root to cwd
+  - invalid skill frontmatter records an explicit manifest error without dropping valid entries
+  - manifest fingerprint stays deterministic for stable inputs
+- required_module_black_box_tests:
+  - compile manifest from a fixture tree and write it under `~/.freehand/state/instructions/capability-manifest.json`
+  - compiled manifest contains source paths, scope, precedence, content size, and content hash, not provider payloads or secrets
+- required_project_black_box_tests:
+  - pending until runtime/context planner consumes the compiled manifest; current slice is index-only
+- test_design_doc: `docs/testing/instruction.capability-loader.md`
+- function_map_doc: `docs/function-maps/instruction.capability-loader.md`
+- mainline_call_doc: `docs/mainline-calls/instruction.capability-loader.json`
+- generated_wiki_doc: `docs/wiki/instruction.capability-loader.md`
+- debug_artifacts:
+  - instruction capability manifest
+  - instruction capability compile errors
+- runtime_paths:
+  - `~/.freehand/AGENTS.md`
+  - `~/.freehand/skills`
+  - `<project>/AGENTS.md`
+  - `<project>/.agents/skills`
+  - `~/.freehand/state/instructions/capability-manifest.json`
+- update_triggers:
+  - AGENTS.md discovery order changes
+  - skill root discovery order changes
+  - skill frontmatter schema changes
+  - manifest schema or fingerprint changes
+  - context-planner consumption of instruction capabilities
+- lifecycle_checks:
+  - authoring directories are discovery inputs only
+  - runtime consumers must consume a compiled/validated manifest
+  - invalid capabilities surface as manifest errors, not silent fallback
+  - manifest remains deterministic and bounded
 
 ### `config.core`
 

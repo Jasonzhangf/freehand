@@ -11,6 +11,7 @@ members = [
   "crates/freehand-debug",
   "crates/freehand-metadata",
   "crates/freehand-control",
+  "crates/freehand-instructions",
   "crates/freehand-task",
   "crates/freehand-ui-protocol",
   "crates/freehand-tools",

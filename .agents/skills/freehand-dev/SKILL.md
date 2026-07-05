@@ -189,6 +189,9 @@ Use this skill for any non-trivial work in this repo.
 - Restart recovery must use authoritative snapshots plus reason-ledger replay; UI sidecars and provider raw ledgers are never recovery truth.
 - In UI protocol work, query and subscribe must stay separate, and source identity fields must remain explicit.
 - Shared contract types should default to serializable, replayable, and persistable unless a higher-priority truth source says otherwise.
+- Freehand AGENTS.md and skills discovery belongs to `instruction.capability-loader` in `crates/freehand-instructions`.
+- Runtime, UI, and provider code must not scan AGENTS.md or skills authoring directories directly; they must consume the deterministic manifest compiled from `~/.freehand/AGENTS.md`, `~/.freehand/skills`, local `AGENTS.md`, and local `.agents/skills`.
+- The first instruction capability slice is index-only. Provider-visible instruction injection must be added later through typed context-planner segments with explicit token budgets.
 
 ## Debug Workflow
 

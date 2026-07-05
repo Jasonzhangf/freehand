@@ -16,6 +16,7 @@ Use this directory family for durable design truth.
 - `docs/design/debug-core-design.md`
 - `docs/design/metadata-core-design.md`
 - `docs/design/control-error-center-refactor.md`
+- `docs/design/instruction-capability-loader-design.md`
 - `docs/design/task-orchestration-design.md`
 - `docs/design/ui-and-runtime-topology.md`
 - `docs/design/config-core-design.md`
@@ -91,6 +92,8 @@ Use this directory family for durable design truth.
   - debug module ownership, trace envelope, debug snapshot, and read-only observation boundaries
 - `metadata-core-design.md`
   - internal metadata center, writer owner, write-node provenance, and metadata/request isolation boundary
+- `instruction-capability-loader-design.md`
+  - deterministic manifest compiler for global/local AGENTS.md and skills authoring surfaces
 - `control-error-center-refactor.md`
   - next refactor design for four fixed request/response hook points, passive status schema, compact built-in task action tools, centralized error policy, metadata watermarks, task orchestration, and control/data isolation
 - `ui-and-runtime-topology.md`

@@ -1,0 +1,34 @@
+# Test Design: `instruction.capability-loader`
+
+- feature_id: `instruction.capability-loader`
+- owner: `crates/freehand-instructions`
+- lifecycle path under test:
+  - discover global Freehand instruction surfaces from `~/.freehand`
+  - discover local project instruction surfaces from project root to cwd
+  - validate skill frontmatter
+  - compile deterministic manifest entries
+  - write manifest JSON under runtime state
+- white-box plan:
+  - global `~/.freehand/AGENTS.md` creates a global AGENTS manifest entry
+  - local `AGENTS.md` files from project root through nested cwd create ordered local entries
+  - global `~/.freehand/skills/**/SKILL.md` creates global skill entries
+  - local `.agents/skills/**/SKILL.md` creates local skill entries
+  - malformed skill frontmatter creates an explicit error record while valid skills remain indexed
+  - stable input order produces stable manifest fingerprint
+- module black-box plan:
+  - fixture tree compile returns a manifest with expected scope and precedence
+  - manifest writer creates `state/instructions/capability-manifest.json`
+  - manifest entries expose path/hash/size metadata and do not inject provider payload text
+- project black-box impact:
+  - no live provider/UI claim in this slice
+  - future runtime startup and context planner slices must consume this compiled manifest rather than scanning authoring directories directly
+- fixtures / replay inputs / runtime evidence paths:
+  - temp fixture trees inside `cargo test -p freehand-instructions`
+  - `~/.freehand/state/instructions/capability-manifest.json`
+- known gaps:
+  - runtime startup does not yet call the compiler
+  - context planner does not yet convert manifest entries into bounded typed context segments
+  - UI/CLI diagnostics for manifest errors are pending
+- sync status between design and implementation:
+  - first white-box and module black-box tests are implemented in `crates/freehand-instructions`
+  - function map and mainline call map bind the manifest compiler symbols

@@ -1455,3 +1455,26 @@ Current real root cause split:
   - browser states reported `pageErrors=0`, console errors none.
 - validation note:
   - For CDP online proof in this environment, spawn headless Chrome inside the automation process and shut down only that explicit PID. Starting Chrome as a background child of a short-lived shell can leave the DevTools port unavailable because Chrome exits when the parent shell closes.
+
+# 2026-07-05 instruction capability loader index slice
+
+- user request: align Freehand AGENTS.md and skills design with `~/code/codex`, support local skills/local AGENTS.md, and index global AGENTS.md from `~/.freehand/AGENTS.md`.
+- owner: new `instruction.capability-loader` feature in `crates/freehand-instructions`.
+- implementation:
+  - added `InstructionCapabilityCompileInput`, `InstructionCapabilityManifest`, `compile_instruction_capability_manifest`, and `write_instruction_capability_manifest`.
+  - compiler indexes global `~/.freehand/AGENTS.md`, global `~/.freehand/skills/**/SKILL.md`, local `AGENTS.md` from project root to cwd, and local `.agents/skills/**/SKILL.md` from project root to cwd.
+  - manifest entries include scope, precedence, normalized path/root, byte count, and content hash; skill entries also include parsed `name` and `description`.
+  - malformed skill frontmatter becomes explicit manifest error records while valid entries remain indexed.
+  - current slice is index-only; runtime/context-planner consumption remains pending and must use the compiled manifest rather than loose directory scanning.
+- docs/gates:
+  - added feature-map seed, function map, test design, design doc, mainline-call manifest, generated wiki, design index entry, and xtask required-file/workspace gates.
+  - updated `freehand-dev` skill to lock owner boundary and forbid runtime/UI/provider direct directory scanning.
+- validation:
+  - `cargo test -p freehand-instructions -- --nocapture` -> 3 passed.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `cargo fmt --check` -> ok.
+  - `cargo test -p xtask -- --nocapture` -> 18 passed.
+  - `cargo test --workspace` -> 433 passed.
+  - `cargo clippy --workspace --all-targets -- -D warnings` -> no issues.

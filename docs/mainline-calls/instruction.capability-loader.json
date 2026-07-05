@@ -1,0 +1,130 @@
+{
+  "feature_id": "instruction.capability-loader",
+  "owner_crate": "crates/freehand-instructions",
+  "owner_module": "crates/freehand-instructions/src/lib.rs",
+  "function_map_doc": "docs/function-maps/instruction.capability-loader.md",
+  "test_design_doc": "docs/testing/instruction.capability-loader.md",
+  "mainline_call_doc": "docs/mainline-calls/instruction.capability-loader.json",
+  "generated_wiki_doc": "docs/wiki/instruction.capability-loader.md",
+  "request_mainline": [
+    "caller supplies Freehand runtime home and current working directory",
+    "loader resolves global instruction authoring inputs from `~/.freehand/AGENTS.md` and `~/.freehand/skills`",
+    "loader resolves local instruction authoring inputs from every directory between project root and cwd using `AGENTS.md` and `.agents/skills`",
+    "discovered authoring files are validated and normalized into typed manifest entries"
+  ],
+  "response_mainline": [
+    "output is a deterministic `InstructionCapabilityManifest`",
+    "manifest entries carry scope, precedence, normalized path, content byte count, and content hash",
+    "skill entries also carry parsed `name` and `description`",
+    "optional writer persists the compiled manifest to `~/.freehand/state/instructions/capability-manifest.json`"
+  ],
+  "error_mainline": [
+    "cwd that is not a directory is rejected",
+    "unreadable AGENTS or skill files become explicit read errors",
+    "malformed skill frontmatter becomes an explicit manifest error while valid capability entries remain visible",
+    "manifest write failure returns an explicit error"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "compile_instruction_capability_manifest",
+      "owner": "crates/freehand-instructions/src/lib.rs",
+      "purpose": "discover, validate, sort, and fingerprint AGENTS.md and skill authoring surfaces into one manifest",
+      "allowed_callers": [
+        "runtime/context planner startup",
+        "CLI diagnostics",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "global/local AGENTS and skills indexing tests"
+      ],
+      "why_shared": "instruction capability discovery must not be duplicated in runtime, UI, or provider crates"
+    },
+    {
+      "symbol": "write_instruction_capability_manifest",
+      "owner": "crates/freehand-instructions/src/lib.rs",
+      "purpose": "persist the compiled manifest under runtime state",
+      "allowed_callers": [
+        "runtime startup",
+        "CLI diagnostics",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "manifest writer test"
+      ],
+      "why_shared": "manifest output path and JSON shape must stay single-sourced"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "InstructionCapabilityCompileInput::new",
+      "file_path": "crates/freehand-instructions/src/lib.rs",
+      "responsibility": "build compile input with default project-root markers",
+      "input_semantic": "runtime home plus cwd",
+      "output_semantic": "typed compile input",
+      "caller": "runtime/CLI/tests",
+      "callee": "input builder",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "compile_instruction_capability_manifest",
+      "file_path": "crates/freehand-instructions/src/lib.rs",
+      "responsibility": "discover global and local AGENTS.md plus skill roots",
+      "input_semantic": "compile input",
+      "output_semantic": "manifest candidates",
+      "caller": "runtime/CLI/tests",
+      "callee": "discovery planner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "agents_md_capability",
+      "file_path": "crates/freehand-instructions/src/lib.rs",
+      "responsibility": "normalize one AGENTS.md source into a manifest entry",
+      "input_semantic": "AGENTS.md path plus scope plus precedence",
+      "output_semantic": "AGENTS manifest entry or error",
+      "caller": "manifest compiler",
+      "callee": "AGENTS parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "collect_skills",
+      "file_path": "crates/freehand-instructions/src/lib.rs",
+      "responsibility": "scan a skill root deterministically",
+      "input_semantic": "skill root plus scope plus precedence",
+      "output_semantic": "skill entries and error records",
+      "caller": "manifest compiler",
+      "callee": "skill scanner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "parse_skill_frontmatter",
+      "file_path": "crates/freehand-instructions/src/lib.rs",
+      "responsibility": "validate required skill frontmatter fields",
+      "input_semantic": "SKILL.md content",
+      "output_semantic": "skill name and description or manifest error",
+      "caller": "skill scanner",
+      "callee": "skill parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "write_instruction_capability_manifest",
+      "file_path": "crates/freehand-instructions/src/lib.rs",
+      "responsibility": "persist manifest JSON under runtime state",
+      "input_semantic": "compiled manifest plus target path",
+      "output_semantic": "manifest file or write error",
+      "caller": "runtime/CLI/tests",
+      "callee": "manifest writer",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "first manifest compiler is implemented in `crates/freehand-instructions`",
+    "current support covers global `~/.freehand/AGENTS.md`, local `AGENTS.md`, global `~/.freehand/skills`, and local `.agents/skills`",
+    "runtime/context planner consumption is pending and must be added through this manifest owner"
+  ]
+}

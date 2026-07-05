@@ -286,6 +286,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "freehand-instructions"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "walkdir",
+]
+
+[[package]]
 name = "freehand-metadata"
 version = "0.1.0"
 dependencies = [
