@@ -2,10 +2,10 @@
 
 - loop_id: `freehand-framework-loop`
 - current_mode: `L1`
-- status: `L1 report-only run verified`
+- status: `L1 report-only no-op`
 - kill_switch_state: `inactive`
 - owner_feature: `foundation.workspace`
-- last_baseline: `2026-07-04T21:03:21+08:00 L1 report-only run; kill switch inactive; mainlines check and gates check passed`
+- last_baseline: `2026-07-05T18:36:00+08:00 L1 report-only run; kill switch inactive; git status clean; mainlines check and gates check passed`
 
 ## Watchlist
 
@@ -40,14 +40,15 @@ cargo fmt --check
 
 ## Last Run Summary
 
-- run_id: `2026-07-04T21:03:21+08:00-l1-run-01`
+- run_id: `2026-07-05T18:36:00+08:00-l1-run-02`
 - mode: `L1`
 - outcome: `no-op`
 - checks:
+  - `git status --short` clean
   - `cargo run -p xtask -- mainlines check` passed
   - `cargo run -p xtask -- gates check` passed
 - findings:
   - kill switch was inactive.
-  - workspace still contains existing untracked Android backup and artifact directories; L1 constraints say not to clean or include them.
+  - MemoryPalace search found prior L1 baseline and no incident requiring action.
   - no mainline or gate drift found.
   - no product code action was taken.
