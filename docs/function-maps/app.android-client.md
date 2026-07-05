@@ -16,6 +16,7 @@
   - `com.freehand.android.data.DaemonConnectionConfigStore` — first-run bundled config bootstrap and app-owned JSON persistence
   - `com.freehand.android.data.ClientConfig` — Android Context adapter for the app-owned daemon connection config file
   - `com.freehand.android.data.HostConfig` — endpoint URL construction
+  - `apps/freehand-android/scripts/verify-device-ui.sh` — explicit-serial Android device UI validation and blocker-evidence capture
 - reference mock: `apps/freehand-server/assets/mocks/android/mobile-mock.html`
 - reference bridge: `apps/freehand-android/app/src/main/assets/bridge.html`
 
@@ -49,6 +50,7 @@
 - connection profile failures must expose active profile, endpoint, and concrete failure class; the client must not silently fall back to localhost, LAN scan, relay, or another profile
 - provider / reason / debug error from `ui.protocol` is rendered as a red status pill; never re-projected as success
 - cancel-without-active-turn clears only local input draft; does not invent a runtime mutation
+- Android device validation script fails explicitly and records blocker evidence when ADB is offline, the device is locked, the Freehand activity is not foreground, or fatal logcat entries are present
 
 ## Shared Multi-Reference Functions
 
@@ -85,10 +87,11 @@
 | 15 | `DaemonConnectionConfigStore::write` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt` | persist validated daemon config to the app-owned JSON file | `DaemonConnectionConfig` | normalized JSON file or explicit config error | `MainActivity::saveHostConfig` | file IO + schema validator | bound |
 | 16 | `MainActivity::saveHostConfig` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | update the active profile endpoint, write app-owned JSON, and reconnect only after write success | edited `HostConfig` | updated config or visible config error | `DrawerController` callback | `DaemonConnectionConfigStore::write` | bound |
 | 17 | `handle_android_mock` | `apps/freehand-server/src/lib.rs` | serve self-contained `mobile-mock.html` for design review | HTTP GET `/mock/android` | HTML body | design-review operator | embedded mock asset | bound |
+| 18 | `verify_device_ui` | `apps/freehand-android/scripts/verify-device-ui.sh` | validate explicit-serial Android device UI foreground state and capture blocker/failure evidence | adb serial + debug APK | passed/blocked/failed artifact directory | operator | adb install/start/dumpsys/logcat/screencap | bound |
 
 ## Sync Status Against Code
 
-- all 17 call table rows are bound to real file paths and symbol names
+- all 18 call table rows are bound to real file paths and symbol names
 - Android live shell now defaults to `AdpEventStream` for status/control; `ProtocolClient` and `SseEventStream` remain compatibility transport classes but are not the default `MainActivity` live path
 - current config code bootstraps bundled `assets/config/client.json` into an app-owned JSON file and uses that file as endpoint truth; `SharedPreferences` no longer owns daemon host/port persistence
 - default remote access direction is Tailscale; relay profile support is schema-reserved and must stay inactive until relay protocol/auth is designed
@@ -99,3 +102,4 @@
 - the Android client is explicitly forbidden from owning a second copy of any projection, command ingress, debug surface, or theme truth
 - shared functions (`UiCommand`, SSE projection, query route) are consumed via HTTP; the Android client never imports Rust crates directly
 - unit tests exist under `apps/freehand-android/app/src/test/java/com/freehand/android/data/` for `TimelineProjector`, `HostConfig`, and `CommandIngress` protocol shape
+- device UI verification script exists for explicit-serial true-device evidence capture; current completion still requires a connected/unlocked device for acceptance evidence

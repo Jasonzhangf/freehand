@@ -559,13 +559,14 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.android-client`
 
 - owner: `apps/freehand-android`
-- allowed_paths: `apps/freehand-android/**`, `apps/freehand-server/assets/mocks/android/**`, `docs/function-maps/app.android-client.md`, `docs/testing/app.android-client.md`, `docs/mainline-calls/app.android-client.json`, `docs/wiki/app.android-client.md`, `docs/design/multi-platform-ui-architecture.md`, `docs/design/android-client-v1-execution.md`
+- allowed_paths: `apps/freehand-android/**`, `apps/freehand-server/assets/mocks/android/**`, `docs/function-maps/app.android-client.md`, `docs/testing/app.android-client.md`, `docs/mainline-calls/app.android-client.json`, `docs/wiki/app.android-client.md`, `docs/design/multi-platform-ui-architecture.md`, `docs/design/android-client-v1-execution.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-runtime/**` except through `freehand-ui-protocol` projections
 - required_checks:
   - `cd apps/freehand-android && ./gradlew testDebugUnitTest`
   - `cargo test -p freehand-server --lib` (mock route smoke remains green)
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
+  - `apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` when a device is available
   - manual: open `apps/freehand-server/assets/mocks/android/mobile-mock.html` via `file://` and verify render
 - required_white_box_tests:
   - `TimelineProjectorTest`
@@ -583,6 +584,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - required_project_black_box_tests:
   - Android app boundary consumes `freehand-ui-protocol` ADP projection truth without reason/provider imports
   - Android live shell renders `bridge.html` snapshots through `TimelineProjector::latestTurnProjectionJson`
+  - Android device script records foreground activity, logcat, and screenshot evidence or explicit blocker state
   - Android mock render matches the locked multi-platform screen grammar
 - test_design_doc: `docs/testing/app.android-client.md`
 - function_map_doc: `docs/function-maps/app.android-client.md`
@@ -591,12 +593,14 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - debug_artifacts:
   - self-contained `mobile-mock.html` render screenshot
   - `mobile-mock.html` HTTP route response body
+  - Android device verification artifact under `artifacts/android-device/<run>/`
 - runtime_paths:
   - `~/.freehand/state/android` (future)
   - `~/.freehand/replays/android` (future)
 - update_triggers:
   - Android app crate is created
   - Android client binds to a real protocol endpoint
+  - Android device validation script changes
   - `ui.protocol` projection shape changes
   - `mobile-mock.html` layout changes
   - generated wiki freshness policy changes

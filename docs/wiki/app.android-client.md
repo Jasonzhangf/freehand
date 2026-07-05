@@ -27,6 +27,7 @@ Generated from `docs/mainline-calls/app.android-client.json`. Do not edit by han
 - ADP onError -> projector.setConnectionState('error') + statusBanner.showPersistent
 - ADP failure frame -> TimelineProjector::applyAdp marks visible error projection
 - AdpEventStream::sendCommand send failure -> CommandResponse(ok=false, code='adp_send_failed')
+- Android device validation script fails explicitly and records blocker evidence when ADB is offline, the device is locked, Freehand is not foreground, or fatal logcat entries are present
 
 ## Shared Multi-Reference Functions
 
@@ -70,13 +71,15 @@ Generated from `docs/mainline-calls/app.android-client.json`. Do not edit by han
 | 15 | `com.freehand.android.data.DaemonConnectionConfigStore::write` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt` | persist validated daemon config to the app-owned JSON file | DaemonConnectionConfig | normalized JSON file or explicit config error | MainActivity::saveHostConfig | file IO plus schema validator | bound |
 | 16 | `com.freehand.android.ui.MainActivity::saveHostConfig` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | update the active profile endpoint, write app-owned JSON, and reconnect only after write success | edited HostConfig | updated config or visible config error | DrawerController callback | DaemonConnectionConfigStore::write | bound |
 | 17 | `freehand_server::handle_android_mock` | `apps/freehand-server/src/lib.rs` | serve self-contained mobile-mock.html for design review | HTTP GET /mock/android | HTML body | design-review operator | embedded mock asset | bound |
+| 18 | `verify_device_ui` | `apps/freehand-android/scripts/verify-device-ui.sh` | validate explicit-serial Android device UI foreground state and capture blocker or failure evidence | adb serial plus debug APK | passed, blocked, or failed artifact directory | operator | adb install/start/dumpsys/logcat/screencap | bound |
 
 ## Sync Status Against Mainline Call
 
-- all 17 call table rows bound to real Kotlin symbols in apps/freehand-android/app/src/main/java/com/freehand/android/
+- all 18 call table rows bound to real Kotlin symbols or owner scripts in apps/freehand-android/
 - Android daemon connection config bootstraps bundled assets/config/client.json into app-owned daemon-connection.json, then uses that JSON file as endpoint truth
 - SharedPreferences no longer owns daemon host or port persistence
 - Android live shell now defaults to AdpEventStream for status/control; ProtocolClient and SseEventStream remain compatibility transport classes but are not the default MainActivity live path
 - unit tests exist for TimelineProjector, HostConfig, and CommandIngress protocol, including ADP URL/frame/projector coverage
+- device UI verification script records pass/block/fail evidence for explicit-serial Android true-device validation
 - mainline JSON generated from function map
 - generated wiki must be regenerated from docs/mainline-calls/app.android-client.json when this function-map truth changes

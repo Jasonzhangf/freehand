@@ -21,7 +21,8 @@
   "error_mainline": [
     "ADP onError -> projector.setConnectionState('error') + statusBanner.showPersistent",
     "ADP failure frame -> TimelineProjector::applyAdp marks visible error projection",
-    "AdpEventStream::sendCommand send failure -> CommandResponse(ok=false, code='adp_send_failed')"
+    "AdpEventStream::sendCommand send failure -> CommandResponse(ok=false, code='adp_send_failed')",
+    "Android device validation script fails explicitly and records blocker evidence when ADB is offline, the device is locked, Freehand is not foreground, or fatal logcat entries are present"
   ],
   "call_table": [
     {
@@ -210,6 +211,17 @@
       "caller": "design-review operator",
       "callee": "embedded mock asset",
       "binding_status": "bound"
+    },
+    {
+      "step": "18",
+      "symbol_path": "verify_device_ui",
+      "file_path": "apps/freehand-android/scripts/verify-device-ui.sh",
+      "responsibility": "validate explicit-serial Android device UI foreground state and capture blocker or failure evidence",
+      "input_semantic": "adb serial plus debug APK",
+      "output_semantic": "passed, blocked, or failed artifact directory",
+      "caller": "operator",
+      "callee": "adb install/start/dumpsys/logcat/screencap",
+      "binding_status": "bound"
     }
   ],
   "shared_functions": [
@@ -255,11 +267,12 @@
     }
   ],
   "sync_status": [
-    "all 17 call table rows bound to real Kotlin symbols in apps/freehand-android/app/src/main/java/com/freehand/android/",
+    "all 18 call table rows bound to real Kotlin symbols or owner scripts in apps/freehand-android/",
     "Android daemon connection config bootstraps bundled assets/config/client.json into app-owned daemon-connection.json, then uses that JSON file as endpoint truth",
     "SharedPreferences no longer owns daemon host or port persistence",
     "Android live shell now defaults to AdpEventStream for status/control; ProtocolClient and SseEventStream remain compatibility transport classes but are not the default MainActivity live path",
     "unit tests exist for TimelineProjector, HostConfig, and CommandIngress protocol, including ADP URL/frame/projector coverage",
+    "device UI verification script records pass/block/fail evidence for explicit-serial Android true-device validation",
     "mainline JSON generated from function map",
     "generated wiki must be regenerated from docs/mainline-calls/app.android-client.json when this function-map truth changes"
   ]

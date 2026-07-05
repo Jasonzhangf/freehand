@@ -1691,3 +1691,24 @@ Current real root cause split:
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
   - `git diff --check`
+
+# 2026-07-06 Android device verifier closeout
+
+- current goal audit:
+  - WebUI responsive/mobile layout has fresh online S-profile evidence at `artifacts/webui-online/20260705-verify-4042-1783272863538/summary.json`.
+  - Android JVM tests and debug APK build pass, but true Android UI/WebView acceptance still requires a connected/unlocked device.
+- implementation:
+  - added `apps/freehand-android/scripts/verify-device-ui.sh`.
+  - script requires an explicit ADB serial, installs the debug APK unless skipped, starts `com.freehand.android/.ui.MainActivity`, captures `adb devices`, activity/window dumps, logcat, screenshot, and `summary.json`.
+  - script exits non-zero with `status=blocked` for offline/unavailable ADB, locked/dozing device, or Freehand not foreground; it exits failed for fatal/exception logcat. It does not broad-kill or silently unlock/switch endpoint.
+  - synchronized `app.android-client` function map, test design, feature map, mainline JSON, and generated wiki.
+- verification:
+  - `bash -n apps/freehand-android/scripts/verify-device-ui.sh`
+  - `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` -> blocked with `adb_state_unavailable`, evidence at `artifacts/android-device/current-blocker/summary.json`.
+  - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest assembleDebug` -> success.
+  - `cargo test -p freehand-server -- --nocapture` -> 11 passed.
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+- remaining blocker:
+  - `adb devices -l` currently returns no device, so true-device UI screenshot/logcat acceptance is not complete.

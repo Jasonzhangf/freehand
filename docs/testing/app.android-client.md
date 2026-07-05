@@ -41,6 +41,7 @@
 30. target mobile closeout: relay config fields are parsed but remain disabled unless explicitly selected by a future relay design
 31. target mobile closeout: connection failure projection includes active profile, endpoint, and concrete failure class
 32. target mobile closeout: aspect-ratio shape selection maps phone portrait, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop-like WebView into the expected layout mode without changing session/protocol truth
+33. `apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` validates true-device foreground state and captures explicit blocker/failure evidence when ADB/device/UI is not usable
 
 ## White-Box Plan
 
@@ -49,6 +50,7 @@
 - `DaemonConnectionConfigTest`: bootstrap bundled Tailscale profile, first-run copy to app-owned JSON, edited profile write/read, malformed existing file explicit failure, missing active profile explicit failure, relay enabled rejection
 - aspect-ratio layout classifier tests: map viewport width/height pairs to mobile/foldable/tablet/desktop layout modes without mutating selected session or draft state
 - `CommandIngressProtocolTest`: covers SubmitUserInput shape, CancelLatestActiveTurn shape, ADP command frame shape, ADP subscribe frame shape, query-as-command negative frame shape, old type-field negative, special characters, empty text
+- Android device validation script static checks: explicit serial required, no broad process kill, records `adb devices`, foreground/window dumps, logcat, screenshot, and summary status
 
 ### Protocol Replay Harness
 
@@ -68,6 +70,7 @@
 - `AdpEventStream::buildFrame` produces correct ADP command/subscribe/query misuse frame shapes (verified by protocol shape tests)
 - `ProtocolClient::postCommand` remains a compatibility HTTP request body path
 - `handle_android_mock` returns HTTP 200 with `mock-mobile` class (existing server test)
+- `apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` exits with `passed`, `blocked`, or `failed` summary JSON and never treats offline/locked/not-foreground states as success
 
 ## Project Black-Box Impact
 
@@ -77,11 +80,12 @@
 - Android app boundary proves `bridge.html` renders the same public conversation projection as the server-side design preview
 - Android app boundary proves daemon connection setup is file-backed, Tailscale-first, explicit on failure, and does not silently fall back to LAN scan/localhost/relay
 - Android/WebUI visual evidence must cover at least phone portrait, phone landscape, tablet portrait, tablet landscape, and foldable-like aspect ratios
+- Android true-device closure requires `apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` to pass with Freehand foreground screenshot and no fatal logcat; blocker summaries are evidence of non-closure, not acceptance evidence
 
 ## Known Gaps
 
 - no Espresso / instrumented tests yet (device-dependent; requires ADB-connected device)
-- no integration smoke against live daemon from a real Android device yet (requires daemon running + device connected)
+- no passing integration smoke against live daemon from a real Android device yet (requires daemon running + connected/unlocked device)
 - no Espresso / instrumented coverage for the drawer edit flow yet; JVM tests cover the file config owner and MainActivity is still device/framework-scoped
 - aspect-ratio layout classifier and visual verification are not implemented yet
 - `bridge.html` JS rendering is not unit-testable from JVM; requires WebView instrumented test
