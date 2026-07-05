@@ -1209,7 +1209,7 @@ function buildModelRequestRenderRow(turn, lifecycle) {
   const label = modelRequestLabel(turn);
   return {
     kind: "system",
-    title: label === "schema retry" ? "Schema" : "Model",
+    title: label === "schema polishing" ? "Schema" : "Model",
     body: [turn.model_request.detail || "Waiting for model response."],
     status: lifecycle.elapsed || "0s",
     identity: { turnId: turn.turn_id },
@@ -1331,7 +1331,7 @@ function modelRequestTimingKey(turn) {
 function modelRequestLabel(turn) {
   const kind = modelRequestKind(turn);
   if (kind === "schemaretry" || kind === "schema_retry") {
-    return "schema retry";
+    return "schema polishing";
   }
   if (kind === "toolresultcontinuation" || kind === "tool_result_continuation") {
     return "thinking after tool result";

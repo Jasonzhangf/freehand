@@ -1529,3 +1529,34 @@ Current real root cause split:
   - turns `runtime-turn-53,runtime-turn-54,runtime-turn-54-r2`
 - exclusion:
   - old `20260705-verify-4041-*` artifacts are wrong-profile intermediate evidence and are intentionally not staged.
+
+# 2026-07-05 provider retry + schema polishing boundary
+
+- user correction: schema mismatch is not failure and should not be called schema repair. It is response-schema mismatch polishing: feedback tells the model what fields/types are missing/wrong so the next model response can align to the Freehand completion contract.
+- implementation:
+  - provider executor failures are classified into concrete codes such as `anthropic_http_status_500`, `anthropic_http_request_failed`, `anthropic_stream_read_failed`, `anthropic_adapter_failed`, `anthropic_invalid_config`, and `anthropic_callback_failed`.
+  - recoverable non-stream provider failures retry five attempts with production exponential backoff `1s,2s,4s,8s,16s`; tests can override backoff with `FREEHAND_PROVIDER_RETRY_BACKOFF_MS`.
+  - provider retry attempts write `error.center` metadata with retry index/cap; pre-cap decisions are `retry_same_step`, cap-exhausted decisions are `fail_turn`.
+  - failed terminal truth uses the concrete provider error code instead of generic `provider_executor_failure`.
+  - UI/user-visible model request text changed from `schema retry #N` to `schema polishing #N`; internal protocol kind `SchemaRetry` and recovery action `repair_schema` are retained for compatibility only.
+- regression locks:
+  - provider success after earlier 500s: `live_bridge_retries_recoverable_provider_errors_then_succeeds`.
+  - provider five-attempt failure: `live_bridge_fails_after_five_provider_retries_with_error_code`.
+  - provider metadata/error truth: `live_bridge_writes_provider_error_metadata_on_executor_failure`.
+  - schema mismatch stays schema-domain polishing, not provider/fail_turn: `live_bridge_records_error_center_metadata_for_schema_repair`.
+  - UI protocol projects `schema polishing #N`: `schema_mismatch_projects_as_model_polishing_activity`.
+- validation:
+  - `cargo test -p freehand-control -- --nocapture`
+  - `cargo test -p freehand-ui-protocol -- --nocapture`
+  - `cargo test -p freehand-runtime -- --nocapture --test-threads=1`
+  - `cargo test -p freehand-server -- --nocapture`
+  - `cargo fmt --check`
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `scripts/install-launchd.sh restartS`, `curl -4fsS http://127.0.0.1:4042/health`, and `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp`
+  - `make verify-webui-online` -> `artifacts/webui-online/20260705-verify-4042-1783252779663/summary.json`
+  - temp-HOME CLI live provider fixture -> `artifacts/provider-retry/20260705-provider-retry-1783252973529124000/summary.json`, `requestCount=5`, stderr contains `anthropic_http_status_500`
+- exclusions:
+  - old wrong-profile `artifacts/webui-online/20260705-verify-4041-*` remain untracked and are not staged.

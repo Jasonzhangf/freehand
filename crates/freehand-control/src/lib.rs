@@ -200,7 +200,11 @@ pub fn classify_error_center_failure(observed: &ErrorCenterObservedFailure) -> E
         return ErrorCenterDecision {
             domain: ErrorCenterDomain::Provider,
             class: ErrorCenterClass::Recoverable,
-            recovery_action: ErrorCenterRecoveryAction::FailTurn,
+            recovery_action: if observed.retry_index >= observed.retry_cap {
+                ErrorCenterRecoveryAction::FailTurn
+            } else {
+                ErrorCenterRecoveryAction::RetrySameStep
+            },
             public_visibility: ErrorCenterPublicVisibility::TerminalSummary,
             retry_index: observed.retry_index,
             retry_cap: observed.retry_cap,
@@ -642,15 +646,28 @@ mod tests {
         let provider = classify_error_center_failure(&ErrorCenterObservedFailure {
             source_owner: "provider.reason-live-bridge".to_owned(),
             source_pipeline_node: "RuntimeLive05ProviderError".to_owned(),
-            code: "provider_executor_failure".to_owned(),
+            code: "anthropic_http_status_500".to_owned(),
             message: "http 500".to_owned(),
-            retry_index: 0,
-            retry_cap: 0,
+            retry_index: 1,
+            retry_cap: 5,
         });
         assert_eq!(provider.domain, ErrorCenterDomain::Provider);
         assert_eq!(provider.class, ErrorCenterClass::Recoverable);
         assert_eq!(
             provider.recovery_action,
+            ErrorCenterRecoveryAction::RetrySameStep
+        );
+
+        let provider_capped = classify_error_center_failure(&ErrorCenterObservedFailure {
+            source_owner: "provider.reason-live-bridge".to_owned(),
+            source_pipeline_node: "RuntimeLive05ProviderError".to_owned(),
+            code: "anthropic_http_status_500".to_owned(),
+            message: "http 500".to_owned(),
+            retry_index: 5,
+            retry_cap: 5,
+        });
+        assert_eq!(
+            provider_capped.recovery_action,
             ErrorCenterRecoveryAction::FailTurn
         );
 

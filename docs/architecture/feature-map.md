@@ -168,6 +168,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - required_checks:
   - `cargo test -p freehand-control`
   - `cargo test -p freehand-runtime live_bridge_records_error_center_metadata_for_schema_repair -- --nocapture`
+  - `cargo test -p freehand-runtime live_bridge_retries_recoverable_provider_errors_then_succeeds -- --nocapture`
+  - `cargo test -p freehand-runtime live_bridge_fails_after_five_provider_retries_with_error_code -- --nocapture`
   - `cargo test -p freehand-runtime live_bridge_returns_unknown_tool_as_failed_tool_result_without_terminalizing -- --nocapture`
   - `cargo test -p freehand-runtime live_bridge_writes_provider_error_metadata_on_executor_failure -- --nocapture`
   - `cargo test -p freehand-runtime runtime_query_reads_error_center_metadata_without_raw_text -- --nocapture`
@@ -176,15 +178,15 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
-  - schema validation errors classify as schema/validation/repair_schema until retry cap
+  - schema mismatch errors classify as schema/validation/repair_schema until retry cap; repair_schema means model response polishing
   - retry cap changes schema recovery action to stop_turn
-  - provider executor failures classify as provider/recoverable/fail_turn
+  - provider executor failures classify as provider/recoverable/retry_same_step before retry cap and provider/recoverable/fail_turn at retry cap
   - tool failures classify as tool/validation/repair_schema
   - error-center metadata query projection filters by trace/turn/domain and omits raw text
 - required_module_black_box_tests:
   - runtime writes `error.center` metadata for completion schema rejection
   - runtime writes `error.center` metadata for failed tool result before provider re-entry
-  - runtime writes `error.center` metadata for provider executor failure before materializing terminal failure
+  - runtime writes `error.center` metadata for provider executor retry attempts and final retry-exhausted failure before materializing terminal failure
   - metadata write failure blocks the originating decision
   - daemon ADP query returns runtime-backed error-center metadata projection
 - required_project_black_box_tests:
@@ -199,7 +201,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `~/.freehand/ledgers/metadata`
 - update_triggers:
   - error domain/class/recovery policy changes
-  - schema repair rhythm changes
+  - schema polishing rhythm changes
   - provider/tool/task/node failure routing changes
   - error metadata watermark fields change
 - lifecycle_checks:

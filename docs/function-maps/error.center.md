@@ -16,14 +16,14 @@
 - runtime constructs `ErrorCenterObservedFailure` with source owner, source pipeline node, code, message, retry index, and retry cap
 - `classify_error_center_failure` maps the observed failure to one error domain, class, recovery action, public visibility, owner target, and repair fields
 - runtime writes the accepted decision to `metadata.core` with writer owner `error.center`
-- provider/tool/schema flow may continue, repair, or fail only after the error-center metadata write succeeds
+- provider/tool/schema flow may continue, retry, repair, or fail only after the error-center metadata write succeeds
 - ADP/read-only clients may query accepted error-center metadata rows through runtime-backed UI protocol queries without reading raw request or provider payloads
 
 ## Response Mainline
 
-- schema validation failures classify as `schema` / `validation` / `repair_schema` until retry cap
+- schema validation failures classify as `schema` / `validation` / `repair_schema` until retry cap; schema/no-schema response mismatch is a model polishing pattern, not provider failure
 - schema validation failures at retry cap classify to `stop_turn`
-- provider executor failures classify as `provider` / `recoverable` / `fail_turn`
+- provider executor failures classify as `provider` / `recoverable` / `retry_same_step` before retry cap and `fail_turn` at retry cap
 - tool execution failures classify as `tool` / `validation` / `repair_schema`
 - metadata rows carry domain, class, code, source owner, source pipeline node, recovery action, retry index, retry cap, public visibility, owner target, repair fields, and raw hash
 - runtime projects only watermarked error-center fields into `UiErrorCenterEventProjection`; raw error message text remains absent from ADP query output
@@ -66,6 +66,6 @@
 
 ## Sync Status Against Code
 
-- first implementation covers schema rejection, failed tool result, and provider executor failure
+- first implementation covers schema rejection, failed tool result, provider executor retry, and provider retry exhaustion failure
 - ADP query and initial subscription projection for error-center metadata are implemented through `ui.protocol`, `runtime.ui-command-dispatch`, shared server transport, daemon, and CLI
 - live push on new error-center metadata writes, task/node/UI error policy, and public WebUI error cards are pending

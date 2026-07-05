@@ -23,10 +23,10 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - the same runtime tool registry exports one deterministic implemented-schema fingerprint that is stamped into planner diagnostics before provider request build
 - Anthropic live executor runs the HTTP/SSE request through raw-capable callbacks so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
-- completed provider tool calls are executed by `freehand-tools`; writable tool calls first go through runtime checkpoint preview/snapshot/execute gating, then success or execution-failure results are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a paired tool result exchange
+- completed provider tool calls are executed by `freehand-tools`; incomplete `tool_use` calls and execution failures become paired failed tool-result exchanges, while writable tool calls first go through runtime checkpoint preview/snapshot/execute gating before success or execution-failure results are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request
 - runtime writes tool execution lifecycle metadata without tool-result content before tool-result re-entry
 - runtime emits tool execution lifecycle debug snapshots through `debug.core` without tool-result content
-- completion schema is parsed from tagged text, validated, and either accepted, rejected with field-level feedback, or used to schedule the next round
+- completion schema is parsed only after terminal-candidate finish reasons; schema/no-schema mismatch is rejected with field-level feedback as a model response-polishing pattern, not provider failure, or used to schedule the next round
 - runtime writes terminal lifecycle metadata before terminal persistence
 - runtime emits terminal lifecycle debug snapshots through `debug.core` before terminal persistence
 - runtime dispatch callers may consume the same bridge through CLI or daemon command ingress without owning provider DTOs
@@ -47,13 +47,13 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 ## Error Mainline
 
 - unsupported provider type/protocol is rejected at the bridge boundary
-- provider execution failures materialize runtime-classified failed terminal truth before the dispatch failure is returned
-- invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times before blocked terminal truth, not failed terminal truth
+- provider execution failures are classified with concrete error codes and retried up to five non-stream attempts with exponential backoff starting at 1 second before failed terminal truth is materialized
+- invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times before blocked terminal truth, not provider failed terminal truth
 - incomplete tool calls are not executed and do not become tool-result truth
 - writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn
 - runtime system errors, including provider transport errors, persistence failures, metadata failures, checkpoint infrastructure failures, and provider-output apply failures, remain explicit terminal bridge errors and are not converted into tool results
-- provider executor transport failures materialize ErrorErr01RuntimeClassified plus failed terminal truth through the active turn before returning dispatch failure, so UI/ADP clients see a closed failed turn instead of a hanging active turn
+- provider executor transport failures materialize ErrorErr01RuntimeClassified plus failed terminal truth with the concrete provider error code through the active turn before returning dispatch failure, so UI/ADP clients see a closed failed turn instead of a hanging active turn
 - provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`
 - metadata ledger bootstrap and metadata write failures are returned as explicit `RuntimeLiveBridgeError::MetadataFailed` errors
 - provider raw debug-ledger write failures are returned as explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
@@ -123,9 +123,9 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 | 24 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned terminal lifecycle metadata before terminal persistence | round/tool/schema-rejection counters plus final terminal status | durable runtime metadata record | live bridge | metadata owner | bound |
 | 25 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned terminal lifecycle debug snapshot before terminal persistence | round/tool/schema-rejection counters plus final terminal status | runtime-owned debug event | live bridge | debug.core | bound |
 | 26 | `ReasonPersistence::record_turn_closed` | `crates/freehand-reason/src/persistence.rs` | materialize terminal live turn | terminal turn truth | closed turn snapshot plus sidecars/index | live bridge | persistence owner | bound |
-| 19 | `record_provider_error_metadata` | `crates/freehand-runtime/src/lib.rs` | write provider executor error metadata when AnthropicExecutorError is returned | executor error classification plus turn identity | durable provider error metadata record | live bridge | metadata owner | bound |
-| 20 | `emit_provider_error_debug` | `crates/freehand-runtime/src/lib.rs` | emit provider executor error debug snapshot when AnthropicExecutorError is returned | executor error summary plus turn identity | runtime-owned debug event | live bridge | debug.core | bound |
-| 27 | `materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | convert provider executor or transport failure into runtime-classified error truth plus failed terminal truth before returning dispatch failure | provider executor error plus active turn | persisted failed closed turn with provider_executor_failure error event | live bridge executor error path | reason and persistence owners | bound |
+| 19 | `record_provider_error_metadata` | `crates/freehand-runtime/src/lib.rs` | write provider executor error-code and retry metadata when AnthropicExecutorError is returned | executor error classification plus retry index/cap plus turn identity | durable provider and error-center metadata records | live bridge | metadata owner | bound |
+| 20 | `emit_provider_retry_debug` | `crates/freehand-runtime/src/lib.rs` | emit provider executor retry/error debug snapshot when AnthropicExecutorError is returned | executor error code plus retry index/cap plus turn identity | runtime-owned debug event | live bridge | debug.core | bound |
+| 27 | `provider_executor_retry_plan / materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | retry recoverable non-stream provider failures up to five attempts and convert exhausted/non-retryable provider executor failure into runtime-classified error truth plus failed terminal truth before returning dispatch failure | provider executor error plus retry plan plus active turn | retry continuation or persisted failed closed turn with concrete provider error code | live bridge executor error path | reason and persistence owners | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -135,10 +135,11 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
+- schema/no-schema response mismatch is a model response-polishing pattern: it remains CompletionSchemaRejected plus error.center repair_schema recovery action and must not be projected as provider failure or fail_turn
 - tool execution result failures, including missing-file read failures and unknown tool names, are surfaced as `ToolResultStatus::Failed` tool-result re-entry truth, sent to Anthropic with `is_error=true`, and do not materialize runtime error or failed terminal truth by themselves
-- provider executor and transport failures are distinct from tool execution result failures: they materialize a failed terminal turn with provider_executor_failure and no active turn before the dispatch error is returned
+- provider executor and transport failures are distinct from schema mismatch polishing and tool execution result failures: recoverable non-stream failures retry up to five attempts, then materialize a failed terminal turn with a concrete provider error code and no active turn before the dispatch error is returned
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`
 - generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes
-- provider executor error metadata is now written through `record_provider_error_metadata` at both single-shot and stream error return paths via pipeline node `RuntimeLive05ProviderError`
+- provider executor retry/error metadata is now written through `record_provider_error_metadata` at both single-shot and stream error return paths via pipeline node `RuntimeLive05ProviderError`

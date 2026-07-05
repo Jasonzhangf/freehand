@@ -1,0 +1,23 @@
+{
+  "runId": "20260705-provider-retry-1783252973529124000",
+  "profile": "isolated-temp-home-cli-live",
+  "command": "HOME=<tmp> FREEHAND_PAIR_TOKEN_SHARED=pair-token-shared FREEHAND_PROVIDER_RETRY_BACKOFF_MS=1 freehand-cliS reason-live --agent master --prompt provider retry fixture",
+  "providerFixture": "local HTTP Anthropic-compatible endpoint returning HTTP 500 for every /v1/messages request",
+  "expectedRetryPolicy": {
+    "attempts": 5,
+    "productionBackoff": "1s,2s,4s,8s,16s",
+    "testOverrideBackoffMs": 1
+  },
+  "observed": {
+    "cliStatus": 2,
+    "requestCount": 5,
+    "paths": ["/v1/messages", "/v1/messages", "/v1/messages", "/v1/messages", "/v1/messages"],
+    "stderr": "anthropic live executor failed: anthropic_http_status_500: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"online retry fixture\"}}"
+  },
+  "checks": {
+    "fiveAttemptsObserved": true,
+    "concreteErrorCodeObserved": true,
+    "globalConfigUntouched": true,
+    "releasePort4041Untouched": true
+  }
+}

@@ -52,7 +52,7 @@
   - protocol-owned subscription channel fanout
   - incremental turn projection updates from shared contracts
   - model request waiting projection, typed phase kind, timing-key stability, and response-clear behavior
-  - completion-schema retry waiting projection with `kind=SchemaRetry` and compact `schema retry #N: issue` detail
+  - completion-schema mismatch waiting projection with `kind=SchemaRetry` and compact `schema polishing #N: issue` detail
   - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
   - structured tool display projection from read/search/write/plan/shell/generic parser output
   - duplicate same-`tool_call_id` tool-call projection upserts one activity and one public tool card

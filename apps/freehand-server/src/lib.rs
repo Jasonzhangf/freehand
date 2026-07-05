@@ -1327,7 +1327,7 @@ mod tests {
         assert!(js_body.contains("phase: modelRequestPhase(turn)"));
         assert!(js_body.contains("modelRequestLabel"));
         assert!(js_body.contains("turnIsWaitingForModelResponse"));
-        assert!(js_body.contains("schema retry"));
+        assert!(js_body.contains("schema polishing"));
         assert!(js_body.contains("thinking after tool result"));
         assert!(!js_body.contains("turnIsWaitingForModel("));
         assert!(js_body.contains("rememberInputHistory"));

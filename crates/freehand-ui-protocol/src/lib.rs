@@ -922,7 +922,7 @@ impl UiProtocolState {
         waiting: UiCompletionSchemaRetryWaiting,
     ) -> UiTurnProjection {
         let detail = format!(
-            "schema retry #{}: {}",
+            "schema polishing #{}: {}",
             waiting.retry_index, waiting.issue_summary
         );
         self.apply_model_request_waiting_kind(UiModelRequestWaiting {
@@ -2614,7 +2614,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_retry_projects_as_model_waiting_activity() {
+    fn schema_mismatch_projects_as_model_polishing_activity() {
         let mut state = UiProtocolState::default();
         let session_id = SessionId::new("session-schema-retry");
         let turn_id = TurnId::new("turn-schema-retry");
@@ -2633,7 +2633,7 @@ mod tests {
         assert_eq!(activity.status, UiModelRequestStatus::Waiting);
         assert_eq!(activity.kind, UiModelRequestKind::SchemaRetry);
         let detail = activity.detail.expect("detail");
-        assert!(detail.contains("schema retry #2"));
+        assert!(detail.contains("schema polishing #2"));
         assert!(detail.contains("evidence must be a string"));
         assert!(!detail.contains("Feedback sent to the model"));
     }

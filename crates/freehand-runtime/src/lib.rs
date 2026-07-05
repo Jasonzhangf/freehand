@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::{
     CompletionClaim, CompletionDecision, CompletionSchemaRejection, CompletionSubmission,
@@ -81,6 +82,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 
+const PROVIDER_EXECUTOR_RETRY_CAP: u32 = 5;
+const PROVIDER_EXECUTOR_INITIAL_BACKOFF_MS: u64 = 1_000;
+const PROVIDER_EXECUTOR_MAX_BACKOFF_MS: u64 = 16_000;
+
 #[derive(Debug, Clone)]
 pub struct LiveReasonTurnRequest {
     pub runtime_home: PathBuf,
@@ -145,6 +150,46 @@ pub enum RuntimeLiveBridgeError {
 struct ExecutedToolResult {
     result: ReasonReq05ToolResultReentry,
     task_truth_changed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProviderExecutorErrorInfo {
+    code: String,
+    message: String,
+    retryable: bool,
+}
+
+impl ProviderExecutorErrorInfo {
+    fn terminal_message(&self) -> String {
+        format!("{}: {}", self.code, self.message)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProviderExecutorRetryPlan {
+    cap: u32,
+    initial_backoff_ms: u64,
+    max_backoff_ms: u64,
+}
+
+impl ProviderExecutorRetryPlan {
+    fn production() -> Self {
+        Self {
+            cap: PROVIDER_EXECUTOR_RETRY_CAP,
+            initial_backoff_ms: PROVIDER_EXECUTOR_INITIAL_BACKOFF_MS,
+            max_backoff_ms: PROVIDER_EXECUTOR_MAX_BACKOFF_MS,
+        }
+    }
+
+    fn backoff_duration(self, retry_index: u32) -> Duration {
+        let exponent = retry_index.saturating_sub(1).min(31);
+        let multiplier = 1_u64.checked_shl(exponent).unwrap_or(u64::MAX);
+        let millis = self
+            .initial_backoff_ms
+            .saturating_mul(multiplier)
+            .min(self.max_backoff_ms);
+        Duration::from_millis(millis)
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -1097,20 +1142,27 @@ where
                 return Err(err);
             }
             if let Err(err) = stream_result {
-                let mapped = map_anthropic_executor_error(err);
+                let info = classify_anthropic_executor_error(&err);
+                let mapped =
+                    RuntimeLiveBridgeError::AnthropicExecutorFailed(info.terminal_message());
                 record_provider_error_metadata(
                     &metadata_center,
                     &agent_id,
                     &request.session_id,
                     &turn,
                     &mapped,
+                    &info.code,
+                    1,
+                    1,
                 )?;
-                emit_provider_error_debug(
+                emit_provider_retry_debug(
                     &debug_hub,
                     &agent_id,
                     &request.session_id,
                     &turn,
-                    &mapped,
+                    &info,
+                    1,
+                    1,
                 );
                 let mut failure_ctx = ProviderExecutorFailureContext {
                     engine: &engine,
@@ -1122,70 +1174,97 @@ where
                     debug_receiver: &debug_receiver,
                     on_debug: &mut on_debug,
                     schema_rejection_count: schema_rejections.len() as u32,
+                    error_code: info.code,
                 };
                 materialize_provider_executor_failure(&mut failure_ctx, &mut turn, &mapped)?;
                 turns.push(turn);
                 return Err(mapped);
             }
         } else {
-            let single_raw_error = RefCell::new(None::<RuntimeLiveBridgeError>);
-            let execute_result =
-                executor.execute_once_with_raw(&provider_ctx(&turn), &semantic_request, |raw| {
-                    if semantic_request.raw_retention
-                        == freehand_provider_core::RawRetentionPolicy::DoNotRetain
-                    {
-                        return Ok(());
+            let retry_plan = provider_executor_retry_plan();
+            let mut retry_index = 0_u32;
+            let outputs = loop {
+                retry_index = retry_index.saturating_add(1);
+                let single_raw_error = RefCell::new(None::<RuntimeLiveBridgeError>);
+                let execute_result = executor.execute_once_with_raw(
+                    &provider_ctx(&turn),
+                    &semantic_request,
+                    |raw| {
+                        if semantic_request.raw_retention
+                            == freehand_provider_core::RawRetentionPolicy::DoNotRetain
+                        {
+                            return Ok(());
+                        }
+                        if let Err(err) = record_live_provider_raw(
+                            &persistence,
+                            &turn.request.session_id,
+                            &turn.request.turn_id,
+                            &turn.request.trace_id,
+                            semantic_request.descriptor.family,
+                            raw,
+                        ) {
+                            *single_raw_error.borrow_mut() = Some(err);
+                            return Err(AnthropicExecutorError::Callback(
+                                "live bridge failed while persisting raw provider response"
+                                    .to_owned(),
+                            ));
+                        }
+                        Ok(())
+                    },
+                );
+                if let Some(err) = single_raw_error.into_inner() {
+                    return Err(err);
+                }
+                match execute_result {
+                    Ok(outputs) => break outputs,
+                    Err(err) => {
+                        let info = classify_anthropic_executor_error(&err);
+                        let mapped = RuntimeLiveBridgeError::AnthropicExecutorFailed(
+                            info.terminal_message(),
+                        );
+                        record_provider_error_metadata(
+                            &metadata_center,
+                            &agent_id,
+                            &request.session_id,
+                            &turn,
+                            &mapped,
+                            &info.code,
+                            retry_index,
+                            retry_plan.cap,
+                        )?;
+                        emit_provider_retry_debug(
+                            &debug_hub,
+                            &agent_id,
+                            &request.session_id,
+                            &turn,
+                            &info,
+                            retry_index,
+                            retry_plan.cap,
+                        );
+                        if !info.retryable || retry_index >= retry_plan.cap {
+                            let mut failure_ctx = ProviderExecutorFailureContext {
+                                engine: &engine,
+                                persistence: &persistence,
+                                history: &history,
+                                receiver: &receiver,
+                                broadcasts: &mut broadcasts,
+                                on_broadcast: &mut on_broadcast,
+                                debug_receiver: &debug_receiver,
+                                on_debug: &mut on_debug,
+                                schema_rejection_count: schema_rejections.len() as u32,
+                                error_code: info.code.clone(),
+                            };
+                            materialize_provider_executor_failure(
+                                &mut failure_ctx,
+                                &mut turn,
+                                &mapped,
+                            )?;
+                            turns.push(turn);
+                            return Err(mapped);
+                        }
+                        ensure_live_not_cancelled(&request)?;
+                        sleep_provider_retry(retry_plan.backoff_duration(retry_index));
                     }
-                    if let Err(err) = record_live_provider_raw(
-                        &persistence,
-                        &turn.request.session_id,
-                        &turn.request.turn_id,
-                        &turn.request.trace_id,
-                        semantic_request.descriptor.family,
-                        raw,
-                    ) {
-                        *single_raw_error.borrow_mut() = Some(err);
-                        return Err(AnthropicExecutorError::Callback(
-                            "live bridge failed while persisting raw provider response".to_owned(),
-                        ));
-                    }
-                    Ok(())
-                });
-            if let Some(err) = single_raw_error.into_inner() {
-                return Err(err);
-            }
-            let outputs = match execute_result {
-                Ok(o) => o,
-                Err(err) => {
-                    let mapped = map_anthropic_executor_error(err);
-                    record_provider_error_metadata(
-                        &metadata_center,
-                        &agent_id,
-                        &request.session_id,
-                        &turn,
-                        &mapped,
-                    )?;
-                    emit_provider_error_debug(
-                        &debug_hub,
-                        &agent_id,
-                        &request.session_id,
-                        &turn,
-                        &mapped,
-                    );
-                    let mut failure_ctx = ProviderExecutorFailureContext {
-                        engine: &engine,
-                        persistence: &persistence,
-                        history: &history,
-                        receiver: &receiver,
-                        broadcasts: &mut broadcasts,
-                        on_broadcast: &mut on_broadcast,
-                        debug_receiver: &debug_receiver,
-                        on_debug: &mut on_debug,
-                        schema_rejection_count: schema_rejections.len() as u32,
-                    };
-                    materialize_provider_executor_failure(&mut failure_ctx, &mut turn, &mapped)?;
-                    turns.push(turn);
-                    return Err(mapped);
                 }
             };
             ensure_live_not_cancelled(&request)?;
@@ -3749,7 +3828,70 @@ fn terminal_debug_details(
 }
 
 fn map_anthropic_executor_error(err: AnthropicExecutorError) -> RuntimeLiveBridgeError {
-    RuntimeLiveBridgeError::AnthropicExecutorFailed(err.to_string())
+    let info = classify_anthropic_executor_error(&err);
+    RuntimeLiveBridgeError::AnthropicExecutorFailed(info.terminal_message())
+}
+
+fn classify_anthropic_executor_error(err: &AnthropicExecutorError) -> ProviderExecutorErrorInfo {
+    match err {
+        AnthropicExecutorError::HttpStatus { status, body } => ProviderExecutorErrorInfo {
+            code: format!("anthropic_http_status_{status}"),
+            message: body.clone(),
+            retryable: *status == 408
+                || *status == 409
+                || *status == 425
+                || *status == 429
+                || *status >= 500,
+        },
+        AnthropicExecutorError::Http(err) => ProviderExecutorErrorInfo {
+            code: "anthropic_http_request_failed".to_owned(),
+            message: err.to_string(),
+            retryable: err.is_connect() || err.is_timeout() || err.is_request(),
+        },
+        AnthropicExecutorError::StreamRead(err) => ProviderExecutorErrorInfo {
+            code: "anthropic_stream_read_failed".to_owned(),
+            message: err.to_string(),
+            retryable: true,
+        },
+        AnthropicExecutorError::Adapter(err) => ProviderExecutorErrorInfo {
+            code: "anthropic_adapter_failed".to_owned(),
+            message: err.to_string(),
+            retryable: false,
+        },
+        AnthropicExecutorError::InvalidConfig => ProviderExecutorErrorInfo {
+            code: "anthropic_invalid_config".to_owned(),
+            message: err.to_string(),
+            retryable: false,
+        },
+        AnthropicExecutorError::Callback(message) => ProviderExecutorErrorInfo {
+            code: "anthropic_callback_failed".to_owned(),
+            message: message.clone(),
+            retryable: false,
+        },
+    }
+}
+
+fn provider_executor_retry_plan() -> ProviderExecutorRetryPlan {
+    let mut plan = ProviderExecutorRetryPlan::production();
+    #[cfg(test)]
+    {
+        plan.initial_backoff_ms = 0;
+        plan.max_backoff_ms = 0;
+    }
+    if let Ok(value) = env::var("FREEHAND_PROVIDER_RETRY_BACKOFF_MS")
+        && let Ok(millis) = value.parse::<u64>()
+    {
+        plan.initial_backoff_ms = millis;
+        plan.max_backoff_ms = millis;
+    }
+    plan
+}
+
+fn sleep_provider_retry(duration: Duration) {
+    if duration.is_zero() {
+        return;
+    }
+    thread::sleep(duration);
 }
 
 fn record_provider_error_metadata(
@@ -3758,6 +3900,9 @@ fn record_provider_error_metadata(
     session_id: &SessionId,
     turn: &TurnRecord,
     error: &RuntimeLiveBridgeError,
+    error_code: &str,
+    retry_index: u32,
+    retry_cap: u32,
 ) -> Result<(), RuntimeLiveBridgeError> {
     write_error_center_metadata(
         center,
@@ -3767,15 +3912,15 @@ fn record_provider_error_metadata(
             turn_id: Some(&turn.request.turn_id),
             trace_id: &turn.request.trace_id,
             pipeline_node: "RuntimeLive05ProviderError",
-            metadata_suffix: "provider_error".to_owned(),
+            metadata_suffix: format!("provider_error:{retry_index}"),
             symbol_path: "run_live_anthropic_reason_turn",
             observed: ErrorCenterObservedFailure {
                 source_owner: "provider.reason-live-bridge".to_owned(),
                 source_pipeline_node: "RuntimeLive05ProviderError".to_owned(),
-                code: "provider_executor_failure".to_owned(),
+                code: error_code.to_owned(),
                 message: error.to_string(),
-                retry_index: 0,
-                retry_cap: 0,
+                retry_index,
+                retry_cap,
             },
         },
     )?;
@@ -3788,7 +3933,7 @@ fn record_provider_error_metadata(
             trace_id: &turn.request.trace_id,
             kind: MetadataKind::Provider,
             pipeline_node: "RuntimeLive05ProviderError",
-            metadata_suffix: "provider_error".to_owned(),
+            metadata_suffix: format!("provider_error:{retry_index}"),
             symbol_path: "run_live_anthropic_reason_turn",
             entries: vec![
                 MetadataEntry {
@@ -3796,8 +3941,20 @@ fn record_provider_error_metadata(
                     value: json!("executor_failure"),
                 },
                 MetadataEntry {
+                    key: "error.code".to_owned(),
+                    value: json!(error_code),
+                },
+                MetadataEntry {
                     key: "error.summary".to_owned(),
                     value: json!(error.to_string()),
+                },
+                MetadataEntry {
+                    key: "error.retry_index".to_owned(),
+                    value: json!(retry_index),
+                },
+                MetadataEntry {
+                    key: "error.retry_cap".to_owned(),
+                    value: json!(retry_cap),
                 },
             ],
         },
@@ -3814,6 +3971,7 @@ struct ProviderExecutorFailureContext<'a> {
     debug_receiver: &'a Receiver<DebugEvent>,
     on_debug: &'a mut dyn FnMut(&DebugEvent),
     schema_rejection_count: u32,
+    error_code: String,
 }
 
 fn materialize_provider_executor_failure(
@@ -3829,7 +3987,7 @@ fn materialize_provider_executor_failure(
         feature_id: turn.request.feature_id.clone(),
         agent_id: Some(turn.request.agent_id.clone()),
         error: ErrorContract {
-            code: "provider_executor_failure".to_owned(),
+            code: ctx.error_code.clone(),
             class: ErrorClass::Upstream,
             recovery: RecoveryPolicy::Recoverable,
             message: message.clone(),
@@ -3853,12 +4011,14 @@ fn materialize_provider_executor_failure(
         .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))
 }
 
-fn emit_provider_error_debug(
+fn emit_provider_retry_debug(
     debug_hub: &DebugHub,
     agent_id: &AgentId,
     session_id: &SessionId,
     turn: &TurnRecord,
-    error: &RuntimeLiveBridgeError,
+    error: &ProviderExecutorErrorInfo,
+    retry_index: u32,
+    retry_cap: u32,
 ) {
     emit_live_bridge_debug(
         debug_hub,
@@ -3869,8 +4029,13 @@ fn emit_provider_error_debug(
             trace_id: &turn.request.trace_id,
             pipeline_node: "RuntimeLive05ProviderError",
             function: "run_live_anthropic_reason_turn",
-            status_text: "provider error occurred",
-            detail_lines: vec![format!("error={}", error)],
+            status_text: "provider error retry scheduled",
+            detail_lines: vec![
+                format!("error_code={}", error.code),
+                format!("retry_index={retry_index}"),
+                format!("retry_cap={retry_cap}"),
+                format!("retryable={}", error.retryable),
+            ],
         },
     );
 }
@@ -5597,7 +5762,7 @@ mod tests {
     }
 
     #[test]
-    fn live_dispatch_projects_schema_retry_feedback_to_client_before_repair_completes() {
+    fn live_dispatch_projects_schema_polishing_feedback_to_client_before_mismatch_completes() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -5606,7 +5771,7 @@ mod tests {
             "application/json",
             vec![
                 invalid_complete_response(),
-                complete_single_response("schema repaired"),
+                complete_single_response("schema polished"),
             ],
         );
         let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
@@ -5619,20 +5784,20 @@ mod tests {
         let receipt = runtime
             .dispatch(
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
-                    text: "trigger schema repair".to_owned(),
+                    text: "trigger schema polishing".to_owned(),
                     session_id: None,
                     cwd: None,
                 })
                 .expect("envelope"),
             )
-            .expect("submit should complete after schema repair");
+            .expect("submit should complete after schema polishing");
         assert!(
             receipt
                 .dispatch_status
                 .contains("reason_live_turn_completed")
         );
         let _first_request = rx.recv().expect("first provider request");
-        let second_request = rx.recv().expect("schema repair provider request");
+        let second_request = rx.recv().expect("schema polishing provider request");
         handle.join().expect("join provider");
 
         assert!(second_request.contains("`completion_reason`: is required"));
@@ -5653,14 +5818,14 @@ mod tests {
                     .turns
                     .iter()
                     .find(|turn| turn.turn_id == TurnId::new("runtime-turn-1"))
-                    .expect("schema retry round");
+                    .expect("schema mismatch round");
                 let activity = retry_round
                     .model_request
                     .as_ref()
-                    .expect("schema retry must be client-visible");
+                    .expect("schema polishing must be client-visible");
                 assert_eq!(activity.kind, UiModelRequestKind::SchemaRetry);
                 let detail = activity.detail.as_deref().expect("schema detail");
-                assert!(detail.contains("schema retry #1"));
+                assert!(detail.contains("schema polishing #1"));
                 assert!(detail.contains("completion_reason is required"));
                 assert!(detail.contains("evidence is required"));
                 assert!(detail.contains("learned is required"));
@@ -5669,7 +5834,7 @@ mod tests {
                     .turns
                     .iter()
                     .find(|turn| turn.turn_id == TurnId::new("runtime-turn-1-r2"))
-                    .expect("repair final round");
+                    .expect("polishing final round");
                 assert_eq!(final_round.terminal_status, Some(TerminalStatus::Success));
                 assert!(final_round.model_request.is_none());
             }
@@ -5680,7 +5845,7 @@ mod tests {
     }
 
     #[test]
-    fn live_dispatch_projects_missing_schema_retry_feedback_to_client() {
+    fn live_dispatch_projects_missing_schema_polishing_feedback_to_client() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -5689,7 +5854,7 @@ mod tests {
             "application/json",
             vec![
                 missing_completion_schema_response(),
-                complete_single_response("schema repaired"),
+                complete_single_response("schema polished"),
             ],
         );
         let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
@@ -5702,20 +5867,20 @@ mod tests {
         let receipt = runtime
             .dispatch(
                 build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
-                    text: "trigger missing schema repair".to_owned(),
+                    text: "trigger missing schema polishing".to_owned(),
                     session_id: None,
                     cwd: None,
                 })
                 .expect("envelope"),
             )
-            .expect("submit should complete after missing schema repair");
+            .expect("submit should complete after missing schema polishing");
         assert!(
             receipt
                 .dispatch_status
                 .contains("reason_live_turn_completed")
         );
         let _first_request = rx.recv().expect("first provider request");
-        let second_request = rx.recv().expect("schema repair provider request");
+        let second_request = rx.recv().expect("schema polishing provider request");
         handle.join().expect("join provider");
 
         assert!(second_request.contains("`freehand_completion`: missing"));
@@ -5735,14 +5900,14 @@ mod tests {
                     .turns
                     .iter()
                     .find(|turn| turn.turn_id == TurnId::new("runtime-turn-1"))
-                    .expect("schema retry round");
+                    .expect("schema mismatch round");
                 let activity = retry_round
                     .model_request
                     .as_ref()
-                    .expect("schema retry must be client-visible");
+                    .expect("schema polishing must be client-visible");
                 assert_eq!(activity.kind, UiModelRequestKind::SchemaRetry);
                 let detail = activity.detail.as_deref().expect("schema detail");
-                assert!(detail.contains("schema retry #1"));
+                assert!(detail.contains("schema polishing #1"));
                 assert!(detail.contains("freehand_completion missing"));
                 assert!(detail.contains("<freehand_completion>"));
             }
@@ -5808,6 +5973,126 @@ mod tests {
             }
             other => panic!("unexpected transcript: {other:?}"),
         }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_retries_recoverable_provider_errors_then_succeeds() {
+        let runtime_home = temp_runtime_home();
+        let (base_url, rx, handle) = spawn_status_sequence_server(vec![
+            (
+                500,
+                "application/json",
+                r#"{"type":"error","error":{"type":"api_error","message":"first upstream failure"}}"#
+                    .to_owned(),
+            ),
+            (
+                500,
+                "application/json",
+                r#"{"type":"error","error":{"type":"api_error","message":"second upstream failure"}}"#
+                    .to_owned(),
+            ),
+            (200, "application/json", complete_single_response("retry ok")),
+        ]);
+
+        let outcome = run_live_reason_turn_with_hooks(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            LiveReasonTurnRequest {
+                runtime_home: runtime_home.clone(),
+                ..live_request(false)
+            },
+            |_| {},
+            |_| {},
+            |_| {},
+        )
+        .expect("provider retry should recover");
+
+        assert!(
+            outcome
+                .turn
+                .terminal_event
+                .expect("terminal")
+                .summary
+                .contains("retry ok")
+        );
+        assert_eq!(rx.iter().take(3).count(), 3);
+        handle.join().expect("join provider");
+        let metadata =
+            metadata_ledger_records(&runtime_home, "agent-live", &SessionId::new("session-live"));
+        let retry_actions = metadata
+            .iter()
+            .filter_map(|row| metadata_entry_string(row, "error.recovery_action"))
+            .collect::<Vec<_>>();
+        assert!(retry_actions.contains(&"retry_same_step".to_owned()));
+        assert!(!retry_actions.contains(&"fail_turn".to_owned()));
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_fails_after_five_provider_retries_with_error_code() {
+        let runtime_home = temp_runtime_home();
+        let responses = (0..PROVIDER_EXECUTOR_RETRY_CAP)
+            .map(|index| {
+                (
+                    500,
+                    "application/json",
+                    format!(
+                        r#"{{"type":"error","error":{{"type":"api_error","message":"upstream failure {index}"}}}}"#
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let (base_url, rx, handle) = spawn_status_sequence_server(responses);
+
+        let err = run_live_reason_turn_with_hooks(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            LiveReasonTurnRequest {
+                runtime_home: runtime_home.clone(),
+                ..live_request(false)
+            },
+            |_| {},
+            |_| {},
+            |_| {},
+        )
+        .expect_err("provider retry exhaustion should fail");
+
+        assert!(err.to_string().contains("anthropic_http_status_500"));
+        assert_eq!(
+            rx.iter().take(PROVIDER_EXECUTOR_RETRY_CAP as usize).count(),
+            5
+        );
+        handle.join().expect("join provider");
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&SessionId::new("session-live"))
+            .expect("restore failed turn");
+        assert!(restored.active_turn.is_none());
+        let closed = restored.closed_turns.last().expect("closed turn");
+        let error = closed.error_events.last().expect("error event");
+        assert_eq!(error.error.code, "anthropic_http_status_500");
+        assert!(
+            closed
+                .terminal_event
+                .as_ref()
+                .expect("terminal")
+                .summary
+                .contains("anthropic_http_status_500")
+        );
+        let metadata =
+            metadata_ledger_records(&runtime_home, "agent-live", &SessionId::new("session-live"));
+        let retry_indexes = metadata
+            .iter()
+            .filter_map(|row| metadata_entry_u64(row, "error.retry_index"))
+            .collect::<Vec<_>>();
+        assert!(retry_indexes.contains(&1));
+        assert!(retry_indexes.contains(&5));
+        let recovery_actions = metadata
+            .iter()
+            .filter_map(|row| metadata_entry_string(row, "error.recovery_action"))
+            .collect::<Vec<_>>();
+        assert!(recovery_actions.contains(&"retry_same_step".to_owned()));
+        assert!(recovery_actions.contains(&"fail_turn".to_owned()));
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
@@ -6263,11 +6548,22 @@ mod tests {
         content_type: &'static str,
         response_bodies: Vec<String>,
     ) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+        spawn_status_sequence_server(
+            response_bodies
+                .into_iter()
+                .map(|body| (200, content_type, body))
+                .collect(),
+        )
+    }
+
+    fn spawn_status_sequence_server(
+        responses: Vec<(u16, &'static str, String)>,
+    ) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let base_url = format!("http://{}", listener.local_addr().expect("addr"));
         let (tx, rx) = mpsc::channel();
         let handle = thread::spawn(move || {
-            for response_body in response_bodies {
+            for (status, content_type, response_body) in responses {
                 let (mut stream, _) = listener.accept().expect("accept");
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
@@ -6287,7 +6583,7 @@ mod tests {
                 tx.send(String::from_utf8(raw).expect("utf8"))
                     .expect("send");
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\n\r\n{response_body}",
+                    "HTTP/1.1 {status} OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\n\r\n{response_body}",
                     response_body.len()
                 );
                 stream.write_all(response.as_bytes()).expect("write");
@@ -7643,6 +7939,19 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     .iter()
                     .any(|entry| entry.key == "error.domain" && entry.value == json!("schema"))
         }));
+        assert!(!metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "error.center"
+                && record
+                    .entries
+                    .iter()
+                    .any(|entry| entry.key == "error.domain" && entry.value == json!("provider"))
+        }));
+        assert!(!metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "error.center"
+                && record.entries.iter().any(|entry| {
+                    entry.key == "error.recovery_action" && entry.value == json!("fail_turn")
+                })
+        }));
     }
 
     #[test]
@@ -8253,10 +8562,17 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         // Return HTTP 500 so the executor returns HttpStatus, which maps to
         // RuntimeLiveBridgeError::AnthropicExecutorFailed and triggers
         // RuntimeLive05ProviderError metadata + debug emission.
-        let (base_url, _rx, handle) = spawn_mock_server(
-            500,
-            "application/json",
-            r#"{"error":{"type":"internal_error","message":"server exploded"}}"#.to_string(),
+        let (base_url, _rx, handle) = spawn_status_sequence_server(
+            (0..PROVIDER_EXECUTOR_RETRY_CAP)
+                .map(|_| {
+                    (
+                        500,
+                        "application/json",
+                        r#"{"error":{"type":"internal_error","message":"server exploded"}}"#
+                            .to_string(),
+                    )
+                })
+                .collect(),
         );
         let request = live_request(false);
         let runtime_home = request.runtime_home.clone();
@@ -8302,6 +8618,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 && record.entries.iter().any(|entry| {
                     entry.key == "error.recovery_action" && entry.value == json!("fail_turn")
                 })
+                && record.entries.iter().any(|entry| {
+                    entry.key == "error.retry_index"
+                        && entry.value == json!(PROVIDER_EXECUTOR_RETRY_CAP)
+                })
         }));
         assert!(
             records
@@ -8329,7 +8649,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             Some(freehand_contracts::TerminalStatus::Failed)
         );
         assert!(failed_turn.error_events.iter().any(|event| {
-            event.error.code == "provider_executor_failure"
+            event.error.code == "anthropic_http_status_500"
                 && event
                     .error
                     .message

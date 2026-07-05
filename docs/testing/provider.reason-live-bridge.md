@@ -32,6 +32,7 @@
   - invalid completion-schema rejection then success path
   - missing completion-schema feedback must be sent to the next provider request with the missing `<freehand_completion>` tag requirement
   - invalid-schema rejection feedback must be sent to the next provider request with concrete missing field names, not only a generic retry prompt
+  - schema/no-schema response mismatch must remain `CompletionSchemaRejected` plus `error.center` polishing guidance (`repair_schema` recovery action internally); it must not be projected as provider failure or `fail_turn`
   - terminal-candidate-only schema parsing path proving `tool_use` responses do not trigger schema retry
   - `claim=continue` next-round path
   - retry-exhausted failed terminal path
@@ -57,11 +58,12 @@
   - one selected anthropic provider emits a writable file tool call, gets checkpointed before execute, and can be rewound by runtime owner truth
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
   - invalid completion schema retries exactly 3 consecutive terminal-candidate responses and closes blocked terminal without early success or failed status
-  - missing completion schema repair request includes the required tag guidance needed by the model for self-repair
-  - invalid completion schema repair request includes the missing schema fields required by the model for self-repair
+  - missing completion schema polishing request includes the required tag guidance needed by the model to align the response to the contract
+  - invalid completion schema polishing request includes the missing schema fields required by the model to align the response to the contract
   - non-string completion fields produce explicit type feedback instead of being reported as missing
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
-  - provider HTTP/executor failure returns explicit dispatch failure, materializes failed terminal/error truth, and leaves no active turn hanging
+  - recoverable non-stream provider HTTP/executor failure retries five attempts with exponential backoff starting at 1 second before explicit dispatch failure, materializes failed terminal/error truth with a concrete provider error code, and leaves no active turn hanging
+  - recoverable non-stream provider HTTP/executor failure can succeed after earlier attempts; metadata records `retry_same_step` attempts without terminal `fail_turn`
   - tool execution result failure returns a paired failed tool result to the model, emits runtime-owned model-continuation waiting status, and can still end with a successful terminal schema
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
   - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation
@@ -86,6 +88,6 @@
   - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
   - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
   - runtime white-box coverage now explicitly locks failed tool-result multi-round continuation, including incomplete `tool_use` as paired failed tool-result truth with zero schema retries, proving execution failures become paired `ToolResultStatus::Failed` re-entry truth and provider/system errors remain explicit bridge failures
-  - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes `provider_executor_failure`, closes the active turn as failed, and restores with no active turn
+  - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes concrete provider error codes such as `anthropic_http_status_500`, retries recoverable non-stream failures up to five attempts, closes the active turn as failed only after exhaustion, and restores with no active turn
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates

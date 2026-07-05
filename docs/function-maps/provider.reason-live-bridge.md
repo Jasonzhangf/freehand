@@ -43,15 +43,15 @@
 ## Error Mainline
 
 - unsupported provider type/protocol is rejected at the bridge boundary
-- provider execution failures are returned explicitly
-- invalid or missing completion schema is rejected with type-aware field-level feedback and retried up to 3 consecutive terminal-candidate responses
+- provider execution failures are classified with concrete error codes, recorded through `error.center`, retried up to five non-stream attempts with exponential backoff starting at 1 second, and returned explicitly only after retry exhaustion or a non-retryable executor error
+- invalid or missing completion schema is a normal response-schema mismatch pattern, not a provider failure: it is rejected with type-aware field-level feedback so the model can polish the response to the contract, then retried up to 3 consecutive terminal-candidate responses
 - non-terminal completion-schema rejection retries publish a waiting projection so UI clients can show that repair feedback was sent to the model
 - incomplete tool calls are not executed as successful side effects
 - incomplete `tool_use` responses are paired back to the model as failed tool results; they must not become schema retries or terminal runtime failures
 - writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn
-- runtime system errors, including provider transport errors, persistence failures, metadata failures, checkpoint infrastructure failures, and provider-output apply failures, remain explicit terminal bridge errors and are not converted into tool results
-- provider executor transport failures materialize `ErrorErr01RuntimeClassified` plus failed terminal truth through the active turn before returning dispatch failure, so UI/ADP clients see a closed failed turn instead of a hanging active turn
+- runtime system errors, including provider transport errors after retry exhaustion, persistence failures, metadata failures, checkpoint infrastructure failures, and provider-output apply failures, remain explicit terminal bridge errors and are not converted into tool results
+- provider executor transport failures materialize `ErrorErr01RuntimeClassified` plus failed terminal truth with the concrete provider error code through the active turn before returning dispatch failure, so UI/ADP clients see a closed failed turn instead of a hanging active turn
 - provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`
 - provider raw debug-ledger write failures are returned as explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - persistence restore/write failures fail the live bridge explicitly
@@ -120,7 +120,7 @@
 | 24 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned terminal lifecycle metadata before terminal persistence | round/tool/schema-rejection counters + final terminal status | durable runtime metadata record | live bridge | metadata owner | bound |
 | 25 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned terminal lifecycle debug snapshot before terminal persistence | round/tool/schema-rejection counters + final terminal status | runtime-owned debug event | live bridge | `debug.core` | bound |
 | 26 | `ReasonPersistence::record_turn_closed` | `crates/freehand-reason/src/persistence.rs` | materialize terminal live turn | terminal turn truth | closed turn snapshot + sidecars/index | live bridge | persistence owner | bound |
-| 27 | `materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | convert provider executor/transport failure into runtime-classified error truth plus failed terminal truth before returning dispatch failure | provider executor error + active turn | persisted failed closed turn with `provider_executor_failure` error event | live bridge executor error path | reason/persistence owners | bound |
+| 27 | `record_provider_error_metadata` / `provider_executor_retry_plan` / `materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | classify provider executor/transport failures, record retry metadata, retry recoverable non-stream attempts up to five times with 1s-start exponential backoff, and materialize failed truth only on exhaustion or non-retryable error | provider executor error + active turn | retry metadata or persisted failed closed turn with concrete provider error code | live bridge executor error path | error/reason/persistence owners | bound |
 
 ## Sync Status Against Code
 
@@ -131,7 +131,7 @@
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
 - tool execution result failures, including missing-file read failures and unknown tool names, are expected to surface as `ToolResultStatus::Failed` tool-result re-entry truth, be sent to the next Anthropic request with `is_error=true`, and must not materialize runtime error or failed terminal truth by themselves
-- provider executor/transport failures are distinct from tool execution result failures: they materialize a failed terminal turn with `provider_executor_failure` and no active turn before the dispatch error is returned
+- provider executor/transport failures are distinct from tool execution result failures and schema mismatch polishing: recoverable non-stream provider errors retry up to five attempts, then materialize a failed terminal turn with a concrete code such as `anthropic_http_status_500` and no active turn before the dispatch error is returned
 - runtime white-box coverage now explicitly locks failed-tool-result multi-round continuation, incomplete `tool_use` returning a failed tool result with zero schema retries, and keeps provider/metadata/persistence/checkpoint failures as system/runtime errors
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported
