@@ -1,5 +1,13 @@
 # CACHE
 
+- Current verified same-session continuation history repair:
+  - `provider.reason-live-bridge` now rebuilds restored `SessionHistory` base context from effective persisted turns before same-session follow-up provider requests.
+  - Second provider request is locked to include previous user/assistant truth via `live_bridge_restores_same_session_history_into_follow_up_provider_request`.
+  - Runtime live submit failure projection now preserves unrelated session transcripts while replacing only the failed session turns.
+  - Online S-profile proof: `artifacts/webui-online/20260705-history-4042-1783254901868/summary.json`, session `webui-session-20260705123503-9d9824e6`, turns `runtime-turn-64,runtime-turn-65`, token `FHCTX-1783254901867` recovered in second answer after first-turn-only context.
+  - General WebUI online gate proof: `artifacts/webui-online/20260705-verify-4042-1783254821320/summary.json`.
+  - verification: `cargo fmt --check`; `cargo test -p freehand-runtime -- --nocapture`; `node --check scripts/webui_verify_online.mjs`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `scripts/install-launchd.sh restartS`; 4042 health; `freehand-cliS adp-smoke`; `make verify-webui-online`.
+
 - Current verified WebUI render projection closeout:
   - `apps/freehand-server/assets/webui.js` now renders from `RenderConversation` / `RenderTurn` / `RenderRow` before DOM construction.
   - live animation is scoped to the current live turn only; historical turns render static.

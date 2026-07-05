@@ -1,5 +1,30 @@
 # note.md
 
+# 2026-07-05 same-session continuation history repair
+
+- user report: WebUI same-session follow-up appeared not to include prior turns; continuation must include all historical turns.
+- owner: `provider.reason-live-bridge` in `crates/freehand-runtime`, with `reason.session-history` as the consumed history owner.
+- root cause: restored live sessions used persisted `SessionHistory` as-is, but persisted closed/effective turns were not rebuilt into `SessionHistory.base_context_segments` before the next provider request, so `ReasonTurnEngine::start_turn` planned only current input plus any existing base context.
+- implementation:
+  - runtime live bridge now calls `ReasonPersistence::restore_turn_snapshots_for_ui(session_id)` on restored sessions and converts effective turns into deterministic `SessionMemory` base segments before starting the next round.
+  - helper path: `rebuild_session_history_from_effective_turns` -> `effective_turn_context_segments` -> `turn_context_segment` -> `history_visible_assistant_text`.
+  - provider/system failure projection in `finish_live_submit` now replaces only the failed session's turns, preserving already-restored other-session transcripts.
+  - WebUI online verifier accepts either a live progress card or a fast terminal second turn, preventing fast provider responses from being reported as a missing live-card failure.
+- regression locks:
+  - `live_bridge_restores_same_session_history_into_follow_up_provider_request` proves second provider request contains `Historical turn 1`, first user prompt, first assistant answer, and second prompt.
+  - `live_dispatch_failure_preserves_other_session_transcripts` proves provider retry exhaustion keeps unrelated session transcript visible while failed session gets its own failed projection.
+- validation:
+  - `cargo fmt --check`
+  - `cargo test -p freehand-runtime -- --nocapture` -> 74 passed
+  - `node --check scripts/webui_verify_online.mjs`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `scripts/install-launchd.sh restartS`, `curl -4fsS http://127.0.0.1:4042/health`, `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp`
+  - `make verify-webui-online` -> `artifacts/webui-online/20260705-verify-4042-1783254821320/summary.json`
+  - real WebUI same-session context proof -> `artifacts/webui-online/20260705-history-4042-1783254901868/summary.json`; session `webui-session-20260705123503-9d9824e6`, turns `runtime-turn-64,runtime-turn-65`, token `FHCTX-1783254901867` recovered in second answer and preserved after refresh.
+- exclusions:
+  - old wrong-profile `artifacts/webui-online/20260705-verify-4041-*` remain unrelated untracked evidence and were not touched.
+
 # 2026-07-04 error.center first skeleton
   - user requirement: implement the first `error.center` skeleton with feature/function/test/mainline/wiki truth, classify schema/tool/provider errors, write watermarked metadata decisions, and prevent runtime-local bypass for those paths.
   - owner: `error.center`.

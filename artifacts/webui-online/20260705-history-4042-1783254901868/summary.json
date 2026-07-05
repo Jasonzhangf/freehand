@@ -1,0 +1,68 @@
+{
+  "runId": "20260705-history-4042-1783254901868",
+  "artifactDir": "/Volumes/extension/code/freehand/artifacts/webui-online/20260705-history-4042-1783254901868",
+  "token": "FHCTX-1783254901867",
+  "sessionId": "webui-session-20260705123503-9d9824e6",
+  "checks": {
+    "firstTerminalHasToken": true,
+    "secondPromptComposerCleared": true,
+    "secondAnswerRecoveredToken": true,
+    "refreshPreservedToken": true,
+    "noPageErrors": true,
+    "noConsoleErrors": true
+  },
+  "first": {
+    "selectedSession": "webui-session-20260705123503-9d9824e6",
+    "selectedTurn": "runtime-turn-64",
+    "composer": "",
+    "commandStatus": "turn completed",
+    "turnStatus": "completed",
+    "liveCount": 0,
+    "messageText": "User\nsubmitted\n\nRemember this exact context token for the next turn: FHCTX-1783254901867. Reply with one short sentence saying stored, and include a valid Freehand completion schema. Do not call tools.\n\nAssistant\ncompleted\n\nStored the context token FHCTX-1783254901867 for the next turn.\n\nFinal\ncompleted\n\nStored the context token FHCTX-1783254901867 verbatim for use in the next turn.",
+    "pageErrors": [],
+    "consoleErrors": []
+  },
+  "afterSecondSubmit": {
+    "selectedSession": "webui-session-20260705123503-9d9824e6",
+    "selectedTurn": "runtime-turn-65",
+    "composer": "",
+    "commandStatus": "dispatching... 0s",
+    "turnStatus": "dispatching... 0s",
+    "liveCount": 0,
+    "messageText": "User\nsubmitted\n\nRemember this exact context token for the next turn: FHCTX-1783254901867. Reply with one short sentence saying stored, and include a valid Freehand completion schema. Do not call tools.\n\nAssistant\ncompleted\n\nStored the context token FHCTX-1783254901867 for the next turn.\n\nFinal\ncompleted\n\nStored the context token FHCTX-1783254901867 verbatim for use in the next turn.\n\nUser\nsubmitted\n\nWhat exact context token did I ask you to remember in the previous message? Reply with the exact token and include a valid Freehand completion schema. Do not call tools.",
+    "pageErrors": [],
+    "consoleErrors": []
+  },
+  "second": {
+    "selectedSession": "webui-session-20260705123503-9d9824e6",
+    "selectedTurn": "runtime-turn-65",
+    "composer": "",
+    "commandStatus": "turn completed",
+    "turnStatus": "completed",
+    "liveCount": 0,
+    "messageText": "User\nsubmitted\n\nRemember this exact context token for the next turn: FHCTX-1783254901867. Reply with one short sentence saying stored, and include a valid Freehand completion schema. Do not call tools.\n\nAssistant\ncompleted\n\nStored the context token FHCTX-1783254901867 for the next turn.\n\nFinal\ncompleted\n\nStored the context token FHCTX-1783254901867 verbatim for use in the next turn.\n\nUser\nsubmitted\n\nWhat exact context token did I ask you to remember in the previous message? Reply with the exact token and include a valid Freehand completion schema. Do not call tools.\n\nAssistant\ncompleted\n\nThe exact context token you asked me to remember is FHCTX-1783254901867.\n\nFinal\ncompleted\n\nProvided the exact context token requested by the user.",
+    "pageErrors": [],
+    "consoleErrors": []
+  },
+  "refreshed": {
+    "selectedSession": "webui-session-20260705123503-9d9824e6",
+    "selectedTurn": "runtime-turn-65",
+    "composer": "",
+    "commandStatus": "turn completed",
+    "turnStatus": "completed",
+    "liveCount": 0,
+    "messageText": "User\nsubmitted\n\nRemember this exact context token for the next turn: FHCTX-1783254901867. Reply with one short sentence saying stored, and include a valid Freehand completion schema. Do not call tools.\n\nAssistant\ncompleted\n\nStored the context token FHCTX-1783254901867 for the next turn.\n\nFinal\ncompleted\n\nStored the context token FHCTX-1783254901867 verbatim for use in the next turn.\n\nUser\nsubmitted\n\nWhat exact context token did I ask you to remember in the previous message? Reply with the exact token and include a valid Freehand completion schema. Do not call tools.\n\nAssistant\ncompleted\n\nThe exact context token you asked me to remember is FHCTX-1783254901867.\n\nFinal\ncompleted\n\nProvided the exact context token requested by the user.",
+    "pageErrors": [],
+    "consoleErrors": []
+  },
+  "adpQuery": {
+    "code": 0,
+    "stdout": "adp_session_query_ok url=ws://127.0.0.1:4042/adp sessions=6 ids=cli-adp-sample-success-1783252973529124000:1:success,runtime-session-master:16:blocked,webui-session-20260705115940-de3b7e5c:3:success,webui-session-20260705123221-8ed193a1:2:success,webui-session-20260705123342-4fd705e4:3:success,webui-session-20260705123503-9d9824e6:2:success selected_session=webui-session-20260705123503-9d9824e6 turns=2 turn_ids=runtime-turn-64,runtime-turn-65\n",
+    "stderr": ""
+  },
+  "chromeLog": [
+    "[stderr] \nDevTools listening on ws://127.0.0.1:9224/devtools/browser/1dcea950-124d-4d17-b870-2b4a2ce5ea9a\n",
+    "[stderr] Trying to load the allocator multiple times. This is *not* supported.\n",
+    "[stderr] [11043:1216927:0705/203506.216227:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT\n"
+  ]
+}

@@ -9,6 +9,7 @@
   "request_mainline": [
     "selected agent config enters the runtime-owned live bridge with one bound provider",
     "live bridge restores or creates the requested session through `ReasonPersistence` before round execution",
+    "when an existing session is restored, live bridge rebuilds `reason.session-history` base context from effective persisted turns before the next round starts, so same-session follow-up requests include prior user/assistant turn truth",
     "runtime emits restore lifecycle debug snapshots through `debug.core` without request text",
     "live bridge bootstraps one shared metadata ledger for runtime-owned lifecycle facts plus delegated `reason.turn` producer writes",
     "bridge derives provider descriptor and executor config from selected provider truth",
@@ -445,6 +446,17 @@
       "caller": "live bridge executor error path",
       "callee": "reason and persistence owners",
       "binding_status": "bound"
+    },
+    {
+      "step": "28",
+      "symbol_path": "rebuild_session_history_from_effective_turns",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "convert effective persisted same-session turns into session-memory base context before the next restored live request starts",
+      "input_semantic": "restored session history plus effective persisted turns",
+      "output_semantic": "resume-rebuild session history with prior user/assistant turn memory",
+      "caller": "live bridge restore path",
+      "callee": "reason.session-history",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -453,6 +465,7 @@
     "runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage",
     "runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage",
     "runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth",
+    "restored same-session follow-up requests rebuild `reason.session-history` base context from effective persisted turns before the next round starts, so the next provider request includes prior user/assistant turn truth",
     "runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence",
     "schema/no-schema response mismatch is a model response-polishing pattern: it remains CompletionSchemaRejected plus error.center repair_schema recovery action and must not be projected as provider failure or fail_turn",
     "tool execution result failures, including missing-file read failures and unknown tool names, are surfaced as `ToolResultStatus::Failed` tool-result re-entry truth, sent to Anthropic with `is_error=true`, and do not materialize runtime error or failed terminal truth by themselves",

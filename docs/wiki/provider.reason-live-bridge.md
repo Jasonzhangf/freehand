@@ -12,6 +12,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 
 - selected agent config enters the runtime-owned live bridge with one bound provider
 - live bridge restores or creates the requested session through `ReasonPersistence` before round execution
+- when an existing session is restored, live bridge rebuilds `reason.session-history` base context from effective persisted turns before the next round starts, so same-session follow-up requests include prior user/assistant turn truth
 - runtime emits restore lifecycle debug snapshots through `debug.core` without request text
 - live bridge bootstraps one shared metadata ledger for runtime-owned lifecycle facts plus delegated `reason.turn` producer writes
 - bridge derives provider descriptor and executor config from selected provider truth
@@ -126,6 +127,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 | 19 | `record_provider_error_metadata` | `crates/freehand-runtime/src/lib.rs` | write provider executor error-code and retry metadata when AnthropicExecutorError is returned | executor error classification plus retry index/cap plus turn identity | durable provider and error-center metadata records | live bridge | metadata owner | bound |
 | 20 | `emit_provider_retry_debug` | `crates/freehand-runtime/src/lib.rs` | emit provider executor retry/error debug snapshot when AnthropicExecutorError is returned | executor error code plus retry index/cap plus turn identity | runtime-owned debug event | live bridge | debug.core | bound |
 | 27 | `provider_executor_retry_plan / materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | retry recoverable non-stream provider failures up to five attempts and convert exhausted/non-retryable provider executor failure into runtime-classified error truth plus failed terminal truth before returning dispatch failure | provider executor error plus retry plan plus active turn | retry continuation or persisted failed closed turn with concrete provider error code | live bridge executor error path | reason and persistence owners | bound |
+| 28 | `rebuild_session_history_from_effective_turns` | `crates/freehand-runtime/src/lib.rs` | convert effective persisted same-session turns into session-memory base context before the next restored live request starts | restored session history plus effective persisted turns | resume-rebuild session history with prior user/assistant turn memory | live bridge restore path | reason.session-history | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -134,6 +136,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
+- restored same-session follow-up requests rebuild `reason.session-history` base context from effective persisted turns before the next round starts, so the next provider request includes prior user/assistant turn truth
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
 - schema/no-schema response mismatch is a model response-polishing pattern: it remains CompletionSchemaRejected plus error.center repair_schema recovery action and must not be projected as provider failure or fail_turn
 - tool execution result failures, including missing-file read failures and unknown tool names, are surfaced as `ToolResultStatus::Failed` tool-result re-entry truth, sent to Anthropic with `is_error=true`, and do not materialize runtime error or failed terminal truth by themselves

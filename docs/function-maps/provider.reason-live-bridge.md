@@ -121,6 +121,7 @@
 | 25 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned terminal lifecycle debug snapshot before terminal persistence | round/tool/schema-rejection counters + final terminal status | runtime-owned debug event | live bridge | `debug.core` | bound |
 | 26 | `ReasonPersistence::record_turn_closed` | `crates/freehand-reason/src/persistence.rs` | materialize terminal live turn | terminal turn truth | closed turn snapshot + sidecars/index | live bridge | persistence owner | bound |
 | 27 | `record_provider_error_metadata` / `provider_executor_retry_plan` / `materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | classify provider executor/transport failures, record retry metadata, retry recoverable non-stream attempts up to five times with 1s-start exponential backoff, and materialize failed truth only on exhaustion or non-retryable error | provider executor error + active turn | retry metadata or persisted failed closed turn with concrete provider error code | live bridge executor error path | error/reason/persistence owners | bound |
+| 28 | `rebuild_session_history_from_effective_turns` | `crates/freehand-runtime/src/lib.rs` | convert effective persisted same-session turns into session-memory base context before the next restored live request starts | restored session history + effective persisted turns | resume-rebuild session history with prior user/assistant turn memory | live bridge restore path | `reason.session-history` | bound |
 
 ## Sync Status Against Code
 
@@ -129,10 +130,12 @@
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
+- restored same-session follow-up requests now rebuild `reason.session-history` base context from effective persisted turns before the next round starts, so the next provider request includes prior user/assistant turn truth
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
 - tool execution result failures, including missing-file read failures and unknown tool names, are expected to surface as `ToolResultStatus::Failed` tool-result re-entry truth, be sent to the next Anthropic request with `is_error=true`, and must not materialize runtime error or failed terminal truth by themselves
 - provider executor/transport failures are distinct from tool execution result failures and schema mismatch polishing: recoverable non-stream provider errors retry up to five attempts, then materialize a failed terminal turn with a concrete code such as `anthropic_http_status_500` and no active turn before the dispatch error is returned
 - runtime white-box coverage now explicitly locks failed-tool-result multi-round continuation, incomplete `tool_use` returning a failed tool result with zero schema retries, and keeps provider/metadata/persistence/checkpoint failures as system/runtime errors
+- runtime dispatcher failure projection now preserves already-restored other-session transcripts while replacing only the failed session turns after provider/system failure recovery
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`

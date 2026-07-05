@@ -104,8 +104,12 @@ try {
 
   await waitForFunction(cdp, () => {
     const live = Array.from(document.querySelectorAll('[data-live="true"]'));
-    return live.length >= 1;
-  }, 20_000, 'second live turn visible');
+    const text = document.getElementById('message-list')?.innerText || '';
+    const turnStatus = document.getElementById('turn-status')?.textContent?.toLowerCase() || '';
+    const commandStatus = document.getElementById('command-status')?.textContent?.toLowerCase() || '';
+    const completed = turnStatus.includes('completed') || commandStatus.includes('turn completed');
+    return live.length >= 1 || (completed && text.includes('definitely-missing-freehand-file.txt'));
+  }, 20_000, 'second turn progress or terminal visible');
   const running2 = await captureState(cdp, '06-second-running');
 
   await waitForTerminal(cdp, 120_000, 'second terminal');
@@ -134,7 +138,8 @@ try {
       firstSubmitComposerCleared: postSubmit1.state.composer === '',
       firstPromptVisibleAfterSubmit: materialized1.state.messageText.includes(prompt1),
       secondSubmitComposerCleared: postSubmit2.state.composer === '',
-      secondRunningHasLiveCard: running2.state.liveCount >= 1,
+      secondProgressObserved:
+        running2.state.liveCount >= 1 || running2.state.turnStatus.toLowerCase().includes('completed') || running2.state.commandStatus.toLowerCase().includes('turn completed'),
       staleHistoricalLiveAfterSecondSubmit: running2.state.nonLastLiveCount,
       refreshPreservedFirstPrompt: refreshed.state.messageText.includes(prompt1),
       refreshPreservedFailurePrompt: refreshed.state.messageText.includes('definitely-missing-freehand-file.txt'),

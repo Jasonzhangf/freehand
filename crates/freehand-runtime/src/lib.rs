@@ -838,6 +838,17 @@ where
                 ));
             }
         };
+    if restore_status == LiveReasonRestoreStatus::RestoredExisting {
+        let mut effective_turns = persistence
+            .restore_turn_snapshots_for_ui(&request.session_id)
+            .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
+        effective_turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
+        rebuild_session_history_from_effective_turns(
+            &mut history,
+            &request.session_id,
+            &effective_turns,
+        )?;
+    }
     let debug_hub = Arc::new(DebugHub::new(true));
     let debug_receiver = debug_hub.subscribe(64);
     let first_round_turn_id = derived_turn_id(&request.turn_id, 1);
@@ -2586,10 +2597,20 @@ impl RuntimeCommandDispatcher {
                                 "failed to project live error turn from persistence: {restore_err}"
                             ))
                         })?;
-                state.turns = restored.closed_turns;
+                let mut restored_turns = persistence
+                    .restore_turn_snapshots_for_ui(&prepared.session_id)
+                    .map_err(|restore_err| {
+                        UiCommandDispatchPortError::DispatchFailed(format!(
+                            "failed to restore effective session turns for live error projection: {restore_err}"
+                        ))
+                    })?;
                 if let Some(active_turn) = restored.active_turn {
-                    state.turns.push(active_turn.turn);
+                    restored_turns.push(active_turn.turn);
                 }
+                state
+                    .turns
+                    .retain(|turn| turn.request.session_id != prepared.session_id);
+                state.turns.extend(restored_turns);
                 state
                     .turns
                     .sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
@@ -5208,6 +5229,91 @@ fn ui_user_text_for_turn(turn: &TurnRecord) -> String {
         .unwrap_or_else(|| turn.request.user_text.clone())
 }
 
+fn rebuild_session_history_from_effective_turns(
+    history: &mut SessionHistory,
+    session_id: &SessionId,
+    turns: &[TurnRecord],
+) -> Result<(), RuntimeLiveBridgeError> {
+    let rebuilt_segments = effective_turn_context_segments(turns);
+    if rebuilt_segments == history.base_context_segments() {
+        return Ok(());
+    }
+    if rebuilt_segments.is_empty() {
+        return Ok(());
+    }
+    history
+        .stage_resume_rebuild(
+            rebuilt_segments,
+            "rebuild session transcript context from effective persisted turns",
+            format!("runtime_restore:{}", session_id.as_str()),
+        )
+        .map_err(|err| RuntimeLiveBridgeError::RewriteRuntimeFailed(err.to_string()))?;
+    Ok(())
+}
+
+fn effective_turn_context_segments(turns: &[TurnRecord]) -> Vec<ContextSegment> {
+    turns.iter().filter_map(turn_context_segment).collect()
+}
+
+fn turn_context_segment(turn: &TurnRecord) -> Option<ContextSegment> {
+    let user_text = ui_user_text_for_turn(turn);
+    let assistant_text = history_visible_assistant_text(turn);
+    if user_text.trim().is_empty() && assistant_text.trim().is_empty() {
+        return None;
+    }
+    let (ordinal, round, raw_turn_id) = runtime_turn_position(&turn.request.turn_id);
+    let content = if assistant_text.trim().is_empty() {
+        format!(
+            "Historical turn {} (round {}):\nUser: {}",
+            ordinal,
+            round,
+            user_text.trim()
+        )
+    } else {
+        format!(
+            "Historical turn {} (round {}):\nUser: {}\nAssistant: {}",
+            ordinal,
+            round,
+            user_text.trim(),
+            assistant_text.trim()
+        )
+    };
+    Some(ContextSegment {
+        segment_id: ContextSegmentId::new(format!("session-memory-{raw_turn_id}")),
+        kind: ContextSegmentKind::SessionMemory,
+        stability: ContextStability::SessionStable,
+        cache_policy: ContextCachePolicy::Cacheable,
+        role: ContextRole::Developer,
+        token_budget: history_segment_token_budget(&content),
+        content,
+        provenance: ContextProvenance {
+            source: "freehand_runtime".to_owned(),
+            reference: Some(format!("historical_turn:{raw_turn_id}")),
+        },
+    })
+}
+
+fn history_visible_assistant_text(turn: &TurnRecord) -> String {
+    let visible_text = strip_completion_submission_block(&collect_turn_text(turn));
+    if !visible_text.trim().is_empty() {
+        return visible_text;
+    }
+    if let Some(terminal) = turn.terminal_event.as_ref()
+        && !terminal.summary.trim().is_empty()
+    {
+        return terminal.summary.clone();
+    }
+    if let Some(error) = turn.error_events.last() {
+        return format!("{}: {}", error.error.code, error.error.message);
+    }
+    String::new()
+}
+
+fn history_segment_token_budget(content: &str) -> u32 {
+    let estimated = ((content.chars().count() as u32) / 4).max(32);
+    estimated.saturating_add(64)
+}
+
 fn runtime_turn_position(turn_id: &TurnId) -> (u64, u64, String) {
     let raw = turn_id.as_str();
     let Some(rest) = raw.strip_prefix("runtime-turn-") else {
@@ -5429,6 +5535,72 @@ mod tests {
     }
 
     #[test]
+    fn live_bridge_restores_same_session_history_into_follow_up_provider_request() {
+        let runtime_home = temp_runtime_home();
+        let session_id = SessionId::new("runtime-session-history");
+        let first_request = LiveReasonTurnRequest {
+            runtime_home: runtime_home.clone(),
+            session_id: session_id.clone(),
+            turn_id: TurnId::new("runtime-turn-1"),
+            trace_id: TraceId::new("runtime-trace-1"),
+            prompt: "first history prompt".to_owned(),
+            cwd: None,
+            stream: false,
+            cancel_token: None,
+        };
+        let (base_url_first, rx_first, handle_first) = spawn_sequence_server(
+            "application/json",
+            vec![complete_single_response("first history answer")],
+        );
+        let first_outcome = run_live_reason_turn(
+            &live_selected_agent(base_url_first, freehand_config::ProviderType::Anthropic),
+            first_request,
+        )
+        .expect("first request");
+        let raw_first = rx_first.recv().expect("first provider request");
+        handle_first.join().expect("join first provider");
+        assert!(raw_first.contains("first history prompt"));
+        assert_eq!(
+            first_outcome.restore_status,
+            LiveReasonRestoreStatus::CreatedNew
+        );
+
+        let second_request = LiveReasonTurnRequest {
+            runtime_home: runtime_home.clone(),
+            session_id: session_id.clone(),
+            turn_id: TurnId::new("runtime-turn-2"),
+            trace_id: TraceId::new("runtime-trace-2"),
+            prompt: "second history prompt".to_owned(),
+            cwd: None,
+            stream: false,
+            cancel_token: None,
+        };
+        let (base_url_second, rx_second, handle_second) = spawn_sequence_server(
+            "application/json",
+            vec![complete_single_response("second history answer")],
+        );
+        let second_outcome = run_live_reason_turn(
+            &live_selected_agent(base_url_second, freehand_config::ProviderType::Anthropic),
+            second_request,
+        )
+        .expect("second request");
+        let raw_second = rx_second.recv().expect("second provider request");
+        handle_second.join().expect("join second provider");
+
+        assert_eq!(
+            second_outcome.restore_status,
+            LiveReasonRestoreStatus::RestoredExisting
+        );
+        assert_eq!(second_outcome.restored_closed_turns, 1);
+        assert!(raw_second.contains("Historical turn 1 (round 1):"));
+        assert!(raw_second.contains("User: first history prompt"));
+        assert!(raw_second.contains("Assistant: first history answer"));
+        assert!(raw_second.contains("second history prompt"));
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
     fn runtime_dispatches_session_crud_into_shared_ui_projection() {
         let runtime_home = temp_runtime_home();
         let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
@@ -5524,6 +5696,121 @@ mod tests {
             err,
             UiCommandDispatchPortError::TargetNotFound("missing-session".to_owned())
         );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_dispatch_failure_preserves_other_session_transcripts() {
+        let runtime_home = temp_runtime_home();
+        let preserved_session = SessionId::new("runtime-session-preserved");
+        let (base_url_ok, rx_ok, handle_ok) = spawn_sequence_server(
+            "application/json",
+            vec![complete_single_response("preserved answer")],
+        );
+        run_live_reason_turn(
+            &live_selected_agent(base_url_ok, freehand_config::ProviderType::Anthropic),
+            LiveReasonTurnRequest {
+                runtime_home: runtime_home.clone(),
+                session_id: preserved_session.clone(),
+                turn_id: TurnId::new("runtime-turn-1"),
+                trace_id: TraceId::new("runtime-trace-1"),
+                prompt: "preserved prompt".to_owned(),
+                cwd: None,
+                stream: false,
+                cancel_token: None,
+            },
+        )
+        .expect("persist preserved session");
+        let _ = rx_ok.recv().expect("preserved provider request");
+        handle_ok.join().expect("join preserved provider");
+
+        let (base_url_fail, rx_fail, handle_fail) = spawn_status_sequence_server(
+            (0..PROVIDER_EXECUTOR_RETRY_CAP)
+                .map(|index| {
+                    (
+                        500,
+                        "application/json",
+                        format!(
+                            r#"{{"type":"error","error":{{"type":"api_error","message":"failure {index}"}}}}"#
+                        ),
+                    )
+                })
+                .collect(),
+        );
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(base_url_fail, freehand_config::ProviderType::Anthropic),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+        let failed_session = SessionId::new("runtime-session-failed");
+
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "failed prompt".to_owned(),
+                    session_id: Some(failed_session.clone()),
+                    cwd: None,
+                })
+                .expect("failed envelope"),
+            )
+            .expect_err("provider exhaustion must fail");
+        for _ in 0..PROVIDER_EXECUTOR_RETRY_CAP {
+            let _ = rx_fail.recv().expect("failed provider request");
+        }
+        handle_fail.join().expect("join failed provider");
+        assert!(
+            err.to_string().contains("anthropic_http_status_500"),
+            "unexpected dispatch error: {err}"
+        );
+
+        match runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: preserved_session.clone(),
+            })
+            .expect("query preserved transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                assert_eq!(
+                    transcript.turns[0].user_text.as_deref(),
+                    Some("preserved prompt")
+                );
+                assert!(
+                    transcript.turns[0]
+                        .terminal_text
+                        .as_deref()
+                        .is_some_and(|text| text.contains("preserved answer"))
+                );
+            }
+            other => panic!("unexpected preserved transcript query: {other:?}"),
+        }
+
+        match runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: failed_session.clone(),
+            })
+            .expect("query failed transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert!(
+                    transcript
+                        .turns
+                        .iter()
+                        .any(|turn| turn.terminal_status == Some(TerminalStatus::Failed)),
+                    "failed session should keep its own failed turn projection: {:?}",
+                    transcript.turns
+                );
+            }
+            other => panic!("unexpected failed transcript query: {other:?}"),
+        }
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }

@@ -37,6 +37,7 @@
   - `claim=continue` next-round path
   - retry-exhausted failed terminal path
   - restore-before-turn path
+  - restored same-session follow-up request includes effective historical turns in the next provider request
   - live turn start/provider-output/schema-rejection/terminal persistence writes
   - provider raw debug-ledger write path for single-shot response bodies and SSE event bodies
   - provider raw debug-ledger failure path is explicit and aborts the live bridge
@@ -57,6 +58,7 @@
   - one selected anthropic provider emits an implemented registered tool call, receives tool result, then closes via accepted completion schema
   - one selected anthropic provider emits a writable file tool call, gets checkpointed before execute, and can be rewound by runtime owner truth
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
+  - dispatcher failure recovery refreshes only the failed session transcript and does not clobber previously restored other-session transcripts in `UiProtocolState`
   - invalid completion schema retries exactly 3 consecutive terminal-candidate responses and closes blocked terminal without early success or failed status
   - missing completion schema polishing request includes the required tag guidance needed by the model to align the response to the contract
   - invalid completion schema polishing request includes the missing schema fields required by the model to align the response to the contract
