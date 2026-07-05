@@ -8,10 +8,10 @@
 
 ## Lifecycle Path Under Test
 
-1. `ClientConfig::load` parses bundled `assets/config/client.json` with Gson; falls back to hardcoded defaults on parse failure
-2. `ClientConfig::load` merges SharedPreferences overrides (saved host/port) over bundled defaults
-3. `HostStore::load` reads persisted host:port from SharedPreferences
-4. `HostStore::save` writes host:port to SharedPreferences
+1. `ClientConfig::store` adapts Android `Context` into an app-owned daemon config file path plus bundled config reader
+2. `DaemonConnectionConfigStore::load` reads the app-owned JSON file when present
+3. `DaemonConnectionConfigStore::load` bootstraps bundled `assets/config/client.json` into the app-owned JSON file on first run
+4. `DaemonConnectionConfigStore::write` persists validated daemon connection config to the app-owned JSON file
 5. `HostConfig` constructs correct URLs: `baseUrl`, `adpUrl`, `commandUrl`, `latestTurnUrl`, `latestTurnSseUrl`
 6. `AdpEventStream::start` opens OkHttp WebSocket to `/adp`, sends `SubscribeLatestActiveTurn`, and sends `QueryLatestActiveTurn`
 7. `AdpEventStream::sendCommand` wraps external-tag UiCommand JSON in a `kind=command` ADP frame
@@ -31,8 +31,8 @@
 20. `TimelineProjector::latestTurnProjectionJson` returns canonical JSON for bridge
 21. `TimelineProjector::fallbackTurnsJson` returns legacy flat turns array
 22. `TimelineProjector::setConnectionState` updates connection field in snapshot
-23. `MainActivity::selectPreferredHost` overrides legacy localhost/192.168.* with bundled config
-24. `MainActivity::selectPreferredHost` overrides same host with legacy port 4040
+23. `DaemonConnectionConfig::parse` rejects malformed JSON, missing required fields, missing active profile, unsupported connection modes, invalid paths, and relay-enabled config explicitly
+24. `MainActivity::saveHostConfig` writes the edited active profile endpoint and reconnects only after the app-owned JSON write succeeds
 25. `bridge.html` JS `applySnapshot` renders `public_conversation` items as DOM cards
 26. `handle_android_mock` serves `mobile-mock.html` with HTTP 200
 27. target mobile closeout: file-backed daemon config bootstraps from bundled `assets/config/client.json` on first run
@@ -45,8 +45,8 @@
 ## White-Box Plan
 
 - `TimelineProjectorTest`: covers turn event parsing (running/success/error/null terminal_status), ADP subscription_event projection including low-noise status-only tool summaries, ADP failure projection, progress, node_status (healthy/unhealthy), error, terminal, empty state, snapshot JSON, connection state, fallbackTurnsJson, latestTurnProjectionJson preservation
-- `HostConfigTest`: covers URL construction for different hosts/ports, including `adpUrl`
-- file-backed config tests: bootstrap bundled Tailscale profile, write/read app-owned JSON config, reject malformed config explicitly, keep relay disabled by default
+- `HostConfigTest`: covers URL construction for different hosts/ports and endpoint paths, including `adpUrl` and `healthUrl`
+- `DaemonConnectionConfigTest`: bootstrap bundled Tailscale profile, first-run copy to app-owned JSON, edited profile write/read, malformed existing file explicit failure, missing active profile explicit failure, relay enabled rejection
 - aspect-ratio layout classifier tests: map viewport width/height pairs to mobile/foldable/tablet/desktop layout modes without mutating selected session or draft state
 - `CommandIngressProtocolTest`: covers SubmitUserInput shape, CancelLatestActiveTurn shape, ADP command frame shape, ADP subscribe frame shape, query-as-command negative frame shape, old type-field negative, special characters, empty text
 
@@ -61,8 +61,8 @@
 ## Module Black-Box Plan
 
 - `cd apps/freehand-android && ./gradlew testDebugUnitTest` runs the JVM-level Android owner tests
-- `ClientConfig::load` parses real bundled `assets/config/client.json` and produces correct `ClientConfig` values
-- `HostStore` round-trips host:port through SharedPreferences
+- `DaemonConnectionConfig::parse` parses real bundled `assets/config/client.json` and produces the active Tailscale `HostConfig`
+- `DaemonConnectionConfigStore` round-trips host/port/path through an app-owned JSON file
 - file-backed daemon config round-trips an edited Tailscale profile through an app-owned JSON file and rebuilds `HostConfig.adpUrl`
 - relay profile remains inert unless explicitly selected by the future relay flow
 - `AdpEventStream::buildFrame` produces correct ADP command/subscribe/query misuse frame shapes (verified by protocol shape tests)
@@ -82,7 +82,7 @@
 
 - no Espresso / instrumented tests yet (device-dependent; requires ADB-connected device)
 - no integration smoke against live daemon from a real Android device yet (requires daemon running + device connected)
-- file-backed daemon config is not implemented yet; current code still uses bundled JSON plus SharedPreferences host/port overrides
+- no Espresso / instrumented coverage for the drawer edit flow yet; JVM tests cover the file config owner and MainActivity is still device/framework-scoped
 - aspect-ratio layout classifier and visual verification are not implemented yet
 - `bridge.html` JS rendering is not unit-testable from JVM; requires WebView instrumented test
 - `MainActivity` lifecycle (onCreate, onResume, onPause, onKeyDown) not unit-testable without Android framework; covered by design + future instrumented tests

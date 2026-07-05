@@ -1,24 +1,22 @@
 {
-  "daemon": {
-    "host": "100.66.1.82",
-    "port": 4041,
-    "profile": "tailscale-main",
-    "healthPath": "/health",
-    "adpPath": "/adp",
-    "subscribePath": "/ui/subscribe/turn/latest",
-    "commandPath": "/ui/command",
-    "queryPath": "/ui/query/latest-active-turn"
-  },
-  "upgrade": {
-    "checkUrl": "http://100.66.1.82:4041/upgrade/check",
-    "downloadUrl": "http://100.66.1.82:4041/upgrade/download",
-    "autoCheck": true,
-    "intervalSeconds": 3600
-  },
-  "discovery": {
-    "autoLanScan": false,
-    "scanPort": 4041,
-    "scanTimeoutMs": 1500,
-    "scanThreads": 8
+  "connectionMode": "tailscale",
+  "activeProfile": "tailscale-main",
+  "profiles": [
+    {
+      "id": "tailscale-main",
+      "mode": "tailscale",
+      "host": "100.66.1.82",
+      "port": 4041,
+      "adpPath": "/adp",
+      "healthPath": "/health",
+      "commandPath": "/ui/command",
+      "queryPath": "/ui/query/latest-active-turn",
+      "subscribePath": "/ui/subscribe/turn/latest"
+    }
+  ],
+  "relay": {
+    "enabled": false,
+    "url": "",
+    "authRef": ""
   }
 }

@@ -15,8 +15,10 @@ import com.freehand.android.R
 import com.freehand.android.data.AdpEventStream
 import com.freehand.android.data.ClientConfig
 import com.freehand.android.data.CommandIngress
+import com.freehand.android.data.DaemonConnectionConfig
+import com.freehand.android.data.DaemonConnectionConfigException
+import com.freehand.android.data.DaemonConnectionConfigStore
 import com.freehand.android.data.HostConfig
-import com.freehand.android.data.HostStore
 import com.freehand.android.data.SlaveState
 import com.freehand.android.data.TimelineProjector
 import com.freehand.android.ui.components.DrawerController
@@ -36,11 +38,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusBanner: StatusBannerController
     private lateinit var drawer: DrawerController
     private lateinit var projector: TimelineProjector
-    private lateinit var hostStore: HostStore
+    private lateinit var configStore: DaemonConnectionConfigStore
     private lateinit var httpClient: OkHttpClient
-    private lateinit var clientConfig: ClientConfig
+    private var clientConfig: DaemonConnectionConfig? = null
     private lateinit var ingress: CommandIngress
     private var adp: AdpEventStream? = null
+    private var configLoadError: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,9 +52,18 @@ class MainActivity : AppCompatActivity() {
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.MILLISECONDS)
             .build()
-        hostStore = HostStore(applicationContext)
         projector = TimelineProjector()
-        clientConfig = ClientConfig.load(applicationContext)
+        configStore = ClientConfig.store(applicationContext)
+        val loadedConfig = try {
+            configStore.load()
+        } catch (e: DaemonConnectionConfigException) {
+            configLoadError = e.message ?: "invalid daemon connection config"
+            null
+        }
+        clientConfig = loadedConfig
+        val initialHost = loadedConfig
+            ?.let { runCatching { it.activeHostConfig() }.getOrNull() }
+            ?: DaemonConnectionConfig.defaultTailscale().activeHostConfig()
 
         val root = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -99,15 +111,23 @@ class MainActivity : AppCompatActivity() {
         )
         inputBar = InputBarController(this, root) { text -> ingress.submit(text) }
         drawer = DrawerController(this, root, onHostChanged = { newHost ->
-            hostStore.save(newHost)
-            connectToDaemon(newHost)
-        }, initialHost = hostStore.load())
+            if (saveHostConfig(newHost)) {
+                connectToDaemon(newHost)
+            }
+        }, initialHost = initialHost)
 
         applyInsets(root)
         setContentView(root)
 
-        // Auto-discover daemon
-        discoverDaemon(hostStore.load())
+        val configError = configLoadError
+        if (configError != null) {
+            projector.setConnectionState("config_error")
+            statusBanner.showPersistent("daemon config error: $configError")
+            topBar.setAgent("freehand", "config error")
+            inputBar.setEnabledState(false)
+        } else {
+            discoverDaemon()
+        }
     }
 
     override fun onResume() {
@@ -120,17 +140,23 @@ class MainActivity : AppCompatActivity() {
         adp?.stop()
     }
 
-    private fun discoverDaemon(saved: HostConfig?) {
+    private fun discoverDaemon() {
         // Connection state machine: connecting -> connected (ADP onOpen only)
         // -> error/closed (ADP onError/onClosed only).
         // discoverDaemon only decides whether to start ADP; it never sets
         // "connected" directly, eliminating the race where health-check pass
         // sets connected while ADP immediately fails and sets unreachable.
-        val configHost = clientConfig.toHostConfig()
-        val target = selectPreferredHost(saved, configHost)
+        val target = try {
+            clientConfig?.activeHostConfig()
+                ?: throw DaemonConnectionConfigException("daemon connection config is not loaded")
+        } catch (e: DaemonConnectionConfigException) {
+            projector.setConnectionState("config_error")
+            statusBanner.showPersistent("daemon config error: ${e.message}")
+            topBar.setAgent("freehand", "config error")
+            inputBar.setEnabledState(false)
+            return
+        }
         topBar.setAgent("freehand", "connecting")
-        // Always try to connect directly to the configured host.
-        // Health check is advisory only; real connection state comes from SSE.
         connectToDaemon(target)
     }
 
@@ -152,7 +178,7 @@ class MainActivity : AppCompatActivity() {
                     ?: com.freehand.android.data.CommandResponse(false, "adp_not_ready", "ADP not ready")
             },
         )
-        topBar.setAgent("${host.host}:${host.port}", "connecting")
+        topBar.setAgent(host.endpointLabel, "connecting")
         newAdp = AdpEventStream(httpClient, host,
             onEvent = { event ->
                 runOnUiThread {
@@ -165,18 +191,19 @@ class MainActivity : AppCompatActivity() {
                     if (result.ok) inputBar.clear() else inputBar.markSendError(result.message.ifBlank { result.code })
                 }
             },
-            onError = { _ ->
+            onError = { error ->
                 runOnUiThread {
                     projector.setConnectionState("error")
-                    statusBanner.showPersistent("daemon unreachable: ${host.host}:${host.port}")
-                    topBar.setAgent("${host.host}:${host.port}", "offline")
+                    val errorClass = error::class.java.simpleName.ifBlank { "ConnectionError" }
+                    statusBanner.showPersistent("daemon unreachable: ${host.endpointLabel} · $errorClass")
+                    topBar.setAgent(host.endpointLabel, "offline")
                 }
             },
             onOpen = {
                 runOnUiThread {
                     projector.setConnectionState("open")
                     statusBanner.hide()
-                    topBar.setAgent("${host.host}:${host.port}", "connected")
+                    topBar.setAgent(host.endpointLabel, "connected")
                     // ADP live: enable input so user can submit.
                     inputBar.setEnabledState(true)
                 }
@@ -184,7 +211,7 @@ class MainActivity : AppCompatActivity() {
             onClosed = {
                 runOnUiThread {
                     projector.setConnectionState("closed")
-                    topBar.setAgent("${host.host}:${host.port}", "offline")
+                    topBar.setAgent(host.endpointLabel, "offline")
                 }
             },
         )
@@ -214,7 +241,7 @@ class MainActivity : AppCompatActivity() {
         // when state is terminal/idle so we don't leave stale text hanging.
         if (connectionState == "open") {
             statusBanner.showTurnProgress(turnState)
-        } else {
+        } else if (connectionState != "config_error" && connectionState != "error") {
             statusBanner.hide()
         }
 
@@ -238,21 +265,50 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun selectPreferredHost(saved: HostConfig?, bundled: HostConfig): HostConfig {
-        if (saved == null) return bundled
-        val savedHost = saved.host.trim()
-        val bundledHost = bundled.host.trim()
-        val savedLooksLegacy = savedHost == "127.0.0.1" || savedHost.startsWith("192.168.")
-        val savedUsesLegacyPort = saved.port == 4040
-        val shouldOverrideLegacyHost = savedLooksLegacy && bundledHost.startsWith("100.")
-        val shouldOverrideLegacyPort = savedHost == bundledHost && savedUsesLegacyPort && bundled.port != saved.port
-        if (shouldOverrideLegacyHost || shouldOverrideLegacyPort) {
-            hostStore.save(bundled)
-            ClientConfig.saveOverride(applicationContext, bundled.host, bundled.port)
-            return bundled
+    private fun saveHostConfig(host: HostConfig): Boolean {
+        val current = clientConfig
+        val updated = if (current == null) {
+            DaemonConnectionConfig(
+                connectionMode = host.mode,
+                activeProfile = host.profileId,
+                profiles = listOf(host.toConnectionProfile()),
+                relay = com.freehand.android.data.DaemonRelayConfig(enabled = false, url = "", authRef = ""),
+            )
+        } else {
+            val profiles = current.profiles.map {
+                if (it.id == host.profileId) host.toConnectionProfile() else it
+            }
+            current.copy(
+                connectionMode = host.mode,
+                activeProfile = host.profileId,
+                profiles = if (profiles.any { it.id == host.profileId }) profiles else profiles + host.toConnectionProfile(),
+            )
         }
-        return saved
+        return try {
+            configStore.write(updated)
+            clientConfig = updated
+            true
+        } catch (e: DaemonConnectionConfigException) {
+            projector.setConnectionState("config_error")
+            statusBanner.showPersistent("daemon config error: ${e.message}")
+            topBar.setAgent(host.endpointLabel, "config error")
+            inputBar.setEnabledState(false)
+            false
+        }
     }
+
+    private fun HostConfig.toConnectionProfile(): com.freehand.android.data.DaemonConnectionProfile =
+        com.freehand.android.data.DaemonConnectionProfile(
+            id = profileId,
+            mode = mode,
+            host = host,
+            port = port,
+            adpPath = adpPath,
+            healthPath = healthPath,
+            commandPath = commandPath,
+            queryPath = queryPath,
+            subscribePath = subscribePath,
+        )
 
     private fun applyInitialTheme(view: WebView?) {
         val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES

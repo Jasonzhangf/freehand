@@ -1635,3 +1635,41 @@ Current real root cause split:
 - implementation plan:
   - added `docs/goals/mobile-webui-responsive-plan.md` with L1 audit status, goals, scope, design principles, implementation slices, verification matrix, risks, and DoD.
   - linked the goal plan from `docs/design/design-doc-index.md`.
+
+# 2026-07-06 mobile WebUI responsive + Android config closeout
+
+- implementation:
+  - WebUI layout classifier now uses viewport width plus aspect ratio and writes only `body[data-layout-shape]` / shell layout shape attributes.
+  - WebUI responsive CSS covers phone portrait, tall phone, phone landscape, tablet portrait, foldable/tablet landscape, and desktop large.
+  - WebUI global auto-scroll no longer calls `window.scrollTo(documentElement.scrollHeight)`; it scrolls the conversation stream instead so sidebar/inspector height cannot push the composer out of view.
+  - Online verifier now fails on false checks, captures viewport matrix screenshots/JSON, and gates `layoutShape`, composer visibility, and message-list visibility.
+  - Android daemon connection config is app-owned JSON bootstrapped from bundled `assets/config/client.json`; SharedPreferences host persistence was removed.
+  - Android active config is Tailscale-first with relay parsed but rejected while disabled.
+  - Android `MainActivity` no longer uses `defaultTailscale()` as a runtime fallback after config-load failure; config errors disable input and show `daemon config error`. The drawer may still use default Tailscale only as an editable repair seed before writing a new explicit config.
+  - Freehand local skill now forbids implementation searches over generated/runtime output and MemoryPalace corpora; generated artifacts are verification evidence only.
+- WebUI online evidence:
+  - S profile restarted via `scripts/install-launchd.sh restartS`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `~/.local/bin/freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> ok.
+  - `make verify-webui-online` -> `artifacts/webui-online/20260705-verify-4042-1783269156414/summary.json`.
+  - session `webui-session-20260705163237-e71a1a3e`; ADP `turn_ids=runtime-turn-80,runtime-turn-81,runtime-turn-81-r2`; selected session `success`.
+  - checks true: composer clears after both submits, submitted first prompt survives refresh, failure prompt survives refresh, second turn progress observed, terminal has `liveCount=0`, `staleHistoricalLiveAfterSecondSubmit=0`, all viewport shapes covered, composer visible, and message list visible.
+  - viewport evidence includes screenshots/JSON for `375x812`, `430x932`, `844x390`, `768x1024`, `1024x768`, `900x1000`, `1280x900`.
+- Android validation:
+  - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest` -> success.
+  - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew assembleDebug` -> success.
+  - APK installed to explicit serial `100.104.163.65:5555` with `adb -s 100.104.163.65:5555 install -r apps/freehand-android/app/build/outputs/apk/debug/app-debug.apk` -> `Success`.
+  - Device remained on Oplus lockscreen/Dozing after ADB wake/dismiss attempts; `dumpsys window` still showed `mDreamingLockscreen=true` and focus on `NotificationShade` / non-Freehand activity, so Freehand UI screenshot/interaction validation is blocked until the device is manually unlocked.
+  - Lock-screen screenshots are under `artifacts/android-device/20260705-debug-install-10010416365/`; they are evidence of the blocker, not UI acceptance evidence.
+- gates:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `node --check scripts/webui_verify_online.mjs`
+  - `node scripts/verify-webui-layout-shapes.mjs`
+  - `cargo test -p freehand-server -- --nocapture`
+  - Android JVM tests and debug APK build as above.
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo test --workspace` -> `437 passed`.
+  - `make ci` -> exit 0.

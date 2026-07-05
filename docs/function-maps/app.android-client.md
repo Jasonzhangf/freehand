@@ -12,8 +12,9 @@
   - `com.freehand.android.data.TimelineProjector` — ui.protocol event → UI state projection
   - `com.freehand.android.data.CommandIngress` — submit / cancel via protocol-owned HTTP command ingress
   - `com.freehand.android.data.ProtocolClient` — compatibility HTTP query + command POST against `freehand-ui-protocol`
-  - `com.freehand.android.data.ClientConfig` — bundled config loading from `assets/config/client.json`
-  - `com.freehand.android.data.HostStore` — host:port persistence in SharedPreferences
+  - `com.freehand.android.data.DaemonConnectionConfig` — file-backed daemon connection config schema, parser, and validator
+  - `com.freehand.android.data.DaemonConnectionConfigStore` — first-run bundled config bootstrap and app-owned JSON persistence
+  - `com.freehand.android.data.ClientConfig` — Android Context adapter for the app-owned daemon connection config file
   - `com.freehand.android.data.HostConfig` — endpoint URL construction
 - reference mock: `apps/freehand-server/assets/mocks/android/mobile-mock.html`
 - reference bridge: `apps/freehand-android/app/src/main/assets/bridge.html`
@@ -39,7 +40,7 @@
 - Android client surfaces the connection state (connecting / connected / offline) as a local banner
 - Android client surfaces agent status and turn status through protocol-projected status pills
 - Android client respects light and dark themes via `mobile-mock.css` tokens
-- target mobile closeout requires daemon connection config to be file-backed and Tailscale-first; the current `SharedPreferences` host/port persistence is a scaffold gap, not final connection truth
+- daemon connection config is file-backed and Tailscale-first; bundled `assets/config/client.json` is bootstrap input only, and the app-owned JSON file is the long-term endpoint truth
 
 ## Error Mainline
 
@@ -67,10 +68,10 @@
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `MainActivity::onCreate` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | app shell entrypoint: load config, create controllers, start discovery | activity intent | app process | Android framework | `ClientConfig::load`, `HostStore::load`, controller ctors | bound |
-| 02 | `ClientConfig::load` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/ClientConfig.kt` | load bundled daemon config from `assets/config/client.json` with SharedPreferences overrides | Android Context | `ClientConfig` | `MainActivity::onCreate` | Gson asset parser | bound |
-| 03 | `HostStore::load` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/HostStore.kt` | load persisted host:port from SharedPreferences | Android Context | `HostConfig` | `MainActivity::onCreate` | SharedPreferences | bound |
-| 04 | `HostConfig::adpUrl` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt` | construct daemon ADP WebSocket URL | host + port | `ws://<host>:<port>/adp` | Android app shell | host config | bound |
+| 01 | `MainActivity::onCreate` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | app shell entrypoint: load file-backed config, create controllers, start ADP connection | activity intent | app process | Android framework | `ClientConfig::store`, `DaemonConnectionConfigStore::load`, controller ctors | bound |
+| 02 | `ClientConfig::store` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/ClientConfig.kt` | adapt Android Context to the app-owned daemon config file and bundled asset reader | Android Context | `DaemonConnectionConfigStore` | `MainActivity::onCreate` | app files dir + asset reader | bound |
+| 03 | `DaemonConnectionConfigStore::load` / `DaemonConnectionConfig::parse` / `DaemonConnectionConfig::activeHostConfig` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt` | read app-owned daemon JSON or bootstrap bundled config, validate required schema, active profile, Tailscale-only mode, endpoint paths, and relay-disabled state | config file + bundled JSON reader | validated `DaemonConnectionConfig` or explicit config error | `MainActivity::onCreate` | Gson `JsonParser`, schema validator, file IO | bound |
+| 04 | `HostConfig::adpUrl` / `HostConfig::healthUrl` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt` | construct selected daemon endpoint URLs from the active profile | profile host + port + paths | `ws://<host>:<port><adpPath>` and health URL | Android app shell | active profile config | bound |
 | 05 | `AdpEventStream::start` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | open OkHttp WebSocket to `/adp`, subscribe latest turn, and query latest turn | no | ADP WebSocket session | `MainActivity::connectToDaemon` | OkHttp `newWebSocket` | bound |
 | 06 | `AdpEventStream::sendCommand` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | wrap UiCommand JSON in an ADP command frame and send it over the active socket | UiCommand JSON | immediate send result + later command receipt/failure callback | `CommandIngress` | ADP WebSocket | bound |
 | 07 | `CommandIngress::submit` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt` | wrap user text in `{"SubmitUserInput":{"text":"..."}}` and dispatch through injected ADP sender | user text | `CommandResponse` | `InputBarController` | `AdpEventStream::sendCommand` | bound |
@@ -81,15 +82,15 @@
 | 12 | `TimelineProjector::latestTurnProjectionJson` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt` | emit canonical `UiPublicTurnProjection` JSON for JS bridge | no | `String?` | `MainActivity::pushSnapshotToWebView` | `latestRawTurnProjection` | bound |
 | 13 | `MainActivity::pushSnapshotToWebView` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | call `window.__freehand.applySnapshot(json)` on WebView via `evaluateJavascript` | projector snapshot | JS bridge invocation | SSE event callback, `onPageFinished` | `TimelineProjector::latestTurnProjectionJson` | bound |
 | 14 | `bridge.html` JS `applySnapshot` | `apps/freehand-android/app/src/main/assets/bridge.html` | render `UiPublicTurnProjection.public_conversation` items as DOM turn cards | JSON snapshot | DOM cards | native `evaluateJavascript` | DOM API | bound |
-| 15 | `HostStore::save` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/HostStore.kt` | persist host:port to SharedPreferences | `HostConfig` | no | `DrawerController` callback, `selectPreferredHost` | SharedPreferences | bound |
-| 16 | `MainActivity::selectPreferredHost` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | override legacy localhost / 192.168.* / port 4040 saved values with bundled config | saved + bundled `HostConfig` | resolved `HostConfig` | `discoverDaemon` | `HostStore::save`, `ClientConfig::saveOverride` | bound |
+| 15 | `DaemonConnectionConfigStore::write` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt` | persist validated daemon config to the app-owned JSON file | `DaemonConnectionConfig` | normalized JSON file or explicit config error | `MainActivity::saveHostConfig` | file IO + schema validator | bound |
+| 16 | `MainActivity::saveHostConfig` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | update the active profile endpoint, write app-owned JSON, and reconnect only after write success | edited `HostConfig` | updated config or visible config error | `DrawerController` callback | `DaemonConnectionConfigStore::write` | bound |
 | 17 | `handle_android_mock` | `apps/freehand-server/src/lib.rs` | serve self-contained `mobile-mock.html` for design review | HTTP GET `/mock/android` | HTML body | design-review operator | embedded mock asset | bound |
 
 ## Sync Status Against Code
 
 - all 17 call table rows are bound to real file paths and symbol names
 - Android live shell now defaults to `AdpEventStream` for status/control; `ProtocolClient` and `SseEventStream` remain compatibility transport classes but are not the default `MainActivity` live path
-- current config code reads bundled `assets/config/client.json` and stores host/port overrides in `SharedPreferences`; upcoming mobile closeout must replace this with an app-owned JSON config file while keeping `HostConfig::adpUrl` as the endpoint builder
+- current config code bootstraps bundled `assets/config/client.json` into an app-owned JSON file and uses that file as endpoint truth; `SharedPreferences` no longer owns daemon host/port persistence
 - default remote access direction is Tailscale; relay profile support is schema-reserved and must stay inactive until relay protocol/auth is designed
 - step 17 is code-bound to `apps/freehand-server/src/lib.rs::handle_android_mock`
 - mainline call JSON and generated wiki must be regenerated from this function map

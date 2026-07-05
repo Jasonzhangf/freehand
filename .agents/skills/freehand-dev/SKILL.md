@@ -199,6 +199,10 @@ Use this skill for any non-trivial work in this repo.
 - Use repo routes first:
   - `docs/debug/debug-playbook.md`
   - `docs/runtime/runtime-directories.md`
+- Debug/search truth is source-first: use only source code, tests, maintained scripts, and canonical docs/function maps/test designs/mainline JSON as search targets.
+- Do not search generated or runtime output when locating implementation truth: exclude `artifacts/**`, `target/**`, build outputs, screenshots, captured reports, generated `docs/wiki/**`, `.mempalace/**`, `memory/*-mempalace-corpus/**`, and `test-palaces/**`.
+- Generated artifacts may be opened only as verification evidence after the producing command runs, not as a source-search corpus or implementation locator.
+- Do not run `mempalace mine` directly on the repo root for Freehand unless `.gitignore` and the dry-run prove generated evidence is excluded; prefer a source-only curated corpus for memory indexing.
 - When debugging, capture both semantic and scene position.
 - Prefer replayable fixtures and event ledger evidence over plain logs.
 - Check `~/.freehand` evidence paths before inventing new debug output locations.

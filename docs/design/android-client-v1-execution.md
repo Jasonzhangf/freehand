@@ -151,7 +151,7 @@ Local state may only cover:
 - scroll position
 - temporary input draft
 - transient connection banner
-- cached host selection
+- file-backed daemon connection profile
 
 Host/endpoint selection is local client state, but it must be file-backed. `SharedPreferences` may cache UI hints, but it is not the authoritative long-term daemon connection config.
 
@@ -165,11 +165,13 @@ Required direction:
 - The config schema keeps an explicit relay section for future server-mediated access, but relay is disabled by default and must not silently activate.
 - Connection failure must show the active profile, endpoint, and error class.
 
-Current implementation gap:
+Current implementation:
 
-- `ClientConfig::load` reads bundled JSON and merges `SharedPreferences` overrides.
-- `HostStore` persists host/port through `SharedPreferences`.
-- This is acceptable as an existing scaffold, but does not satisfy the file-backed config requirement for the mobile closeout slice.
+- `ClientConfig::store` adapts Android `Context` to the app-owned config file path.
+- `DaemonConnectionConfigStore::load` bootstraps `assets/config/client.json` into `filesDir/daemon-connection.json` on first run.
+- Later startups read only the app-owned JSON file as endpoint truth.
+- `DaemonConnectionConfig::parse` validates required fields, active profile, Tailscale-only mode, endpoint paths, and relay-disabled state explicitly.
+- `DrawerController` edits the active profile endpoint, `MainActivity::saveHostConfig` writes the app-owned JSON file, and ADP reconnects from the selected profile only after the write succeeds.
 
 ### 7.3 Status mapping
 
@@ -200,7 +202,7 @@ Current implementation gap:
 6. add debug / tool detail projection
 7. add lifecycle reconnect and foreground/background handling
 8. add native bridge only where system integration requires it
-9. replace SharedPreferences-only host persistence with file-backed daemon connection config
+9. keep file-backed daemon connection config covered by JVM tests and explicit UI errors
 10. add aspect-ratio aware WebView/WebUI layout verification for phone, foldable, and tablet shapes
 
 ## 9. Testing Strategy

@@ -2,6 +2,31 @@ import { initializeThemeToggle } from "/assets/theme.js";
 
 initializeThemeToggle(document);
 
+export function classifyLayoutShape(width, height) {
+  const safeWidth = Math.max(1, Number(width) || 1);
+  const safeHeight = Math.max(1, Number(height) || 1);
+  const ratio = safeWidth / safeHeight;
+  if (safeWidth >= 1180 && ratio > 1.15) {
+    return "desktop_large";
+  }
+  if (safeWidth >= 720 && ratio >= 0.85 && ratio <= 1.35) {
+    return "foldable_unfolded";
+  }
+  if (safeWidth >= 880 && ratio > 1) {
+    return "tablet_landscape";
+  }
+  if (safeWidth >= 600 && safeWidth <= 1023 && ratio <= 1) {
+    return "tablet_portrait";
+  }
+  if (safeWidth < 880 && ratio > 4 / 3) {
+    return "phone_landscape";
+  }
+  if (safeWidth < 720 && ratio <= 9 / 16) {
+    return "tall_phone";
+  }
+  return "phone_portrait";
+}
+
 const shell = document.querySelector("[data-webui-shell]");
 const messageList = document.getElementById("message-list");
 const sessionList = document.getElementById("session-list");
@@ -45,6 +70,22 @@ const shortcutHelp =
   "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success · Cmd/Ctrl+2 failure. Slash: /help /new /task /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
 const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) || "";
+
+function applyLayoutShape() {
+  const width = window.innerWidth || (window.visualViewport ? window.visualViewport.width : 1);
+  const height = window.innerHeight || (window.visualViewport ? window.visualViewport.height : 1);
+  const shape = classifyLayoutShape(width, height);
+  document.body.dataset.layoutShape = shape;
+  if (shell) {
+    shell.dataset.layoutShape = shape;
+  }
+  return shape;
+}
+
+window.__freehandLayout = {
+  classifyLayoutShape,
+  applyLayoutShape,
+};
 
 const state = {
   turn: null,
@@ -2270,9 +2311,12 @@ function messageListIsNearBottom() {
 
 function scrollMessagesToBottom() {
   window.requestAnimationFrame(() => {
+    const streamStage = document.querySelector(".stream-stage");
+    if (streamStage) {
+      streamStage.scrollTop = streamStage.scrollHeight;
+    }
     messageList.scrollTop = messageList.scrollHeight;
     messageList.lastElementChild?.scrollIntoView({ block: "end" });
-    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
   });
 }
 
@@ -3005,6 +3049,13 @@ taskCwdInput.addEventListener("change", () => {
   setCommandStatus(state.selectedCwd ? `task target directory selected: ${state.selectedCwd}` : "task target directory cleared", { stickyMs: 5000 });
   renderAll();
 });
+
+applyLayoutShape();
+window.addEventListener("resize", applyLayoutShape);
+window.addEventListener("orientationchange", applyLayoutShape);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", applyLayoutShape);
+}
 
 document.addEventListener("keydown", (event) => {
   if (document.activeElement === composerInput && (event.key === "ArrowUp" || event.key === "ArrowDown")) {

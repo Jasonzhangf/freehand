@@ -1454,6 +1454,187 @@ body.theme-dark .debug-toggle.is-active {
   }
 }
 
+body[data-layout-shape="desktop_large"] .app-shell {
+  grid-template-columns: 56px 254px minmax(0, 1fr) 244px;
+}
+
+body[data-layout-shape="desktop_large"] .app-shell,
+body[data-layout-shape="foldable_unfolded"] .app-shell,
+body[data-layout-shape="tablet_landscape"] .app-shell {
+  height: 100vh;
+  overflow: hidden;
+}
+
+body[data-layout-shape="desktop_large"] .rail,
+body[data-layout-shape="desktop_large"] .sidebar,
+body[data-layout-shape="desktop_large"] .workspace,
+body[data-layout-shape="desktop_large"] .inspector,
+body[data-layout-shape="foldable_unfolded"] .sidebar,
+body[data-layout-shape="foldable_unfolded"] .workspace,
+body[data-layout-shape="foldable_unfolded"] .inspector,
+body[data-layout-shape="tablet_landscape"] .rail,
+body[data-layout-shape="tablet_landscape"] .sidebar,
+body[data-layout-shape="tablet_landscape"] .workspace,
+body[data-layout-shape="tablet_landscape"] .inspector {
+  min-height: 0;
+  overflow: auto;
+}
+
+body[data-layout-shape="desktop_large"] .conversation-region,
+body[data-layout-shape="foldable_unfolded"] .conversation-region,
+body[data-layout-shape="tablet_landscape"] .conversation-region {
+  height: calc(100vh - 28px);
+  min-height: 0;
+}
+
+body[data-layout-shape="desktop_large"] .stream-stage,
+body[data-layout-shape="foldable_unfolded"] .stream-stage,
+body[data-layout-shape="tablet_landscape"] .stream-stage {
+  min-height: 0;
+  overflow: auto;
+}
+
+body[data-layout-shape="foldable_unfolded"] .app-shell {
+  grid-template-columns: 270px minmax(0, 1fr);
+}
+
+body[data-layout-shape="foldable_unfolded"] .rail {
+  display: none;
+}
+
+body[data-layout-shape="foldable_unfolded"] .sidebar {
+  min-height: 100vh;
+}
+
+body[data-layout-shape="foldable_unfolded"] .workspace {
+  min-height: 100vh;
+}
+
+body[data-layout-shape="foldable_unfolded"] .inspector {
+  grid-column: 1 / 3;
+  min-height: auto;
+  border-left: 0;
+  border-top: 1px solid var(--line);
+}
+
+body[data-layout-shape="tablet_landscape"] .app-shell {
+  grid-template-columns: 56px 236px minmax(0, 1fr);
+}
+
+body[data-layout-shape="tablet_landscape"] .inspector {
+  grid-column: 2 / 4;
+  min-height: auto;
+  border-left: 0;
+  border-top: 1px solid var(--line);
+}
+
+body[data-layout-shape="tablet_portrait"] .app-shell,
+body[data-layout-shape="phone_portrait"] .app-shell,
+body[data-layout-shape="tall_phone"] .app-shell,
+body[data-layout-shape="phone_landscape"] .app-shell {
+  grid-template-columns: 1fr;
+}
+
+body[data-layout-shape="tablet_portrait"] .rail,
+body[data-layout-shape="phone_portrait"] .rail,
+body[data-layout-shape="tall_phone"] .rail,
+body[data-layout-shape="phone_landscape"] .rail {
+  display: none;
+}
+
+body[data-layout-shape="tablet_portrait"] .sidebar,
+body[data-layout-shape="phone_portrait"] .sidebar,
+body[data-layout-shape="tall_phone"] .sidebar,
+body[data-layout-shape="phone_landscape"] .sidebar,
+body[data-layout-shape="tablet_portrait"] .workspace,
+body[data-layout-shape="phone_portrait"] .workspace,
+body[data-layout-shape="tall_phone"] .workspace,
+body[data-layout-shape="phone_landscape"] .workspace,
+body[data-layout-shape="tablet_portrait"] .inspector,
+body[data-layout-shape="phone_portrait"] .inspector,
+body[data-layout-shape="tall_phone"] .inspector,
+body[data-layout-shape="phone_landscape"] .inspector {
+  min-height: auto;
+  border: 0;
+  padding: 14px;
+}
+
+body[data-layout-shape="phone_portrait"] .sidebar,
+body[data-layout-shape="tall_phone"] .sidebar {
+  order: 2;
+}
+
+body[data-layout-shape="phone_portrait"] .workspace,
+body[data-layout-shape="tall_phone"] .workspace {
+  order: 1;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+
+body[data-layout-shape="phone_portrait"] .inspector,
+body[data-layout-shape="tall_phone"] .inspector {
+  order: 3;
+}
+
+body[data-layout-shape="phone_landscape"] .app-shell {
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
+body[data-layout-shape="phone_landscape"] .sidebar {
+  min-height: 100vh;
+  border-right: 1px solid var(--line);
+}
+
+body[data-layout-shape="phone_landscape"] .workspace {
+  min-height: 100vh;
+}
+
+body[data-layout-shape="phone_landscape"] .inspector {
+  grid-column: 1 / 3;
+  border-top: 1px solid var(--line);
+}
+
+body[data-layout-shape="phone_portrait"] .topbar-main,
+body[data-layout-shape="tall_phone"] .topbar-main,
+body[data-layout-shape="tablet_portrait"] .topbar-main,
+body[data-layout-shape="phone_portrait"] .region-header,
+body[data-layout-shape="tall_phone"] .region-header,
+body[data-layout-shape="tablet_portrait"] .region-header,
+body[data-layout-shape="phone_portrait"] .composer-grid,
+body[data-layout-shape="tall_phone"] .composer-grid,
+body[data-layout-shape="tablet_portrait"] .composer-grid {
+  grid-template-columns: 1fr;
+}
+
+body[data-layout-shape="phone_portrait"] .conversation-region,
+body[data-layout-shape="tall_phone"] .conversation-region {
+  min-height: calc(100svh - 28px);
+  border-radius: 0;
+}
+
+body[data-layout-shape="phone_portrait"] .composer-card,
+body[data-layout-shape="tall_phone"] .composer-card {
+  position: sticky;
+  bottom: env(safe-area-inset-bottom);
+  z-index: 20;
+}
+
+body[data-layout-shape="phone_portrait"] .message-list,
+body[data-layout-shape="tall_phone"] .message-list,
+body[data-layout-shape="tablet_portrait"] .message-list,
+body[data-layout-shape="phone_landscape"] .message-list {
+  width: 100%;
+}
+
+body[data-layout-shape="phone_portrait"] .chat-message,
+body[data-layout-shape="tall_phone"] .chat-message {
+  max-width: 94%;
+}
+
+body[data-layout-shape="phone_portrait"] .chat-message-user,
+body[data-layout-shape="tall_phone"] .chat-message-user {
+  max-width: 90%;
+}
+
 @media (max-width: 880px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1494,4 +1675,101 @@ body.theme-dark .debug-toggle.is-active {
   .message-list {
     width: 100%;
   }
+}
+
+body[data-layout-shape="phone_portrait"] .composer-card,
+body[data-layout-shape="tall_phone"] .composer-card,
+body[data-layout-shape="tablet_portrait"] .composer-card {
+  position: fixed;
+  right: 10px;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  left: 10px;
+  z-index: 40;
+  width: auto;
+  max-height: 48svh;
+  overflow: auto;
+}
+
+body[data-layout-shape="phone_landscape"] .composer-card {
+  position: fixed;
+  right: 10px;
+  bottom: 8px;
+  left: 234px;
+  z-index: 40;
+  width: auto;
+  max-height: calc(100svh - 18px);
+  overflow: auto;
+}
+
+body[data-layout-shape="phone_portrait"] .conversation-region,
+body[data-layout-shape="tall_phone"] .conversation-region,
+body[data-layout-shape="tablet_portrait"] .conversation-region {
+  padding-bottom: min(52svh, 420px);
+}
+
+body[data-layout-shape="phone_landscape"] .conversation-region {
+  padding-bottom: min(62svh, 260px);
+}
+
+body[data-layout-shape="phone_portrait"] .composer-input,
+body[data-layout-shape="tall_phone"] .composer-input,
+body[data-layout-shape="tablet_portrait"] .composer-input,
+body[data-layout-shape="phone_landscape"] .composer-input {
+  min-height: 74px;
+  max-height: 20svh;
+}
+
+body[data-layout-shape="phone_portrait"] .composer-control-strip,
+body[data-layout-shape="tall_phone"] .composer-control-strip,
+body[data-layout-shape="tablet_portrait"] .composer-control-strip,
+body[data-layout-shape="phone_landscape"] .composer-control-strip {
+  gap: 6px;
+  max-height: 92px;
+  overflow: auto;
+}
+
+body[data-layout-shape="phone_landscape"] .workspace {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100svh;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 10px;
+}
+
+body[data-layout-shape="phone_landscape"] .topbar {
+  display: none;
+}
+
+body[data-layout-shape="phone_landscape"] .conversation-region {
+  height: calc(100svh - 16px);
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 10px min(48svh, 190px);
+  overflow: hidden;
+}
+
+body[data-layout-shape="phone_landscape"] .region-header {
+  padding-bottom: 6px;
+}
+
+body[data-layout-shape="phone_landscape"] .stream-stage {
+  min-height: 0;
+  overflow: auto;
+  padding-top: 4px;
+}
+
+body[data-layout-shape="phone_landscape"] .composer-card {
+  max-height: 45svh;
+}
+
+body[data-layout-shape="phone_landscape"] .composer-input {
+  min-height: 48px;
+  max-height: 12svh;
+  padding: 10px;
+}
+
+body[data-layout-shape="phone_landscape"] .composer-control-strip {
+  max-height: 44px;
 }

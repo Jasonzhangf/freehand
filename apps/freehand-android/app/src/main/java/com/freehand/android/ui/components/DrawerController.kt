@@ -12,7 +12,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.freehand.android.R
 import com.freehand.android.data.HostConfig
-import com.freehand.android.data.HostStore
 
 /**
  * Right-slide drawer for low-frequency connection settings only.
@@ -58,7 +57,7 @@ class DrawerController(
         panel.addView(sectionLabel(panel.context.getString(R.string.section_connection)))
         panel.addView(spacer(6))
         panel.addView(TextView(panel.context).apply {
-            text = "profile: tailscale-main"
+            text = "profile: ${initialHost.profileId} · ${initialHost.mode}"
             textSize = 12f
             setTextColor(Color.parseColor("#94A3B8"))
         })
@@ -81,8 +80,15 @@ class DrawerController(
         panel.addView(spacer(8))
         panel.addView(actionButton(panel.context.getString(R.string.action_save_connection)) {
             val newHost = HostConfig(
-                host = hostInput.text.toString().ifBlank { HostStore.DEFAULT_HOST },
-                port = portInput.text.toString().toIntOrNull() ?: HostStore.DEFAULT_PORT,
+                host = hostInput.text.toString().ifBlank { initialHost.host },
+                port = portInput.text.toString().toIntOrNull() ?: initialHost.port,
+                profileId = initialHost.profileId,
+                mode = initialHost.mode,
+                adpPath = initialHost.adpPath,
+                healthPath = initialHost.healthPath,
+                commandPath = initialHost.commandPath,
+                queryPath = initialHost.queryPath,
+                subscribePath = initialHost.subscribePath,
             )
             onHostChanged(newHost)
             toggle()

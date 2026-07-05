@@ -28,6 +28,9 @@ run_verify_webui_online() {
   echo "[freehand-webui-online] health: $health_url"
   curl -4fsS "$health_url" >/dev/null
 
+  echo "[freehand-webui-online] verifying layout shape classifier"
+  node scripts/verify-webui-layout-shapes.mjs
+
   echo "[freehand-webui-online] running real browser WebUI + ADP verification: $base_url"
   FREEHAND_WEBUI_BASE_URL="$base_url" \
     FREEHAND_WEBUI_ADP_URL="$adp_url" \

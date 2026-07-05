@@ -6,3 +6,4 @@
 /.beads/sync-state*
 /tmp
 /dist
+/artifacts

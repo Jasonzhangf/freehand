@@ -1148,6 +1148,13 @@ mod tests {
         assert!(!webui_css_body.contains("var(--ok)"));
         assert!(webui_css_body.contains(".execution-row-tool"));
         assert!(webui_css_body.contains(".debug-toggle"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"]"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"phone_landscape\"]"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"tablet_portrait\"]"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"tablet_landscape\"]"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"foldable_unfolded\"]"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"desktop_large\"]"));
+        assert!(webui_css_body.contains("env(safe-area-inset-bottom)"));
 
         let js = client
             .get(format!("{}/assets/webui.js", server.base_url))
@@ -1173,6 +1180,24 @@ mod tests {
         assert!(js_body.contains("new EventSource(endpoint)"));
         assert!(js_body.contains("function ensureSseTurnSubscription"));
         assert!(js_body.contains("SSE turn refresh received"));
+        assert!(js_body.contains("function classifyLayoutShape"));
+        assert!(js_body.contains("function applyLayoutShape"));
+        assert!(js_body.contains("window.__freehandLayout"));
+        assert!(js_body.contains("document.body.dataset.layoutShape"));
+        assert!(js_body.contains("shell.dataset.layoutShape"));
+        assert!(
+            js_body
+                .contains("window.visualViewport.addEventListener(\"resize\", applyLayoutShape)")
+        );
+        assert!(
+            js_body.contains("window.addEventListener(\"orientationchange\", applyLayoutShape)")
+        );
+        assert!(js_body.contains("return \"phone_portrait\""));
+        assert!(js_body.contains("return \"phone_landscape\""));
+        assert!(js_body.contains("return \"tablet_portrait\""));
+        assert!(js_body.contains("return \"tablet_landscape\""));
+        assert!(js_body.contains("return \"foldable_unfolded\""));
+        assert!(js_body.contains("return \"desktop_large\""));
         assert!(js_body.contains("adpSubscribe"));
         assert!(js_body.contains("subscription_accepted"));
         assert!(!js_body.contains("fetch("));
@@ -1267,7 +1292,9 @@ mod tests {
         assert!(js_body.contains("messageListIsNearBottom"));
         assert!(js_body.contains("window.scrollY"));
         assert!(js_body.contains("forceScrollToBottom"));
-        assert!(js_body.contains("window.scrollTo"));
+        assert!(js_body.contains("const streamStage = document.querySelector(\".stream-stage\")"));
+        assert!(js_body.contains("streamStage.scrollTop = streamStage.scrollHeight"));
+        assert!(!js_body.contains("window.scrollTo({ top: document.documentElement.scrollHeight"));
         assert!(js_body.contains("function conversationTurnsForRender"));
         assert!(js_body.contains("if (!state.selectedSessionId)"));
         assert!(js_body.contains("await refreshTurn();"));

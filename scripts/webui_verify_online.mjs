@@ -121,6 +121,7 @@ try {
     return !!document.querySelector('[data-webui-shell="true"]');
   }, 20_000, 'shell reloaded');
   const refreshed = await captureState(cdp, '08-after-refresh');
+  const viewportSnapshots = await captureViewportMatrix(cdp);
 
   const sessionId = refreshed.state.selectedSession || terminal2.state.selectedSession || terminal1.state.selectedSession;
   const adpQuery = sessionId
@@ -144,6 +145,9 @@ try {
       refreshPreservedFirstPrompt: refreshed.state.messageText.includes(prompt1),
       refreshPreservedFailurePrompt: refreshed.state.messageText.includes('definitely-missing-freehand-file.txt'),
       terminal2NoLive: terminal2.state.liveCount === 0,
+      viewportShapesCovered: viewportSnapshots.every((entry) => entry.state.layoutShape === entry.expectedShape),
+      viewportComposerVisible: viewportSnapshots.every((entry) => entry.state.composerVisible),
+      viewportMessageListVisible: viewportSnapshots.every((entry) => entry.state.messageListVisible),
     },
     snapshots: {
       postSubmit1,
@@ -153,6 +157,7 @@ try {
       running2,
       terminal2,
       refreshed,
+      viewportSnapshots,
     },
     adpQuery,
     chromeProfileDir,
@@ -161,6 +166,14 @@ try {
 
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
   console.log(JSON.stringify(summary, null, 2));
+
+  const failedChecks = Object.entries(summary.checks).filter(([key, value]) => {
+    if (key === 'staleHistoricalLiveAfterSecondSubmit') return value !== 0;
+    return value !== true;
+  });
+  if (failedChecks.length > 0) {
+    throw new Error(`WebUI online verification failed checks: ${failedChecks.map(([key, value]) => `${key}=${value}`).join(', ')}`);
+  }
 
   await cdp.close();
 } finally {
@@ -201,6 +214,15 @@ async function captureState(cdp, label) {
       commandStatus: document.getElementById('command-status')?.textContent?.trim() || '',
       turnStatus: document.getElementById('turn-status')?.textContent?.trim() || '',
       workspaceStatus: document.getElementById('workspace-status')?.textContent?.trim() || '',
+      layoutShape: document.body.dataset.layoutShape || '',
+      shellLayoutShape: document.querySelector('[data-webui-shell="true"]')?.dataset.layoutShape || '',
+      composerVisible: isVisible(document.getElementById('composer-form')),
+      messageListVisible: isVisible(document.getElementById('message-list')),
+      composerRect: rectOf(document.getElementById('composer-form')),
+      composerCardRect: rectOf(document.querySelector('.composer-card')),
+      messageListRect: rectOf(document.getElementById('message-list')),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      scrollY: window.scrollY,
       liveCount: live.length,
       nonLastLiveCount: live.filter((node) => node !== lastMessage).length,
       messageCount: messages.length,
@@ -208,9 +230,82 @@ async function captureState(cdp, label) {
       pageErrors: window.__freehandVerify?.pageErrors || [],
       consoleErrors: window.__freehandVerify?.consoleErrors || [],
     };
+    function isVisible(node) {
+      if (!node) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.top <= window.innerHeight;
+    }
+    function rectOf(node) {
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+        height: rect.height,
+      };
+    }
   });
   await fs.writeFile(path.join(artifactDir, `${label}.json`), JSON.stringify(state, null, 2));
   return { label, state };
+}
+
+async function captureViewportMatrix(cdp) {
+  const viewports = [
+    { label: '09-viewport-phone-portrait-375x812', width: 375, height: 812, expectedShape: 'tall_phone' },
+    { label: '10-viewport-tall-phone-430x932', width: 430, height: 932, expectedShape: 'tall_phone' },
+    { label: '11-viewport-phone-landscape-844x390', width: 844, height: 390, expectedShape: 'phone_landscape' },
+    { label: '12-viewport-tablet-portrait-768x1024', width: 768, height: 1024, expectedShape: 'tablet_portrait' },
+    { label: '13-viewport-tablet-landscape-1024x768', width: 1024, height: 768, expectedShape: 'foldable_unfolded' },
+    { label: '14-viewport-foldable-900x1000', width: 900, height: 1000, expectedShape: 'foldable_unfolded' },
+    { label: '15-viewport-desktop-1280x900', width: 1280, height: 900, expectedShape: 'desktop_large' },
+  ];
+  const results = [];
+  for (const viewport of viewports) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: viewport.width,
+      height: viewport.height,
+      deviceScaleFactor: 1,
+      mobile: viewport.width < 900,
+    });
+    await evalInPage(cdp, () => {
+      window.dispatchEvent(new Event('resize'));
+      return window.__freehandLayout?.applyLayoutShape?.();
+    });
+    await evalInPage(cdp, () => {
+      window.scrollTo(0, 0);
+      const streamStage = document.querySelector('.stream-stage');
+      if (streamStage) {
+        streamStage.scrollTop = streamStage.scrollHeight;
+      }
+      const messageList = document.getElementById('message-list');
+      if (messageList) {
+        messageList.scrollTop = messageList.scrollHeight;
+      }
+    });
+    try {
+      await waitForFunction(
+        cdp,
+        (expected) => document.body.dataset.layoutShape === expected,
+        10_000,
+        `${viewport.label} layout shape`,
+        viewport.expectedShape,
+      );
+    } catch (error) {
+      const snapshot = await captureState(cdp, `${viewport.label}-failure`);
+      await fs.writeFile(
+        path.join(artifactDir, `${viewport.label}-failure-context.json`),
+        JSON.stringify({ ...viewport, error: error.message, snapshot }, null, 2),
+      );
+      throw error;
+    }
+    const snapshot = await captureState(cdp, viewport.label);
+    results.push({ ...viewport, ...snapshot });
+  }
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  return results;
 }
 
 async function waitForTerminal(cdp, timeoutMs, label) {
@@ -222,10 +317,10 @@ async function waitForTerminal(cdp, timeoutMs, label) {
   }, timeoutMs, label);
 }
 
-async function waitForFunction(cdp, fn, timeoutMs, label) {
+async function waitForFunction(cdp, fn, timeoutMs, label, arg) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const result = await evalInPage(cdp, fn);
+    const result = await evalInPage(cdp, fn, arg);
     if (result) {
       return;
     }
