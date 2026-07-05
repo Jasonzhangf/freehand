@@ -1500,3 +1500,32 @@ Current real root cause split:
   - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> ok.
   - `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample success` -> session `cli-adp-sample-success-1783219259178878000`, turn `runtime-turn-42`, `rounds=1`, terminal command receipt.
   - `cargo clippy -p freehand-provider-anthropic -p freehand-runtime --all-targets -- -D warnings` -> no issues.
+
+# 2026-07-05 WebUI online gate profile correction
+
+- user correction: dev/S profile uses fixed `4042`; release/global profile uses fixed `4041`.
+- implementation:
+  - `make verify-webui-online` now defaults to S profile `http://127.0.0.1:4042/`, `ws://127.0.0.1:4042/adp`, `freehand-cliS`, and `FREEHAND_WEBUI_PROFILE=4042`.
+  - `make verify-webui-release-online` is the explicit release wrapper for `4041` and `freehand-cli`.
+  - browser verifier renamed from `scripts/webui_verify_4041.mjs` to `scripts/webui_verify_online.mjs` and parameterized by environment.
+  - `xtask` gate now locks default/release URL, health URL, ADP URL, CLI, and profile snippets; xtask fixtures include both wrapper scripts.
+  - docs/function map/test design/mainline JSON/generated wiki/release doc/MEMORY corrected so alpha closeout no longer points at 4041.
+- validation:
+  - `cargo run -p xtask -- mainlines generate`
+  - `bash -n scripts/verify-webui-online.sh scripts/verify-webui-release-online.sh`
+  - `node --check scripts/webui_verify_online.mjs`
+  - `cargo test -p xtask -- --nocapture` -> 18 passed
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `scripts/install-launchd.sh installS` started `com.freehand.daemonS` on `127.0.0.1:4042`
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`
+  - `~/.local/bin/freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> ok
+  - `make verify-webui-online` -> run `20260705-verify-4042-1783248727371`, all checks true, ADP session query exit 0
+  - `make ci` -> exit 0
+- evidence:
+  - `artifacts/webui-online/20260705-verify-4042-1783248727371/summary.json`
+  - session `webui-session-20260705105207-a9295d35`
+  - turns `runtime-turn-53,runtime-turn-54,runtime-turn-54-r2`
+- exclusion:
+  - old `20260705-verify-4041-*` artifacts are wrong-profile intermediate evidence and are intentionally not staged.

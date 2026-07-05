@@ -5,14 +5,16 @@ import path from 'node:path';
 
 const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const debugPort = 9223;
-const baseUrl = 'http://127.0.0.1:4041/';
-const adpUrl = 'ws://127.0.0.1:4041/adp';
+const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
+const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const cliPath = process.env.FREEHAND_WEBUI_CLI || `${process.env.HOME}/.local/bin/freehand-cliS`;
+const profileName = process.env.FREEHAND_WEBUI_PROFILE || portLabelFromBaseUrl(baseUrl);
 const successPrompt =
   'ADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.';
 const failurePrompt =
   'ADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.';
 
-const runId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-verify-4041-${Date.now()}`;
+const runId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-verify-${profileName}-${Date.now()}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
 
 await fs.mkdir(artifactDir, { recursive: true });
@@ -118,12 +120,15 @@ try {
 
   const sessionId = refreshed.state.selectedSession || terminal2.state.selectedSession || terminal1.state.selectedSession;
   const adpQuery = sessionId
-    ? await runCommand(['~/.local/bin/freehand-cli', 'adp-session-query', '--url', adpUrl, '--session', sessionId])
+    ? await runCommand([cliPath, 'adp-session-query', '--url', adpUrl, '--session', sessionId])
     : { code: 1, stdout: '', stderr: 'missing session id' };
 
   const summary = {
     runId,
     artifactDir,
+    baseUrl,
+    adpUrl,
+    cliPath,
     sessionId,
     checks: {
       firstSubmitComposerCleared: postSubmit1.state.composer === '',
@@ -341,6 +346,28 @@ function createCdpClient(webSocketUrl) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizedBaseUrl(value) {
+  const url = new URL(value);
+  if (!url.pathname.endsWith('/')) {
+    url.pathname = `${url.pathname}/`;
+  }
+  return url.toString();
+}
+
+function adpUrlFromBaseUrl(value) {
+  const url = new URL(value);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.pathname = '/adp';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+function portLabelFromBaseUrl(value) {
+  const url = new URL(value);
+  return url.port ? url.port : url.protocol === 'https:' ? '443' : '80';
 }
 
 function onceExit(child, timeoutMs) {

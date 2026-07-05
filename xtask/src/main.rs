@@ -839,7 +839,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks",
+        ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -857,6 +857,65 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         &makefile,
         "verify-webui-online:\n\tscripts/verify-webui-online.sh",
         "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "verify-webui-release-online:\n\tscripts/verify-webui-release-online.sh",
+        "Makefile",
+    )?;
+    let webui_online = fs::read_to_string(root.join("scripts/verify-webui-online.sh"))
+        .map_err(|err| format!("read scripts/verify-webui-online.sh: {err}"))?;
+    require_contains(
+        &webui_online,
+        "FREEHAND_WEBUI_BASE_URL:-http://127.0.0.1:4042/",
+        "scripts/verify-webui-online.sh",
+    )?;
+    require_contains(
+        &webui_online,
+        "FREEHAND_WEBUI_HEALTH_URL:-http://127.0.0.1:4042/health",
+        "scripts/verify-webui-online.sh",
+    )?;
+    require_contains(
+        &webui_online,
+        "FREEHAND_WEBUI_ADP_URL:-ws://127.0.0.1:4042/adp",
+        "scripts/verify-webui-online.sh",
+    )?;
+    require_contains(
+        &webui_online,
+        "FREEHAND_WEBUI_CLI:-$HOME/.local/bin/freehand-cliS",
+        "scripts/verify-webui-online.sh",
+    )?;
+    require_contains(
+        &webui_online,
+        "FREEHAND_WEBUI_PROFILE:-4042",
+        "scripts/verify-webui-online.sh",
+    )?;
+    let webui_release = fs::read_to_string(root.join("scripts/verify-webui-release-online.sh"))
+        .map_err(|err| format!("read scripts/verify-webui-release-online.sh: {err}"))?;
+    require_contains(
+        &webui_release,
+        "FREEHAND_WEBUI_BASE_URL:-http://127.0.0.1:4041/",
+        "scripts/verify-webui-release-online.sh",
+    )?;
+    require_contains(
+        &webui_release,
+        "FREEHAND_WEBUI_HEALTH_URL:-http://127.0.0.1:4041/health",
+        "scripts/verify-webui-release-online.sh",
+    )?;
+    require_contains(
+        &webui_release,
+        "FREEHAND_WEBUI_ADP_URL:-ws://127.0.0.1:4041/adp",
+        "scripts/verify-webui-release-online.sh",
+    )?;
+    require_contains(
+        &webui_release,
+        "FREEHAND_WEBUI_CLI:-$HOME/.local/bin/freehand-cli}",
+        "scripts/verify-webui-release-online.sh",
+    )?;
+    require_contains(
+        &webui_release,
+        "FREEHAND_WEBUI_PROFILE:-4041",
+        "scripts/verify-webui-release-online.sh",
     )?;
     require_contains(
         &makefile,
@@ -1765,12 +1824,12 @@ mod tests {
     }
 
     fn write_ci_cd_fixture(root: &Path, mode: CiFixtureMode) {
-        for rel in [".githooks", ".github/workflows"] {
+        for rel in [".githooks", ".github/workflows", "scripts"] {
             fs::create_dir_all(root.join(rel)).expect("create ci fixture dir");
         }
         let makefile = match mode {
             CiFixtureMode::Aligned | CiFixtureMode::CiWorkflowPartialGate => {
-                ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
+                ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
@@ -1779,6 +1838,7 @@ mainlines:\n\tcargo run -p xtask -- mainlines check\n\
 gates:\n\tcargo run -p xtask -- gates check\n\
 ci: build fmt clippy test mainlines gates\n\
 verify-webui-online:\n\tscripts/verify-webui-online.sh\n\
+verify-webui-release-online:\n\tscripts/verify-webui-release-online.sh\n\
 release:\n\tscripts/release.sh\n\
 install-global:\n\tscripts/install-global.sh\n\
 install-symlink:\n\tscripts/install-symlink.sh\n\
@@ -1790,7 +1850,7 @@ uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n\
 uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n"
             }
             CiFixtureMode::MakeCiMissingMainlines => {
-                ".PHONY: build fmt clippy test gates ci verify-webui-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
+                ".PHONY: build fmt clippy test gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
@@ -1798,6 +1858,7 @@ test:\n\tcargo test --workspace\n\
 gates:\n\tcargo run -p xtask -- gates check\n\
 ci: build fmt clippy test gates\n\
 verify-webui-online:\n\tscripts/verify-webui-online.sh\n\
+verify-webui-release-online:\n\tscripts/verify-webui-release-online.sh\n\
 release:\n\tscripts/release.sh\n\
 install-global:\n\tscripts/install-global.sh\n\
 install-symlink:\n\tscripts/install-symlink.sh\n\
@@ -1810,6 +1871,27 @@ uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n"
             }
         };
         fs::write(root.join("Makefile"), makefile).expect("write Makefile fixture");
+        fs::write(
+            root.join("scripts/verify-webui-online.sh"),
+            "#!/usr/bin/env bash\n\
+base_url=\"${FREEHAND_WEBUI_BASE_URL:-http://127.0.0.1:4042/}\"\n\
+health_url=\"${FREEHAND_WEBUI_HEALTH_URL:-http://127.0.0.1:4042/health}\"\n\
+adp_url=\"${FREEHAND_WEBUI_ADP_URL:-ws://127.0.0.1:4042/adp}\"\n\
+cli_path=\"${FREEHAND_WEBUI_CLI:-$HOME/.local/bin/freehand-cliS}\"\n\
+profile=\"${FREEHAND_WEBUI_PROFILE:-4042}\"\n",
+        )
+        .expect("write WebUI online fixture");
+        fs::write(
+            root.join("scripts/verify-webui-release-online.sh"),
+            "#!/usr/bin/env bash\n\
+FREEHAND_WEBUI_BASE_URL=\"${FREEHAND_WEBUI_BASE_URL:-http://127.0.0.1:4041/}\" \\\n\
+FREEHAND_WEBUI_HEALTH_URL=\"${FREEHAND_WEBUI_HEALTH_URL:-http://127.0.0.1:4041/health}\" \\\n\
+FREEHAND_WEBUI_ADP_URL=\"${FREEHAND_WEBUI_ADP_URL:-ws://127.0.0.1:4041/adp}\" \\\n\
+FREEHAND_WEBUI_CLI=\"${FREEHAND_WEBUI_CLI:-$HOME/.local/bin/freehand-cli}\" \\\n\
+FREEHAND_WEBUI_PROFILE=\"${FREEHAND_WEBUI_PROFILE:-4041}\" \\\n\
+  scripts/verify-webui-online.sh\n",
+        )
+        .expect("write WebUI release online fixture");
         fs::write(
             root.join(".githooks/pre-push"),
             "#!/usr/bin/env bash\nset -euo pipefail\nmake ci\n",

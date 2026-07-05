@@ -1,0 +1,149 @@
+{
+  "runId": "20260705-verify-4042-1783248727371",
+  "artifactDir": "/Volumes/extension/code/freehand/artifacts/webui-online/20260705-verify-4042-1783248727371",
+  "baseUrl": "http://127.0.0.1:4042/",
+  "adpUrl": "ws://127.0.0.1:4042/adp",
+  "cliPath": "/Users/fanzhang/.local/bin/freehand-cliS",
+  "sessionId": "webui-session-20260705105207-a9295d35",
+  "checks": {
+    "firstSubmitComposerCleared": true,
+    "firstPromptVisibleAfterSubmit": true,
+    "secondSubmitComposerCleared": true,
+    "secondRunningHasLiveCard": true,
+    "staleHistoricalLiveAfterSecondSubmit": 0,
+    "refreshPreservedFirstPrompt": true,
+    "refreshPreservedFailurePrompt": true,
+    "terminal2NoLive": true
+  },
+  "snapshots": {
+    "postSubmit1": {
+      "label": "02-after-first-submit",
+      "state": {
+        "selectedSession": "webui-session-20260705105207-a9295d35",
+        "selectedTurn": "runtime-turn-53",
+        "composer": "",
+        "commandStatus": "dispatching... 0s",
+        "turnStatus": "dispatching... 0s",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 1,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783248728385",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "materialized1": {
+      "label": "03-first-materialized",
+      "state": {
+        "selectedSession": "webui-session-20260705105207-a9295d35",
+        "selectedTurn": "runtime-turn-53",
+        "composer": "",
+        "commandStatus": "dispatching... 0s",
+        "turnStatus": "dispatching... 0s",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 1,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783248728385",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "terminal1": {
+      "label": "04-first-terminal",
+      "state": {
+        "selectedSession": "webui-session-20260705105207-a9295d35",
+        "selectedTurn": "runtime-turn-53",
+        "composer": "",
+        "commandStatus": "turn completed",
+        "turnStatus": "completed",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 2,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783248728385\n\nAssistant\ncompleted\n\nThe pending input marker 1783248728385 verified successfully and the task is complete.\n\nFinal\ncompleted\n\nVerified the pending input success marker and confirmed the ADP success sample.",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "postSubmit2": {
+      "label": "05-after-second-submit",
+      "state": {
+        "selectedSession": "webui-session-20260705105207-a9295d35",
+        "selectedTurn": "runtime-turn-54",
+        "composer": "",
+        "commandStatus": "dispatching... 0s",
+        "turnStatus": "dispatching... 0s",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 3,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783248728385\n\nAssistant\ncompleted\n\nThe pending input marker 1783248728385 verified successfully and the task is complete.\n\nFinal\ncompleted\n\nVerified the pending input success marker and confirmed the ADP success sample.\n\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "running2": {
+      "label": "06-second-running",
+      "state": {
+        "selectedSession": "webui-session-20260705105207-a9295d35",
+        "selectedTurn": "runtime-turn-54",
+        "composer": "",
+        "commandStatus": "thinking after tool result... 0s",
+        "turnStatus": "thinking after tool result... 0s",
+        "workspaceStatus": "connected",
+        "liveCount": 1,
+        "nonLastLiveCount": 0,
+        "messageCount": 4,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783248728385\n\nAssistant\ncompleted\n\nThe pending input marker 1783248728385 verified successfully and the task is complete.\n\nFinal\ncompleted\n\nVerified the pending input success marker and confirmed the ADP success sample.\n\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.\n\nAssistant\ntool failed\n\nI'll call the read_file tool exactly once with the specified path, then report success through the completion schema.\n\nRead file\n执行失败 · 0s\ntype: read file\ntarget: definitely-missing-freehand-file.txt\npath=definitely-missing-freehand-file.txt\nModel\n0s\n\ntool result returned: 1 failed / 1 total · waiting model",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "terminal2": {
+      "label": "07-second-terminal",
+      "state": {
+        "selectedSession": "webui-session-20260705105207-a9295d35",
+        "selectedTurn": "runtime-turn-54-r2",
+        "composer": "",
+        "commandStatus": "turn completed",
+        "turnStatus": "completed",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 5,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783248728385\n\nAssistant\ncompleted\n\nThe pending input marker 1783248728385 verified successfully and the task is complete.\n\nFinal\ncompleted\n\nVerified the pending input success marker and confirmed the ADP success sample.\n\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.\n\nAssistant\ntool failed\n\nI'll call the read_file tool exactly once with the specified path, then report success through the completion schema.\n\nRead file\n执行失败 · 0s\ntype: read file\ntarget: definitely-missing-freehand-file.txt\npath=definitely-missing-freehand-file.txt\nAssistant\ncompleted\nFinal\ncompleted\n\nPerformed the ADP failure-sample procedure: invoked read_file once on the deliberately missing path 'definitely-missing-freehand-file.txt', received a tool-execution failure (cannot resolve path, os error 2), and used that failure to satisfy the failure-sample flow and report success.",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    },
+    "refreshed": {
+      "label": "08-after-refresh",
+      "state": {
+        "selectedSession": "webui-session-20260705105207-a9295d35",
+        "selectedTurn": "runtime-turn-54-r2",
+        "composer": "",
+        "commandStatus": "turn completed",
+        "turnStatus": "completed",
+        "workspaceStatus": "connected",
+        "liveCount": 0,
+        "nonLastLiveCount": 0,
+        "messageCount": 5,
+        "messageText": "User\nsubmitted\n\nADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.\nMarker: verify pending input success 1783248728385\n\nAssistant\ncompleted\n\nThe pending input marker 1783248728385 verified successfully and the task is complete.\n\nFinal\ncompleted\n\nVerified the pending input success marker and confirmed the ADP success sample.\n\nUser\nsubmitted\n\nADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.\n\nAssistant\ntool failed\n\nI'll call the read_file tool exactly once with the specified path, then report success through the completion schema.\n\nRead file\n执行失败 · 0s\ntype: read file\ntarget: definitely-missing-freehand-file.txt\npath=definitely-missing-freehand-file.txt\nAssistant\ncompleted\nFinal\ncompleted\n\nPerformed the ADP failure-sample procedure: invoked read_file once on the deliberately missing path 'definitely-missing-freehand-file.txt', received a tool-execution failure (cannot resolve path, os error 2), and used that failure to satisfy the failure-sample flow and report success.",
+        "pageErrors": [],
+        "consoleErrors": []
+      }
+    }
+  },
+  "adpQuery": {
+    "code": 0,
+    "stdout": "adp_session_query_ok url=ws://127.0.0.1:4042/adp sessions=7 ids=cli-adp-sample-success-1783219259178878000:1:success,webui-session-20260705015702-61789d20:27:failed,webui-session-20260705100051-ed416720:3:success,webui-session-20260705100831-73be5d90:3:success,webui-session-20260705101236-34cd9e04:3:success,webui-session-20260705102934-ec7ca170:3:success,webui-session-20260705105207-a9295d35:3:success selected_session=webui-session-20260705105207-a9295d35 turns=3 turn_ids=runtime-turn-53,runtime-turn-54,runtime-turn-54-r2",
+    "stderr": ""
+  },
+  "chromeProfileDir": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/freehand-webui-verify-wSDH98",
+  "chromeLog": [
+    "[stderr] \nDevTools listening on ws://127.0.0.1:9223/devtools/browser/746d85fb-50f8-4251-9ba1-fbfac1985f3f\n",
+    "[stderr] Trying to load the allocator multiple times. This is *not* supported.\n"
+  ]
+}

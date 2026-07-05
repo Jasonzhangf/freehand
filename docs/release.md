@@ -26,19 +26,27 @@ The GitHub release workflow calls the same script after the full gate, then uplo
 
 ## Alpha Closeout Gate
 
-Alpha promotion requires the release build plus one fixed-port WebUI online proof against the globally installed daemon.
+Alpha promotion requires the release build plus one fixed-port WebUI online proof against the S-profile daemon. The S-profile is the default development/alpha validation surface and runs on `127.0.0.1:4042` through `freehand-*S` commands. The release profile stays on `127.0.0.1:4041` and is verified only by the explicit release target.
 
 Run the alpha closeout sequence from the repo root:
 
 ```bash
-scripts/install-global.sh
-scripts/install-launchd.sh restart
+scripts/install-launchd.sh installS
+scripts/install-launchd.sh restartS
 make verify-webui-online
 ```
 
-`make verify-webui-online` is intentionally separate from `make ci` because it requires a running local daemon on `127.0.0.1:4041` and a local Chrome binary for real browser evidence. It is mandatory for alpha promotion and for WebUI/ADP/session lifecycle changes, but it is not a CI-safe static gate.
+`make verify-webui-online` is intentionally separate from `make ci` because it requires a running local S-profile daemon on `127.0.0.1:4042` and a local Chrome binary for real browser evidence. It is mandatory for alpha promotion and for WebUI/ADP/session lifecycle changes, but it is not a CI-safe static gate.
 
-The online gate performs a real browser flow through `http://127.0.0.1:4041/` and compares it with ADP truth:
+Release profile verification is explicit and must not be used as the default development WebUI gate:
+
+```bash
+scripts/install-global.sh
+scripts/install-launchd.sh restart
+make verify-webui-release-online
+```
+
+The default online gate performs a real browser flow through `http://127.0.0.1:4042/` and compares it with ADP truth through `freehand-cliS`:
 
 1. creates a new WebUI conversation
 2. submits a success sample and verifies the composer clears while the user input remains visible
@@ -47,10 +55,10 @@ The online gate performs a real browser flow through `http://127.0.0.1:4041/` an
 5. verifies only the current live card animates and historical turns are static
 6. waits for terminal success with `runtime-turn-N-r2`
 7. refreshes the page and verifies both prompts remain visible
-8. runs `freehand-cli adp-session-query` for the same session
+8. runs `freehand-cliS adp-session-query` for the same session
 9. writes screenshots and `summary.json` under `artifacts/webui-online/<run-id>/`
 
-Alpha cannot be claimed from `node --check`, unit tests, or static screenshots alone. The required evidence is the final `summary.json`, screenshots, fixed `4041` health, and matching served WebUI asset hash when code changed.
+Alpha cannot be claimed from `node --check`, unit tests, or static screenshots alone. The required evidence is the final S-profile `summary.json`, screenshots, fixed `4042` health, ADP truth, and matching served WebUI asset hash when code changed. Release `4041` proof is additional release-closeout evidence, not the default WebUI development gate.
 
 Current alpha blockers that are explicitly outside the single-agent WebUI alpha scope must remain documented in `docs/architecture/architecture-gaps.md`:
 

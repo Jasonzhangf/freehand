@@ -30,7 +30,7 @@
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
 - release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
-- WebUI online verification wrapper checks fixed `127.0.0.1:4041` daemon health and invokes the real browser WebUI + ADP proof for alpha promotion
+- WebUI online verification wrapper checks fixed S-profile `127.0.0.1:4042` daemon health and invokes the real browser WebUI + ADP proof for alpha promotion; release-profile `127.0.0.1:4041` proof is a separate explicit target
 - global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
 - symlink install script builds debug host binaries, exposes `freehand-cliS`, `freehand-serverS`, and `freehand-daemonS` as symlinks, and installs a copied `freehand-daemon-launchdS` wrapper for development without replacing global release commands
 - launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths
@@ -49,7 +49,7 @@
 - gate returns success when migrated mainline call-table bindings resolve to source files and symbols
 - gate returns success when local and remote automation routes through the same full gate stack
 - release artifacts include `freehand-cli`, `freehand-server`, `freehand-daemon`, and the Android release APK under `dist/`
-- WebUI online verification writes screenshots and `summary.json` under `artifacts/webui-online/<run-id>/`, proving composer clear, visible submitted input, multi-round failed-tool continuation, no stale historical animation, refresh persistence, and ADP session truth alignment
+- S-profile WebUI online verification writes screenshots and `summary.json` under `artifacts/webui-online/<run-id>/`, proving composer clear, visible submitted input, multi-round failed-tool continuation, no stale historical animation, refresh persistence, and ADP session truth alignment
 - global install exposes `freehand-cli`, `freehand-server`, and `freehand-daemon` on the chosen install prefix
 - symlink install exposes `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` on the chosen prefix, pointing host commands at repo debug binaries while keeping the launchd wrapper executable as a prefix-local file
 - launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
@@ -106,7 +106,7 @@
 | 16 | `verify_data_control_boundaries` | `xtask/src/main.rs` | validate static data/control isolation rules on source-owned request and metadata types | Rust source files for contracts and metadata owners | pass/fail | `run_gates_check` | source scanners | bound |
 | 17 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that `docs/architecture/feature-map.md` keeps one seed entry per `feature_id` | feature-map markdown | pass/fail | `run_gates_check` | feature-map scanner | bound |
 | 18 | `run_release` | `scripts/release.sh` | run release regressions and build/stage host + Android artifacts | repo root state | `dist/` artifacts | operator / GitHub release workflow | `make ci`, Cargo, Gradle | bound |
-| 19 | `scripts/verify-webui-online.sh` / `scripts/webui_verify_4041.mjs` | `scripts/verify-webui-online.sh`, `scripts/webui_verify_4041.mjs` | run fixed-port real browser WebUI + ADP alpha proof | running daemon on `127.0.0.1:4041` | screenshots, summary JSON, ADP session alignment | operator / `make verify-webui-online` | curl, Chrome CDP, WebUI, `freehand-cli adp-session-query` | bound |
+| 19 | `run_verify_webui_online` | `scripts/verify-webui-online.sh` | run fixed-port S-profile real browser WebUI + ADP alpha proof | running S-profile daemon on `127.0.0.1:4042` | screenshots, summary JSON, ADP session alignment | operator / `make verify-webui-online` | curl, `scripts/webui_verify_online.mjs`, Chrome CDP, WebUI, `freehand-cliS adp-session-query` | bound |
 | 20 | `run_install_global` | `scripts/install-global.sh` | run release script and install host binaries to a global prefix | release artifacts | installed commands | operator | `scripts/release.sh`, install tool | bound |
 | 21 | `run_install_launchd` | `scripts/install-launchd.sh` | install global binaries and bootstrap the macOS user LaunchAgent | repo root + runtime env | running launchd service | operator | `scripts/install-global.sh`, launchctl | bound |
 | 22 | `run_uninstall_launchd` | `scripts/uninstall-launchd.sh` | stop and remove the macOS user LaunchAgent plist | launchd label | service removed | operator | launchctl | bound |
@@ -117,6 +117,6 @@
 - workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code
 - current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, and static data/control boundary checks
 - release and global-install scripts are documented in `docs/release.md`
-- alpha WebUI online verification is documented in `docs/release.md` and exposed as `make verify-webui-online`
+- alpha WebUI online verification defaults to S-profile 4042 and is documented in `docs/release.md`; release 4041 proof is explicit via `make verify-webui-release-online`
 - initial framework loop governance docs are bound under `docs/loops/freehand-framework-loop` in L1 report-only mode
 - generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes
