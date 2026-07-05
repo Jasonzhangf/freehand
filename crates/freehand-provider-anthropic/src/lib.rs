@@ -18,6 +18,8 @@ use freehand_provider_core::{
 use serde_json::{Value, json};
 use thiserror::Error;
 
+pub const DEFAULT_ANTHROPIC_MAX_TOKENS: u64 = 8192;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnthropicAdapterConfig {
     pub max_tokens: u64,
@@ -811,7 +813,10 @@ mod tests {
     }
 
     fn adapter() -> AnthropicAdapter {
-        AnthropicAdapter::new(AnthropicAdapterConfig { max_tokens: 512 }).expect("adapter")
+        AnthropicAdapter::new(AnthropicAdapterConfig {
+            max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+        })
+        .expect("adapter")
     }
 
     fn executor(base_url: String) -> AnthropicExecutor {
@@ -819,7 +824,9 @@ mod tests {
             base_url,
             api_key: "test-api-key".to_owned(),
             anthropic_version: "2023-06-01".to_owned(),
-            adapter: AnthropicAdapterConfig { max_tokens: 512 },
+            adapter: AnthropicAdapterConfig {
+                max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+            },
         })
         .expect("executor")
     }
@@ -942,7 +949,10 @@ mod tests {
         let rendered = adapter.render_request(&request(), true).expect("rendered");
         assert_eq!(rendered.path, "/v1/messages");
         let body: Value = serde_json::from_str(&rendered.body).expect("json");
-        assert_eq!(body.get("max_tokens").and_then(Value::as_u64), Some(512));
+        assert_eq!(
+            body.get("max_tokens").and_then(Value::as_u64),
+            Some(DEFAULT_ANTHROPIC_MAX_TOKENS)
+        );
         assert_eq!(body.get("stream").and_then(Value::as_bool), Some(true));
     }
 

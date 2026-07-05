@@ -47,7 +47,7 @@ use freehand_node::{
 };
 use freehand_provider_anthropic::{
     AnthropicAdapterConfig, AnthropicExecutor, AnthropicExecutorConfig, AnthropicExecutorError,
-    AnthropicRawCapture,
+    AnthropicRawCapture, DEFAULT_ANTHROPIC_MAX_TOKENS,
 };
 use freehand_provider_core::{
     ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderProtocol,
@@ -876,7 +876,9 @@ where
         base_url: selected.provider.base_url.clone(),
         api_key: selected.provider.api_key.clone(),
         anthropic_version: "2023-06-01".to_owned(),
-        adapter: AnthropicAdapterConfig { max_tokens: 512 },
+        adapter: AnthropicAdapterConfig {
+            max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+        },
     })
     .map_err(map_anthropic_executor_error)?;
 

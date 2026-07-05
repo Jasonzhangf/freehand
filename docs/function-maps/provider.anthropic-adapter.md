@@ -79,4 +79,5 @@
 - incremental stream regression proves callback delivery can happen before the provider response completes
 - raw-capable executor bindings now preserve single-shot response bodies, HTTP error bodies, and SSE event bodies before semantic parsing
 - request renderer now binds Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result` message rendering from provider-neutral metadata
+- request renderer default output budget is locked by `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`
 - the generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes

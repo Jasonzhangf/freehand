@@ -1478,3 +1478,25 @@ Current real root cause split:
   - `cargo test -p xtask -- --nocapture` -> 18 passed.
   - `cargo test --workspace` -> 433 passed.
   - `cargo clippy --workspace --all-targets -- -D warnings` -> no issues.
+
+# 2026-07-05 Anthropic max_tokens default 8192
+
+- user correction: default provider output budget must be 8192, not current 512.
+- owner slice: `provider.anthropic-adapter` plus `provider.reason-live-bridge` caller wiring in runtime.
+- implementation:
+  - added `DEFAULT_ANTHROPIC_MAX_TOKENS: u64 = 8192` in `crates/freehand-provider-anthropic`.
+  - runtime live Anthropic executor now uses that constant instead of hardcoded `512`.
+  - Anthropic adapter tests now assert rendered request `max_tokens=8192`.
+  - provider Anthropic function map, test design, mainline JSON, and generated wiki synchronized.
+- validation:
+  - `cargo fmt --check` -> ok.
+  - `cargo test -p freehand-provider-anthropic -- --nocapture` -> 15 passed.
+  - `cargo test -p freehand-runtime live_bridge_interrupts_non_candidate_max_tokens_without_failed_status -- --nocapture` -> 1 passed.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `scripts/install-launchd.sh restartS` rebuilt/restarted S profile on `127.0.0.1:4042`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> ok.
+  - `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample success` -> session `cli-adp-sample-success-1783219259178878000`, turn `runtime-turn-42`, `rounds=1`, terminal command receipt.
+  - `cargo clippy -p freehand-provider-anthropic -p freehand-runtime --all-targets -- -D warnings` -> no issues.

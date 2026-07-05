@@ -29,7 +29,7 @@
   - `~/.freehand/replays/providers/anthropic`
 - sync status between design and implementation:
   - `AnthropicAdapter` baseline implemented
-  - request rendering covers Messages API with explicit `max_tokens` adapter config and typed input segments
+  - request rendering covers Messages API with default `max_tokens=8192`, explicit adapter config validation, and typed input segments
   - request rendering now covers Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result`
   - single-shot and stream parsing cover text, tool use, usage, terminal, and error paths
   - live `minimonth` fixtures now cover thinking/text/usage/cache/terminal replay for single-shot and SSE
