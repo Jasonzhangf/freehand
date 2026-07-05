@@ -1750,3 +1750,16 @@ Current real root cause split:
   - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest assembleDebug` -> `BUILD SUCCESSFUL`.
 - conclusion:
   - do not mark the mobile WebUI / Android closeout goal complete until the Android device is connected/unlocked and `verify-device-ui.sh` passes with Freehand foreground screenshot and no fatal logcat, or Jason explicitly accepts the remaining Android device risk.
+
+# 2026-07-06 Android device blocked audit
+
+- active goal audit:
+  - objective remains the mobile WebUI / Android WebView closeout from `/Users/fanzhang/.codex/attachments/75141fb8-5139-49b6-ac44-ffc7f7608b3a/pasted-text-1.txt`.
+  - completion still requires Android true-device UI/WebView evidence; existing blocker summaries are explicitly not acceptance evidence.
+- repeated blocker:
+  - `adb devices -l` returned no devices.
+  - `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` exited blocked again with `adb_state_unavailable`.
+  - blocker evidence: `artifacts/android-device/20260705T180852Z-100.104.163.65_5555/summary.json`.
+- blocked decision:
+  - same external blocker has now repeated across consecutive goal continuations with no available local progress path: ADB device `100.104.163.65:5555` is unavailable.
+  - next meaningful progress requires the Android device/emulator to be connected and unlocked, then rerun `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`.
