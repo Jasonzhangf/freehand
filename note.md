@@ -1855,3 +1855,22 @@ Current real root cause split:
   - online checks true: composer clears after both submits, first and failure prompts survive refresh, failed-tool continuation reaches terminal success, stale historical live count is `0`, terminal live count is `0`, viewport matrix and mobile drawers pass.
 - remaining:
   - Android true-device WebView acceptance remains blocked until device is unlocked and `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passes.
+
+# 2026-07-06 Android true-device WebView acceptance closeout
+
+- prerequisite:
+  - device `100.104.163.65:5555` is online: `adb devices -l` showed `device product:PLZ110 model:PLZ110`.
+  - release/Tailscale daemon endpoint verified before device run:
+    - `curl -4fsS http://100.66.1.82:4041/health` -> `ok`.
+    - `~/.local/bin/freehand-cli adp-smoke --url ws://100.66.1.82:4041/adp` -> `adp_smoke_ok`.
+- Android verifier:
+  - command: `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`.
+  - result: passed.
+  - evidence: `artifacts/android-device/20260706T040938Z-100.104.163.65_5555-64346/summary.json`.
+  - summary fields: `status=passed`, `reason=freehand_activity_foreground_no_fatal_logcat`, `package=com.freehand.android`, `activity=.ui.MainActivity`, APK `apps/freehand-android/app/build/outputs/apk/debug/app-debug.apk`.
+  - screenshot: `artifacts/android-device/20260706T040938Z-100.104.163.65_5555-64346/screenshot.png`.
+  - visual inspection: screenshot shows daemon-hosted Freehand WebUI mobile layout with `Sessions` / `Status` drawer buttons, conversation-first body, completed turn card, and bottom composer; it is not the old native/fallback desktop-column UI.
+- closure impact:
+  - previous blocker `device_locked_or_dreaming` is cleared for this device run.
+  - mobile WebUI/Android WebView goal now has both S-profile browser evidence and Android true-device foreground WebView evidence.
+  - final full local gate after Android pass: `make ci` -> exit 0.
