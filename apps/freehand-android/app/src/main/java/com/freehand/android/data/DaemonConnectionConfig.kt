@@ -217,7 +217,12 @@ class DaemonConnectionConfigStore(
 ) {
     fun load(): DaemonConnectionConfig {
         if (configFile.exists()) {
-            return DaemonConnectionConfig.parse(configFile.readText())
+            val existing = DaemonConnectionConfig.parse(configFile.readText())
+            val migrated = migrateLegacyBundledDefault(existing)
+            if (migrated != existing) {
+                write(migrated)
+            }
+            return migrated
         }
         val bundledJson = try {
             bundledConfigReader()
@@ -237,6 +242,29 @@ class DaemonConnectionConfigStore(
         } catch (e: Exception) {
             throw DaemonConnectionConfigException("app-owned daemon connection config cannot be written: ${e.message}", e)
         }
+    }
+
+    private fun migrateLegacyBundledDefault(config: DaemonConnectionConfig): DaemonConnectionConfig {
+        val profile = config.profiles.singleOrNull() ?: return config
+        val isLegacyBundledDefault = config.connectionMode == "tailscale" &&
+            config.activeProfile == "tailscale-main" &&
+            profile.id == "tailscale-main" &&
+            profile.mode == "tailscale" &&
+            profile.host == "100.66.1.82" &&
+            profile.port == 4042 &&
+            profile.adpPath == "/adp" &&
+            profile.healthPath == "/health" &&
+            profile.commandPath == "/ui/command" &&
+            profile.queryPath == "/ui/query/latest-active-turn" &&
+            profile.subscribePath == "/ui/subscribe/turn/latest" &&
+            !config.relay.enabled &&
+            config.relay.url.isBlank() &&
+            config.relay.authRef.isBlank()
+        if (!isLegacyBundledDefault) return config
+
+        return config.copy(
+            profiles = listOf(profile.copy(port = 4041)),
+        )
     }
 }
 

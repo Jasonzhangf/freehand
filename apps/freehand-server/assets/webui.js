@@ -27,9 +27,35 @@ export function classifyLayoutShape(width, height) {
   return "phone_portrait";
 }
 
+function viewportDimensionsForLayout() {
+  const widths = [
+    window.visualViewport && window.visualViewport.width,
+    document.documentElement && document.documentElement.clientWidth,
+    window.innerWidth,
+  ].map(Number).filter((value) => Number.isFinite(value) && value > 0);
+  const heights = [
+    window.visualViewport && window.visualViewport.height,
+    document.documentElement && document.documentElement.clientHeight,
+    window.innerHeight,
+  ].map(Number).filter((value) => Number.isFinite(value) && value > 0);
+  return {
+    width: widths.length > 0 ? Math.min(...widths) : 1,
+    height: heights.length > 0 ? Math.max(...heights) : 1,
+  };
+}
+
+function isMobileDrawerLayout(shape) {
+  return ["phone_portrait", "tall_phone", "tablet_portrait"].includes(shape);
+}
+
 const shell = document.querySelector("[data-webui-shell]");
 const messageList = document.getElementById("message-list");
 const sessionList = document.getElementById("session-list");
+const mobileDrawerScrim = document.getElementById("mobile-drawer-scrim");
+const openSessionDrawerButton = document.getElementById("open-session-drawer-button");
+const closeSessionDrawerButton = document.getElementById("close-session-drawer-button");
+const openDetailDrawerButton = document.getElementById("open-detail-drawer-button");
+const closeDetailDrawerButton = document.getElementById("close-detail-drawer-button");
 const newConversationButton = document.getElementById("new-conversation-button");
 const newTaskButton = document.getElementById("new-task-button");
 const taskCwdInput = document.getElementById("task-cwd-input");
@@ -72,8 +98,7 @@ const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStor
 const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) || "";
 
 function applyLayoutShape() {
-  const width = window.innerWidth || (window.visualViewport ? window.visualViewport.width : 1);
-  const height = window.innerHeight || (window.visualViewport ? window.visualViewport.height : 1);
+  const { width, height } = viewportDimensionsForLayout();
   const shape = classifyLayoutShape(width, height);
   document.body.dataset.layoutShape = shape;
   if (shell) {
@@ -107,6 +132,7 @@ const state = {
   pendingAttachments: [],
   inputHistory: [],
   inputHistoryIndex: null,
+  mobileDrawer: null,
   submitStartedAt: null,
   submitInFlight: false,
   commandStatusMessage: "connecting to ADP...",
@@ -136,6 +162,48 @@ function shellConfig() {
     checkpointQuery: shell.dataset.checkpointQuery,
     commandEndpoint: shell.dataset.commandEndpoint,
   };
+}
+
+function applyMobileDrawerState() {
+  const shape = document.body.dataset.layoutShape || applyLayoutShape();
+  const drawer = isMobileDrawerLayout(shape) ? state.mobileDrawer : null;
+  if (drawer) {
+    document.body.dataset.mobileDrawer = drawer;
+    if (shell) {
+      shell.dataset.mobileDrawer = drawer;
+    }
+  } else {
+    delete document.body.dataset.mobileDrawer;
+    if (shell) {
+      delete shell.dataset.mobileDrawer;
+    }
+  }
+  if (openSessionDrawerButton) {
+    openSessionDrawerButton.setAttribute("aria-expanded", drawer === "sessions" ? "true" : "false");
+  }
+  if (openDetailDrawerButton) {
+    openDetailDrawerButton.setAttribute("aria-expanded", drawer === "details" ? "true" : "false");
+  }
+  if (mobileDrawerScrim) {
+    mobileDrawerScrim.setAttribute("aria-hidden", drawer ? "false" : "true");
+  }
+}
+
+function setMobileDrawer(drawer) {
+  const shape = document.body.dataset.layoutShape || applyLayoutShape();
+  state.mobileDrawer = drawer && isMobileDrawerLayout(shape) ? drawer : null;
+  applyMobileDrawerState();
+}
+
+function closeMobileDrawer() {
+  setMobileDrawer(null);
+}
+
+function syncMobileDrawerForLayout() {
+  if (!isMobileDrawerLayout(document.body.dataset.layoutShape || applyLayoutShape())) {
+    state.mobileDrawer = null;
+  }
+  applyMobileDrawerState();
 }
 
 function adpUrl() {
@@ -1854,6 +1922,7 @@ function startNewConversation() {
   const sessionId = newDraftSessionId();
   resetLocalConversationState(sessionId);
   setSelectedCwd("");
+  closeMobileDrawer();
   setCommandStatus("new conversation ready", { stickyMs: 5000 });
 }
 
@@ -1876,6 +1945,7 @@ async function startNewTask() {
     });
     await refreshSessions();
     await refreshSelectedSession();
+    closeMobileDrawer();
     setCommandStatus(`new task ready · cwd ${cwd}`, { stickyMs: 5000 });
   } catch (error) {
     setCommandStatus(`new task failed: ${error.message}`, { stickyMs: 8000 });
@@ -2451,6 +2521,7 @@ function renderSessions() {
 
     button.addEventListener("click", () => {
       setSelectedSessionId(session.session_id);
+      closeMobileDrawer();
       refreshSelectedSession().catch((error) => {
         setCommandStatus(`session refresh failed: ${error.message}`);
       });
@@ -2472,6 +2543,7 @@ function renderDraftSessionItem() {
     setSelectedSessionId(state.draftSessionId);
     state.sessionTurns = [];
     setTurnProjection(null, { preserveSessionTurns: true });
+    closeMobileDrawer();
     renderAll();
   });
   sessionList.appendChild(item);
@@ -3007,6 +3079,25 @@ if (debugDetailsToggle) {
     renderAll();
   });
 }
+if (openSessionDrawerButton) {
+  openSessionDrawerButton.addEventListener("click", () => {
+    setMobileDrawer(state.mobileDrawer === "sessions" ? null : "sessions");
+  });
+}
+if (closeSessionDrawerButton) {
+  closeSessionDrawerButton.addEventListener("click", closeMobileDrawer);
+}
+if (openDetailDrawerButton) {
+  openDetailDrawerButton.addEventListener("click", () => {
+    setMobileDrawer(state.mobileDrawer === "details" ? null : "details");
+  });
+}
+if (closeDetailDrawerButton) {
+  closeDetailDrawerButton.addEventListener("click", closeMobileDrawer);
+}
+if (mobileDrawerScrim) {
+  mobileDrawerScrim.addEventListener("click", closeMobileDrawer);
+}
 attachFileButton.addEventListener("click", () => attachmentFileInput.click());
 attachImageButton.addEventListener("click", () => attachmentImageInput.click());
 attachVideoButton.addEventListener("click", () => attachmentVideoInput.click());
@@ -3051,10 +3142,20 @@ taskCwdInput.addEventListener("change", () => {
 });
 
 applyLayoutShape();
-window.addEventListener("resize", applyLayoutShape);
-window.addEventListener("orientationchange", applyLayoutShape);
+syncMobileDrawerForLayout();
+window.addEventListener("resize", () => {
+  applyLayoutShape();
+  syncMobileDrawerForLayout();
+});
+window.addEventListener("orientationchange", () => {
+  applyLayoutShape();
+  syncMobileDrawerForLayout();
+});
 if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", applyLayoutShape);
+  window.visualViewport.addEventListener("resize", () => {
+    applyLayoutShape();
+    syncMobileDrawerForLayout();
+  });
 }
 
 document.addEventListener("keydown", (event) => {
@@ -3102,6 +3203,10 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   event.preventDefault();
+  if (state.mobileDrawer) {
+    closeMobileDrawer();
+    return;
+  }
   const hasLiveTurn = state.submitInFlight || (state.turn && turnIsCurrentLiveTurn(state.turn));
   if (hasLiveTurn) {
     state.rollbackArmedAt = 0;

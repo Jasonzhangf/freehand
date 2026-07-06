@@ -10,7 +10,7 @@ activity_name="${FREEHAND_ANDROID_ACTIVITY:-.ui.MainActivity}"
 apk_path="${FREEHAND_ANDROID_APK:-apps/freehand-android/app/build/outputs/apk/debug/app-debug.apk}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 safe_serial="${serial//[^A-Za-z0-9_.-]/_}"
-artifact_dir="${FREEHAND_ANDROID_ARTIFACT_DIR:-artifacts/android-device/${stamp}-${safe_serial:-no-serial}}"
+artifact_dir="${FREEHAND_ANDROID_ARTIFACT_DIR:-artifacts/android-device/${stamp}-${safe_serial:-no-serial}-$$}"
 
 usage() {
   cat >&2 <<'USAGE'
@@ -65,6 +65,13 @@ verify_apk_contains_activity() {
   fi
 }
 
+freehand_fatal_logcat_pattern() {
+  printf 'Process: %s|%s.*(Exception|Error)|FATAL EXCEPTION.*%s\n' \
+    "$package_name" \
+    "${package_name//./\\.}" \
+    "${package_name//./\\.}"
+}
+
 verify_device_ui() {
   if [[ -z "$serial" ]]; then
     usage
@@ -97,8 +104,10 @@ verify_device_ui() {
   adb -s "$serial" logcat -d -t 1500 >"$artifact_dir/logcat.txt" 2>&1 || true
   adb -s "$serial" exec-out screencap -p >"$artifact_dir/screenshot.png" 2>"$artifact_dir/screencap.stderr" || true
 
-  if grep -E "AndroidRuntime|FATAL EXCEPTION|${package_name}.*(Exception|Error)" "$artifact_dir/logcat.txt" >/dev/null; then
-    grep -E "AndroidRuntime|FATAL EXCEPTION|${package_name}.*(Exception|Error)" "$artifact_dir/logcat.txt" \
+  local fatal_pattern
+  fatal_pattern="$(freehand_fatal_logcat_pattern)"
+  if grep -E "$fatal_pattern" "$artifact_dir/logcat.txt" >/dev/null; then
+    grep -E "$fatal_pattern" "$artifact_dir/logcat.txt" \
       >"$artifact_dir/fatal-logcat.txt" || true
     write_summary "failed" "fatal_or_exception_logcat"
     echo "[freehand-android-device] failed: fatal/exception logcat found; see $artifact_dir" >&2

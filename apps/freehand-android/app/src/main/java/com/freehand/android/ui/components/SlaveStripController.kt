@@ -46,7 +46,7 @@ class SlaveStripController(
     fun render(slaves: List<Pair<String, String>>) {
         row.removeAllViews()
         if (slaves.isEmpty()) {
-        strip.visibility = View.GONE
+            strip.visibility = View.GONE
             return
         }
         strip.visibility = View.VISIBLE
@@ -65,4 +65,5 @@ class SlaveStripController(
 
     private fun dp(v: Int): Int = (v * density).toInt()
 
+    fun root(): View = strip
 }

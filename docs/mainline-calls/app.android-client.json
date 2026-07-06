@@ -15,8 +15,10 @@
   ],
   "response_mainline": [
     "daemon ADP emits UiAdpResponse::SubscriptionEvent with UiSubscriptionEvent / UiProjection::Turn -> AdpEventStream receives Event -> TimelineProjector::applyAdp updates state + latestRawTurnProjection",
-    "MainActivity::pushSnapshotToWebView calls window.__freehand.applySnapshot(json) on bridge.html",
-    "bridge.html JS renders public_conversation items as DOM turn cards"
+    "MainActivity::loadRemoteWebUi hides native chrome after ADP opens and loads the daemon-hosted WebUI root so Android shares WebUI visual/session/ADP rendering truth",
+    "MainActivity::pushSnapshotToWebView calls window.__freehand.applySnapshot(json) on bridge.html only before the remote WebUI is loaded",
+    "bridge.html JS renders public_conversation items as DOM turn cards only in fallback/config-error mode",
+    "WebView settings force mobile viewport rendering so the daemon-hosted WebUI applies phone/tall-phone/tablet portrait drawer layout instead of desktop columns on a phone"
   ],
   "error_mainline": [
     "ADP onError -> projector.setConnectionState('error') + statusBanner.showPersistent",
@@ -29,7 +31,7 @@
       "step": "01",
       "symbol_path": "com.freehand.android.ui.MainActivity::onCreate",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "app shell entrypoint: load file-backed config, create controllers, start ADP connection",
+      "responsibility": "app shell entrypoint: load file-backed config, configure WebView for mobile viewport rendering, create controllers, start ADP connection",
       "input_semantic": "activity intent",
       "output_semantic": "app process",
       "caller": "Android framework",
@@ -51,7 +53,7 @@
       "step": "03",
       "symbol_path": "com.freehand.android.data.DaemonConnectionConfigStore::load / com.freehand.android.data.DaemonConnectionConfig::parse / com.freehand.android.data.DaemonConnectionConfig::activeHostConfig",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt",
-      "responsibility": "read app-owned daemon JSON or bootstrap bundled config, validate required schema, active profile, Tailscale-only mode, endpoint paths, and relay-disabled state",
+      "responsibility": "read app-owned daemon JSON or bootstrap bundled config, validate required schema, active profile, Tailscale-only mode, endpoint paths, relay-disabled state, and migrate the known legacy bundled default port without touching user-edited configs",
       "input_semantic": "config file plus bundled JSON reader",
       "output_semantic": "validated DaemonConnectionConfig or explicit config error",
       "caller": "MainActivity::onCreate",
@@ -161,10 +163,10 @@
       "step": "13",
       "symbol_path": "com.freehand.android.ui.MainActivity::pushSnapshotToWebView",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "call window.__freehand.applySnapshot(json) on WebView via evaluateJavascript",
+      "responsibility": "call window.__freehand.applySnapshot(json) on the fallback bridge only until remote daemon WebUI is loaded",
       "input_semantic": "projector snapshot",
-      "output_semantic": "JS bridge invocation",
-      "caller": "SSE event callback, onPageFinished",
+      "output_semantic": "JS bridge invocation or no-op after remote WebUI load",
+      "caller": "ADP event callback, onPageFinished",
       "callee": "TimelineProjector::latestTurnProjectionJson",
       "binding_status": "bound"
     },
@@ -172,11 +174,22 @@
       "step": "14",
       "symbol_path": "applySnapshot",
       "file_path": "apps/freehand-android/app/src/main/assets/bridge.html",
-      "responsibility": "render UiPublicTurnProjection.public_conversation items as DOM turn cards",
+      "responsibility": "render UiPublicTurnProjection.public_conversation items as DOM turn cards in fallback/config-error mode only",
       "input_semantic": "JSON snapshot",
       "output_semantic": "DOM cards",
       "caller": "native evaluateJavascript",
       "callee": "DOM API",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14a",
+      "symbol_path": "com.freehand.android.ui.MainActivity::loadRemoteWebUi",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "hide native chrome after ADP open and load daemon-hosted WebUI so Android shares WebUI visual/session/ADP rendering truth",
+      "input_semantic": "validated HostConfig",
+      "output_semantic": "WebView URL http://<host>:<port>/",
+      "caller": "MainActivity::connectToDaemon ADP onOpen",
+      "callee": "daemon-hosted WebUI",
       "binding_status": "bound"
     },
     {

@@ -4,6 +4,8 @@ import android.content.res.Configuration
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -44,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ingress: CommandIngress
     private var adp: AdpEventStream? = null
     private var configLoadError: String? = null
+    private var remoteWebUiLoaded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,12 +80,29 @@ class MainActivity : AppCompatActivity() {
             settings.domStorageEnabled = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             settings.cacheMode = WebSettings.LOAD_DEFAULT
+            settings.useWideViewPort = false
+            settings.loadWithOverviewMode = false
+            settings.textZoom = 100
             clearCache(true)
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    applyInitialTheme(view)
-                    pushSnapshotToWebView()
+                    if (!remoteWebUiLoaded) {
+                        applyInitialTheme(view)
+                        pushSnapshotToWebView()
+                    }
+                }
+
+                override fun onReceivedError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    error: WebResourceError?,
+                ) {
+                    super.onReceivedError(view, request, error)
+                    if (request?.isForMainFrame == true) {
+                        showNativeShell(true)
+                        statusBanner.showPersistent("webui unreachable: ${error?.description ?: "load failed"}")
+                    }
                 }
             }
             // bridge.html is the live WebView host page; it consumes
@@ -193,6 +213,7 @@ class MainActivity : AppCompatActivity() {
             },
             onError = { error ->
                 runOnUiThread {
+                    showNativeShell(true)
                     projector.setConnectionState("error")
                     val errorClass = error::class.java.simpleName.ifBlank { "ConnectionError" }
                     statusBanner.showPersistent("daemon unreachable: ${host.endpointLabel} · $errorClass")
@@ -204,8 +225,7 @@ class MainActivity : AppCompatActivity() {
                     projector.setConnectionState("open")
                     statusBanner.hide()
                     topBar.setAgent(host.endpointLabel, "connected")
-                    // ADP live: enable input so user can submit.
-                    inputBar.setEnabledState(true)
+                    loadRemoteWebUi(host)
                 }
             },
             onClosed = {
@@ -219,8 +239,22 @@ class MainActivity : AppCompatActivity() {
         newAdp.start()
     }
 
+    private fun loadRemoteWebUi(host: HostConfig) {
+        remoteWebUiLoaded = true
+        showNativeShell(false)
+        webView.loadUrl("${host.baseUrl}/")
+    }
+
+    private fun showNativeShell(visible: Boolean) {
+        val visibility = if (visible) View.VISIBLE else View.GONE
+        topBar.root().visibility = visibility
+        slaveStrip.root().visibility = if (visible) View.GONE else View.GONE
+        inputBar.root().visibility = visibility
+    }
+
     private fun pushSnapshotToWebView() {
         if (!::webView.isInitialized) return
+        if (remoteWebUiLoaded) return
         val snapshot = projector.snapshot()
         topBar.setAgent(
             name = (snapshot["agent_name"] as? String)?.ifBlank { "agent" } ?: "agent",

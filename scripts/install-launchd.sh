@@ -11,16 +11,33 @@ workdir="${FREEHAND_DAEMON_WORKDIR:-"$repo_root"}"
 pair_token="${FREEHAND_PAIR_TOKEN_SHARED:-}"
 command="${1:-install}"
 
+detect_tailscale_ip() {
+  if command -v tailscale >/dev/null 2>&1; then
+    tailscale ip -4 2>/dev/null | sed -n '1p'
+  fi
+}
+
+default_daemon_bind() {
+  local port="$1"
+  local tailscale_ip
+  tailscale_ip="$(detect_tailscale_ip)"
+  if [[ -n "$tailscale_ip" ]]; then
+    printf '%s:%s\n' "$tailscale_ip" "$port"
+  else
+    printf '127.0.0.1:%s\n' "$port"
+  fi
+}
+
 case "$command" in
   install|restart)
     service_suffix=""
     default_label="com.freehand.daemon"
-    default_bind_addr="127.0.0.1:4041"
+    default_bind_addr="$(default_daemon_bind 4041)"
     ;;
   installS|restartS)
     service_suffix="S"
     default_label="com.freehand.daemonS"
-    default_bind_addr="127.0.0.1:4042"
+    default_bind_addr="$(default_daemon_bind 4042)"
     ;;
   *)
     echo "usage: $0 [install|restart|installS|restartS]" >&2

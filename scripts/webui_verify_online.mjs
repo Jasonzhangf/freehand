@@ -122,6 +122,7 @@ try {
   }, 20_000, 'shell reloaded');
   const refreshed = await captureState(cdp, '08-after-refresh');
   const viewportSnapshots = await captureViewportMatrix(cdp);
+  const mobileDrawerProof = await captureMobileDrawerProof(cdp);
 
   const sessionId = refreshed.state.selectedSession || terminal2.state.selectedSession || terminal1.state.selectedSession;
   const adpQuery = sessionId
@@ -148,6 +149,30 @@ try {
       viewportShapesCovered: viewportSnapshots.every((entry) => entry.state.layoutShape === entry.expectedShape),
       viewportComposerVisible: viewportSnapshots.every((entry) => entry.state.composerVisible),
       viewportMessageListVisible: viewportSnapshots.every((entry) => entry.state.messageListVisible),
+      mobileConversationPrimary: viewportSnapshots
+        .filter((entry) => isMobileDrawerShape(entry.expectedShape))
+        .every((entry) =>
+          entry.state.mobileSessionButtonVisible &&
+          entry.state.mobileDetailButtonVisible &&
+          entry.state.messageListVisible &&
+          entry.state.composerVisible &&
+          !entry.state.sessionDrawerVisible &&
+          !entry.state.detailDrawerVisible &&
+          !entry.state.mobileDrawer
+        ),
+      mobileSessionDrawerOpens:
+        mobileDrawerProof.sessionOpen.state.mobileDrawer === 'sessions' &&
+        mobileDrawerProof.sessionOpen.state.sessionDrawerVisible &&
+        !mobileDrawerProof.sessionOpen.state.detailDrawerVisible,
+      mobileDetailDrawerOpens:
+        mobileDrawerProof.detailOpen.state.mobileDrawer === 'details' &&
+        mobileDrawerProof.detailOpen.state.detailDrawerVisible &&
+        !mobileDrawerProof.detailOpen.state.sessionDrawerVisible,
+      mobileDrawerCloses:
+        !mobileDrawerProof.afterSessionClose.state.mobileDrawer &&
+        !mobileDrawerProof.afterSessionClose.state.sessionDrawerVisible &&
+        !mobileDrawerProof.afterDetailClose.state.mobileDrawer &&
+        !mobileDrawerProof.afterDetailClose.state.detailDrawerVisible,
     },
     snapshots: {
       postSubmit1,
@@ -158,6 +183,7 @@ try {
       terminal2,
       refreshed,
       viewportSnapshots,
+      mobileDrawerProof,
     },
     adpQuery,
     chromeProfileDir,
@@ -216,11 +242,18 @@ async function captureState(cdp, label) {
       workspaceStatus: document.getElementById('workspace-status')?.textContent?.trim() || '',
       layoutShape: document.body.dataset.layoutShape || '',
       shellLayoutShape: document.querySelector('[data-webui-shell="true"]')?.dataset.layoutShape || '',
+      mobileDrawer: document.body.dataset.mobileDrawer || '',
       composerVisible: isVisible(document.getElementById('composer-form')),
       messageListVisible: isVisible(document.getElementById('message-list')),
+      mobileSessionButtonVisible: isVisible(document.getElementById('open-session-drawer-button')),
+      mobileDetailButtonVisible: isVisible(document.getElementById('open-detail-drawer-button')),
+      sessionDrawerVisible: isVisible(document.querySelector('.sidebar')),
+      detailDrawerVisible: isVisible(document.querySelector('.inspector')),
       composerRect: rectOf(document.getElementById('composer-form')),
       composerCardRect: rectOf(document.querySelector('.composer-card')),
       messageListRect: rectOf(document.getElementById('message-list')),
+      sessionDrawerRect: rectOf(document.querySelector('.sidebar')),
+      detailDrawerRect: rectOf(document.querySelector('.inspector')),
       viewport: { width: window.innerWidth, height: window.innerHeight },
       scrollY: window.scrollY,
       liveCount: live.length,
@@ -233,7 +266,12 @@ async function captureState(cdp, label) {
     function isVisible(node) {
       if (!node) return false;
       const rect = node.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.top <= window.innerHeight;
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom >= 0 &&
+        rect.top <= window.innerHeight &&
+        rect.right >= 0 &&
+        rect.left <= window.innerWidth;
     }
     function rectOf(node) {
       if (!node) return null;
@@ -274,6 +312,7 @@ async function captureViewportMatrix(cdp) {
       window.dispatchEvent(new Event('resize'));
       return window.__freehandLayout?.applyLayoutShape?.();
     });
+    await delay(260);
     await evalInPage(cdp, () => {
       window.scrollTo(0, 0);
       const streamStage = document.querySelector('.stream-stage');
@@ -306,6 +345,142 @@ async function captureViewportMatrix(cdp) {
   }
   await cdp.send('Emulation.clearDeviceMetricsOverride');
   return results;
+}
+
+async function captureMobileDrawerProof(cdp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 1,
+    mobile: true,
+  });
+  await evalInPage(cdp, () => {
+    window.dispatchEvent(new Event('resize'));
+    return window.__freehandLayout?.applyLayoutShape?.();
+  });
+  await delay(260);
+  await waitForFunction(
+    cdp,
+    () => document.body.dataset.layoutShape === 'tall_phone',
+    10_000,
+    'mobile drawer proof layout',
+  );
+  const closed = await captureState(cdp, '16-mobile-drawer-closed-default');
+  await evalInPage(cdp, () => {
+    document.getElementById('open-session-drawer-button')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => {
+      const node = document.querySelector('.sidebar');
+      const rect = node?.getBoundingClientRect();
+      return document.body.dataset.mobileDrawer === 'sessions' &&
+        !!rect &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom >= 0 &&
+        rect.top <= window.innerHeight &&
+        rect.right >= 0 &&
+        rect.left <= 1 &&
+        !visibleWithinViewport(document.querySelector('.inspector'));
+      function visibleWithinViewport(candidate) {
+        const candidateRect = candidate?.getBoundingClientRect();
+        return !!candidateRect &&
+          candidateRect.width > 0 &&
+          candidateRect.height > 0 &&
+          candidateRect.bottom >= 0 &&
+          candidateRect.top <= window.innerHeight &&
+          candidateRect.right >= 0 &&
+          candidateRect.left <= window.innerWidth;
+      }
+    },
+    5_000,
+    'session drawer open',
+  );
+  await delay(260);
+  const sessionOpen = await captureState(cdp, '17-mobile-session-drawer-open');
+  await evalInPage(cdp, () => {
+    document.getElementById('close-session-drawer-button')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => {
+      const node = document.querySelector('.sidebar');
+      const rect = node?.getBoundingClientRect();
+      const visible = !!rect &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom >= 0 &&
+        rect.top <= window.innerHeight &&
+        rect.right >= 0 &&
+        rect.left <= window.innerWidth;
+      return !document.body.dataset.mobileDrawer && !visible;
+    },
+    5_000,
+    'session drawer closed',
+  );
+  const afterSessionClose = await captureState(cdp, '18-mobile-session-drawer-closed');
+  await evalInPage(cdp, () => {
+    document.getElementById('open-detail-drawer-button')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => {
+      const node = document.querySelector('.inspector');
+      const rect = node?.getBoundingClientRect();
+      return document.body.dataset.mobileDrawer === 'details' &&
+        !!rect &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom >= 0 &&
+        rect.top <= window.innerHeight &&
+        rect.right >= 0 &&
+        rect.left <= window.innerWidth &&
+        rect.right >= window.innerWidth - 1 &&
+        !visibleWithinViewport(document.querySelector('.sidebar'));
+      function visibleWithinViewport(candidate) {
+        const candidateRect = candidate?.getBoundingClientRect();
+        return !!candidateRect &&
+          candidateRect.width > 0 &&
+          candidateRect.height > 0 &&
+          candidateRect.bottom >= 0 &&
+          candidateRect.top <= window.innerHeight &&
+          candidateRect.right >= 0 &&
+          candidateRect.left <= window.innerWidth;
+      }
+    },
+    5_000,
+    'detail drawer open',
+  );
+  await delay(260);
+  const detailOpen = await captureState(cdp, '19-mobile-detail-drawer-open');
+  await evalInPage(cdp, () => {
+    document.getElementById('close-detail-drawer-button')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => {
+      const node = document.querySelector('.inspector');
+      const rect = node?.getBoundingClientRect();
+      const visible = !!rect &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom >= 0 &&
+        rect.top <= window.innerHeight &&
+        rect.right >= 0 &&
+        rect.left <= window.innerWidth;
+      return !document.body.dataset.mobileDrawer && !visible;
+    },
+    5_000,
+    'detail drawer closed',
+  );
+  const afterDetailClose = await captureState(cdp, '20-mobile-detail-drawer-closed');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  return { closed, sessionOpen, afterSessionClose, detailOpen, afterDetailClose };
+}
+
+function isMobileDrawerShape(shape) {
+  return ['phone_portrait', 'tall_phone', 'tablet_portrait'].includes(shape);
 }
 
 async function waitForTerminal(cdp, timeoutMs, label) {

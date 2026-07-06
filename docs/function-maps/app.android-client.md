@@ -33,7 +33,9 @@
 
 ## Response Mainline
 
-- Android client renders the latest active turn projection as turn cards via `bridge.html` JS bridge
+- Android client uses `bridge.html` only as the native fallback/config-error shell; after the selected daemon ADP endpoint opens, the WebView loads the daemon-hosted WebUI page so mobile uses the same WebUI CSS, session UI, ADP rendering, and conversation layout as browser WebUI
+- Android WebView settings force a mobile viewport (`useWideViewPort=false`, `loadWithOverviewMode=false`, `textZoom=100`) so the daemon-hosted WebUI aspect-ratio classifier sees phone-sized CSS dimensions instead of a desktop layout viewport
+- Android client renders the latest active turn projection as turn cards via `bridge.html` JS bridge only before the remote WebUI is available
 - Android client renders terminal text as the final projected message and never as raw provider payload or raw completion schema
 - Android client renders tool calls and tool results as protocol-projected low-noise tool blocks with status-driven color, preserving `tool_call_id` while keeping verbose tool term text out of the main timeline
 - Android client renders the top status strip from protocol-projected current-agent and slave summary
@@ -42,6 +44,7 @@
 - Android client surfaces agent status and turn status through protocol-projected status pills
 - Android client respects light and dark themes via `mobile-mock.css` tokens
 - daemon connection config is file-backed and Tailscale-first; bundled `assets/config/client.json` is bootstrap input only, and the app-owned JSON file is the long-term endpoint truth
+- app-owned daemon config load may migrate only the known legacy bundled default (`tailscale-main` on `100.66.1.82:4042`) to the current release port `4041`; user-edited host/path/profile config remains authoritative and is not silently replaced
 
 ## Error Mainline
 
@@ -50,7 +53,7 @@
 - connection profile failures must expose active profile, endpoint, and concrete failure class; the client must not silently fall back to localhost, LAN scan, relay, or another profile
 - provider / reason / debug error from `ui.protocol` is rendered as a red status pill; never re-projected as success
 - cancel-without-active-turn clears only local input draft; does not invent a runtime mutation
-- Android device validation script fails explicitly and records failed evidence when the APK is missing the configured launcher activity class or Freehand emits fatal/exception logcat, and records blocker evidence only when ADB is offline, the device is locked, or Freehand is not foreground without app fatal evidence
+- Android device validation script fails explicitly and records failed evidence when the APK is missing the configured launcher activity class or Freehand package/process emits fatal/exception logcat, and records blocker evidence only when ADB is offline, the device is locked, or Freehand is not foreground without app fatal evidence
 
 ## Shared Multi-Reference Functions
 
@@ -70,9 +73,9 @@
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `MainActivity::onCreate` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | app shell entrypoint: load file-backed config, create controllers, start ADP connection | activity intent | app process | Android framework | `ClientConfig::store`, `DaemonConnectionConfigStore::load`, controller ctors | bound |
+| 01 | `MainActivity::onCreate` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | app shell entrypoint: load file-backed config, configure WebView for mobile viewport rendering, create controllers, start ADP connection | activity intent | app process | Android framework | `ClientConfig::store`, `DaemonConnectionConfigStore::load`, controller ctors | bound |
 | 02 | `ClientConfig::store` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/ClientConfig.kt` | adapt Android Context to the app-owned daemon config file and bundled asset reader | Android Context | `DaemonConnectionConfigStore` | `MainActivity::onCreate` | app files dir + asset reader | bound |
-| 03 | `DaemonConnectionConfigStore::load` / `DaemonConnectionConfig::parse` / `DaemonConnectionConfig::activeHostConfig` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt` | read app-owned daemon JSON or bootstrap bundled config, validate required schema, active profile, Tailscale-only mode, endpoint paths, and relay-disabled state | config file + bundled JSON reader | validated `DaemonConnectionConfig` or explicit config error | `MainActivity::onCreate` | Gson `JsonParser`, schema validator, file IO | bound |
+| 03 | `DaemonConnectionConfigStore::load` / `DaemonConnectionConfig::parse` / `DaemonConnectionConfig::activeHostConfig` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt` | read app-owned daemon JSON or bootstrap bundled config, validate required schema, active profile, Tailscale-only mode, endpoint paths, relay-disabled state, and migrate the known legacy bundled default port without touching user-edited configs | config file + bundled JSON reader | validated `DaemonConnectionConfig` or explicit config error | `MainActivity::onCreate` | Gson `JsonParser`, schema validator, file IO | bound |
 | 04 | `HostConfig::adpUrl` / `HostConfig::healthUrl` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt` | construct selected daemon endpoint URLs from the active profile | profile host + port + paths | `ws://<host>:<port><adpPath>` and health URL | Android app shell | active profile config | bound |
 | 05 | `AdpEventStream::start` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | open OkHttp WebSocket to `/adp`, subscribe latest turn, and query latest turn | no | ADP WebSocket session | `MainActivity::connectToDaemon` | OkHttp `newWebSocket` | bound |
 | 06 | `AdpEventStream::sendCommand` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | wrap UiCommand JSON in an ADP command frame and send it over the active socket | UiCommand JSON | immediate send result + later command receipt/failure callback | `CommandIngress` | ADP WebSocket | bound |
@@ -82,8 +85,9 @@
 | 10 | `AdpEventStream::stop` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | close active ADP WebSocket | no | no | `MainActivity::onPause`, `connectToDaemon` | OkHttp `WebSocket::close` | bound |
 | 11 | `TimelineProjector::snapshot` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt` | emit full UI state map including `latest_turn` for native controllers | no | `Map<String, Any?>` | `MainActivity::pushSnapshotToWebView` | internal state | bound |
 | 12 | `TimelineProjector::latestTurnProjectionJson` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt` | emit canonical `UiPublicTurnProjection` JSON for JS bridge | no | `String?` | `MainActivity::pushSnapshotToWebView` | `latestRawTurnProjection` | bound |
-| 13 | `MainActivity::pushSnapshotToWebView` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | call `window.__freehand.applySnapshot(json)` on WebView via `evaluateJavascript` | projector snapshot | JS bridge invocation | SSE event callback, `onPageFinished` | `TimelineProjector::latestTurnProjectionJson` | bound |
-| 14 | `bridge.html` JS `applySnapshot` | `apps/freehand-android/app/src/main/assets/bridge.html` | render `UiPublicTurnProjection.public_conversation` items as DOM turn cards | JSON snapshot | DOM cards | native `evaluateJavascript` | DOM API | bound |
+| 13 | `MainActivity::pushSnapshotToWebView` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | call `window.__freehand.applySnapshot(json)` on the fallback bridge only until remote daemon WebUI is loaded | projector snapshot | JS bridge invocation or no-op after remote WebUI load | ADP event callback, `onPageFinished` | `TimelineProjector::latestTurnProjectionJson` | bound |
+| 14 | `bridge.html` JS `applySnapshot` | `apps/freehand-android/app/src/main/assets/bridge.html` | render `UiPublicTurnProjection.public_conversation` items as DOM turn cards in fallback/config-error mode only | JSON snapshot | DOM cards | native `evaluateJavascript` | DOM API | bound |
+| 14a | `MainActivity::loadRemoteWebUi` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | hide native chrome after ADP open and load daemon-hosted WebUI so Android shares WebUI visual/session/ADP rendering truth | validated `HostConfig` | WebView URL `http://<host>:<port>/` | `MainActivity::connectToDaemon` ADP onOpen | daemon-hosted WebUI | bound |
 | 15 | `DaemonConnectionConfigStore::write` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt` | persist validated daemon config to the app-owned JSON file | `DaemonConnectionConfig` | normalized JSON file or explicit config error | `MainActivity::saveHostConfig` | file IO + schema validator | bound |
 | 16 | `MainActivity::saveHostConfig` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | update the active profile endpoint, write app-owned JSON, and reconnect only after write success | edited `HostConfig` | updated config or visible config error | `DrawerController` callback | `DaemonConnectionConfigStore::write` | bound |
 | 17 | `handle_android_mock` | `apps/freehand-server/src/lib.rs` | serve self-contained `mobile-mock.html` for design review | HTTP GET `/mock/android` | HTML body | design-review operator | embedded mock asset | bound |

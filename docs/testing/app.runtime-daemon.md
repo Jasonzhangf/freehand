@@ -4,7 +4,7 @@
 - owner: `apps/freehand-daemon`
 - lifecycle path under test:
   - daemon bootstrap selects one agent from config and creates a runtime dispatcher
-  - launchd wrapper loads `~/.freehand/daemon.env` and starts one configured daemon agent through explicit `FREEHAND_DAEMON_BIN` on a fixed bind address
+  - launchd wrapper loads `~/.freehand/daemon.env` and starts one configured daemon agent through explicit `FREEHAND_DAEMON_BIN` on a fixed port, binding to the local Tailscale IPv4 when available so Android/WebView clients can reach the daemon
   - runtime dispatcher exposes one shared UI state handle
   - daemon injects runtime dispatch into shared HTTP/SSE transport
   - daemon exposes the same shared state and runtime dispatch through ADP WebSocket at `/adp`
@@ -19,7 +19,7 @@
 - white-box plan:
   - daemon bootstrap helper coverage
   - config-selected bootstrap coverage
-  - launchd wrapper env validation coverage through shell syntax, explicit daemon binary validation, and runtime smoke
+  - launchd wrapper env validation coverage through shell syntax, explicit daemon binary validation, Tailscale bind selection, and runtime smoke
   - bind-arg parsing coverage
   - dependency boundary scan
 - module black-box plan:
@@ -40,7 +40,7 @@
   - daemon ADP task list subscription smoke
   - daemon ADP error-center metadata query smoke
   - daemon ADP query-as-command rejection smoke
-  - launchd service smoke: `launchctl print`, `/health`, `/`, log file creation, and restart wait-until-healthy behavior
+  - launchd service smoke: `launchctl print`, `/health`, `/`, log file creation, restart wait-until-healthy behavior, and Tailscale-IP `/health` reachability for Android clients when Tailscale is present
 - project black-box impact:
   - closes the first real runtime host gap without polluting the protocol-only app boundary
   - machine-readable mainline truth remains the only source for generated wiki artifacts

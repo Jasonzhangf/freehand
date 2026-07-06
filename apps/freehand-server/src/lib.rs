@@ -1154,6 +1154,9 @@ mod tests {
         assert!(webui_css_body.contains("body[data-layout-shape=\"tablet_landscape\"]"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"foldable_unfolded\"]"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"desktop_large\"]"));
+        assert!(webui_css_body.contains("body[data-mobile-drawer=\"sessions\"] .sidebar"));
+        assert!(webui_css_body.contains("body[data-mobile-drawer=\"details\"] .inspector"));
+        assert!(webui_css_body.contains(".mobile-drawer-scrim"));
         assert!(webui_css_body.contains("env(safe-area-inset-bottom)"));
 
         let js = client
@@ -1182,16 +1185,18 @@ mod tests {
         assert!(js_body.contains("SSE turn refresh received"));
         assert!(js_body.contains("function classifyLayoutShape"));
         assert!(js_body.contains("function applyLayoutShape"));
+        assert!(js_body.contains("function viewportDimensionsForLayout"));
+        assert!(js_body.contains("function setMobileDrawer"));
+        assert!(js_body.contains("function syncMobileDrawerForLayout"));
         assert!(js_body.contains("window.__freehandLayout"));
         assert!(js_body.contains("document.body.dataset.layoutShape"));
         assert!(js_body.contains("shell.dataset.layoutShape"));
-        assert!(
-            js_body
-                .contains("window.visualViewport.addEventListener(\"resize\", applyLayoutShape)")
-        );
-        assert!(
-            js_body.contains("window.addEventListener(\"orientationchange\", applyLayoutShape)")
-        );
+        assert!(js_body.contains("document.body.dataset.mobileDrawer"));
+        assert!(js_body.contains("shell.dataset.mobileDrawer"));
+        assert!(js_body.contains("open-session-drawer-button"));
+        assert!(js_body.contains("open-detail-drawer-button"));
+        assert!(js_body.contains("window.visualViewport.addEventListener(\"resize\", () =>"));
+        assert!(js_body.contains("window.addEventListener(\"orientationchange\", () =>"));
         assert!(js_body.contains("return \"phone_portrait\""));
         assert!(js_body.contains("return \"phone_landscape\""));
         assert!(js_body.contains("return \"tablet_portrait\""));

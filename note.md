@@ -1783,3 +1783,45 @@ Current real root cause split:
   - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest assembleDebug` -> `BUILD SUCCESSFUL`.
   - `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `git diff --check` -> ok.
   - current real-device acceptance still blocked by `device_locked_or_dreaming`; evidence `artifacts/android-device/20260706T002048Z-100.104.163.65_5555/summary.json`.
+
+# 2026-07-06 mobile WebUI / Android WebView release closeout attempt
+
+- active goal audit:
+  - objective remains mobile WebUI / Android WebView closeout from `/Users/fanzhang/.codex/attachments/75141fb8-5139-49b6-ac44-ffc7f7608b3a/pasted-text-1.txt`.
+  - WebUI and release daemon evidence is closed; Android true-device WebView acceptance is still blocked by secure keyguard.
+- WebUI S-profile online evidence:
+  - `FREEHAND_DAEMON_BIND=127.0.0.1:4042 scripts/install-launchd.sh restartS` -> restarted `com.freehand.daemonS`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `~/.local/bin/freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - `make verify-webui-online` -> exit 0.
+  - latest evidence: `artifacts/webui-online/20260706-verify-4042-1783303750890/summary.json`.
+  - checks true: composer clears after submit, submitted prompts survive refresh, second turn progress observed, no stale historical live animation, terminal has no live animation, viewport matrix covered, mobile conversation is primary, session/detail drawers open, drawer closes.
+- release daemon evidence:
+  - `tailscale ip -4` -> `100.66.1.82`.
+  - `FREEHAND_DAEMON_BIND=100.66.1.82:4041 scripts/install-launchd.sh restart` -> restarted `com.freehand.daemon`.
+  - `curl -4fsS http://100.66.1.82:4041/health` -> `ok`.
+  - `~/.local/bin/freehand-cli adp-smoke --url ws://100.66.1.82:4041/adp` -> `adp_smoke_ok`.
+- Android device evidence:
+  - `adb devices -l` shows `100.104.163.65:5555 device product:PLZ110 model:PLZ110`.
+  - `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` exited blocked with `device_locked_or_dreaming`.
+  - blocker evidence: `artifacts/android-device/20260706T021041Z-webui-mobile-release-4041/summary.json`.
+  - screenshot evidence: `artifacts/android-device/20260706T021041Z-webui-mobile-release-4041/screenshot.png`; visual state is not Freehand WebView, so it is blocker evidence only.
+  - `dumpsys-window.txt` shows `KeyguardServiceDelegate showing=true secure=true inputRestricted=true`, `mCurrentFocus=NotificationShade`, and `mFocusedApp=com.freehand.android/.ui.MainActivity`.
+  - `adb shell wm dismiss-keyguard`, statusbar collapse, wake, swipe, HOME, and explicit `am start` could not remove secure keyguard.
+  - app-owned daemon config on device is correct: `tailscale-main`, host `100.66.1.82`, port `4041`, `adpPath=/adp`, relay disabled.
+- local gates:
+  - `node --check apps/freehand-server/assets/webui.js` -> ok.
+  - `node --check scripts/webui_verify_online.mjs` -> ok.
+  - `node scripts/verify-webui-layout-shapes.mjs` -> ok.
+  - `cargo fmt --check` -> ok.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `cargo test -p freehand-server -- --nocapture` -> 11 passed.
+  - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest assembleDebug` -> `BUILD SUCCESSFUL`.
+  - `cargo clippy --workspace --all-targets -- -D warnings` -> no issues.
+  - `cargo test --workspace` -> 440 passed.
+  - `make ci` -> exit 0.
+- conclusion:
+  - code/docs/WebUI/release daemon are verified.
+  - do not claim Android true-device WebView UI acceptance until the Oplus device is manually unlocked and `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passes with Freehand foreground screenshot.

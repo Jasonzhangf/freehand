@@ -25,7 +25,7 @@
 ## Response Mainline
 
 - daemon serves runtime-backed dispatch receipts over HTTP command ingress
-- daemon can run as a launchd user service with fixed WebUI bind, `RunAtLoad`, `KeepAlive`, and stdout/stderr logs under `~/.freehand/logs`
+- daemon can run as a launchd user service with fixed WebUI port, Tailscale-IP bind when available, `RunAtLoad`, `KeepAlive`, and stdout/stderr logs under `~/.freehand/logs`
 - daemon launchd wrapper execs the explicit `FREEHAND_DAEMON_BIN` from `~/.freehand/daemon.env` instead of resolving a possibly stale daemon from `PATH`
 - daemon serves query and continuous SSE projections from the runtime-owned shared UI state
 - daemon serves ADP WebSocket command/query/subscribe frames from the same runtime-owned shared UI state and runtime query port, so WebUI/Android/CLI automation can use one control/status path
@@ -82,6 +82,7 @@
 | 06 | `handle_adp_socket` / `handle_adp_connection` | `apps/freehand-server/src/lib.rs` | serve protocol-owned ADP WebSocket command/query/subscribe frames on the daemon host | WebSocket ADP frames + shared protocol state + dispatch port | ADP response frames and subscription events | WebUI/Android/CLI automation | protocol transport owner | bound |
 | 06a | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | serve daemon-hosted read-only runtime query frames such as task list/history and error-center metadata | ADP query command | ADP query result or failure frame | shared ADP transport | runtime owner query bridge | bound |
 | 07 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | `~/.freehand/daemon.env` | daemon process exec | macOS launchd | `FREEHAND_DAEMON_BIN serve` | bound |
+| 07a | `default_daemon_bind` / `detect_tailscale_ip` | `scripts/install-launchd.sh` | choose launchd default bind as the local Tailscale IPv4 on the fixed release/S port when Tailscale is available, otherwise fall back to loopback | install/restart profile | `<tailscale-ip>:4041` / `<tailscale-ip>:4042` or loopback fallback | launchd installer | `tailscale ip -4` | bound |
 | 08 | `handle_adp_socket` / `RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs` / `crates/freehand-runtime/src/lib.rs` | serve daemon ADP error-center query and initial subscription snapshots from runtime metadata truth | ADP error-center query or subscribe frame | ADP error-center query result or initial subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime metadata projection owner | bound |
 
 ## Sync Status Against Code

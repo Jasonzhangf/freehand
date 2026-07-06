@@ -65,6 +65,74 @@ class DaemonConnectionConfigTest {
     }
 
     @Test
+    fun `store migrates legacy bundled default port to release port`() {
+        val dir = Files.createTempDirectory("freehand-android-config-legacy-default").toFile()
+        val configFile = File(dir, DaemonConnectionConfig.DEFAULT_CONFIG_FILE)
+        configFile.writeText(
+            """
+            {
+              "connectionMode": "tailscale",
+              "activeProfile": "tailscale-main",
+              "profiles": [
+                {
+                  "id": "tailscale-main",
+                  "mode": "tailscale",
+                  "host": "100.66.1.82",
+                  "port": 4042,
+                  "adpPath": "/adp",
+                  "healthPath": "/health",
+                  "commandPath": "/ui/command",
+                  "queryPath": "/ui/query/latest-active-turn",
+                  "subscribePath": "/ui/subscribe/turn/latest"
+                }
+              ],
+              "relay": { "enabled": false, "url": "", "authRef": "" }
+            }
+            """.trimIndent(),
+        )
+        val store = DaemonConnectionConfigStore(configFile) { readBundledConfig() }
+
+        val host = store.load().activeHostConfig()
+
+        assertEquals(4041, host.port)
+        assertTrue(configFile.readText().contains("\"port\":4041"))
+    }
+
+    @Test
+    fun `store preserves user edited tailscale port`() {
+        val dir = Files.createTempDirectory("freehand-android-config-user-port").toFile()
+        val configFile = File(dir, DaemonConnectionConfig.DEFAULT_CONFIG_FILE)
+        configFile.writeText(
+            """
+            {
+              "connectionMode": "tailscale",
+              "activeProfile": "tailscale-main",
+              "profiles": [
+                {
+                  "id": "tailscale-main",
+                  "mode": "tailscale",
+                  "host": "custom-tailnet",
+                  "port": 4042,
+                  "adpPath": "/adp",
+                  "healthPath": "/health",
+                  "commandPath": "/ui/command",
+                  "queryPath": "/ui/query/latest-active-turn",
+                  "subscribePath": "/ui/subscribe/turn/latest"
+                }
+              ],
+              "relay": { "enabled": false, "url": "", "authRef": "" }
+            }
+            """.trimIndent(),
+        )
+        val store = DaemonConnectionConfigStore(configFile) { readBundledConfig() }
+
+        val host = store.load().activeHostConfig()
+
+        assertEquals("custom-tailnet", host.host)
+        assertEquals(4042, host.port)
+    }
+
+    @Test
     fun `malformed existing app owned config fails explicitly`() {
         val dir = Files.createTempDirectory("freehand-android-config-bad").toFile()
         val configFile = File(dir, DaemonConnectionConfig.DEFAULT_CONFIG_FILE)
