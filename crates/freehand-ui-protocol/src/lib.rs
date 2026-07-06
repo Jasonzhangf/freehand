@@ -114,6 +114,7 @@ pub enum UiCommand {
     QuerySessionTurns {
         session_id: SessionId,
     },
+    QueryConfigStatus,
     QueryTaskList {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         status: Option<String>,
@@ -449,6 +450,24 @@ pub struct UiErrorCenterEventListProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiConfigStatusProjection {
+    pub agent_name: String,
+    pub agent_mode: String,
+    pub node_id: String,
+    pub paired_agent_name: String,
+    pub paired_agent_mode: String,
+    pub paired_node_id: String,
+    pub provider_id: String,
+    pub provider_type: String,
+    pub provider_protocol: String,
+    pub provider_base_url_host: String,
+    pub default_model: String,
+    pub provider_auth_type: String,
+    pub provider_auth_source: String,
+    pub restart_required_on_change: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiProjection {
     Turn(UiTurnProjection),
     NodeStatus(NodeStatusSnapshot),
@@ -494,6 +513,7 @@ pub enum UiQueryResult {
     TaskList(UiTaskListProjection),
     TaskHistory(UiTaskHistoryProjection),
     ErrorCenterEvents(UiErrorCenterEventListProjection),
+    ConfigStatus(UiConfigStatusProjection),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1153,6 +1173,7 @@ impl UiProtocolState {
             }
             UiCommand::QueryTaskList { .. }
             | UiCommand::QueryTaskHistory { .. }
+            | UiCommand::QueryConfigStatus
             | UiCommand::QueryErrorCenterEvents { .. } => Err(UiProtocolError::StreamKindMismatch),
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
                 self.node_status.get(node_id).cloned(),
@@ -1874,6 +1895,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QuerySessionList => "query_session_list",
         UiCommand::QueryArchivedSessionList => "query_archived_session_list",
         UiCommand::QuerySessionTurns { .. } => "query_session_turns",
+        UiCommand::QueryConfigStatus => "query_config_status",
         UiCommand::QueryTaskList { .. } => "query_task_list",
         UiCommand::QueryTaskHistory { .. } => "query_task_history",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
@@ -3287,6 +3309,42 @@ mod tests {
     }
 
     #[test]
+    fn config_status_query_stays_runtime_owned_and_secret_free() {
+        validate_command(&UiCommand::QueryConfigStatus).expect("valid query");
+        let ingress_err = accept_command_ingress(&UiCommand::QueryConfigStatus)
+            .expect_err("config status query must not enter command ingress");
+        assert_eq!(ingress_err, UiProtocolError::IngressCommandKindMismatch);
+
+        let query_err = UiProtocolState::default()
+            .query(&UiCommand::QueryConfigStatus)
+            .expect_err("config status must stay runtime-owned");
+        assert_eq!(query_err, UiProtocolError::StreamKindMismatch);
+
+        let result = UiQueryResult::ConfigStatus(UiConfigStatusProjection {
+            agent_name: "master".to_owned(),
+            agent_mode: "master".to_owned(),
+            node_id: "master-node".to_owned(),
+            paired_agent_name: "worker".to_owned(),
+            paired_agent_mode: "slave".to_owned(),
+            paired_node_id: "worker-node".to_owned(),
+            provider_id: "minimonth".to_owned(),
+            provider_type: "anthropic".to_owned(),
+            provider_protocol: "messages".to_owned(),
+            provider_base_url_host: "api.example.test".to_owned(),
+            default_model: "MiniMax-M2".to_owned(),
+            provider_auth_type: "apikey".to_owned(),
+            provider_auth_source: "env".to_owned(),
+            restart_required_on_change: true,
+        });
+        let encoded = serde_json::to_string(&result).expect("config status json");
+        assert!(encoded.contains("ConfigStatus"));
+        assert!(encoded.contains("provider_auth_source"));
+        assert!(!encoded.contains("api_key"));
+        assert!(!encoded.contains("pair_token"));
+        assert!(!encoded.contains("secret"));
+    }
+
+    #[test]
     fn incremental_turn_projection_updates_from_shared_contract_events() {
         let mut state = UiProtocolState::default();
         let mut receiver = state.subscribe();
@@ -3340,10 +3398,11 @@ mod tests {
     fn adp_request_and_response_frames_roundtrip() {
         let request = UiAdpRequest::Query {
             request_id: "req-1".to_owned(),
-            query: UiCommand::QueryLatestActiveTurn,
+            query: UiCommand::QueryConfigStatus,
         };
         let request_json = serde_json::to_string(&request).expect("request json");
         assert!(request_json.contains("\"kind\":\"query\""));
+        assert!(request_json.contains("QueryConfigStatus"));
         let decoded_request: UiAdpRequest =
             serde_json::from_str(&request_json).expect("decoded request");
         assert_eq!(decoded_request, request);

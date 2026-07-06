@@ -48,6 +48,9 @@ fn run() -> Result<String, String> {
     if flag == "adp-session-manage" {
         return run_adp_session_manage(args.collect());
     }
+    if flag == "adp-config-query" {
+        return run_adp_config_query(args.collect());
+    }
     if flag == "adp-task-query" {
         return run_adp_task_query(args.collect());
     }
@@ -59,7 +62,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
                 .to_owned(),
         );
     }
@@ -76,7 +79,7 @@ fn run() -> Result<String, String> {
         .map_err(|err| err.to_string())?;
 
     Ok(format!(
-        "agent={} mode={} allowed_pair_ip={} pair_token_env={} provider={} provider_type={} provider_protocol={} default_model={} base_url={} provider_auth={} restart_required_on_change={}",
+        "agent={} mode={} allowed_pair_ip={} pair_token_env={} provider={} provider_type={} provider_protocol={} default_model={} base_url={} provider_auth_source={} restart_required_on_change={}",
         selected.name,
         mode_label(selected.mode),
         selected
@@ -89,7 +92,7 @@ fn run() -> Result<String, String> {
         provider_protocol_label(selected.provider.protocol),
         selected.provider.default_model,
         selected.provider.base_url,
-        provider_auth_label(selected.provider.auth_type),
+        selected.provider.auth_source.as_str(),
         selected.restart_required_on_change
     ))
 }
@@ -288,6 +291,20 @@ fn run_adp_task_query(args: Vec<String>) -> Result<String, String> {
         .build()
         .map_err(|err| err.to_string())?;
     runtime.block_on(run_adp_task_query_async(url, query))
+}
+
+fn run_adp_config_query(args: Vec<String>) -> Result<String, String> {
+    let usage = "usage: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp".to_owned();
+    if args.len() != 2 || args[0] != "--url" {
+        return Err(usage);
+    }
+    let url = args[1].clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_adp_config_query_async(url))
 }
 
 fn run_adp_error_query(args: Vec<String>) -> Result<String, String> {
@@ -618,6 +635,53 @@ async fn run_adp_task_query_async(url: String, query: UiCommand) -> Result<Strin
     }
 }
 
+async fn run_adp_config_query_async(url: String) -> Result<String, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
+        .await
+        .map_err(|_| format!("ADP connect timeout: {url}"))?
+        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let request_id = "cli-config-query-1".to_owned();
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Query {
+            request_id: request_id.clone(),
+            query: UiCommand::QueryConfigStatus,
+        },
+    )
+    .await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let _ = socket.close(None).await;
+            return Err("ADP config query timeout".to_owned());
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| "ADP config query timeout".to_owned())??;
+        match response {
+            UiAdpResponse::QueryResult {
+                request_id: response_id,
+                result,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return summarize_config_query_result(&url, &result);
+            }
+            UiAdpResponse::Failure {
+                request_id: response_id,
+                failure,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Err(format!(
+                    "ADP config query failure {}: {}",
+                    failure.code, failure.message
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
 async fn run_adp_error_query_async(url: String, query: UiCommand) -> Result<String, String> {
     let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
         .await
@@ -770,6 +834,43 @@ fn summarize_task_query_result(
                 .join(",")
         )),
         _ => Err("ADP task query returned non-task result".to_owned()),
+    }
+}
+
+fn summarize_config_query_result(
+    url: &str,
+    result: &freehand_ui_protocol::UiQueryResult,
+) -> Result<String, String> {
+    match result {
+        freehand_ui_protocol::UiQueryResult::ConfigStatus(status) => {
+            let output = format!(
+                "adp_config_query_ok url={} agent={} mode={} node={} paired_agent={} paired_mode={} paired_node={} provider={} provider_type={} provider_protocol={} base_url_host={} default_model={} auth_type={} auth_source={} restart_required_on_change={}",
+                url,
+                status.agent_name,
+                status.agent_mode,
+                status.node_id,
+                status.paired_agent_name,
+                status.paired_agent_mode,
+                status.paired_node_id,
+                status.provider_id,
+                status.provider_type,
+                status.provider_protocol,
+                status.provider_base_url_host,
+                status.default_model,
+                status.provider_auth_type,
+                status.provider_auth_source,
+                status.restart_required_on_change
+            );
+            if output.contains("api_key")
+                || output.contains("pair_token")
+                || output.contains("sk-")
+                || output.contains("secret")
+            {
+                return Err("ADP config query attempted to print secret-bearing fields".to_owned());
+            }
+            Ok(output)
+        }
+        _ => Err("ADP config query returned non-config result".to_owned()),
     }
 }
 
@@ -1481,10 +1582,6 @@ fn provider_type_label(provider_type: freehand_config::ProviderType) -> &'static
 
 fn provider_protocol_label(protocol: freehand_config::ProviderProtocol) -> &'static str {
     protocol.as_str()
-}
-
-fn provider_auth_label(auth_type: freehand_config::ProviderAuthType) -> &'static str {
-    auth_type.as_str()
 }
 
 fn live_restore_status_label(status: LiveReasonRestoreStatus) -> &'static str {

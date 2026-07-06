@@ -185,9 +185,20 @@ try {
         settingsProof.desktopOpen.state.settingsReadonlyButtonCount >= 3 &&
         settingsProof.desktopOpen.state.settingsDisabledButtonCount >= 3 &&
         settingsProof.desktopOpen.state.settingsText.includes('Provider and model') &&
+        settingsProof.desktopOpen.state.settingsText.includes('Active agent') &&
+        settingsProof.desktopOpen.state.settingsAgent !== '' &&
+        settingsProof.desktopOpen.state.settingsAgent !== 'loading' &&
+        settingsProof.desktopOpen.state.settingsProvider !== '' &&
+        settingsProof.desktopOpen.state.settingsProvider !== 'loading' &&
+        settingsProof.desktopOpen.state.settingsProviderHost !== '' &&
+        settingsProof.desktopOpen.state.settingsProviderHost !== 'loading' &&
+        settingsProof.desktopOpen.state.settingsProviderAuth !== '' &&
+        settingsProof.desktopOpen.state.settingsProviderAuth !== 'loading' &&
+        settingsProof.desktopOpen.state.settingsConfigError === 'none' &&
         settingsProof.desktopOpen.state.settingsText.includes('Connection') &&
         settingsProof.desktopOpen.state.passwordInputCount === 0 &&
-        settingsProof.desktopOpen.state.apiKeyTextVisible === false,
+        settingsProof.desktopOpen.state.apiKeyTextVisible === false &&
+        settingsProof.desktopOpen.state.secretTextVisible === false,
       settingsCloseKeepsConversation:
         !settingsProof.afterClose.state.settingsShellVisible &&
         settingsProof.afterClose.state.messageText.includes(prompt1) &&
@@ -328,10 +339,17 @@ async function captureState(cdp, label) {
       detailDrawerVisible: isVisible(document.querySelector('.inspector')),
       settingsShellVisible: isVisible(document.getElementById('settings-shell')),
       settingsText: document.getElementById('settings-shell')?.innerText || '',
+      settingsAgent: document.getElementById('settings-agent-value')?.textContent?.trim() || '',
+      settingsProvider: document.getElementById('settings-provider-id')?.textContent?.trim() || '',
+      settingsProviderHost: document.getElementById('settings-provider-host')?.textContent?.trim() || '',
+      settingsProviderAuth: document.getElementById('settings-provider-auth')?.textContent?.trim() || '',
+      settingsModel: document.getElementById('settings-model-value')?.textContent?.trim() || '',
+      settingsConfigError: document.getElementById('settings-config-error')?.textContent?.trim() || '',
       settingsReadonlyButtonCount: document.querySelectorAll('#settings-shell .settings-readonly-action').length,
       settingsDisabledButtonCount: document.querySelectorAll('#settings-shell .settings-readonly-action:disabled').length,
       passwordInputCount: document.querySelectorAll('input[type="password"]').length,
       apiKeyTextVisible: /api[-_ ]?key/i.test(document.body.innerText || ''),
+      secretTextVisible: /api_key|pair_token|sk-|secret/i.test(document.getElementById('settings-shell')?.innerText || ''),
       sessionAgentGroupCount: document.querySelectorAll('.session-agent-group').length,
       sessionAgentNestedCount: document.querySelectorAll('.session-agent-sessions .session-item').length,
       sessionAgentExpandedCount: document.querySelectorAll('.session-agent-group[data-expanded="true"]').length,
@@ -459,8 +477,11 @@ async function captureSettingsProof(cdp) {
       const settings = document.getElementById('settings-shell');
       return !settings?.hidden &&
         settings.innerText.includes('Provider and model') &&
+        settings.innerText.includes('Active agent') &&
+        !settings.innerText.includes('loading') &&
         settings.querySelectorAll('.settings-readonly-action:disabled').length >= 3 &&
-        document.querySelectorAll('input[type="password"]').length === 0;
+        document.querySelectorAll('input[type="password"]').length === 0 &&
+        !/api_key|pair_token|sk-|secret/i.test(settings.innerText);
     },
     5_000,
     'desktop settings shell open',

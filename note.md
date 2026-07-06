@@ -2049,3 +2049,33 @@ Current real root cause split:
   - online checks true: desktop Settings read-only, Settings close keeps conversation, mobile Settings drawer opens, mobile drawers close, success + failed-tool multi-round conversation terminal, no stale live animation, clean `/new`, viewport matrix.
 - remaining:
   - Batch 1 is read-only only. Provider/model edits, first-run setup, config projection, and Android native pre-connection settings convergence remain future batches.
+
+# 2026-07-07 OpenMinis config UI L2 Batch 2 owner-backed config projection
+
+- implementation:
+  - `config.core` now preserves `ProviderAuthSourceKind` (`inline` / `env`) on selected provider config, separate from runtime-only resolved API key.
+  - `ui.protocol` now owns `QueryConfigStatus` and `UiQueryResult::ConfigStatus(UiConfigStatusProjection)`; protocol state rejects this query as runtime-owned and command ingress rejects it as query-route misuse.
+  - `runtime.ui-command-dispatch` now maps `QueryConfigStatus` from live selected agent config to UI-safe projection: active agent/mode/node, paired agent/mode/node, provider id/type/protocol, base URL host only, default model, auth type/source, restart-required flag.
+  - `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` now verifies config status without UI.
+  - WebUI Settings now renders real owner-backed agent/provider/model/auth-source values and explicit config query error state; it does not parse TOML or render credential values.
+- online proof:
+  - S profile restarted on `127.0.0.1:4042`.
+  - `freehand-cliS adp-config-query` returned `agent=master`, `provider=minimax`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`.
+  - served JS/CSS hashes matched workspace.
+  - `make verify-webui-online` passed with evidence `artifacts/webui-online/20260706-verify-4042-1783376428677/summary.json`.
+  - Settings evidence: `settingsAgent=master`, `settingsProvider=minimax`, `settingsProviderHost=api.minimaxi.com`, `settingsProviderAuth=credential · inline`, `settingsModel=MiniMax-M3`, `settingsConfigError=none`, `apiKeyTextVisible=false`, `secretTextVisible=false`.
+- validation:
+  - `cargo test -p freehand-config -- --nocapture` -> 14 passed.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 45 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 75 passed.
+  - `cargo test -p freehand-cli -- --nocapture` -> 13 passed.
+  - `cargo test -p freehand-server -- --nocapture` -> 12 passed.
+  - `node --check apps/freehand-server/assets/webui.js` -> ok.
+  - `node --check scripts/webui_verify_online.mjs` -> ok.
+  - `cargo fmt --check` -> ok.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `git diff --check` -> ok.
+- remaining:
+  - Provider/model edit flow is still locked for future Batch 3. No config writes were implemented.

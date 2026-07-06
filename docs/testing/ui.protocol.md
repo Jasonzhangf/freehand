@@ -15,6 +15,7 @@
   - task list/history ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies persisted task truth
   - task list ADP subscribe frames use protocol-owned subscription shape and receive runtime-supplied task list projections without making protocol state the task truth owner
   - error-center ADP query/subscribe frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies metadata-backed truth
+  - config status ADP query frames use protocol-owned command/result DTOs while runtime owner code supplies config.core-backed truth
   - debug query returns per-turn read-only debug snapshot truth
   - checkpoint query returns read-only runtime-owned checkpoint summary projections
   - subscribe returns an initial snapshot plus continuous incremental truth, or waits for the first matching turn when subscribing before any turn exists
@@ -61,6 +62,7 @@
   - task query command validation covers empty history id and command-ingress rejection for query-route misuse
   - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
   - error-center query command validation covers empty session id and command-ingress rejection for query-route misuse
+  - config status query covers command-ingress rejection, runtime-owned protocol-state rejection, JSON roundtrip, and no-secret DTO serialization
   - error-center subscription selector and matcher cover accepted error-center projections
 - module black-box plan:
   - command ingress accept/reject smoke
@@ -85,6 +87,7 @@
   - ADP task list/history query smoke proves the protocol frame can carry task read models supplied by runtime
   - ADP task list subscription smoke proves initial task list projection and subsequent runtime-published task changes use the same subscription channel
   - ADP error-center query smoke proves the protocol frame can carry metadata read models supplied by runtime
+  - ADP config status query smoke proves the protocol frame can carry safe config read models supplied by runtime
   - ADP error-center subscription smoke proves initial error-center projection uses the same subscription frame shape
   - ADP query-as-command negative smoke
   - ADP session management negative smoke proves invalid session metadata and rollback commands, including empty cwd/session id, fail explicitly instead of becoming local-only UI state
@@ -97,6 +100,7 @@
   - protocol can expose runtime task query DTOs without becoming task persistence truth
   - protocol can broadcast runtime task list projections without becoming task persistence truth
   - protocol can expose runtime error-center query DTOs without becoming metadata/error truth
+  - protocol can expose runtime config status DTOs without becoming config truth or leaking key material
   - ADP gives WebUI, Android, CLI, and headless smoke tests one shared control/status protocol
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with protocol owner code and function map updates
@@ -132,3 +136,4 @@
   - task list/history query commands and DTOs are landed; runtime-backed ADP task query is regression-locked in daemon tests
   - task list subscription shape is landed for runtime-backed ADP task push and stays projection-only
   - error-center query/subscription commands and DTOs are landed; runtime-backed ADP error-center query is regression-locked in daemon tests
+  - config status query/result DTO is landed; protocol-state rejection and secret-free serialization are regression-locked

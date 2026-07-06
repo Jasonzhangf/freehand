@@ -1,10 +1,10 @@
 # OpenMinis Config UI Closeout Budget
 
-- mode: `L1`
-- max_wall_time_minutes: 45
-- max_shell_commands: 25
-- max_write_files: 7
-- max_code_edits: 0
+- mode: `L2 assisted`
+- max_wall_time_minutes: 120
+- max_shell_commands: 80
+- max_write_files: 18
+- max_code_edits: 1 scoped batch
 - max_attempts_per_item: 3
 - max_items_per_run: 1
 
@@ -16,6 +16,16 @@ Exit after:
 - Freehand config/UI gaps are mapped to owners.
 - L2 batch plan and required gates are written.
 - Run log records report-only outcome.
+
+## L2 Batch Criteria
+
+Exit after one scoped batch:
+
+- owner maps and test designs are updated before/with code
+- implementation touches only the approved owner chain for the batch
+- positive and negative tests cover the new projection path
+- S-profile online WebUI proof on `127.0.0.1:4042` passes
+- run log records commands and evidence
 
 ## Required Early Exit
 

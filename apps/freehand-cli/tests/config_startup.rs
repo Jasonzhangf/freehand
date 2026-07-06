@@ -709,7 +709,7 @@ provider = "mini27"
     assert!(stdout.contains("provider_protocol=chat_completions"));
     assert!(stdout.contains("default_model=MiniMax-M2.7"));
     assert!(stdout.contains("base_url=http://guizhouyun.site:2080"));
-    assert!(stdout.contains("provider_auth=apikey"));
+    assert!(stdout.contains("provider_auth_source=inline"));
     assert!(stdout.contains("restart_required_on_change=true"));
     assert!(!stdout.contains("sk-inline"));
 

@@ -92,6 +92,21 @@ pub enum ProviderAuthConfig {
     ApiKeyEnv { env_var: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderAuthSourceKind {
+    Inline,
+    Env,
+}
+
+impl ProviderAuthSourceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Inline => "inline",
+            Self::Env => "env",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderConfig {
     pub id: String,
@@ -112,6 +127,7 @@ pub struct SelectedProviderConfig {
     pub base_url: String,
     pub default_model: String,
     pub auth_type: ProviderAuthType,
+    pub auth_source: ProviderAuthSourceKind,
     pub api_key: String,
 }
 
@@ -166,6 +182,7 @@ impl LoadedConfig {
             });
         }
 
+        let auth_source = provider.auth.source_kind();
         let api_key = resolve_provider_api_key(provider)?;
         let paired = self.agents.get(&agent.paired_agent_name).ok_or_else(|| {
             ConfigError::PairedAgentNotFound {
@@ -193,10 +210,20 @@ impl LoadedConfig {
                 base_url: provider.base_url.clone(),
                 default_model: provider.default_model.clone(),
                 auth_type: provider.auth_type,
+                auth_source,
                 api_key,
             },
             restart_required_on_change: true,
         })
+    }
+}
+
+impl ProviderAuthConfig {
+    pub fn source_kind(&self) -> ProviderAuthSourceKind {
+        match self {
+            Self::ApiKeyInline { .. } => ProviderAuthSourceKind::Inline,
+            Self::ApiKeyEnv { .. } => ProviderAuthSourceKind::Env,
+        }
     }
 }
 
@@ -699,6 +726,7 @@ provider = "claude"
         );
         assert_eq!(worker.pair_token_env, "SLAVE_TOKEN");
         assert_eq!(mini27.protocol, ProviderProtocol::Responses);
+        assert_eq!(mini27.auth.source_kind(), ProviderAuthSourceKind::Inline);
 
         fs::remove_file(path).expect("cleanup");
     }
@@ -743,6 +771,7 @@ provider = "mini27"
         assert_eq!(provider.base_url, "http://guizhouyun.site:2080");
         assert_eq!(provider.default_model, "MiniMax-M2.7");
         assert_eq!(provider.protocol, ProviderProtocol::ChatCompletions);
+        assert_eq!(provider.auth.source_kind(), ProviderAuthSourceKind::Inline);
 
         fs::remove_file(path).expect("cleanup");
     }
@@ -1020,6 +1049,10 @@ provider = "mini27"
             selected.provider.protocol,
             ProviderProtocol::ChatCompletions
         );
+        assert_eq!(
+            selected.provider.auth_source,
+            ProviderAuthSourceKind::Inline
+        );
         assert_eq!(selected.provider.api_key, "sk-inline");
         assert!(selected.restart_required_on_change);
 
@@ -1074,6 +1107,7 @@ provider = "claude"
 
         assert_eq!(selected.provider.id, "claude");
         assert_eq!(selected.provider.protocol, ProviderProtocol::Messages);
+        assert_eq!(selected.provider.auth_source, ProviderAuthSourceKind::Env);
         assert_eq!(selected.provider.api_key, "claude-secret");
         assert_eq!(selected.paired_agent_name, "master");
         assert_eq!(selected.paired_node_id, "master-node");

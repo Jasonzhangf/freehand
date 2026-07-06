@@ -163,6 +163,8 @@ const state = {
   publicConversation: [],
   debug: null,
   checkpoints: [],
+  configStatus: null,
+  configStatusError: null,
   toolTimings: new Map(),
   lifecycleClocks: new Map(),
   pendingUserInput: null,
@@ -2486,6 +2488,13 @@ function applyAdpQueryResult(result) {
   if (checkpoints !== undefined) {
     state.checkpoints = checkpoints.checkpoints || [];
     renderCheckpoints();
+    return;
+  }
+  const configStatus = variantPayload(result, "ConfigStatus");
+  if (configStatus !== undefined) {
+    state.configStatus = configStatus;
+    state.configStatusError = null;
+    renderSettingsShell();
   }
 }
 
@@ -2951,21 +2960,43 @@ function renderSettingsShell() {
   const selectedSessionId = state.selectedSessionId || "not selected";
   const workspace = state.selectedCwd || selected?.cwd || activeTurnForSelectedSession()?.cwd || "runtime default";
   const modelLabel =
+    state.configStatus?.default_model ||
     modelSelector?.selectedOptions?.[0]?.textContent ||
     modelSelector?.value ||
     "Runtime config";
   const attachments = currentAttachments();
+  const providerSummary = state.configStatus
+    ? `${state.configStatus.provider_id} · ${state.configStatus.provider_protocol}`
+    : state.configStatusError
+      ? "unavailable"
+      : "loading";
   setText("settings-status-pill", state.adpStatus || "connecting");
   setText("settings-connection-summary", state.adpStatus || "connecting");
   setText("settings-service-origin", window.location.origin || "same origin");
   setText("settings-connection-state", state.adpStatus || "connecting");
   setText("settings-model-value", modelLabel);
+  setText("settings-provider-summary", providerSummary);
+  setText("settings-agent-value", state.configStatus?.agent_name || "loading");
+  setText("settings-agent-mode", state.configStatus?.agent_mode || "loading");
+  setText("settings-agent-node", state.configStatus?.node_id || "loading");
+  setText("settings-paired-agent", state.configStatus ? `${state.configStatus.paired_agent_name} · ${state.configStatus.paired_agent_mode}` : "loading");
+  setText("settings-provider-id", state.configStatus?.provider_id || "loading");
+  setText("settings-provider-type", state.configStatus?.provider_type || "loading");
+  setText("settings-provider-protocol", state.configStatus?.provider_protocol || "loading");
+  setText("settings-provider-host", state.configStatus?.provider_base_url_host || "loading");
+  setText("settings-provider-auth", state.configStatus ? `${settingsAuthTypeLabel(state.configStatus.provider_auth_type)} · ${state.configStatus.provider_auth_source}` : "loading");
+  setText("settings-restart-required", state.configStatus?.restart_required_on_change ? "restart required after changes" : "no restart flag");
+  setText("settings-config-error", state.configStatusError || "none");
   setText("settings-session-count", `${sessionCount} session(s)`);
   setText("settings-selected-session", selectedSessionId);
   setText("settings-workspace-value", workspace);
   setText("settings-attachment-count", `${attachments.length}`);
   setText("settings-attachment-value", `${attachments.length} draft item(s)`);
   showInspectorPanel(state.inspectorPanel);
+}
+
+function settingsAuthTypeLabel(authType) {
+  return authType === "apikey" ? "credential" : (authType || "credential");
 }
 
 function renderTurnMeta() {
@@ -3094,6 +3125,17 @@ async function refreshCheckpoints() {
   renderAll();
 }
 
+async function refreshConfigStatus() {
+  try {
+    const result = await adpQuery("QueryConfigStatus");
+    applyAdpQueryResult(result);
+  } catch (error) {
+    state.configStatus = null;
+    state.configStatusError = error.message;
+    renderSettingsShell();
+  }
+}
+
 async function refreshAllProtocolState() {
   await refreshSessions();
   await refreshSelectedSession();
@@ -3101,6 +3143,7 @@ async function refreshAllProtocolState() {
     await refreshTurn();
   }
   await refreshCheckpoints();
+  await refreshConfigStatus();
 }
 
 function ensureTurnSubscription() {

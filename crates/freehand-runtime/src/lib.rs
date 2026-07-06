@@ -71,10 +71,10 @@ use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
     UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
-    UiCompletionSchemaRetryWaiting, UiErrorCenterEventListProjection, UiErrorCenterEventProjection,
-    UiModelRequestKind, UiModelRequestWaiting, UiProtocolState, UiQueryResult, UiRuntimeQueryPort,
-    UiSessionMetadataProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
-    UiTaskListProjection, UiTaskSnapshotProjection, UiTurnProjection,
+    UiCompletionSchemaRetryWaiting, UiConfigStatusProjection, UiErrorCenterEventListProjection,
+    UiErrorCenterEventProjection, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
+    UiQueryResult, UiRuntimeQueryPort, UiSessionMetadataProjection, UiTaskHistoryProjection,
+    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskSnapshotProjection, UiTurnProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
 };
@@ -2319,6 +2319,14 @@ impl RuntimeCommandDispatcher {
     ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
         let state = self.state.lock().expect("lock runtime dispatcher state");
         match command {
+            UiCommand::QueryConfigStatus => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                Ok(Some(UiQueryResult::ConfigStatus(
+                    project_config_status_for_ui(&live.selected_agent),
+                )))
+            }
             UiCommand::QueryTaskList { status, agent_id } => {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
@@ -2940,6 +2948,56 @@ fn session_cwds_from_turns(turns: &[TurnRecord]) -> BTreeMap<SessionId, PathBuf>
         }
     }
     cwds
+}
+
+fn project_config_status_for_ui(selected: &SelectedAgentConfig) -> UiConfigStatusProjection {
+    UiConfigStatusProjection {
+        agent_name: selected.name.clone(),
+        agent_mode: selected.mode.as_str().to_owned(),
+        node_id: selected.node_id.clone(),
+        paired_agent_name: selected.paired_agent_name.clone(),
+        paired_agent_mode: selected.paired_agent_mode.as_str().to_owned(),
+        paired_node_id: selected.paired_node_id.clone(),
+        provider_id: selected.provider.id.clone(),
+        provider_type: selected.provider.provider_type.as_str().to_owned(),
+        provider_protocol: selected.provider.protocol.as_str().to_owned(),
+        provider_base_url_host: config_base_url_host_for_ui(&selected.provider.base_url),
+        default_model: selected.provider.default_model.clone(),
+        provider_auth_type: selected.provider.auth_type.as_str().to_owned(),
+        provider_auth_source: selected.provider.auth_source.as_str().to_owned(),
+        restart_required_on_change: selected.restart_required_on_change,
+    }
+}
+
+fn config_base_url_host_for_ui(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let without_scheme = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(trimmed);
+    let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
+    let without_userinfo = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    let host = if without_userinfo.starts_with('[') {
+        without_userinfo
+            .split(']')
+            .next()
+            .map(|value| format!("{value}]"))
+            .unwrap_or_else(|| without_userinfo.to_owned())
+    } else {
+        without_userinfo
+            .split(':')
+            .next()
+            .unwrap_or(without_userinfo)
+            .to_owned()
+    };
+    if host.trim().is_empty() {
+        "<invalid-host>".to_owned()
+    } else {
+        host
+    }
 }
 
 fn run_control_status_stop_hook(
@@ -5705,6 +5763,51 @@ mod tests {
     }
 
     #[test]
+    fn runtime_query_projects_config_status_without_secrets() {
+        let runtime_home = temp_runtime_home();
+        let selected = live_selected_agent(
+            "https://user:password@example.invalid:8443/v1".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        );
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &selected,
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+
+        let result = runtime
+            .query_runtime(&UiCommand::QueryConfigStatus)
+            .expect("config query")
+            .expect("runtime-owned result");
+
+        match result {
+            UiQueryResult::ConfigStatus(status) => {
+                assert_eq!(status.agent_name, "agent-live");
+                assert_eq!(status.agent_mode, "master");
+                assert_eq!(status.node_id, "agent-live-node");
+                assert_eq!(status.paired_agent_name, "agent-live-worker");
+                assert_eq!(status.provider_id, "provider-live");
+                assert_eq!(status.provider_type, "anthropic");
+                assert_eq!(status.provider_protocol, "messages");
+                assert_eq!(status.provider_base_url_host, "example.invalid");
+                assert_eq!(status.default_model, "MiniMax-M2.7");
+                assert_eq!(status.provider_auth_type, "apikey");
+                assert_eq!(status.provider_auth_source, "env");
+                assert!(status.restart_required_on_change);
+                let encoded = serde_json::to_string(&status).expect("status json");
+                assert!(!encoded.contains("test-api-key"));
+                assert!(!encoded.contains("password"));
+                assert!(!encoded.contains("api_key"));
+                assert!(!encoded.contains("pair-token"));
+            }
+            other => panic!("unexpected query result: {other:?}"),
+        }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
     fn live_dispatch_failure_preserves_other_session_transcripts() {
         let runtime_home = temp_runtime_home();
         let preserved_session = SessionId::new("runtime-session-preserved");
@@ -6538,6 +6641,7 @@ mod tests {
                 base_url: "https://example.invalid".to_owned(),
                 default_model: "model-master".to_owned(),
                 auth_type: freehand_config::ProviderAuthType::ApiKey,
+                auth_source: freehand_config::ProviderAuthSourceKind::Inline,
                 api_key: "secret".to_owned(),
             },
             restart_required_on_change: true,
@@ -6571,6 +6675,7 @@ mod tests {
                 base_url,
                 default_model: "MiniMax-M2.7".to_owned(),
                 auth_type: freehand_config::ProviderAuthType::ApiKey,
+                auth_source: freehand_config::ProviderAuthSourceKind::Env,
                 api_key: "test-api-key".to_owned(),
             },
             restart_required_on_change: true,

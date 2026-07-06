@@ -27,6 +27,7 @@
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 - ADP/read-only task query requests enter through `UiRuntimeQueryPort` and route to `TaskRuntime::list_tasks` or `TaskRuntime::task_history` without duplicating task filtering or ledger ordering in runtime
 - ADP/read-only error-center query requests enter through `UiRuntimeQueryPort` and route to runtime-owned metadata ledger projection without exposing raw provider/tool/request text
+- ADP/read-only config status query requests enter through `UiRuntimeQueryPort` and project the selected live agent/provider config without exposing API keys, pair tokens, or credential-bearing URLs
 - successful task tool mutations publish a runtime-owned task list projection into `UiProtocolState` so ADP task list subscribers observe lifecycle changes without UI polling
 
 ## Response Mainline
@@ -56,6 +57,7 @@
 - session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections
 - runtime-backed task list and task history queries return UI-safe task projections sourced from `task.orchestration` snapshot and ledger APIs
 - runtime-backed error-center queries return UI-safe projections sourced from `metadata.core` ledger rows written by `error.center`
+- runtime-backed config status queries return UI-safe projections sourced from `config.core` selected agent truth and include auth source type only
 - runtime-backed task list subscription updates reuse the same projection helper and source task truth from `TaskRuntime::list_tasks`
 
 ## Error Mainline
@@ -75,6 +77,7 @@
 - unwritable shared node metadata ledgers fail bootstrap explicitly as `NodeRuntimeInit` and must not materialize a runtime dispatcher
 - task query misses map to explicit dispatch target-not-found failures; invalid task status filters and task persistence failures map to dispatch failures
 - error-center metadata ledger load/parse failures map to explicit dispatch failures; incomplete rows are skipped instead of being repaired into guessed semantics
+- config status query without live selected config returns no runtime result rather than inventing app-local config truth
 - task list publication failures after task mutation are explicit dispatch failures and must not be silently swallowed as a successful task tool result
 
 ## Shared Multi-Reference Functions
@@ -97,6 +100,12 @@
   - allowed callers: `RuntimeCommandDispatcher::query_runtime`
   - related tests: `runtime_query_reads_error_center_metadata_without_raw_text`, `daemon_adp_queries_runtime_error_center_truth`
   - why shared: keeps metadata ledger reads runtime-owned while app transports stay protocol-only
+- `project_config_status_for_ui`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: build UI-safe active config projection from `config.core` selected agent truth
+  - allowed callers: `RuntimeCommandDispatcher::query_runtime`
+  - related tests: `runtime_query_projects_config_status_without_secrets`
+  - why shared: keeps config-to-UI projection in runtime owner while app transports stay protocol-only
 
 ## Function Call Table
 
@@ -114,7 +123,8 @@
 | 10 | `restore_all_persisted_sessions_into_ui` | `crates/freehand-runtime/src/lib.rs` | rehydrate UI protocol state from reason-ledger turn snapshots and group same-ordinal runtime rounds for transcript projection | persisted reason sessions | derived UI session list/transcripts with retained tool activity | runtime bootstrap | reason persistence + UI protocol | bound |
 | 11 | `RuntimeCommandDispatcher::dispatch_session_management` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned session CRUD and rollback commands into reason persistence APIs and refresh UI projection | session CRUD or rollback dispatch envelope | dispatch receipt or target-not-found failure | `RuntimeCommandDispatcher::dispatch` | `ReasonPersistence` session metadata/rollback owner | bound |
 | 11a | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace a session transcript with persistence-owned effective projections after rollback | session id + effective turn projections | queryable transcript excluding rolled-back logical turn | `RuntimeCommandDispatcher::dispatch_session_management` | ui.protocol state | bound |
-| 12 | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | route read-only runtime queries such as task list/history and error-center events into owner APIs | UI query command | optional query result or explicit dispatch failure | WebUI/daemon ADP query transport | task runtime owner / metadata center | bound |
+| 12 | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | route read-only runtime queries such as config status, task list/history, and error-center events into owner APIs | UI query command | optional query result or explicit dispatch failure | WebUI/daemon ADP query transport | selected config / task runtime owner / metadata center | bound |
+| 12a | `project_config_status_for_ui` / `config_base_url_host_for_ui` | `crates/freehand-runtime/src/lib.rs` | convert selected live agent config into UI-safe active config status | selected agent config | secret-free config status projection | `RuntimeCommandDispatcher::query_runtime` | UI protocol DTO | bound |
 | 13 | `project_task_list_for_ui` / `project_task_history_for_ui` | `crates/freehand-runtime/src/lib.rs` | convert task owner snapshots and ledger events into protocol DTOs without changing task truth | task snapshots or ledger events | UI-safe task query projection | `RuntimeCommandDispatcher::query_runtime` | UI protocol DTOs | bound |
 | 14 | `task_list_projection_from_runtime` / `UiProtocolState::publish_task_list_projection` | `crates/freehand-runtime/src/lib.rs` / `crates/freehand-ui-protocol/src/lib.rs` | publish runtime-owned task list projection after successful task tool mutation | task runtime snapshot | UI task list subscription event | live task tool bridge | ui.protocol subscription channel | bound |
 | 15 | `query_error_center_events_for_ui` | `crates/freehand-runtime/src/lib.rs` | read session metadata ledger and filter `error.center` rows by trace, turn, and domain | runtime home plus query filters | UI-safe error-center event list | `RuntimeCommandDispatcher::query_runtime` | metadata center | bound |
@@ -148,6 +158,7 @@
 - runtime rollback dispatch is bound as a thin route to `reason.persistence::rollback_latest_session_turn` plus UI effective transcript replacement
 - runtime task query dispatch is bound as a thin read-only route to `task.orchestration`
 - runtime error-center query dispatch is bound as a thin read-only route to `metadata.core` rows written by `error.center`
+- runtime config status query dispatch is bound as a thin read-only route from selected `config.core` truth to `UiConfigStatusProjection`
 - runtime task list projection publication is bound as a thin route from task mutation to `ui.protocol`
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever

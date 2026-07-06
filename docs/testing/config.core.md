@@ -10,15 +10,18 @@
   - select one agent per process
   - select one enabled provider per agent
   - resolve provider auth source without leaking secret projection
+  - preserve safe auth source kind on selected provider config for downstream UI-safe status projection
   - validate restart-only config activation
 - white-box plan:
   - parse and validate agent/provider schema, reciprocal peer-topology invariants, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
+  - assert inline and env auth providers project `ProviderAuthSourceKind` while resolved API keys remain runtime-only
   - positive peer-topology coverage locks selected-agent projection of local node id, paired agent name, paired mode, paired node id, paired allowed IP, and paired pair-token env
   - negative peer-topology coverage locks self-pairing, missing paired agent, same-mode paired agents, and non-reciprocal paired agents
 - module black-box plan:
   - load config file and select named agent with full provider runtime selection plus paired-topology projection through public config boundary
 - project black-box impact:
   - CLI startup path consumes one named agent configuration and projects selected provider metadata without exposing API key
+  - runtime/UI config status queries can consume `auth_source` without reading raw provider auth fields or resolved API keys
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - config fixtures under crate test fixtures
@@ -27,4 +30,5 @@
   - provider runtime execution support is still outside `config.core`; current project black-box scope stops at safe projection of selection truth
 - sync status between design and implementation:
   - white-box, module black-box, and project black-box baseline cover multi-provider registry, reciprocal peer topology, and selected-provider projection
+  - selected-provider auth source is regression-locked for inline and env configurations
   - migrated mainline-call source and generated wiki are kept in sync with this test design

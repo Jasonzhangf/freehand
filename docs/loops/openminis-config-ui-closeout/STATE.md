@@ -1,11 +1,11 @@
 # OpenMinis Config UI Closeout State
 
 - loop_id: `openminis-config-ui-closeout`
-- current_mode: `L1`
-- status: `L1 report-only plan drafted`
+- current_mode: `L2`
+- status: `L2 Batch 2 owner-backed config projection in progress`
 - kill_switch_state: `inactive`
-- owner_feature: `foundation.workspace`
-- last_baseline: `2026-07-07 L1 report-only; OpenMinis public source unavailable; website IA reviewed; Freehand owner gaps mapped`
+- owner_feature: `config.core`, `ui.protocol`, `runtime.ui-command-dispatch`, `app.webui-smoke`
+- last_baseline: `2026-07-07 L2 Batch 1 committed read-only Settings shell; Batch 2 is adding owner-backed read-only config projection`
 
 ## Current Findings
 
@@ -14,6 +14,7 @@
 3. Android has file-backed daemon connection config and an edit path, but the primary conversation UI now loads daemon-hosted WebUI, so settings entry and visual language should converge with WebUI.
 4. Freehand WebUI currently exposes model as a read-only selector and daemon connection implicitly via the serving origin; it does not expose provider CRUD, provider health, active agent/provider projection, model groups, skill management, session filesystem namespace view, or daemon connection profile management.
 5. `config.core` owns `~/.freehand/config.toml`; `app.webui-smoke` must not import config semantics or write config directly.
+6. L2 Batch 1 landed a read-only WebUI Settings shell; Batch 2 must replace placeholder provider/model/agent values with `config.core` -> `ui.protocol` -> `runtime.ui-command-dispatch` projections.
 
 ## Gap Matrix
 
@@ -32,8 +33,8 @@
 
 ## L2 Batch Order
 
-1. Settings shell and style alignment: add a WebUI settings drawer/page with read-only config/status sections, using OpenMinis-like compact cards/disclosures. No config mutation yet.
-2. Config projection API: add protocol/runtime read-only projection for active agent, provider registry summary, daemon bind/profile, and config validation errors.
+1. Settings shell and style alignment: completed in commit `292eab8`.
+2. Config projection API: in progress for active agent, selected provider id/type/protocol/base URL host, default model, auth source type, and restart-required status.
 3. Provider/model config edit path: add owner-backed update command only after config write/restart semantics are designed; no direct UI writes.
 4. Android settings entry convergence: ensure Android remote WebUI exposes the same settings entry and keep native daemon profile editor only for pre-connection/config-error repair.
 5. Advanced surfaces: skills registry, session filesystem namespaces, task/background settings as separate owner-backed slices.

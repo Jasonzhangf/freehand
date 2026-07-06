@@ -1145,6 +1145,10 @@ mod tests {
         assert!(root_body.contains("id=\"settings-shell-toggle\""));
         assert!(root_body.contains("id=\"open-settings-drawer-button\""));
         assert!(root_body.contains("id=\"settings-shell\""));
+        assert!(root_body.contains("id=\"settings-agent-value\""));
+        assert!(root_body.contains("id=\"settings-provider-host\""));
+        assert!(root_body.contains("id=\"settings-provider-auth\""));
+        assert!(root_body.contains("id=\"settings-config-error\""));
         assert!(root_body.contains("Provider editing locked"));
         assert!(root_body.contains("Task settings pending"));
         assert!(!root_body.contains("type=\"password\""));
@@ -1272,6 +1276,15 @@ mod tests {
         assert!(js_body.contains("function setMobileDrawer"));
         assert!(js_body.contains("function showInspectorPanel"));
         assert!(js_body.contains("function renderSettingsShell"));
+        assert!(js_body.contains("QueryConfigStatus"));
+        assert!(js_body.contains("refreshConfigStatus"));
+        assert!(js_body.contains("variantPayload(result, \"ConfigStatus\")"));
+        assert!(js_body.contains("state.configStatus"));
+        assert!(js_body.contains("settings-provider-host"));
+        assert!(js_body.contains("settings-provider-auth"));
+        assert!(js_body.contains("settings-config-error"));
+        assert!(js_body.contains("function settingsAuthTypeLabel"));
+        assert!(js_body.contains("authType === \"apikey\" ? \"credential\""));
         assert!(js_body.contains("open-settings-drawer-button"));
         assert!(js_body.contains("settings-shell-toggle"));
         assert!(
