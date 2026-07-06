@@ -78,7 +78,14 @@ const mobileDrawerScrim = document.getElementById("mobile-drawer-scrim");
 const openSessionDrawerButton = document.getElementById("open-session-drawer-button");
 const closeSessionDrawerButton = document.getElementById("close-session-drawer-button");
 const openDetailDrawerButton = document.getElementById("open-detail-drawer-button");
+const openSettingsDrawerButton = document.getElementById("open-settings-drawer-button");
 const closeDetailDrawerButton = document.getElementById("close-detail-drawer-button");
+const settingsShellToggle = document.getElementById("settings-shell-toggle");
+const inspectorEyebrow = document.getElementById("inspector-eyebrow");
+const inspectorTitle = document.getElementById("inspector-title");
+const inspectorCopy = document.getElementById("inspector-copy");
+const inspectorDebugPanel = document.getElementById("inspector-debug-panel");
+const settingsShell = document.getElementById("settings-shell");
 const newConversationButton = document.getElementById("new-conversation-button");
 const newTaskButton = document.getElementById("new-task-button");
 const taskCwdInput = document.getElementById("task-cwd-input");
@@ -123,7 +130,7 @@ const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
 const adpRequestTimeoutMs = 8000;
 const shortcutHelp =
-  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success · Cmd/Ctrl+2 failure. Slash: /help /new /task /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
+  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success · Cmd/Ctrl+2 failure. Slash: /help /new /task /settings /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
 const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) || "";
 
@@ -165,6 +172,7 @@ const state = {
   inputHistory: [],
   inputHistoryIndex: null,
   mobileDrawer: null,
+  inspectorPanel: "debug",
   submitStartedAt: null,
   submitInFlight: false,
   commandStatusMessage: "connecting to service...",
@@ -217,6 +225,9 @@ function applyMobileDrawerState() {
   }
   if (openDetailDrawerButton) {
     openDetailDrawerButton.setAttribute("aria-expanded", drawer === "details" ? "true" : "false");
+  }
+  if (openSettingsDrawerButton) {
+    openSettingsDrawerButton.setAttribute("aria-expanded", drawer === "settings" ? "true" : "false");
   }
   if (mobileDrawerScrim) {
     mobileDrawerScrim.setAttribute("aria-hidden", drawer ? "false" : "true");
@@ -2906,10 +2917,61 @@ function renderCheckpoints() {
   });
 }
 
+function showInspectorPanel(panel) {
+  state.inspectorPanel = panel === "settings" ? "settings" : "debug";
+  const showingSettings = state.inspectorPanel === "settings";
+  if (inspectorDebugPanel) {
+    inspectorDebugPanel.hidden = showingSettings;
+  }
+  if (settingsShell) {
+    settingsShell.hidden = !showingSettings;
+  }
+  if (inspectorEyebrow) {
+    inspectorEyebrow.textContent = showingSettings ? "settings" : "detail region";
+  }
+  if (inspectorTitle) {
+    inspectorTitle.textContent = showingSettings ? "Settings" : "Selected Turn Debug";
+  }
+  if (inspectorCopy) {
+    inspectorCopy.textContent = showingSettings
+      ? "Read-only runtime and workspace controls. Editing unlocks only after owner-backed config contracts exist."
+      : "右侧只展示当前 turn 的调试摘要，不抢主消息流焦点。";
+  }
+  if (settingsShellToggle) {
+    settingsShellToggle.classList.toggle("is-active", showingSettings);
+    settingsShellToggle.setAttribute("aria-pressed", showingSettings ? "true" : "false");
+  }
+}
+
+function renderSettingsShell() {
+  const selected = sessionSummaryForSelected();
+  const draftCount = state.draftSessionId ? 1 : 0;
+  const persistedCount = state.sessions.length;
+  const sessionCount = persistedCount + draftCount;
+  const selectedSessionId = state.selectedSessionId || "not selected";
+  const workspace = state.selectedCwd || selected?.cwd || activeTurnForSelectedSession()?.cwd || "runtime default";
+  const modelLabel =
+    modelSelector?.selectedOptions?.[0]?.textContent ||
+    modelSelector?.value ||
+    "Runtime config";
+  const attachments = currentAttachments();
+  setText("settings-status-pill", state.adpStatus || "connecting");
+  setText("settings-connection-summary", state.adpStatus || "connecting");
+  setText("settings-service-origin", window.location.origin || "same origin");
+  setText("settings-connection-state", state.adpStatus || "connecting");
+  setText("settings-model-value", modelLabel);
+  setText("settings-session-count", `${sessionCount} session(s)`);
+  setText("settings-selected-session", selectedSessionId);
+  setText("settings-workspace-value", workspace);
+  setText("settings-attachment-count", `${attachments.length}`);
+  setText("settings-attachment-value", `${attachments.length} draft item(s)`);
+  showInspectorPanel(state.inspectorPanel);
+}
+
 function renderTurnMeta() {
   const turn = activeTurnForSelectedSession();
   if (!turn) {
-    setText("session-title", state.selectedSessionId || "waiting for protocol state");
+    setText("session-title", state.selectedSessionId || "waiting for service state");
     setText("session-copy", state.selectedSessionId ? "no turns in selected session" : "no active turn yet");
     setText("strip-session", state.selectedSessionId || "-");
     setText("strip-turn", "-");
@@ -2982,6 +3044,7 @@ function renderAll() {
   renderAttachmentTray();
   renderDebug();
   renderCheckpoints();
+  renderSettingsShell();
   renderCommandStatus();
 }
 
@@ -3208,6 +3271,12 @@ async function runSlashCommand(rawText) {
     case "/task":
       openNewSessionDialog("task");
       return true;
+    case "/settings":
+      showInspectorPanel("settings");
+      setMobileDrawer("settings");
+      renderAll();
+      setCommandStatus("settings opened", { stickyMs: 4000 });
+      return true;
     case "/cwd": {
       const cwd = requireTaskCwd("task cwd selection");
       if (cwd) {
@@ -3223,9 +3292,9 @@ async function runSlashCommand(rawText) {
       setCommandStatus("sessions refreshed", { stickyMs: 5000 });
       return true;
     case "/reload":
-      setCommandStatus("refreshing protocol state...", { stickyMs: 3000 });
+      setCommandStatus("refreshing service state...", { stickyMs: 3000 });
       await refreshAllProtocolState();
-      setCommandStatus("protocol state refreshed", { stickyMs: 5000 });
+      setCommandStatus("service state refreshed", { stickyMs: 5000 });
       return true;
     case "/success":
       loadSamplePrompt("success");
@@ -3383,6 +3452,18 @@ function renderDebugDetailsToggle() {
   debugDetailsToggle.textContent = state.debugDetailsVisible ? "Debug on" : "Debug off";
 }
 
+function openDebugPanel() {
+  showInspectorPanel("debug");
+  setMobileDrawer("details");
+  renderAll();
+}
+
+function openSettingsPanel() {
+  showInspectorPanel("settings");
+  setMobileDrawer("settings");
+  renderAll();
+}
+
 newConversationButton.addEventListener("click", () => openNewSessionDialog("conversation"));
 newTaskButton.addEventListener("click", () => {
   openNewSessionDialog("task");
@@ -3418,7 +3499,26 @@ if (closeSessionDrawerButton) {
 }
 if (openDetailDrawerButton) {
   openDetailDrawerButton.addEventListener("click", () => {
-    setMobileDrawer(state.mobileDrawer === "details" ? null : "details");
+    if (state.mobileDrawer === "details" && state.inspectorPanel === "debug") {
+      closeMobileDrawer();
+      return;
+    }
+    openDebugPanel();
+  });
+}
+if (openSettingsDrawerButton) {
+  openSettingsDrawerButton.addEventListener("click", () => {
+    if (state.mobileDrawer === "settings" && state.inspectorPanel === "settings") {
+      closeMobileDrawer();
+      return;
+    }
+    openSettingsPanel();
+  });
+}
+if (settingsShellToggle) {
+  settingsShellToggle.addEventListener("click", () => {
+    showInspectorPanel(state.inspectorPanel === "settings" ? "debug" : "settings");
+    renderAll();
   });
 }
 if (closeDetailDrawerButton) {
@@ -3567,10 +3667,10 @@ document.addEventListener("keydown", (event) => {
     }
     if (usesModifier && event.key.toLowerCase() === "r") {
       event.preventDefault();
-      setCommandStatus("refreshing protocol state...", { stickyMs: 3000 });
+      setCommandStatus("refreshing service state...", { stickyMs: 3000 });
       refreshAllProtocolState()
         .then(() => {
-          setCommandStatus("protocol state refreshed", { stickyMs: 5000 });
+          setCommandStatus("service state refreshed", { stickyMs: 5000 });
         })
         .catch((error) => {
           setCommandStatus(`refresh failed: ${error.message}`, { stickyMs: 8000 });

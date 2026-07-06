@@ -385,6 +385,138 @@ body.theme-dark .checkpoint-item {
   background: rgba(138, 106, 48, 0.14);
 }
 
+.settings-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-shell[hidden],
+.inspector-debug-panel[hidden] {
+  display: none !important;
+}
+
+.settings-hero,
+.settings-card {
+  border: 1px solid rgba(31, 108, 88, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.settings-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+}
+
+.settings-hero-title {
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.settings-status-pill {
+  border-radius: 999px;
+  background: rgba(232, 243, 238, 0.86);
+  color: var(--master);
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-card {
+  overflow: hidden;
+}
+
+.settings-card summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 750;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-card summary span:last-child {
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 550;
+  text-align: right;
+}
+
+.settings-card-body {
+  display: grid;
+  gap: 8px;
+  padding: 0 11px 11px;
+}
+
+.settings-row {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: rgba(247, 251, 248, 0.72);
+}
+
+.settings-row span,
+.settings-note {
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.settings-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-readonly-action {
+  width: fit-content;
+  border: 1px solid rgba(31, 108, 88, 0.18);
+  border-radius: 999px;
+  background: rgba(232, 243, 238, 0.76);
+  color: var(--text-soft);
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.settings-readonly-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+body.theme-dark .settings-hero,
+body.theme-dark .settings-card {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(88, 176, 141, 0.22);
+}
+
+body.theme-dark .settings-row {
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .session-item.active {
   border-color: rgba(23, 107, 85, 0.24);
   background: rgba(227, 240, 234, 0.72);
@@ -2118,7 +2250,8 @@ body.theme-dark[data-layout-shape="tablet_portrait"] .inspector {
 }
 
 body[data-mobile-drawer="sessions"] .sidebar,
-body[data-mobile-drawer="details"] .inspector {
+body[data-mobile-drawer="details"] .inspector,
+body[data-mobile-drawer="settings"] .inspector {
   transition: transform 180ms ease;
   transform: translateX(0);
 }

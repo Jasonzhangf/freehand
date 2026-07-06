@@ -151,6 +151,7 @@ try {
     prompt1,
   );
   const refreshed = await captureState(cdp, '08-after-refresh');
+  const settingsProof = await captureSettingsProof(cdp);
   const viewportSnapshots = await captureViewportMatrix(cdp);
   const mobileDrawerProof = await captureMobileDrawerProof(cdp);
 
@@ -179,6 +180,18 @@ try {
       refreshPreservedFailurePrompt: refreshed.state.messageText.includes('definitely-missing-freehand-file.txt'),
       terminal2NoLive: terminal2.state.liveCount === 0,
       viewportShapesCovered: viewportSnapshots.every((entry) => entry.state.layoutShape === entry.expectedShape),
+      desktopSettingsOpensReadOnly:
+        settingsProof.desktopOpen.state.settingsShellVisible &&
+        settingsProof.desktopOpen.state.settingsReadonlyButtonCount >= 3 &&
+        settingsProof.desktopOpen.state.settingsDisabledButtonCount >= 3 &&
+        settingsProof.desktopOpen.state.settingsText.includes('Provider and model') &&
+        settingsProof.desktopOpen.state.settingsText.includes('Connection') &&
+        settingsProof.desktopOpen.state.passwordInputCount === 0 &&
+        settingsProof.desktopOpen.state.apiKeyTextVisible === false,
+      settingsCloseKeepsConversation:
+        !settingsProof.afterClose.state.settingsShellVisible &&
+        settingsProof.afterClose.state.messageText.includes(prompt1) &&
+        settingsProof.afterClose.state.messageText.includes('definitely-missing-freehand-file.txt'),
       viewportComposerVisible: viewportSnapshots.every((entry) => entry.state.composerVisible),
       viewportMessageListVisible: viewportSnapshots.every((entry) => entry.state.messageListVisible),
       mobileConversationPrimary: viewportSnapshots
@@ -186,6 +199,7 @@ try {
         .every((entry) =>
           entry.state.mobileSessionButtonVisible &&
           entry.state.mobileDetailButtonVisible &&
+          entry.state.mobileSettingsButtonVisible &&
           entry.state.messageListVisible &&
           entry.state.composerVisible &&
           !entry.state.sessionDrawerVisible &&
@@ -209,11 +223,19 @@ try {
         mobileDrawerProof.detailOpen.state.mobileDrawer === 'details' &&
         mobileDrawerProof.detailOpen.state.detailDrawerVisible &&
         !mobileDrawerProof.detailOpen.state.sessionDrawerVisible,
+      mobileSettingsDrawerOpens:
+        mobileDrawerProof.settingsOpen.state.mobileDrawer === 'settings' &&
+        mobileDrawerProof.settingsOpen.state.detailDrawerVisible &&
+        mobileDrawerProof.settingsOpen.state.settingsShellVisible &&
+        mobileDrawerProof.settingsOpen.state.settingsReadonlyButtonCount >= 3 &&
+        !mobileDrawerProof.settingsOpen.state.sessionDrawerVisible,
       mobileDrawerCloses:
         !mobileDrawerProof.afterSessionClose.state.mobileDrawer &&
         !mobileDrawerProof.afterSessionClose.state.sessionDrawerVisible &&
         !mobileDrawerProof.afterDetailClose.state.mobileDrawer &&
-        !mobileDrawerProof.afterDetailClose.state.detailDrawerVisible,
+        !mobileDrawerProof.afterDetailClose.state.detailDrawerVisible &&
+        !mobileDrawerProof.afterSettingsClose.state.mobileDrawer &&
+        !mobileDrawerProof.afterSettingsClose.state.detailDrawerVisible,
       newSessionStartsClean:
         cleanNewSession.state.selectedTurn === '-' &&
         cleanNewSession.state.messageCount === 0 &&
@@ -235,6 +257,7 @@ try {
       running2,
       terminal2,
       refreshed,
+      settingsProof,
       viewportSnapshots,
       mobileDrawerProof,
     },
@@ -300,8 +323,15 @@ async function captureState(cdp, label) {
       messageListVisible: isVisible(document.getElementById('message-list')),
       mobileSessionButtonVisible: isVisible(document.getElementById('open-session-drawer-button')),
       mobileDetailButtonVisible: isVisible(document.getElementById('open-detail-drawer-button')),
+      mobileSettingsButtonVisible: isVisible(document.getElementById('open-settings-drawer-button')),
       sessionDrawerVisible: isVisible(document.querySelector('.sidebar')),
       detailDrawerVisible: isVisible(document.querySelector('.inspector')),
+      settingsShellVisible: isVisible(document.getElementById('settings-shell')),
+      settingsText: document.getElementById('settings-shell')?.innerText || '',
+      settingsReadonlyButtonCount: document.querySelectorAll('#settings-shell .settings-readonly-action').length,
+      settingsDisabledButtonCount: document.querySelectorAll('#settings-shell .settings-readonly-action:disabled').length,
+      passwordInputCount: document.querySelectorAll('input[type="password"]').length,
+      apiKeyTextVisible: /api[-_ ]?key/i.test(document.body.innerText || ''),
       sessionAgentGroupCount: document.querySelectorAll('.session-agent-group').length,
       sessionAgentNestedCount: document.querySelectorAll('.session-agent-sessions .session-item').length,
       sessionAgentExpandedCount: document.querySelectorAll('.session-agent-group[data-expanded="true"]').length,
@@ -348,13 +378,13 @@ async function captureState(cdp, label) {
 
 async function captureViewportMatrix(cdp) {
   const viewports = [
-    { label: '09-viewport-phone-portrait-375x812', width: 375, height: 812, expectedShape: 'tall_phone' },
-    { label: '10-viewport-tall-phone-430x932', width: 430, height: 932, expectedShape: 'tall_phone' },
-    { label: '11-viewport-phone-landscape-844x390', width: 844, height: 390, expectedShape: 'phone_landscape' },
-    { label: '12-viewport-tablet-portrait-768x1024', width: 768, height: 1024, expectedShape: 'tablet_portrait' },
-    { label: '13-viewport-tablet-landscape-1024x768', width: 1024, height: 768, expectedShape: 'foldable_unfolded' },
-    { label: '14-viewport-foldable-900x1000', width: 900, height: 1000, expectedShape: 'foldable_unfolded' },
-    { label: '15-viewport-desktop-1280x900', width: 1280, height: 900, expectedShape: 'desktop_large' },
+    { label: '11-viewport-phone-portrait-375x812', width: 375, height: 812, expectedShape: 'tall_phone' },
+    { label: '12-viewport-tall-phone-430x932', width: 430, height: 932, expectedShape: 'tall_phone' },
+    { label: '13-viewport-phone-landscape-844x390', width: 844, height: 390, expectedShape: 'phone_landscape' },
+    { label: '14-viewport-tablet-portrait-768x1024', width: 768, height: 1024, expectedShape: 'tablet_portrait' },
+    { label: '15-viewport-tablet-landscape-1024x768', width: 1024, height: 768, expectedShape: 'foldable_unfolded' },
+    { label: '16-viewport-foldable-900x1000', width: 900, height: 1000, expectedShape: 'foldable_unfolded' },
+    { label: '17-viewport-desktop-1280x900', width: 1280, height: 900, expectedShape: 'desktop_large' },
   ];
   const results = [];
   for (const viewport of viewports) {
@@ -403,6 +433,53 @@ async function captureViewportMatrix(cdp) {
   return results;
 }
 
+async function captureSettingsProof(cdp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1280,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await evalInPage(cdp, () => {
+    window.dispatchEvent(new Event('resize'));
+    return window.__freehandLayout?.applyLayoutShape?.();
+  });
+  await waitForFunction(
+    cdp,
+    () => document.body.dataset.layoutShape === 'desktop_large',
+    10_000,
+    'desktop settings layout',
+  );
+  await evalInPage(cdp, () => {
+    document.getElementById('settings-shell-toggle')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => {
+      const settings = document.getElementById('settings-shell');
+      return !settings?.hidden &&
+        settings.innerText.includes('Provider and model') &&
+        settings.querySelectorAll('.settings-readonly-action:disabled').length >= 3 &&
+        document.querySelectorAll('input[type="password"]').length === 0;
+    },
+    5_000,
+    'desktop settings shell open',
+  );
+  const desktopOpen = await captureState(cdp, '09-settings-desktop-open');
+  await evalInPage(cdp, () => {
+    document.getElementById('settings-shell-toggle')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => document.getElementById('settings-shell')?.hidden === true,
+    5_000,
+    'desktop settings shell closed',
+  );
+  const afterClose = await captureState(cdp, '10-settings-desktop-closed');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  return { desktopOpen, afterClose };
+}
+
 async function captureMobileDrawerProof(cdp) {
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 390,
@@ -421,7 +498,7 @@ async function captureMobileDrawerProof(cdp) {
     10_000,
     'mobile drawer proof layout',
   );
-  const closed = await captureState(cdp, '16-mobile-drawer-closed-default');
+  const closed = await captureState(cdp, '18-mobile-drawer-closed-default');
   await dispatchRightSwipe(cdp, 120, 320, 260, 326);
   await waitForFunction(
     cdp,
@@ -443,7 +520,7 @@ async function captureMobileDrawerProof(cdp) {
     'session drawer opened by right swipe',
   );
   await delay(260);
-  const swipeSessionOpen = await captureState(cdp, '17-mobile-session-drawer-open-swipe');
+  const swipeSessionOpen = await captureState(cdp, '19-mobile-session-drawer-open-swipe');
   await evalInPage(cdp, () => {
     document.getElementById('close-session-drawer-button')?.click();
   });
@@ -485,7 +562,7 @@ async function captureMobileDrawerProof(cdp) {
     'session drawer open',
   );
   await delay(260);
-  const sessionOpen = await captureState(cdp, '18-mobile-session-drawer-open');
+  const sessionOpen = await captureState(cdp, '20-mobile-session-drawer-open');
   await evalInPage(cdp, () => {
     document.getElementById('close-session-drawer-button')?.click();
   });
@@ -506,7 +583,7 @@ async function captureMobileDrawerProof(cdp) {
     5_000,
     'session drawer closed',
   );
-  const afterSessionClose = await captureState(cdp, '19-mobile-session-drawer-closed');
+  const afterSessionClose = await captureState(cdp, '21-mobile-session-drawer-closed');
   await evalInPage(cdp, () => {
     document.getElementById('open-detail-drawer-button')?.click();
   });
@@ -540,7 +617,7 @@ async function captureMobileDrawerProof(cdp) {
     'detail drawer open',
   );
   await delay(260);
-  const detailOpen = await captureState(cdp, '20-mobile-detail-drawer-open');
+  const detailOpen = await captureState(cdp, '22-mobile-detail-drawer-open');
   await evalInPage(cdp, () => {
     document.getElementById('close-detail-drawer-button')?.click();
   });
@@ -561,9 +638,75 @@ async function captureMobileDrawerProof(cdp) {
     5_000,
     'detail drawer closed',
   );
-  const afterDetailClose = await captureState(cdp, '21-mobile-detail-drawer-closed');
+  const afterDetailClose = await captureState(cdp, '23-mobile-detail-drawer-closed');
+  await evalInPage(cdp, () => {
+    document.getElementById('open-settings-drawer-button')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => {
+      const node = document.querySelector('.inspector');
+      const rect = node?.getBoundingClientRect();
+      return document.body.dataset.mobileDrawer === 'settings' &&
+        !document.getElementById('settings-shell')?.hidden &&
+        document.getElementById('settings-shell')?.innerText.includes('Provider and model') &&
+        !!rect &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom >= 0 &&
+        rect.top <= window.innerHeight &&
+        rect.right >= 0 &&
+        rect.left <= window.innerWidth &&
+        rect.right >= window.innerWidth - 1 &&
+        !visibleWithinViewport(document.querySelector('.sidebar'));
+      function visibleWithinViewport(candidate) {
+        const candidateRect = candidate?.getBoundingClientRect();
+        return !!candidateRect &&
+          candidateRect.width > 0 &&
+          candidateRect.height > 0 &&
+          candidateRect.bottom >= 0 &&
+          candidateRect.top <= window.innerHeight &&
+          candidateRect.right >= 0 &&
+          candidateRect.left <= window.innerWidth;
+      }
+    },
+    5_000,
+    'settings drawer open',
+  );
+  await delay(260);
+  const settingsOpen = await captureState(cdp, '24-mobile-settings-drawer-open');
+  await evalInPage(cdp, () => {
+    document.getElementById('close-detail-drawer-button')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => {
+      const node = document.querySelector('.inspector');
+      const rect = node?.getBoundingClientRect();
+      const visible = !!rect &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom >= 0 &&
+        rect.top <= window.innerHeight &&
+        rect.right >= 0 &&
+        rect.left <= window.innerWidth;
+      return !document.body.dataset.mobileDrawer && !visible;
+    },
+    5_000,
+    'settings drawer closed',
+  );
+  const afterSettingsClose = await captureState(cdp, '25-mobile-settings-drawer-closed');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  return { closed, swipeSessionOpen, sessionOpen, afterSessionClose, detailOpen, afterDetailClose };
+  return {
+    closed,
+    swipeSessionOpen,
+    sessionOpen,
+    afterSessionClose,
+    detailOpen,
+    afterDetailClose,
+    settingsOpen,
+    afterSettingsClose,
+  };
 }
 
 async function dispatchRightSwipe(cdp, startX, startY, endX, endY) {

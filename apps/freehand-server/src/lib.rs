@@ -980,6 +980,13 @@ mod tests {
         assert!(html.contains("id=\"new-conversation-button\""));
         assert!(html.contains("id=\"new-task-button\""));
         assert!(html.contains("id=\"task-cwd-input\""));
+        assert!(html.contains("id=\"settings-shell-toggle\""));
+        assert!(html.contains("id=\"open-settings-drawer-button\""));
+        assert!(html.contains("id=\"settings-shell\""));
+        assert!(html.contains("Provider editing locked"));
+        assert!(html.contains("Skill settings pending"));
+        assert!(!html.contains("type=\"password\""));
+        assert!(!html.contains("api-key"));
         assert!(html.contains("id=\"new-session-dialog\""));
         assert!(html.contains("id=\"new-session-form\""));
         assert!(html.contains("id=\"new-task-path-presets\""));
@@ -1017,6 +1024,7 @@ mod tests {
         ));
         assert!(html.contains("id=\"open-session-drawer-button\""));
         assert!(html.contains("id=\"open-detail-drawer-button\""));
+        assert!(html.contains("id=\"open-settings-drawer-button\""));
     }
 
     #[tokio::test]
@@ -1134,6 +1142,13 @@ mod tests {
         assert!(root_body.contains("id=\"session-select-all-button\""));
         assert!(root_body.contains("id=\"session-clear-selection-button\""));
         assert!(root_body.contains("id=\"session-delete-selected-button\""));
+        assert!(root_body.contains("id=\"settings-shell-toggle\""));
+        assert!(root_body.contains("id=\"open-settings-drawer-button\""));
+        assert!(root_body.contains("id=\"settings-shell\""));
+        assert!(root_body.contains("Provider editing locked"));
+        assert!(root_body.contains("Task settings pending"));
+        assert!(!root_body.contains("type=\"password\""));
+        assert!(!root_body.contains("api-key"));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
         assert!(root_body.contains("id=\"debug-details-toggle\""));
         assert!(!root_body.contains(">Success</button>"));
@@ -1206,7 +1221,13 @@ mod tests {
         assert!(webui_css_body.contains("body[data-layout-shape=\"desktop_large\"]"));
         assert!(webui_css_body.contains("body[data-mobile-drawer=\"sessions\"] .sidebar"));
         assert!(webui_css_body.contains("body[data-mobile-drawer=\"details\"] .inspector"));
+        assert!(webui_css_body.contains("body[data-mobile-drawer=\"settings\"] .inspector"));
         assert!(webui_css_body.contains(".mobile-drawer-scrim"));
+        assert!(webui_css_body.contains(".settings-shell"));
+        assert!(webui_css_body.contains(".settings-shell[hidden]"));
+        assert!(webui_css_body.contains(".inspector-debug-panel[hidden]"));
+        assert!(webui_css_body.contains(".settings-card"));
+        assert!(webui_css_body.contains(".settings-readonly-action:disabled"));
         assert!(webui_css_body.contains(".session-agent-group"));
         assert!(webui_css_body.contains(".session-agent-button"));
         assert!(webui_css_body.contains(".session-agent-sessions"));
@@ -1249,6 +1270,18 @@ mod tests {
         assert!(js_body.contains("function applyLayoutShape"));
         assert!(js_body.contains("function viewportDimensionsForLayout"));
         assert!(js_body.contains("function setMobileDrawer"));
+        assert!(js_body.contains("function showInspectorPanel"));
+        assert!(js_body.contains("function renderSettingsShell"));
+        assert!(js_body.contains("open-settings-drawer-button"));
+        assert!(js_body.contains("settings-shell-toggle"));
+        assert!(
+            js_body.contains(
+                "state.inspectorPanel = panel === \"settings\" ? \"settings\" : \"debug\""
+            )
+        );
+        assert!(js_body.contains("const attachments = currentAttachments();"));
+        assert!(!js_body.contains("currentDraftAttachments"));
+        assert!(js_body.contains("case \"/settings\""));
         assert!(js_body.contains("function syncMobileDrawerForLayout"));
         assert!(js_body.contains("function installMobileSessionSwipeGesture"));
         assert!(js_body.contains("setMobileDrawer(\"sessions\")"));
@@ -1275,6 +1308,10 @@ mod tests {
         assert!(js_body.contains("transport-context-tag"));
         assert!(js_body.contains("open-session-drawer-button"));
         assert!(js_body.contains("open-detail-drawer-button"));
+        assert!(js_body.contains("setMobileDrawer(\"settings\")"));
+        assert!(!js_body.contains("localStorage.setItem(\"freehand-config"));
+        assert!(!js_body.contains("writeConfig"));
+        assert!(!js_body.contains("apiKey"));
         assert!(js_body.contains("window.visualViewport.addEventListener(\"resize\", () =>"));
         assert!(js_body.contains("window.addEventListener(\"orientationchange\", () =>"));
         assert!(js_body.contains("return \"phone_portrait\""));

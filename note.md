@@ -1987,3 +1987,65 @@ Current real root cause split:
   - online WebUI evidence: `artifacts/webui-online/20260706-verify-4041-1783348272047/summary.json`.
   - WebUI checks all true; `messageTextContainsADP=false`; command statuses include `new conversation ready`, `dispatching...`, `thinking after tool result...`, and `turn completed`.
   - Android true-device evidence: `artifacts/android-device/20260706T143159Z-100.104.163.65_5555-81364/summary.json`, `status=passed`.
+
+# 2026-07-07 OpenMinis config UI L1 report-only
+
+- user request: reference OpenMinis UI, identify missing Freehand config functionality/UI, then make it a loop to complete.
+- skills used: `freehand-dev` and `loop-governance`.
+- OpenMinis evidence:
+  - local source search found no local OpenMinis checkout.
+  - GitHub repo `OpenMinis/OpenMinis` is public but source is not available yet; README says public source is still being organized.
+  - `https://openminis.app/` is the usable reference: first-run provider setup, provider/model table, advanced config, model groups, agent loop models, skills, session filesystem namespaces, native/mobile capability settings, FAQ-style diagnostics, compact Apple-like cards/disclosures.
+- Freehand gap summary:
+  - WebUI has conversation/session/mobile rendering and a read-only model display, but no full settings/config surface.
+  - Android has file-backed daemon connection config, but normal connected UI loads daemon-hosted WebUI, so WebUI must expose the shared settings entry.
+  - Config truth is `config.core` at `~/.freehand/config.toml`; WebUI must not parse/write config directly.
+  - Missing user-facing surfaces: first-run/config-needed flow, provider list/editor/status, editable model selection contract, agent/provider topology view, skill registry, session filesystem namespace view, daemon/profile status, task/background settings.
+- loop/plan files added:
+  - `docs/loops/openminis-config-ui-closeout/LOOP.md`
+  - `docs/loops/openminis-config-ui-closeout/STATE.md`
+  - `docs/loops/openminis-config-ui-closeout/loop-constraints.md`
+  - `docs/loops/openminis-config-ui-closeout/loop-budget.md`
+  - `docs/loops/openminis-config-ui-closeout/loop-run-log.md`
+  - `docs/goals/openminis-config-ui-closeout-plan.md`
+- L2 batch order:
+  - read-only settings shell
+  - owner-backed config projection
+  - provider/model edit flow with restart-required semantics
+  - Android connection settings convergence
+  - advanced surfaces only after owners exist
+- L1 non-action: no product code, runtime config, launchd, Android install, or provider secret changes.
+
+# 2026-07-07 OpenMinis config UI L2 Batch 1 read-only Settings shell
+
+- implementation:
+  - WebUI now has a desktop Settings button and mobile Settings drawer entry.
+  - right inspector can switch between debug and Settings panels using `inspectorPanel`; this is UI-only and does not mutate ADP/session truth.
+  - Settings shell is read-only and compact: connection, provider/model, sessions/workspace, skills, files/attachments, tasks/background, diagnostics.
+  - provider/model/skill/task edit actions are disabled until owner-backed `config.core` / `ui.protocol` contracts exist.
+  - WebUI does not add API-key/password inputs and does not write config/local config state.
+  - user-visible `ADP waiting` / `protocol state` copy in WebUI shell/refresh status was changed to service wording.
+  - online verifier now checks desktop Settings, mobile Settings drawer, read-only disabled controls, no secret inputs, and conversation remains intact after closing Settings.
+- bugs caught by online verification:
+  - `renderSettingsShell()` initially called nonexistent `currentDraftAttachments()`, causing a real browser `ReferenceError` and `/new` failure; fixed to existing `currentAttachments()` and locked in asset smoke.
+  - `.settings-shell { display: grid }` overrode the HTML `hidden` attribute, so closing Settings left it visible; fixed with explicit `.settings-shell[hidden]` / `.inspector-debug-panel[hidden]` CSS rule and asset smoke.
+- verification:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `node --check scripts/webui_verify_online.mjs`
+  - `cargo test -p freehand-server -- --nocapture` -> 12 passed.
+  - `cargo fmt --check`
+  - `git diff --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `scripts/install-launchd.sh restartS`
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `~/.local/bin/freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - served asset hashes matched workspace:
+    - `webui.js`: `b47acaa05b93160c9ec485e66b1281a71223623c19daefb09a41747e6b00e11a`
+    - `webui.css`: `115709c6f33c1d3bcd4e8e67e93d1976b534a7a48eee89adb33f05538e8744ec`
+  - `make verify-webui-online` -> passed.
+  - online evidence: `artifacts/webui-online/20260706-verify-4042-1783371813295/summary.json`.
+  - online checks true: desktop Settings read-only, Settings close keeps conversation, mobile Settings drawer opens, mobile drawers close, success + failed-tool multi-round conversation terminal, no stale live animation, clean `/new`, viewport matrix.
+- remaining:
+  - Batch 1 is read-only only. Provider/model edits, first-run setup, config projection, and Android native pre-connection settings convergence remain future batches.
