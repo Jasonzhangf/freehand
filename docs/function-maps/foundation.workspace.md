@@ -35,7 +35,7 @@
 - global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
 - symlink install script builds debug host binaries, exposes `freehand-cliS`, `freehand-serverS`, and `freehand-daemonS` as symlinks, and installs a copied `freehand-daemon-launchdS` wrapper for development without replacing global release commands
 - launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths
-- launchd install script supports a coexisting symlink profile through `installS` / `restartS`, using `com.freehand.daemonS`, `~/.freehand/daemonS.env`, `127.0.0.1:4042`, and `daemonS.*.log`; `restartS` refreshes the debug daemon binary copy before service kickstart so launchd does not run stale code
+- launchd install script supports a coexisting symlink profile through `installS` / `restartS`, using `com.freehand.daemonS`, `~/.freehand/daemonS.env`, `127.0.0.1:4042`, and `daemonS.*.log`; `restartS` refreshes the debug daemon binary copy before service kickstart and health-checks the env-backed bind so Tailscale defaults cannot move the S profile off loopback
 - launchd install script keeps daemon workspace env out of the release/global-install regression subprocess so daemon runtime path selection cannot pollute workspace tests
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
@@ -55,7 +55,7 @@
 - global install exposes `freehand-cli`, `freehand-server`, and `freehand-daemon` on the chosen install prefix
 - symlink install exposes `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` on the chosen prefix, pointing host commands at repo debug binaries while keeping the launchd wrapper executable as a prefix-local file
 - launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
-- launchd symlink install exposes `com.freehand.daemonS` as a separate user LaunchAgent with explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4042` WebUI, and separate `daemonS.*.log` files; symlink profile restart refreshes the debug daemon binary copy before restarting
+- launchd symlink install exposes `com.freehand.daemonS` as a separate user LaunchAgent with explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4042` WebUI, and separate `daemonS.*.log` files; symlink profile restart refreshes the debug daemon binary copy and health-checks the existing env bind before restarting
 - release/global-install regressions run without inherited daemon workspace root overrides while the final LaunchAgent still receives the configured daemon workdir
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
 - gate returns explicit failure with missing path or missing policy snippet
@@ -73,7 +73,7 @@
 - missing source-only search exclusions, missing unsafe-argument guards, or missing `scripts/source-search.sh` policy snippets surface as gate failure
 - missing release prerequisites such as Java or Cargo surface as script failure before artifacts are claimed
 - missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surface as online verification failure before alpha success is claimed
-- launchd bootstrap or kickstart failure surfaces as script failure before background service success is claimed
+- launchd bootstrap, kickstart, or env-backed health endpoint failure surfaces as script failure before background service success is claimed
 - mismatched launchd daemon binary prefix surfaces as install script failure before service success is claimed
 - symlink install failure surfaces before launchd symlink service success is claimed
 - request-node structs that introduce metadata/debug/cache/control payload fields or types surface as gate failure

@@ -241,11 +241,11 @@
     },
     {
       "step": "11",
-      "symbol_path": "refreshTurn / refreshSessions / renderMessages / logicalSessionTurns / stripFreehandCompletionBlock / normalizePublicConversation / classifyLayoutShape / applyLayoutShape / viewportDimensionsForLayout / setMobileDrawer / closeMobileDrawer / syncMobileDrawerForLayout / renderCommandStatus / refreshDebug / submitUserInput / setSessionList / setArchivedSessionList / renameSelectedSession / restoreArchivedSession / rollbackLatestSessionTurn",
+      "symbol_path": "refreshTurn / refreshSessions / renderMessages / logicalSessionTurns / stripFreehandCompletionBlock / normalizePublicConversation / classifyLayoutShape / applyLayoutShape / viewportDimensionsForLayout / setMobileDrawer / closeMobileDrawer / syncMobileDrawerForLayout / setComposerFocused / openNewSessionDialog / submitNewSessionDialog / renderCommandStatus / refreshDebug / submitUserInput / setSessionList / renameSelectedSession / deleteSelectedSessions / rollbackLatestSessionTurn",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "consume ADP query and subscription turn payloads, render semantic/tool/debug cards, expose protocol-owned session rename/archive/archived-list/restore/rollback controls, keep same-tool updates in one card, apply aspect-ratio layout shape attributes, keep mobile portrait session/detail surfaces in UI-only overlay drawers outside normal conversation flow, and keep missing debug snapshots pending instead of failed",
+      "responsibility": "consume ADP query and subscription turn payloads, render semantic/tool/debug cards, expose protocol-owned session rename/remove/rollback controls, open the New dialog for global conversation or cwd-bound task creation, keep same-tool updates in one card, apply aspect-ratio layout shape attributes, keep mobile portrait session/detail surfaces in UI-only overlay drawers outside normal conversation flow, keep mobile focused composer state presentation-only, and keep missing debug snapshots pending instead of failed",
       "input_semantic": "`UiAdpResponse` frames plus debug snapshot/pending state plus command dispatch receipt plus selected session UI intent plus viewport size plus mobile drawer button events",
-      "output_semantic": "DOM message blocks, session lists, archived list, composer refill after rollback receipt, command status, layout shape attributes, and mobile drawer state attributes",
+      "output_semantic": "DOM message blocks, session lists, New dialog state, composer refill after rollback receipt, command status, layout shape attributes, composer focus attributes, and mobile drawer state attributes",
       "caller": "WebUI shell",
       "callee": "ADP protocol frames",
       "binding_status": "bound"

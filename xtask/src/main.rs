@@ -962,6 +962,28 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         "uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS",
         "Makefile",
     )?;
+    let install_launchd = fs::read_to_string(root.join("scripts/install-launchd.sh"))
+        .map_err(|err| format!("read scripts/install-launchd.sh: {err}"))?;
+    require_contains(
+        &install_launchd,
+        "if [[ \"$profile_suffix\" == \"S\" ]]; then",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "printf '127.0.0.1:%s\\n' \"$port\"",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "elif [[ -f \"$env_file\" ]]; then",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "env_bind=\"$(awk -F= '$1 == \"FREEHAND_DAEMON_BIND\"",
+        "scripts/install-launchd.sh",
+    )?;
 
     let pre_push = fs::read_to_string(root.join(".githooks/pre-push"))
         .map_err(|err| format!("read .githooks/pre-push: {err}"))?;
@@ -1735,6 +1757,16 @@ mod tests {
     }
 
     #[test]
+    fn ci_cd_gate_commands_reject_launchd_without_env_bind_health() {
+        let root = test_repo_root("ci-cd-launchd-missing-env-bind");
+        write_ci_cd_fixture(&root, CiFixtureMode::LaunchdMissingEnvBind);
+
+        let err = verify_ci_cd_gate_commands(&root)
+            .expect_err("launchd restart without env-backed health bind must fail");
+        assert!(err.contains("scripts/install-launchd.sh"), "{err}");
+    }
+
+    #[test]
     fn feature_map_unique_entries_accept_single_seed_entry() {
         let root = test_repo_root("feature-map-unique");
         write_feature_map_fixture(&root, FeatureMapFixtureMode::Aligned);
@@ -1879,6 +1911,7 @@ mod tests {
         Aligned,
         MakeCiMissingMainlines,
         CiWorkflowPartialGate,
+        LaunchdMissingEnvBind,
     }
 
     enum FeatureMapFixtureMode {
@@ -1972,7 +2005,9 @@ mod tests {
             fs::create_dir_all(root.join(rel)).expect("create ci fixture dir");
         }
         let makefile = match mode {
-            CiFixtureMode::Aligned | CiFixtureMode::CiWorkflowPartialGate => {
+            CiFixtureMode::Aligned
+            | CiFixtureMode::CiWorkflowPartialGate
+            | CiFixtureMode::LaunchdMissingEnvBind => {
                 ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
@@ -2015,6 +2050,41 @@ uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n"
             }
         };
         fs::write(root.join("Makefile"), makefile).expect("write Makefile fixture");
+        let launchd_script = match mode {
+            CiFixtureMode::LaunchdMissingEnvBind => {
+                "#!/usr/bin/env bash\n\
+default_daemon_bind() {\n\
+  local port=\"$1\"\n\
+  local profile_suffix=\"${2:-}\"\n\
+  if [[ \"$profile_suffix\" == \"S\" ]]; then\n\
+    printf '127.0.0.1:%s\\n' \"$port\"\n\
+    return 0\n\
+  fi\n\
+}\n\
+bind_addr=\"$default_bind_addr\"\n"
+            }
+            CiFixtureMode::Aligned
+            | CiFixtureMode::MakeCiMissingMainlines
+            | CiFixtureMode::CiWorkflowPartialGate => {
+                "#!/usr/bin/env bash\n\
+default_daemon_bind() {\n\
+  local port=\"$1\"\n\
+  local profile_suffix=\"${2:-}\"\n\
+  if [[ \"$profile_suffix\" == \"S\" ]]; then\n\
+    printf '127.0.0.1:%s\\n' \"$port\"\n\
+    return 0\n\
+  fi\n\
+}\n\
+bind_addr=\"$default_bind_addr\"\n\
+if [[ -n \"${FREEHAND_DAEMON_BIND:-}\" ]]; then\n\
+  bind_addr=\"$FREEHAND_DAEMON_BIND\"\n\
+elif [[ -f \"$env_file\" ]]; then\n\
+  env_bind=\"$(awk -F= '$1 == \"FREEHAND_DAEMON_BIND\" { print $2; exit }' \"$env_file\")\"\n\
+fi\n"
+            }
+        };
+        fs::write(root.join("scripts/install-launchd.sh"), launchd_script)
+            .expect("write install launchd fixture");
         fs::write(
             root.join("scripts/verify-webui-online.sh"),
             "#!/usr/bin/env bash\n\
@@ -2042,7 +2112,9 @@ FREEHAND_WEBUI_PROFILE=\"${FREEHAND_WEBUI_PROFILE:-4041}\" \\\n\
         )
         .expect("write pre-push fixture");
         let ci_workflow = match mode {
-            CiFixtureMode::Aligned | CiFixtureMode::MakeCiMissingMainlines => {
+            CiFixtureMode::Aligned
+            | CiFixtureMode::MakeCiMissingMainlines
+            | CiFixtureMode::LaunchdMissingEnvBind => {
                 "name: ci\njobs:\n  rust-gates:\n    steps:\n      - name: Full gate\n        run: make ci\n"
             }
             CiFixtureMode::CiWorkflowPartialGate => {

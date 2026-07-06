@@ -971,6 +971,13 @@ mod tests {
         assert!(html.contains("id=\"new-conversation-button\""));
         assert!(html.contains("id=\"new-task-button\""));
         assert!(html.contains("id=\"task-cwd-input\""));
+        assert!(html.contains("id=\"new-session-dialog\""));
+        assert!(html.contains("id=\"new-session-form\""));
+        assert!(html.contains("id=\"new-task-path-presets\""));
+        assert!(html.contains("data-cwd=\"/Volumes/extension/code/freehand\""));
+        assert!(!html.contains("Archived sessions"));
+        assert!(!html.contains("id=\"archived-session-list\""));
+        assert!(!html.contains(">Archive</button>"));
         assert!(!html.contains("id=\"success-sample-button\""));
         assert!(!html.contains("id=\"failure-sample-button\""));
         assert!(html.contains("composer-control-strip"));
@@ -983,6 +990,11 @@ mod tests {
         assert!(html.contains("id=\"strip-cwd\""));
         assert!(html.contains("id=\"model-selector\""));
         assert!(html.contains("id=\"attachment-tray\""));
+        assert!(html.contains("work-context-tags"));
+        assert!(html.contains("id=\"worker-context-tag\""));
+        assert!(html.contains("id=\"task-context-tag\""));
+        assert!(html.contains("id=\"transport-context-tag\""));
+        assert!(!html.contains("id=\"conversation-turn\""));
     }
 
     #[tokio::test]
@@ -1158,6 +1170,14 @@ mod tests {
         assert!(webui_css_body.contains("body[data-mobile-drawer=\"details\"] .inspector"));
         assert!(webui_css_body.contains(".mobile-drawer-scrim"));
         assert!(webui_css_body.contains("env(safe-area-inset-bottom)"));
+        assert!(webui_css_body.contains(".work-context-tags"));
+        assert!(webui_css_body.contains(".context-tag"));
+        assert!(webui_css_body.contains(".new-session-dialog"));
+        assert!(webui_css_body.contains(".new-task-path-presets"));
+        assert!(webui_css_body.contains(".path-preset-button"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-card"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-control-strip"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"] #send-button"));
 
         let js = client
             .get(format!("{}/assets/webui.js", server.base_url))
@@ -1193,6 +1213,21 @@ mod tests {
         assert!(js_body.contains("shell.dataset.layoutShape"));
         assert!(js_body.contains("document.body.dataset.mobileDrawer"));
         assert!(js_body.contains("shell.dataset.mobileDrawer"));
+        assert!(js_body.contains("function setComposerFocused"));
+        assert!(js_body.contains("document.body.dataset.composerFocused"));
+        assert!(js_body.contains("shell.dataset.composerFocused"));
+        assert!(js_body.contains("composerInput.addEventListener(\"focus\""));
+        assert!(js_body.contains("composerInput.addEventListener(\"blur\""));
+        assert!(js_body.contains("function openNewSessionDialog"));
+        assert!(js_body.contains("function submitNewSessionDialog"));
+        assert!(js_body.contains("newTaskPathPresets.addEventListener(\"click\""));
+        assert!(js_body.contains("DeleteSession"));
+        assert!(!js_body.contains("ArchiveSession"));
+        assert!(!js_body.contains("RestoreSession"));
+        assert!(!js_body.contains("QueryArchivedSessionList"));
+        assert!(js_body.contains("worker-context-tag"));
+        assert!(js_body.contains("task-context-tag"));
+        assert!(js_body.contains("transport-context-tag"));
         assert!(js_body.contains("open-session-drawer-button"));
         assert!(js_body.contains("open-detail-drawer-button"));
         assert!(js_body.contains("window.visualViewport.addEventListener(\"resize\", () =>"));
@@ -1276,12 +1311,8 @@ mod tests {
                     .expect("pending chat render push")
         );
         assert!(js_body.contains("deleteSelectedSessions"));
-        assert!(js_body.contains("ArchiveSession"));
-        assert!(js_body.contains("RestoreSession"));
         assert!(js_body.contains("RollbackLatestSessionTurn"));
         assert!(js_body.contains("rollbackLatestSessionTurn"));
-        assert!(js_body.contains("setArchivedSessionList"));
-        assert!(js_body.contains("archivedSessions"));
         assert!(js_body.contains("session-selector"));
         assert!(js_body.contains("session-rename-selected-button"));
         assert!(js_body.contains("renderSessionBulkToolbar"));

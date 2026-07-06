@@ -2,14 +2,17 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../apps/freehand-server/assets/webui.js', import.meta.url), 'utf8');
-const functionMatch = source.match(/export function classifyLayoutShape[\s\S]*?\n}\n\nconst shell/);
+const functionMatch = source.match(/export function classifyLayoutShape[\s\S]*?\n}\n\nfunction isMobileDrawerLayout/);
 assert(functionMatch, 'classifyLayoutShape export must exist before DOM bindings');
 
 const functionSource = functionMatch[0]
   .replace('export function classifyLayoutShape', 'function classifyLayoutShape')
-  .replace('\n\nconst shell', '');
+  .replace('export function classifyLayoutShapeForClient', 'function classifyLayoutShapeForClient')
+  .replace('\n\nfunction isMobileDrawerLayout', '');
 
-const classifyLayoutShape = Function(`${functionSource}; return classifyLayoutShape;`)();
+const { classifyLayoutShape, classifyLayoutShapeForClient } = Function(
+  `${functionSource}; return { classifyLayoutShape, classifyLayoutShapeForClient };`,
+)();
 
 const cases = [
   { width: 375, height: 812, expected: 'tall_phone' },
@@ -21,6 +24,12 @@ const cases = [
   { width: 1280, height: 900, expected: 'desktop_large' },
 ];
 
+const clientCases = [
+  { width: 980, height: 1882, client: 'android-webview', expected: 'tablet_portrait' },
+  { width: 412, height: 915, client: 'android-webview', expected: 'tall_phone' },
+  { width: 915, height: 412, client: 'android-webview', expected: 'phone_landscape' },
+];
+
 for (const item of cases) {
   assert.equal(
     classifyLayoutShape(item.width, item.height),
@@ -29,4 +38,12 @@ for (const item of cases) {
   );
 }
 
-console.log(JSON.stringify({ ok: true, cases }, null, 2));
+for (const item of clientCases) {
+  assert.equal(
+    classifyLayoutShapeForClient(item.width, item.height, item.client),
+    item.expected,
+    `${item.client}:${item.width}x${item.height}`,
+  );
+}
+
+console.log(JSON.stringify({ ok: true, cases, clientCases }, null, 2));

@@ -1,5 +1,13 @@
 # CACHE
 
+- Current verified mobile WebUI / restartS closeout:
+  - `scripts/install-launchd.sh restartS` now uses S fixed default `127.0.0.1:4042` and health-checks the existing env-backed bind from `~/.freehand/daemonS.env`; it no longer recomputes a Tailscale `:4042` health URL when the S daemon is configured for loopback.
+  - `scripts/webui_verify_online.mjs` now follows the real `/new` dialog flow: open New Conversation, wait for `new-session-dialog`, confirm, wait for a fresh draft session, then submit the success and failed-tool continuation prompts.
+  - Latest accepted online proof: `artifacts/webui-online/20260706-verify-4042-1783310624927/summary.json`, session `webui-session-20260706040346-0c5a9c53`, ADP `turn_ids=runtime-turn-98,runtime-turn-99,runtime-turn-99-r2`.
+  - Verified true: composer clears after both submits, first prompt and failed-tool prompt survive refresh, failed-tool continuation reaches terminal success, stale historical live count is `0`, terminal live count is `0`, viewport matrix passes, mobile session/detail drawers pass.
+  - Validation run: `bash -n scripts/install-launchd.sh`; `node --check scripts/webui_verify_online.mjs`; `node --check apps/freehand-server/assets/webui.js`; `cargo test -p xtask ci_cd -- --nocapture`; `cargo test -p freehand-server -- --nocapture`; `cargo fmt --check`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `git diff --check`; `scripts/install-launchd.sh restartS`; 4042 health; `freehand-cliS adp-smoke`; `make verify-webui-online`.
+  - Remaining blocker: Android true-device WebView acceptance still requires unlocked device and passing `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`.
+
 - Current verified same-session continuation history repair:
   - `provider.reason-live-bridge` now rebuilds restored `SessionHistory` base context from effective persisted turns before same-session follow-up provider requests.
   - Second provider request is locked to include previous user/assistant truth via `live_bridge_restores_same_session_history_into_follow_up_provider_request`.

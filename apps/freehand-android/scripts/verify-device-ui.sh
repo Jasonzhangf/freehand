@@ -95,13 +95,19 @@ verify_device_ui() {
   fi
 
   adb -s "$serial" logcat -c || true
+  adb -s "$serial" shell am force-stop "$package_name" || true
   adb -s "$serial" shell input keyevent KEYCODE_WAKEUP || true
   adb -s "$serial" shell am start -n "${package_name}/${activity_name}" >"$artifact_dir/am-start.txt" 2>&1 || true
-  sleep "${FREEHAND_ANDROID_SETTLE_SECONDS:-3}"
+  for _ in $(seq 1 "${FREEHAND_ANDROID_SETTLE_SECONDS:-12}"); do
+    sleep 1
+    if adb -s "$serial" logcat -d -t 3000 2>/dev/null | grep -F 'FreehandWebUiLayout' >/dev/null; then
+      break
+    fi
+  done
 
   adb -s "$serial" shell dumpsys activity activities >"$artifact_dir/dumpsys-activity.txt" 2>&1 || true
   adb -s "$serial" shell dumpsys window >"$artifact_dir/dumpsys-window.txt" 2>&1 || true
-  adb -s "$serial" logcat -d -t 1500 >"$artifact_dir/logcat.txt" 2>&1 || true
+  adb -s "$serial" logcat -d -t 3000 >"$artifact_dir/logcat.txt" 2>&1 || true
   adb -s "$serial" exec-out screencap -p >"$artifact_dir/screenshot.png" 2>"$artifact_dir/screencap.stderr" || true
 
   local fatal_pattern
@@ -124,6 +130,27 @@ verify_device_ui() {
     write_summary "blocked" "freehand_activity_not_foreground"
     echo "[freehand-android-device] blocked: Freehand activity is not foreground; see $artifact_dir" >&2
     exit 2
+  fi
+
+  if ! grep -F 'FreehandWebUiLayout' "$artifact_dir/logcat.txt" >"$artifact_dir/webui-layout-logcat.txt"; then
+    write_summary "failed" "missing_webui_layout_probe"
+    echo "[freehand-android-device] failed: missing WebUI layout probe; see $artifact_dir" >&2
+    exit 1
+  fi
+
+  if ! grep -Eq '"shape":"(phone_portrait|tall_phone|tablet_portrait)"' "$artifact_dir/webui-layout-logcat.txt"; then
+    write_summary "failed" "webui_layout_not_mobile_conversation"
+    echo "[freehand-android-device] failed: WebUI did not report mobile conversation layout; see $artifact_dir" >&2
+    exit 1
+  fi
+
+  if ! grep -Fq '"sessionDrawerFixed":true' "$artifact_dir/webui-layout-logcat.txt" ||
+    ! grep -Fq '"detailDrawerFixed":true' "$artifact_dir/webui-layout-logcat.txt" ||
+    ! grep -Fq '"sessionDrawerInViewport":false' "$artifact_dir/webui-layout-logcat.txt" ||
+    ! grep -Fq '"detailDrawerInViewport":false' "$artifact_dir/webui-layout-logcat.txt"; then
+    write_summary "failed" "webui_drawers_not_offscreen"
+    echo "[freehand-android-device] failed: WebUI session/detail surfaces are not hidden as offscreen drawers; see $artifact_dir" >&2
+    exit 1
   fi
 
   write_summary "passed" "freehand_activity_foreground_no_fatal_logcat"

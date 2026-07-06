@@ -2,6 +2,7 @@ package com.freehand.android.ui
 
 import android.content.res.Configuration
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.webkit.WebResourceError
@@ -87,7 +88,9 @@ class MainActivity : AppCompatActivity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    if (!remoteWebUiLoaded) {
+                    if (remoteWebUiLoaded) {
+                        reportRemoteWebUiLayout(view)
+                    } else {
                         applyInitialTheme(view)
                         pushSnapshotToWebView()
                     }
@@ -242,7 +245,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadRemoteWebUi(host: HostConfig) {
         remoteWebUiLoaded = true
         showNativeShell(false)
-        webView.loadUrl("${host.baseUrl}/")
+        webView.loadUrl("${host.baseUrl}/?client=android-webview")
     }
 
     private fun showNativeShell(visible: Boolean) {
@@ -297,6 +300,41 @@ class MainActivity : AppCompatActivity() {
             "if(window.__freehand&&window.__freehand.applySnapshot){window.__freehand.applySnapshot($allTurnsJson);}else{window.__freehandPending=$allTurnsJson;}",
             null,
         )
+    }
+
+    private fun reportRemoteWebUiLayout(view: WebView?) {
+        val webView = view ?: return
+        webView.evaluateJavascript(
+            """
+            (() => ({
+              shape: document.body.dataset.layoutShape || "",
+              mobileDrawer: document.body.dataset.mobileDrawer || "",
+              innerWidth: window.innerWidth,
+              innerHeight: window.innerHeight,
+              visualWidth: window.visualViewport ? window.visualViewport.width : null,
+              visualHeight: window.visualViewport ? window.visualViewport.height : null,
+              conversationPrimary: !!document.querySelector(".workspace"),
+              sessionDrawerFixed: !!document.querySelector(".sidebar") &&
+                getComputedStyle(document.querySelector(".sidebar")).position === "fixed",
+              detailDrawerFixed: !!document.querySelector(".inspector") &&
+                getComputedStyle(document.querySelector(".inspector")).position === "fixed",
+              sessionDrawerInViewport: (() => {
+                const node = document.querySelector(".sidebar");
+                if (!node) return false;
+                const box = node.getBoundingClientRect();
+                return box.right > 0 && box.left < window.innerWidth;
+              })(),
+              detailDrawerInViewport: (() => {
+                const node = document.querySelector(".inspector");
+                if (!node) return false;
+                const box = node.getBoundingClientRect();
+                return box.right > 0 && box.left < window.innerWidth;
+              })()
+            }))();
+            """.trimIndent(),
+        ) { value ->
+            Log.i("FreehandWebUiLayout", value ?: "null")
+        }
     }
 
     private fun saveHostConfig(host: HostConfig): Boolean {

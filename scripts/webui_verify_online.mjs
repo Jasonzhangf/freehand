@@ -80,7 +80,21 @@ try {
   await evalInPage(cdp, () => {
     document.getElementById('new-conversation-button')?.click();
   });
-  await delay(250);
+  await waitForFunction(
+    cdp,
+    () => document.getElementById('new-session-dialog')?.open === true,
+    10_000,
+    'new conversation dialog open',
+  );
+  await evalInPage(cdp, () => {
+    document.getElementById('new-session-confirm-button')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => !(document.getElementById('new-session-dialog')?.open) && (document.getElementById('strip-session')?.textContent || '').includes('webui-session-'),
+    10_000,
+    'new conversation draft selected',
+  );
   await captureState(cdp, '01-after-new-conversation');
 
   const prompt1 = `verify pending input success ${Date.now()}`;
@@ -120,6 +134,16 @@ try {
   await waitForFunction(cdp, () => {
     return !!document.querySelector('[data-webui-shell="true"]');
   }, 20_000, 'shell reloaded');
+  await waitForFunction(
+    cdp,
+    (firstMarker) => {
+      const text = document.getElementById('message-list')?.innerText || '';
+      return text.includes(firstMarker) && text.includes('definitely-missing-freehand-file.txt');
+    },
+    20_000,
+    'refreshed transcript visible',
+    prompt1,
+  );
   const refreshed = await captureState(cdp, '08-after-refresh');
   const viewportSnapshots = await captureViewportMatrix(cdp);
   const mobileDrawerProof = await captureMobileDrawerProof(cdp);

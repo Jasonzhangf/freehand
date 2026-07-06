@@ -19,6 +19,11 @@ detect_tailscale_ip() {
 
 default_daemon_bind() {
   local port="$1"
+  local profile_suffix="${2:-}"
+  if [[ "$profile_suffix" == "S" ]]; then
+    printf '127.0.0.1:%s\n' "$port"
+    return 0
+  fi
   local tailscale_ip
   tailscale_ip="$(detect_tailscale_ip)"
   if [[ -n "$tailscale_ip" ]]; then
@@ -32,12 +37,12 @@ case "$command" in
   install|restart)
     service_suffix=""
     default_label="com.freehand.daemon"
-    default_bind_addr="$(default_daemon_bind 4041)"
+    default_bind_addr="$(default_daemon_bind 4041 "$service_suffix")"
     ;;
   installS|restartS)
     service_suffix="S"
     default_label="com.freehand.daemonS"
-    default_bind_addr="$(default_daemon_bind 4042)"
+    default_bind_addr="$(default_daemon_bind 4042 "$service_suffix")"
     ;;
   *)
     echo "usage: $0 [install|restart|installS|restartS]" >&2
@@ -48,7 +53,6 @@ esac
 env_file="${FREEHAND_DAEMON_ENV_FILE:-"$runtime_home/daemon${service_suffix}.env"}"
 label="${FREEHAND_LAUNCHD_LABEL:-$default_label}"
 plist_path="$HOME/Library/LaunchAgents/$label.plist"
-bind_addr="${FREEHAND_DAEMON_BIND:-$default_bind_addr}"
 daemon_bin="$bin_dir/freehand-daemon${service_suffix}"
 if [[ "$service_suffix" == "S" ]]; then
   daemon_bin="$bin_dir/freehand-daemonS-bin"
@@ -56,6 +60,16 @@ fi
 launchd_wrapper="$bin_dir/freehand-daemon-launchd${service_suffix}"
 stdout_log="$logs_dir/daemon${service_suffix}.stdout.log"
 stderr_log="$logs_dir/daemon${service_suffix}.stderr.log"
+
+bind_addr="$default_bind_addr"
+if [[ -n "${FREEHAND_DAEMON_BIND:-}" ]]; then
+  bind_addr="$FREEHAND_DAEMON_BIND"
+elif [[ -f "$env_file" ]]; then
+  env_bind="$(awk -F= '$1 == "FREEHAND_DAEMON_BIND" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; exit }' "$env_file")"
+  if [[ -n "$env_bind" ]]; then
+    bind_addr="$env_bind"
+  fi
+fi
 
 cd "$repo_root"
 

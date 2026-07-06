@@ -1825,3 +1825,33 @@ Current real root cause split:
 - conclusion:
   - code/docs/WebUI/release daemon are verified.
   - do not claim Android true-device WebView UI acceptance until the Oplus device is manually unlocked and `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passes with Freehand foreground screenshot.
+
+# 2026-07-06 restartS bind and WebUI online verifier closeout
+
+- root cause:
+  - `scripts/install-launchd.sh restartS` recomputed `bind_addr` from default Tailscale detection instead of reading `~/.freehand/daemonS.env`, so health could check `100.66.1.82:4042` while the S daemon was actually configured for `127.0.0.1:4042`.
+  - `scripts/webui_verify_online.mjs` still assumed `new-conversation-button` directly created a session. After the `/new` dialog change, the script opened the dialog but did not confirm it, so prompts could land in a stale localStorage-selected archived session and produce false refresh-history failures.
+- implementation:
+  - S-profile default bind is now fixed to `127.0.0.1:<port>` inside `default_daemon_bind`; release profile can still use explicit `FREEHAND_DAEMON_BIND` or its default path.
+  - launchd script resolves `bind_addr` from explicit `FREEHAND_DAEMON_BIND`, then existing env file `FREEHAND_DAEMON_BIND`, then profile default.
+  - xtask gate now locks the S loopback branch and env-backed health bind snippets, with a negative CI/CD fixture test for missing env bind.
+  - online verifier now waits for the New dialog, confirms conversation mode, waits for the draft session, and after reload waits until both success and failed-tool prompts are visible before screenshot/assertion.
+  - synchronized foundation function map, test design, mainline JSON, generated wiki, and local freehand-dev skill.
+- verification:
+  - `bash -n scripts/install-launchd.sh`
+  - `node --check scripts/webui_verify_online.mjs`
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `cargo test -p xtask ci_cd -- --nocapture` -> 4 passed.
+  - `cargo test -p freehand-server -- --nocapture` -> 11 passed.
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+  - `scripts/install-launchd.sh restartS` -> restarted `com.freehand.daemonS`, S install output showed `--bind 127.0.0.1:4042`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `~/.local/bin/freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - `make verify-webui-online` -> exit 0; evidence `artifacts/webui-online/20260706-verify-4042-1783310624927/summary.json`.
+  - online checks true: composer clears after both submits, first and failure prompts survive refresh, failed-tool continuation reaches terminal success, stale historical live count is `0`, terminal live count is `0`, viewport matrix and mobile drawers pass.
+- remaining:
+  - Android true-device WebView acceptance remains blocked until device is unlocked and `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passes.
