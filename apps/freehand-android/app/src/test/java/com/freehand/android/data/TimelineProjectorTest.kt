@@ -114,6 +114,9 @@ class TimelineProjectorTest {
         val json = projector.latestTurnProjectionJson()
         assertNotNull(json)
         assertTrue(json!!.contains("query frame rejected"))
+        assertTrue(json.contains("\"title\":\"Connection\""))
+        assertFalse(json.contains("\"title\":\"ADP\""))
+        assertFalse(json.contains("ADP failure"))
     }
 
     // ── apply() progress event ──────────────────────────────────────────

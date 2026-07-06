@@ -103,8 +103,8 @@ class TimelineProjector {
                     add("public_conversation", JsonArray().apply {
                         add(JsonObject().apply {
                             addProperty("kind", "Error")
-                            addProperty("title", "ADP")
-                            addProperty("body", failure?.get("message").asStringSafe() ?: "ADP failure")
+                            addProperty("title", "Connection")
+                            addProperty("body", failure?.get("message").asStringSafe() ?: "connection failure")
                             addProperty("status", "failed")
                         })
                     })

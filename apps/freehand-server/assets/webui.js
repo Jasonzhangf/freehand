@@ -146,7 +146,9 @@ window.__freehandLayout = {
 const state = {
   turn: null,
   sessions: [],
+  sessionListLoaded: false,
   selectedSessionIds: new Set(),
+  expandedAgentIds: new Set(["master"]),
   selectedSessionId: initialSelectedSessionId,
   selectedCwd: initialSelectedCwd,
   draftSessionId: null,
@@ -165,7 +167,7 @@ const state = {
   mobileDrawer: null,
   submitStartedAt: null,
   submitInFlight: false,
-  commandStatusMessage: "connecting to ADP...",
+  commandStatusMessage: "connecting to service...",
   commandStatusStickyUntil: 0,
   adpFailure: null,
   adpStatus: "connecting",
@@ -253,6 +255,79 @@ function syncMobileDrawerForLayout() {
   applyMobileDrawerState();
 }
 
+function shouldIgnoreSessionSwipeTarget(target) {
+  if (!target || !target.closest) {
+    return false;
+  }
+  return !!target.closest("input, textarea, select, button, a, dialog, .composer-card, .sidebar, .inspector");
+}
+
+function installMobileSessionSwipeGesture() {
+  const openThreshold = 68;
+  const verticalTolerance = 58;
+  let gesture = null;
+
+  const begin = (event) => {
+    if (!isMobileDrawerLayout(document.body.dataset.layoutShape || applyLayoutShape())) {
+      gesture = null;
+      return;
+    }
+    if (state.mobileDrawer || shouldIgnoreSessionSwipeTarget(event.target)) {
+      gesture = null;
+      return;
+    }
+    const point = event.touches ? event.touches[0] : event;
+    if (!point) {
+      gesture = null;
+      return;
+    }
+    gesture = {
+      id: event.pointerId,
+      startX: point.clientX,
+      startY: point.clientY,
+      tracking: true,
+    };
+  };
+
+  const move = (event) => {
+    if (!gesture || !gesture.tracking) {
+      return;
+    }
+    const point = event.touches ? event.touches[0] : event;
+    if (!point) {
+      return;
+    }
+    const deltaX = point.clientX - gesture.startX;
+    const deltaY = point.clientY - gesture.startY;
+    if (deltaX < 0 || Math.abs(deltaY) > verticalTolerance) {
+      gesture = null;
+      return;
+    }
+    if (deltaX > 12 && deltaX > Math.abs(deltaY) * 1.4 && event.cancelable) {
+      event.preventDefault();
+    }
+    if (deltaX >= openThreshold && deltaX > Math.abs(deltaY) * 1.4) {
+      setMobileDrawer("sessions");
+      gesture = null;
+    }
+  };
+
+  const end = () => {
+    gesture = null;
+  };
+
+  if (window.PointerEvent) {
+    document.addEventListener("pointerdown", begin, { passive: true });
+    document.addEventListener("pointermove", move, { passive: false });
+    document.addEventListener("pointerup", end, { passive: true });
+    document.addEventListener("pointercancel", end, { passive: true });
+  }
+  document.addEventListener("touchstart", begin, { passive: true });
+  document.addEventListener("touchmove", move, { passive: false });
+  document.addEventListener("touchend", end, { passive: true });
+  document.addEventListener("touchcancel", end, { passive: true });
+}
+
 function adpUrl() {
   const endpoint = shellConfig().adpEndpoint || "/adp";
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -279,12 +354,12 @@ function ensureAdpSocket() {
   const socket = new WebSocket(adpUrl());
   state.adpSocket = socket;
   state.adpStatus = "connecting";
-  setCommandStatus("ADP connecting...");
+  setCommandStatus("connecting to service...");
 
   state.adpOpened = new Promise((resolve, reject) => {
     socket.addEventListener("open", () => {
       state.adpStatus = "connected";
-      setCommandStatus("ADP connected; waiting for subscription...");
+      setCommandStatus("connected; waiting for updates...");
       renderAll();
       resolve(socket);
     });
@@ -292,25 +367,25 @@ function ensureAdpSocket() {
       try {
         handleAdpFrame(JSON.parse(event.data));
       } catch (error) {
-        state.adpFailure = `ADP decode failed: ${error.message}`;
+        state.adpFailure = `connection decode failed: ${error.message}`;
         setCommandStatus(state.adpFailure);
         renderAll();
       }
     });
     socket.addEventListener("error", () => {
       state.adpStatus = "error";
-      setCommandStatus("ADP transport error");
+      setCommandStatus("connection error");
       renderAll();
-      reject(new Error("ADP transport error"));
+      reject(new Error("connection error"));
     });
     socket.addEventListener("close", () => {
       state.adpStatus = "closed";
-      setCommandStatus("ADP closed");
+      setCommandStatus("connection closed");
       state.adpSocket = null;
       state.adpOpened = null;
       state.adpSubscriptions.clear();
       for (const { reject: rejectRequest } of state.adpRequests.values()) {
-        rejectRequest(new Error("ADP closed"));
+        rejectRequest(new Error("connection closed"));
       }
       for (const { timeoutId } of state.adpRequests.values()) {
         window.clearTimeout(timeoutId);
@@ -338,7 +413,7 @@ function requestAdp(kind, payloadKey, payload, prefix) {
         return;
       }
       state.adpRequests.delete(requestId);
-      reject(new Error(`ADP ${kind} request timed out after ${formatDuration(adpRequestTimeoutMs)}`));
+      reject(new Error(`request timed out after ${formatDuration(adpRequestTimeoutMs)}`));
     }, adpRequestTimeoutMs);
     state.adpRequests.set(requestId, { resolve, reject, kind, timeoutId });
   });
@@ -406,7 +481,7 @@ function handleAdpFrame(frame) {
         request.resolve(frame.selector);
       }
       state.adpSubscriptions.add(frame.request_id);
-      setBackgroundCommandStatus(`ADP subscription accepted: ${frame.selector.stream_kind}`);
+      setBackgroundCommandStatus(`updates connected: ${frame.selector.stream_kind}`);
       return;
     case "subscription_event":
       state.adpFailure = null;
@@ -419,10 +494,10 @@ function handleAdpFrame(frame) {
         window.clearTimeout(request.timeoutId);
         request.reject(new Error(frame.failure.message || frame.failure.code));
       }
-      setCommandStatus(`ADP failure: ${frame.failure.code}`);
+      setCommandStatus(`request failed: ${frame.failure.code}`);
       return;
     default:
-      setCommandStatus(`unknown ADP frame: ${frame.kind}`);
+      setCommandStatus(`unknown service message: ${frame.kind}`);
   }
 }
 
@@ -538,7 +613,7 @@ function addAttachmentFiles(files, forcedKind = null) {
   const next = [...currentAttachments()];
   Array.from(files || []).forEach((file) => {
     next.push({
-      id: crypto.randomUUID(),
+      id: browserRandomId(),
       name: file.name,
       size: file.size,
       type: file.type || "application/octet-stream",
@@ -782,7 +857,7 @@ function pendingExecutionCard(renderPending) {
   body.appendChild(executionRow({
     kind: "system",
     title: "Client",
-    body: ["Request accepted by WebUI. Waiting for ADP dispatch."],
+    body: ["Request accepted. Waiting for service dispatch."],
     status: elapsed || "0s",
   }));
   return article;
@@ -799,7 +874,7 @@ function pendingChatCards(renderPending) {
   const assistantRows = [{
     kind: "system",
     title: "Client",
-    body: ["Request accepted by WebUI. Waiting for ADP dispatch."],
+    body: ["Request accepted. Waiting for service dispatch."],
     status: elapsed || "0s",
   }];
   const renderTurn = {
@@ -821,7 +896,7 @@ function failureChatBubble(message) {
     },
     [{
       kind: "error",
-      title: "ADP",
+      title: "Connection",
       body: [message],
       status: "failed",
     }],
@@ -2022,9 +2097,27 @@ function syncSelectedCwdFromProjection(projection) {
   }
 }
 
+function browserRandomId() {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+  if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    cryptoApi.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex
+      .slice(6, 8)
+      .join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+  }
+  return `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 function newDraftSessionId() {
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
-  return `webui-session-${stamp}-${crypto.randomUUID().slice(0, 8)}`;
+  return `webui-session-${stamp}-${browserRandomId().slice(0, 8)}`;
 }
 
 function resetLocalConversationState(sessionId) {
@@ -2032,6 +2125,8 @@ function resetLocalConversationState(sessionId) {
   state.sessionTurns = [];
   state.turn = null;
   state.publicConversation = [];
+  state.debug = null;
+  state.adpFailure = null;
   state.pendingUserInput = null;
   state.pendingSubmitId = null;
   state.pendingSubmitSessionId = null;
@@ -2082,6 +2177,7 @@ async function startNewTask(options = {}) {
 
 function setSessionList(projection) {
   state.sessions = (projection && projection.sessions) || [];
+  state.sessionListLoaded = true;
   const knownSessionIds = new Set(state.sessions.map((session) => session.session_id));
   for (const sessionId of Array.from(state.selectedSessionIds)) {
     if (!knownSessionIds.has(sessionId)) {
@@ -2094,6 +2190,11 @@ function setSessionList(projection) {
     !state.sessions.some((session) => session.session_id === state.selectedSessionId)
   ) {
     setSelectedSessionId(null);
+  }
+  if (state.sessions.length === 0 && !state.draftSessionId && !state.submitInFlight && !state.pendingUserInput) {
+    clearLocalConversationTruth();
+  } else if (state.turn && !sessionTruthAllowsTurn(state.turn)) {
+    clearLocalConversationTruth({ preserveSelectedSession: true });
   }
   if (!state.selectedSessionId && state.sessions.length > 0) {
     const active = state.sessions.find((session) => session.active_turn_id);
@@ -2220,9 +2321,15 @@ async function rollbackLatestSessionTurn() {
 }
 
 function setSessionTranscript(projection) {
+  if (projection && projection.session_id && !sessionTruthAllowsSessionId(projection.session_id)) {
+    if (state.selectedSessionId === projection.session_id) {
+      clearLocalConversationTruth();
+    }
+    return;
+  }
   state.sessionTurns = logicalSessionTurns((projection && projection.turns) || []);
   syncSelectedCwdFromProjection(projection);
-  if (projection && projection.session_id && state.sessionTurns.length > 0) {
+  if (projection && projection.session_id) {
     setSelectedSessionId(projection.session_id);
     if (state.draftSessionId === projection.session_id) {
       state.draftSessionId = null;
@@ -2230,6 +2337,42 @@ function setSessionTranscript(projection) {
   }
   const latestTurn = state.sessionTurns[state.sessionTurns.length - 1] || null;
   setTurnProjection(latestTurn, { preserveSessionTurns: true });
+}
+
+function clearLocalConversationTruth(options = {}) {
+  if (!options.preserveSelectedSession) {
+    setSelectedSessionId(null);
+  }
+  state.sessionTurns = [];
+  state.turn = null;
+  state.publicConversation = [];
+  state.debug = null;
+  state.adpFailure = null;
+  state.lifecycleClocks.clear();
+  state.toolTimings.clear();
+}
+
+function sessionTruthAllowsTurn(turn) {
+  if (!turn || !turn.session_id) {
+    return false;
+  }
+  return sessionTruthAllowsSessionId(turn.session_id);
+}
+
+function sessionTruthAllowsSessionId(sessionId) {
+  if (!sessionId) {
+    return false;
+  }
+  if (state.draftSessionId && sessionId === state.draftSessionId) {
+    return true;
+  }
+  if (state.pendingSubmitSessionId && sessionId === state.pendingSubmitSessionId) {
+    return true;
+  }
+  if (!state.sessionListLoaded) {
+    return true;
+  }
+  return state.sessions.some((session) => session.session_id === sessionId);
 }
 
 function turnOrderKey(turnId) {
@@ -2256,7 +2399,16 @@ function turnOrderKey(turnId) {
 }
 
 function setTurnProjection(turn, options = {}) {
+  if (turn && !sessionTruthAllowsTurn(turn)) {
+    if (state.turn && state.turn.session_id === turn.session_id) {
+      clearLocalConversationTruth({ preserveSelectedSession: true });
+    }
+    return;
+  }
   state.turn = turn || null;
+  if (!state.turn) {
+    state.debug = null;
+  }
   if (state.turn && !state.selectedSessionId) {
     setSelectedSessionId(state.turn.session_id);
   }
@@ -2281,6 +2433,10 @@ function setTurnProjection(turn, options = {}) {
 function applyAdpQueryResult(result) {
   const turn = variantPayload(result, "Turn");
   if (turn !== undefined) {
+    if (turn && !sessionTruthAllowsTurn(turn)) {
+      renderAll();
+      return;
+    }
     if (state.selectedSessionId && turn.session_id !== state.selectedSessionId) {
       renderAll();
       return;
@@ -2289,7 +2445,7 @@ function applyAdpQueryResult(result) {
     renderAll();
     if (state.turn) {
       refreshDebug().catch((error) => {
-        setCommandStatus(`debug ADP query failed: ${error.message}`);
+      setCommandStatus(`debug query failed: ${error.message}`);
       });
     }
     return;
@@ -2326,12 +2482,16 @@ function applyAdpSubscriptionEvent(event) {
   const projection = event.projection || {};
   const turn = variantPayload(projection, "Turn");
   if (turn !== undefined) {
+    if (turn && !sessionTruthAllowsTurn(turn)) {
+      renderCommandStatus();
+      return;
+    }
     if (state.selectedSessionId && turn.session_id !== state.selectedSessionId) {
       renderCommandStatus();
       return;
     }
     setTurnProjection(turn);
-    setBackgroundCommandStatus("ADP turn update received");
+    setBackgroundCommandStatus("conversation updated");
     renderAll();
     ensureDebugSubscription();
     return;
@@ -2354,20 +2514,21 @@ function liveTurnStatus() {
     const elapsed = elapsedSince(state.submitStartedAt);
     return elapsed ? `dispatching... ${elapsed}` : "dispatching...";
   }
-  if (!state.turn) {
+  const turn = activeTurnForSelectedSession();
+  if (!turn) {
     return null;
   }
 
-  const waitingTools = (state.turn.tool_activities || []).filter(
+  const waitingTools = (turn.tool_activities || []).filter(
     (tool) => tool.status === "Waiting" || tool.status === "waiting",
   );
   if (waitingTools.length > 0) {
     return waitingToolStatus(waitingTools);
   }
 
-  if (turnIsWaitingForModelResponse(state.turn)) {
-    const elapsed = elapsedSince(lifecycleClockStartedAt(modelRequestTimingKey(state.turn)));
-    const label = modelRequestLabel(state.turn);
+  if (turnIsWaitingForModelResponse(turn)) {
+    const elapsed = elapsedSince(lifecycleClockStartedAt(modelRequestTimingKey(turn)));
+    const label = modelRequestLabel(turn);
     return elapsed ? `${label}... ${elapsed}` : `${label}...`;
   }
 
@@ -2376,11 +2537,21 @@ function liveTurnStatus() {
     return elapsed ? `dispatching... ${elapsed}` : "dispatching...";
   }
 
-  if (state.turn.terminal_text) {
+  if (turn.terminal_text) {
     return "turn completed";
   }
 
   return null;
+}
+
+function activeTurnForSelectedSession() {
+  if (!state.turn) {
+    return null;
+  }
+  if (state.selectedSessionId && state.turn.session_id !== state.selectedSessionId) {
+    return null;
+  }
+  return state.turn;
 }
 
 function renderCommandStatus() {
@@ -2402,19 +2573,7 @@ function renderMessages() {
   const renderModel = buildConversationRenderModel();
   const hasSelectedSessionTranscript = renderModel.turns.length > 0;
 
-  if (state.selectedSessionId && !hasSelectedSessionTranscript && !state.turn) {
-    // A newly selected draft session should stay visually clean until the user sends.
-  } else if (renderModel.turns.length === 0 && !state.turn) {
-    fragments.push(
-      card(
-        "Assistant",
-        { className: "pending", label: "idle" },
-        "等待数据",
-        "WebUI 正在查询最新 turn。",
-        "assistant",
-      ),
-    );
-  } else {
+  if (renderModel.turns.length > 0) {
     renderModel.turns.forEach((renderTurn) => {
       fragments.push(...turnChatCards(renderTurn));
     });
@@ -2433,12 +2592,10 @@ function renderMessages() {
     empty.className = "chat-empty-state";
     const title = document.createElement("div");
     title.className = "chat-empty-title";
-    title.textContent = state.selectedSessionId ? "New conversation" : "Waiting for protocol state";
+    title.textContent = "New conversation";
     const copy = document.createElement("div");
     copy.className = "chat-empty-copy";
-    copy.textContent = state.selectedSessionId
-      ? "Send a message to start this session."
-      : "Waiting for ADP session state.";
+    copy.textContent = "Send a message to start this session.";
     empty.append(title, copy);
     fragments.push(empty);
   }
@@ -2515,6 +2672,143 @@ function appendSessionParts(item, label, title, meta) {
   item.append(labelNode, titleNode, metaNode);
 }
 
+function normalizeAgentId(value) {
+  const agentId = `${value || ""}`.trim();
+  return agentId || "master";
+}
+
+function sessionAgentId(session) {
+  if (!session) {
+    return "master";
+  }
+  const explicit = session.agent_id || session.source_agent_id || session.agent || session.source_agent;
+  if (explicit) {
+    return normalizeAgentId(explicit);
+  }
+  if (state.turn && state.turn.session_id === session.session_id && state.turn.source) {
+    return normalizeAgentId(state.turn.source.source_agent_id);
+  }
+  const turn = state.sessionTurns.find((candidate) => candidate.session_id === session.session_id && candidate.source);
+  return normalizeAgentId(turn && turn.source && turn.source.source_agent_id);
+}
+
+function agentDisplayName(agentId) {
+  const normalized = normalizeAgentId(agentId);
+  if (normalized === "master") {
+    return "Master";
+  }
+  return normalized;
+}
+
+function sessionKindLabel(session) {
+  return normalizeCwd(session && session.cwd) ? "task" : "global";
+}
+
+function groupedSessionsByAgent(sessions) {
+  const groups = new Map();
+  (sessions || []).forEach((session) => {
+    const agentId = sessionAgentId(session);
+    if (!groups.has(agentId)) {
+      groups.set(agentId, []);
+    }
+    groups.get(agentId).push(session);
+  });
+  return Array.from(groups.entries()).map(([agentId, groupSessions]) => ({
+    agentId,
+    sessions: groupSessions,
+  }));
+}
+
+function ensureSessionAgentExpanded(agentId) {
+  state.expandedAgentIds.add(normalizeAgentId(agentId));
+}
+
+function renderSessionItem(session) {
+  const item = document.createElement("section");
+  item.className = `session-item session-row${session.session_id === state.selectedSessionId ? " active" : ""}`;
+  item.dataset.sessionId = session.session_id;
+  item.dataset.sessionKind = sessionKindLabel(session);
+
+  const selector = document.createElement("input");
+  selector.className = "session-selector";
+  selector.type = "checkbox";
+  selector.checked = state.selectedSessionIds.has(session.session_id);
+  selector.setAttribute("aria-label", `Select session ${session.session_id}`);
+  selector.addEventListener("change", () => {
+    toggleSessionSelection(session.session_id, selector.checked);
+  });
+
+  const button = document.createElement("button");
+  button.className = "session-button";
+  button.type = "button";
+  button.dataset.sessionId = session.session_id;
+
+  const cwd = normalizeCwd(session.cwd);
+  const cwdTail = cwd ? ` · ${cwd.split("/").filter(Boolean).slice(-2).join("/") || cwd}` : "";
+  const turnText = session.latest_turn_id
+    ? `${session.latest_turn_id} · ${session.turn_count} turn(s)${cwdTail}`
+    : `${session.turn_count} turn(s)${cwdTail}`;
+  appendSessionParts(
+    button,
+    session.active_turn_id ? "active" : `${sessionKindLabel(session)} · ${session.latest_status || "session"}`,
+    session.title || session.session_id,
+    turnText,
+  );
+
+  button.addEventListener("click", () => {
+    setSelectedSessionId(session.session_id);
+    closeMobileDrawer();
+    refreshSelectedSession().catch((error) => {
+      setCommandStatus(`session refresh failed: ${error.message}`);
+    });
+  });
+  item.append(selector, button);
+  return item;
+}
+
+function renderSessionAgentGroup(group) {
+  const selectedInGroup = group.sessions.some((session) => session.session_id === state.selectedSessionId);
+  if (selectedInGroup) {
+    ensureSessionAgentExpanded(group.agentId);
+  }
+  const section = document.createElement("section");
+  section.className = "session-agent-group";
+  section.dataset.agentId = group.agentId;
+  section.dataset.expanded = state.expandedAgentIds.has(group.agentId) ? "true" : "false";
+
+  const button = document.createElement("button");
+  button.className = "session-agent-button";
+  button.type = "button";
+  button.setAttribute("aria-expanded", section.dataset.expanded);
+  const taskCount = group.sessions.filter((session) => normalizeCwd(session.cwd)).length;
+  const globalCount = group.sessions.length - taskCount;
+  button.innerHTML = `
+    <span class="session-agent-main">
+      <span class="session-agent-chevron" aria-hidden="true">›</span>
+      <span class="session-agent-name"></span>
+    </span>
+    <span class="session-agent-count"></span>
+  `;
+  button.querySelector(".session-agent-name").textContent = agentDisplayName(group.agentId);
+  button.querySelector(".session-agent-count").textContent =
+    `${group.sessions.length} session(s) · ${taskCount} task · ${globalCount} global`;
+  button.addEventListener("click", () => {
+    if (state.expandedAgentIds.has(group.agentId)) {
+      state.expandedAgentIds.delete(group.agentId);
+    } else {
+      state.expandedAgentIds.add(group.agentId);
+    }
+    renderSessions();
+  });
+
+  const sessionsNode = document.createElement("div");
+  sessionsNode.className = "session-agent-sessions";
+  group.sessions.forEach((session) => sessionsNode.appendChild(renderSessionItem(session)));
+
+  section.append(button, sessionsNode);
+  return section;
+}
+
 function renderSessionBulkToolbar() {
   if (!sessionBulkCount || !sessionDeleteSelectedButton) {
     return;
@@ -2556,44 +2850,8 @@ function renderSessions() {
     renderDraftSessionItem();
   }
 
-  state.sessions.forEach((session) => {
-    const item = document.createElement("section");
-    item.className = `session-item session-row${session.session_id === state.selectedSessionId ? " active" : ""}`;
-    item.dataset.sessionId = session.session_id;
-
-    const selector = document.createElement("input");
-    selector.className = "session-selector";
-    selector.type = "checkbox";
-    selector.checked = state.selectedSessionIds.has(session.session_id);
-    selector.setAttribute("aria-label", `Select session ${session.session_id}`);
-    selector.addEventListener("change", () => {
-      toggleSessionSelection(session.session_id, selector.checked);
-    });
-
-    const button = document.createElement("button");
-    button.className = "session-button";
-    button.type = "button";
-    button.dataset.sessionId = session.session_id;
-
-    const cwd = normalizeCwd(session.cwd);
-    const cwdTail = cwd ? ` · ${cwd.split("/").filter(Boolean).slice(-2).join("/") || cwd}` : "";
-    const turnText = session.latest_turn_id ? `${session.latest_turn_id} · ${session.turn_count} turn(s)${cwdTail}` : `${session.turn_count} turn(s)${cwdTail}`;
-    appendSessionParts(
-      button,
-      session.active_turn_id ? "active" : session.latest_status || "session",
-      session.title || session.session_id,
-      turnText,
-    );
-
-    button.addEventListener("click", () => {
-      setSelectedSessionId(session.session_id);
-      closeMobileDrawer();
-      refreshSelectedSession().catch((error) => {
-        setCommandStatus(`session refresh failed: ${error.message}`);
-      });
-    });
-    item.append(selector, button);
-    sessionList.appendChild(item);
+  groupedSessionsByAgent(state.sessions).forEach((group) => {
+    sessionList.appendChild(renderSessionAgentGroup(group));
   });
   renderSessionBulkToolbar();
 }
@@ -2603,6 +2861,7 @@ function renderDraftSessionItem() {
   item.className = `session-item session-button${state.draftSessionId === state.selectedSessionId ? " active" : ""}`;
   item.type = "button";
   item.dataset.sessionId = state.draftSessionId;
+  item.dataset.sessionKind = state.selectedCwd ? "task" : "global";
   appendSessionParts(item, "draft", state.draftSessionId, state.selectedCwd ? `cwd ${state.selectedCwd}` : "first send creates session");
   item.addEventListener("click", () => {
     setSelectedSessionId(state.draftSessionId);
@@ -2648,7 +2907,8 @@ function renderCheckpoints() {
 }
 
 function renderTurnMeta() {
-  if (!state.turn) {
+  const turn = activeTurnForSelectedSession();
+  if (!turn) {
     setText("session-title", state.selectedSessionId || "waiting for protocol state");
     setText("session-copy", state.selectedSessionId ? "no turns in selected session" : "no active turn yet");
     setText("strip-session", state.selectedSessionId || "-");
@@ -2656,7 +2916,7 @@ function renderTurnMeta() {
     setText("strip-cwd", state.selectedCwd || "-");
     setText("worker-context-tag", "Master");
     setText("task-context-tag", state.selectedCwd ? "Task cwd" : "Global");
-    setText("transport-context-tag", state.adpStatus || "ADP waiting");
+    setText("transport-context-tag", state.adpStatus || "waiting");
     setText("turn-status", liveTurnStatus() || "waiting");
     setText("strip-slave", "idle");
     setText("slave-chip", "waiting");
@@ -2665,27 +2925,27 @@ function renderTurnMeta() {
     return;
   }
 
-  setText("session-title", state.turn.session_id);
-  setText("session-copy", state.turn.cwd ? `${state.turn.turn_id} · ${state.turn.cwd}` : state.turn.turn_id);
-  setText("strip-session", state.turn.session_id);
-  setText("strip-turn", state.turn.turn_id);
-  setText("strip-cwd", state.turn.cwd || state.selectedCwd || "-");
-  setText("worker-context-tag", state.turn.slave_substream_card ? "Worker active" : "Master");
-  setText("task-context-tag", state.turn.cwd ? "Task cwd" : "Global");
-  setText("transport-context-tag", state.turn.turn_id || "ADP");
-  const runningTools = (state.turn.tool_activities || []).filter((tool) => tool.status === "Waiting" || tool.status === "waiting");
-  const turnStatus = state.turn.terminal_text
+  setText("session-title", turn.session_id);
+  setText("session-copy", turn.cwd ? `${turn.turn_id} · ${turn.cwd}` : turn.turn_id);
+  setText("strip-session", turn.session_id);
+  setText("strip-turn", turn.turn_id);
+  setText("strip-cwd", turn.cwd || state.selectedCwd || "-");
+  setText("worker-context-tag", turn.slave_substream_card ? "Worker active" : "Master");
+  setText("task-context-tag", turn.cwd ? "Task cwd" : "Global");
+  setText("transport-context-tag", turn.turn_id || "service");
+  const runningTools = (turn.tool_activities || []).filter((tool) => tool.status === "Waiting" || tool.status === "waiting");
+  const turnStatus = turn.terminal_text
     ? "completed"
     : runningTools.length > 0
       ? waitingToolStatus(runningTools).replace("tool executing", "tool running")
-      : turnIsWaitingForModelResponse(state.turn)
+      : turnIsWaitingForModelResponse(turn)
         ? liveTurnStatus()
         : state.submitInFlight
           ? liveTurnStatus()
           : "waiting";
   setText("turn-status", turnStatus);
 
-  if (state.turn.slave_substream_card) {
+  if (turn.slave_substream_card) {
     setText("strip-slave", "substream active");
     setText("slave-chip", "active");
     setText("slave-title", "slave substream available");
@@ -2750,7 +3010,7 @@ async function refreshSelectedSession() {
   applyAdpQueryResult(result);
   if (state.turn) {
     refreshDebug().catch((error) => {
-      setCommandStatus(`debug ADP query failed: ${error.message}`);
+      setCommandStatus(`debug query failed: ${error.message}`);
     });
   }
 }
@@ -2774,7 +3034,7 @@ async function refreshCheckpoints() {
 async function refreshAllProtocolState() {
   await refreshSessions();
   await refreshSelectedSession();
-  if (!state.selectedSessionId) {
+  if (!state.selectedSessionId && !state.sessionListLoaded) {
     await refreshTurn();
   }
   await refreshCheckpoints();
@@ -2789,7 +3049,7 @@ function ensureTurnSubscription() {
     { SubscribeLatestActiveTurn: { client: adpClientKind() } },
     "sub-turn",
   ).catch((error) => {
-    setCommandStatus(`ADP turn subscribe failed: ${error.message}`);
+    setCommandStatus(`turn subscription failed: ${error.message}`);
   });
 }
 
@@ -2809,6 +3069,10 @@ function ensureSseTurnSubscription() {
   stream.addEventListener("turn", (event) => {
     try {
       const turn = JSON.parse(event.data);
+      if (turn && !sessionTruthAllowsTurn(turn)) {
+        renderCommandStatus();
+        return;
+      }
       if (state.selectedSessionId && turn.session_id !== state.selectedSessionId) {
         renderCommandStatus();
         return;
@@ -2837,7 +3101,7 @@ function ensureDebugSubscription() {
   if (!state.debug) {
       state.debug = {
         status_text: "debug stream waiting",
-        detail_lines: ["waiting for ADP debug subscription"],
+        detail_lines: ["waiting for debug subscription"],
       };
       renderDebug();
   }
@@ -2990,7 +3254,7 @@ async function runSlashCommand(rawText) {
       setCommandStatus(`attachments ${state.attachmentsPreviewOpen ? "preview visible" : "preview collapsed"}: ${attachmentSummary()}`, { stickyMs: 5000 });
       return true;
     case "/model":
-      setCommandStatus("model selection is controlled by runtime config for this ADP surface", { stickyMs: 6000 });
+      setCommandStatus("model selection is controlled by runtime config", { stickyMs: 6000 });
       return true;
     default:
       if (command.startsWith("/")) {
@@ -3107,7 +3371,7 @@ function loadSamplePrompt(kind) {
   }
   composerInput.value = prompt;
   composerInput.focus();
-  setCommandStatus(`${kind} scenario loaded; press Send to run through ADP`, { stickyMs: 5000 });
+  setCommandStatus(`${kind} scenario loaded; press Send to run`, { stickyMs: 5000 });
 }
 
 function renderDebugDetailsToggle() {
@@ -3271,6 +3535,7 @@ taskCwdInput.addEventListener("change", () => {
 
 applyLayoutShape();
 syncMobileDrawerForLayout();
+installMobileSessionSwipeGesture();
 window.addEventListener("resize", () => {
   applyLayoutShape();
   syncMobileDrawerForLayout();
@@ -3366,6 +3631,6 @@ ensureAdpSocket()
     await refreshAllProtocolState();
   })
   .catch((error) => {
-    setCommandStatus(`ADP bootstrap failed: ${error.message}`);
+    setCommandStatus(`startup connection failed: ${error.message}`);
     renderAll();
   });

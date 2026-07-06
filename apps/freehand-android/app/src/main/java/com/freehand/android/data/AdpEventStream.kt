@@ -71,15 +71,15 @@ class AdpEventStream(
             return CommandResponse(false, "bad_command_json", e.message ?: "bad command json")
         }
         val webSocket = socket
-            ?: return CommandResponse(false, "adp_not_connected", "ADP WebSocket is not connected")
+            ?: return CommandResponse(false, "adp_not_connected", "service connection is not ready")
         val requestId = nextRequestId("cmd")
         pendingCommands[requestId] = Unit
         val sent = webSocket.send(buildFrame("command", requestId, "command", command))
         if (!sent) {
             pendingCommands.remove(requestId)
-            return CommandResponse(false, "adp_send_failed", "ADP command frame send failed")
+            return CommandResponse(false, "adp_send_failed", "request send failed")
         }
-        return CommandResponse(true, "adp_command_sent", "ADP command frame sent")
+        return CommandResponse(true, "adp_command_sent", "request sent")
     }
 
     private fun subscribeLatestTurn(webSocket: WebSocket) {
@@ -125,7 +125,7 @@ class AdpEventStream(
                 val response = CommandResponse(
                     ok = false,
                     code = failure?.get("code")?.asString ?: "adp_failure",
-                    message = failure?.get("message")?.asString ?: "ADP failure",
+                    message = failure?.get("message")?.asString ?: "connection failure",
                 )
                 if (requestId.startsWith("android-cmd-")) {
                     onCommandResult(response)

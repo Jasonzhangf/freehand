@@ -138,8 +138,10 @@ Use this skill for any non-trivial work in this repo.
 - First version UI scope is CLI plus WebUI.
 - WebUI default control/status transport is ADP WebSocket `/adp`; HTTP query plus SSE subscribe remains compatibility/static-page support. Do not mix either UI transport with node WebSocket pairing semantics.
 - Daemon control/status automation is ADP WebSocket at `/adp`; WebUI, Android, CLI, and headless tests should converge on ADP command/query/subscribe frames for unified state inspection before relying on DOM-specific diagnosis.
+- ADP is internal transport terminology. WebUI/Android user-facing labels, status text, failure cards, and diagnostic prompts must say connection/service/request/conversation, not ADP; ADP may appear in code symbols, docs, CLI/test output, and debug-only surfaces.
 - WebUI selected-session transcript rendering must preserve protocol/session transcript order and append-or-replace the latest same-session turn; do not sort visible cards by `runtime-turn-*` ordinal because ordinals can reset after restart or recovery.
 - WebUI lifecycle animation must be scoped to current live turn render projection only; historical turn/tool rows must remain static even when they still carry protocol model_request or tool status fields.
+- WebUI session-list truth is the render gate after it has loaded. Latest-active query, latest-turn ADP/SSE updates, and selected-session transcript projections may render only when the session id is listed, current draft, or current pending-submit; non-destructive `DeleteSession` can leave old turn truth queryable, so never use latest-active as a fallback after session-list truth exists.
 - ADP WebSocket is UI/control/status transport, not node master/slave pairing transport; keep node pairing WebSocket semantics separate.
 - Command ingress must stay split from query/subscribe routes. Query/subscribe commands are not valid command-ingress payloads and must be rejected explicitly.
 - Before a UI command leaves `freehand-ui-protocol`, it must be wrapped in a protocol-owned owner-routing envelope; app boundaries must not invent their own command-to-owner routing.

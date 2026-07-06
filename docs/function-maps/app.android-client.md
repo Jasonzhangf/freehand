@@ -48,8 +48,8 @@
 
 ## Error Mainline
 
-- invalid command ingress returns explicit ADP failure to the user; the Android client does not invent success
-- network or ADP drop returns explicit client-visible connection state; no silent re-render and no fallback projection
+- invalid command ingress returns an explicit protocol failure frame, but user-facing Android UI renders it as a connection/request failure and does not expose `ADP`; the Android client does not invent success
+- network or protocol transport drop returns explicit client-visible connection state; no silent re-render, no fallback projection, and no protocol-name leakage in user-facing cards/banners
 - connection profile failures must expose active profile, endpoint, and concrete failure class; the client must not silently fall back to localhost, LAN scan, relay, or another profile
 - provider / reason / debug error from `ui.protocol` is rendered as a red status pill; never re-projected as success
 - cancel-without-active-turn clears only local input draft; does not invent a runtime mutation

@@ -390,6 +390,78 @@ body.theme-dark .checkpoint-item {
   background: rgba(227, 240, 234, 0.72);
 }
 
+.session-agent-group {
+  display: grid;
+  gap: 6px;
+}
+
+.session-agent-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(31, 108, 88, 0.16);
+  border-radius: 12px;
+  background: rgba(232, 243, 238, 0.58);
+  color: var(--master);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.session-agent-main {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.session-agent-chevron {
+  display: inline-block;
+  color: var(--text-soft);
+  font-size: 16px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+
+.session-agent-group[data-expanded="true"] .session-agent-chevron {
+  transform: rotate(90deg);
+}
+
+.session-agent-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-agent-count {
+  flex: 0 0 auto;
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.session-agent-sessions {
+  display: grid;
+  gap: 6px;
+  padding-left: 9px;
+  border-left: 1px solid rgba(31, 108, 88, 0.13);
+}
+
+.session-agent-group[data-expanded="false"] .session-agent-sessions {
+  display: none;
+}
+
+.session-item[data-session-kind="task"] {
+  border-color: rgba(138, 106, 48, 0.16);
+}
+
 .session-title,
 .inspector-block-title,
 .slave-name,

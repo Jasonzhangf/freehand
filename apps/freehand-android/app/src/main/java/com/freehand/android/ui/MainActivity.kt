@@ -198,7 +198,7 @@ class MainActivity : AppCompatActivity() {
             },
             sendCommand = { command ->
                 newAdp?.sendCommand(command)
-                    ?: com.freehand.android.data.CommandResponse(false, "adp_not_ready", "ADP not ready")
+                    ?: com.freehand.android.data.CommandResponse(false, "adp_not_ready", "service connection is not ready")
             },
         )
         topBar.setAgent(host.endpointLabel, "connecting")

@@ -50,6 +50,7 @@
 ## White-Box Plan
 
 - `TimelineProjectorTest`: covers turn event parsing (running/success/error/null terminal_status), ADP subscription_event projection including low-noise status-only tool summaries, ADP failure projection, progress, node_status (healthy/unhealthy), error, terminal, empty state, snapshot JSON, connection state, fallbackTurnsJson, latestTurnProjectionJson preservation
+- `TimelineProjectorTest`: user-visible failure projection must use connection/request wording and must not render `ADP` in public conversation title/body
 - `HostConfigTest`: covers URL construction for different hosts/ports and endpoint paths, including `adpUrl` and `healthUrl`
 - `DaemonConnectionConfigTest`: bootstrap bundled Tailscale profile, first-run copy to app-owned JSON, edited profile write/read, malformed existing file explicit failure, missing active profile explicit failure, relay enabled rejection
 - aspect-ratio layout classifier tests: map viewport width/height pairs to mobile/foldable/tablet/desktop layout modes without mutating selected session or draft state

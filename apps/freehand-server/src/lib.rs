@@ -1,12 +1,13 @@
 mod assets;
 mod page;
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Html;
 use axum::response::IntoResponse;
@@ -119,6 +120,10 @@ pub fn render_webui_smoke() -> String {
     page::render_webui_smoke()
 }
 
+pub fn render_webui_smoke_for_client(client: Option<&str>) -> String {
+    page::render_webui_smoke_for_client(client)
+}
+
 pub fn seed_webui_protocol_state() -> UiProtocolState {
     let mut state = UiProtocolState::default();
     let projection = sample_slave_turn_projection();
@@ -128,8 +133,10 @@ pub fn seed_webui_protocol_state() -> UiProtocolState {
     state
 }
 
-async fn handle_root() -> Html<String> {
-    Html(render_webui_smoke())
+async fn handle_root(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    Html(render_webui_smoke_for_client(
+        params.get("client").map(String::as_str),
+    ))
 }
 
 async fn handle_android_mock() -> Html<String> {
@@ -963,6 +970,8 @@ mod tests {
     fn webui_smoke_renders_shell_and_asset_routes() {
         let html = render_webui_smoke();
         assert!(html.contains("data-webui-shell=\"true\""));
+        assert!(!html.contains("data-layout-client=\"android-webview\""));
+        assert!(!html.contains("data-layout-shape=\"tablet_portrait\""));
         assert!(html.contains("/assets/theme.css"));
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/webui.js"));
@@ -995,6 +1004,19 @@ mod tests {
         assert!(html.contains("id=\"task-context-tag\""));
         assert!(html.contains("id=\"transport-context-tag\""));
         assert!(!html.contains("id=\"conversation-turn\""));
+    }
+
+    #[test]
+    fn webui_android_client_shell_pins_mobile_initial_layout() {
+        let html = render_webui_smoke_for_client(Some("android-webview"));
+        assert!(html.contains(
+            "<body class=\"theme-light\" data-layout-client=\"android-webview\" data-layout-shape=\"tablet_portrait\">"
+        ));
+        assert!(html.contains(
+            "<main class=\"app-shell\" data-webui-shell=\"true\" data-layout-client=\"android-webview\" data-layout-shape=\"tablet_portrait\""
+        ));
+        assert!(html.contains("id=\"open-session-drawer-button\""));
+        assert!(html.contains("id=\"open-detail-drawer-button\""));
     }
 
     #[tokio::test]
@@ -1099,6 +1121,8 @@ mod tests {
         assert_eq!(root.status(), StatusCode::OK);
         let root_body = root.text().await.expect("root body");
         assert!(root_body.contains("data-webui-shell=\"true\""));
+        assert!(!root_body.contains("data-layout-client=\"android-webview\""));
+        assert!(!root_body.contains("data-layout-shape=\"tablet_portrait\""));
         assert!(root_body.contains("/assets/theme.css"));
         assert!(root_body.contains("data-adp-endpoint=\"/adp\""));
         assert!(root_body.contains("id=\"session-list\""));
@@ -1116,6 +1140,20 @@ mod tests {
         assert!(!root_body.contains(">Failure</button>"));
         assert!(!root_body.contains("Success sample"));
         assert!(!root_body.contains("Failure sample"));
+
+        let android_root = client
+            .get(format!("{}/?client=android-webview", server.base_url))
+            .send()
+            .await
+            .expect("android root response");
+        assert_eq!(android_root.status(), StatusCode::OK);
+        let android_root_body = android_root.text().await.expect("android root body");
+        assert!(android_root_body.contains(
+            "<body class=\"theme-light\" data-layout-client=\"android-webview\" data-layout-shape=\"tablet_portrait\">"
+        ));
+        assert!(android_root_body.contains(
+            "<main class=\"app-shell\" data-webui-shell=\"true\" data-layout-client=\"android-webview\" data-layout-shape=\"tablet_portrait\""
+        ));
 
         let theme = client
             .get(format!("{}/assets/theme.css", server.base_url))
@@ -1169,6 +1207,10 @@ mod tests {
         assert!(webui_css_body.contains("body[data-mobile-drawer=\"sessions\"] .sidebar"));
         assert!(webui_css_body.contains("body[data-mobile-drawer=\"details\"] .inspector"));
         assert!(webui_css_body.contains(".mobile-drawer-scrim"));
+        assert!(webui_css_body.contains(".session-agent-group"));
+        assert!(webui_css_body.contains(".session-agent-button"));
+        assert!(webui_css_body.contains(".session-agent-sessions"));
+        assert!(webui_css_body.contains(".session-item[data-session-kind=\"task\"]"));
         assert!(webui_css_body.contains("env(safe-area-inset-bottom)"));
         assert!(webui_css_body.contains(".work-context-tags"));
         assert!(webui_css_body.contains(".context-tag"));
@@ -1208,6 +1250,9 @@ mod tests {
         assert!(js_body.contains("function viewportDimensionsForLayout"));
         assert!(js_body.contains("function setMobileDrawer"));
         assert!(js_body.contains("function syncMobileDrawerForLayout"));
+        assert!(js_body.contains("function installMobileSessionSwipeGesture"));
+        assert!(js_body.contains("setMobileDrawer(\"sessions\")"));
+        assert!(js_body.contains("deltaX >= openThreshold"));
         assert!(js_body.contains("window.__freehandLayout"));
         assert!(js_body.contains("document.body.dataset.layoutShape"));
         assert!(js_body.contains("shell.dataset.layoutShape"));
@@ -1248,12 +1293,22 @@ mod tests {
         assert!(js_body.contains("QuerySessionTurns"));
         assert!(js_body.contains("refreshSelectedSession"));
         assert!(js_body.contains("newDraftSessionId"));
-        assert!(js_body.contains("crypto.randomUUID"));
+        assert!(js_body.contains("function browserRandomId"));
+        assert!(js_body.contains("typeof cryptoApi.randomUUID === \"function\""));
+        assert!(js_body.contains("cryptoApi.getRandomValues(bytes)"));
+        assert!(!js_body.contains("crypto.randomUUID().slice"));
         assert!(js_body.contains("initialSelectedSessionId"));
         assert!(js_body.contains("isDraftSessionId"));
         assert!(js_body.contains("startNewConversation"));
         assert!(js_body.contains("startNewTask"));
         assert!(js_body.contains("selectedSessionIds"));
+        assert!(js_body.contains("expandedAgentIds"));
+        assert!(js_body.contains("function sessionAgentId"));
+        assert!(js_body.contains("function groupedSessionsByAgent"));
+        assert!(js_body.contains("function renderSessionAgentGroup"));
+        assert!(js_body.contains("function renderSessionItem"));
+        assert!(js_body.contains("session.source_agent_id"));
+        assert!(js_body.contains("state.turn.source.source_agent_id"));
         assert!(js_body.contains("selectAllSessions"));
         assert!(js_body.contains("draftSessionId: null"));
         assert!(js_body.contains("state.draftSessionId === sessionId"));
@@ -1283,6 +1338,10 @@ mod tests {
         assert!(js_body.contains("function pendingUserInputIsMaterialized"));
         assert!(js_body.contains("function clearPendingUserInputIfMaterialized"));
         assert!(js_body.contains("clearPendingUserInputIfMaterialized();"));
+        assert!(js_body.contains("function activeTurnForSelectedSession"));
+        assert!(js_body.contains(
+            "state.selectedSessionId && state.turn.session_id !== state.selectedSessionId"
+        ));
         assert!(js_body.contains("function sameRenderableTurn"));
         assert!(js_body.contains("const merged = [];"));
         assert!(js_body.contains("sameRenderableTurn(existing, turn)"));
@@ -1333,7 +1392,31 @@ mod tests {
         assert!(!js_body.contains("window.scrollTo({ top: document.documentElement.scrollHeight"));
         assert!(js_body.contains("function conversationTurnsForRender"));
         assert!(js_body.contains("if (!state.selectedSessionId)"));
-        assert!(js_body.contains("await refreshTurn();"));
+        assert!(js_body.contains("sessionListLoaded: false"));
+        assert!(js_body.contains("state.sessionListLoaded = true"));
+        assert!(js_body.contains("function sessionTruthAllowsTurn"));
+        assert!(js_body.contains("function sessionTruthAllowsSessionId"));
+        assert!(js_body.contains("!state.selectedSessionId && !state.sessionListLoaded"));
+        assert!(js_body.contains("if (turn && !sessionTruthAllowsTurn(turn))"));
+        assert!(js_body.contains("!sessionTruthAllowsSessionId(projection.session_id)"));
+        assert!(js_body.contains("clearLocalConversationTruth"));
+        assert!(
+            !js_body.contains(
+                "state.selectedSessionId && !hasSelectedSessionTranscript && !state.turn"
+            )
+        );
+        assert!(!js_body.contains("WebUI 正在查询最新 turn。"));
+        assert!(!js_body.contains("等待数据"));
+        assert!(!root_body.contains("WebUI 正在查询最新 turn。"));
+        assert!(!root_body.contains("等待数据"));
+        assert!(root_body.contains("New conversation"));
+        assert!(root_body.contains("Send a message to start this session."));
+        assert!(js_body.contains("if (projection && projection.session_id)"));
+        assert!(
+            !js_body.contains(
+                "if (projection && projection.session_id && state.sessionTurns.length > 0)"
+            )
+        );
         assert!(js_body.contains("turns.filter(Boolean).forEach"));
         assert!(js_body.contains("merged[index] = turn;"));
         assert!(!js_body.contains("function compareTurnIds"));
@@ -1429,6 +1512,7 @@ mod tests {
         assert!(js_body.contains("formatDuration"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("tool_call_id"));
+        assert!(!js_body.contains("ADP"));
         assert!(!js_body.contains("ADP success sample"));
         assert!(!js_body.contains("ADP failure sample"));
         assert!(js_body.contains("scenario loaded"));
@@ -1450,7 +1534,7 @@ mod tests {
         assert!(js_body.contains("setCommandStatus"));
         assert!(js_body.contains("setBackgroundCommandStatus"));
         assert!(js_body.contains("adpRequestTimeoutMs"));
-        assert!(js_body.contains("ADP ${kind} request timed out"));
+        assert!(js_body.contains("request timed out after"));
         assert!(js_body.contains("commandStatusStickyUntil"));
         assert!(js_body.contains("stickyMs"));
         assert!(js_body.contains("Cmd/Ctrl+Enter"));
@@ -1483,7 +1567,7 @@ mod tests {
             .expect("adp failure branch present");
         assert!(
             adp_failure_pos > turn_render_pos,
-            "ADP failure card must render after conversation timeline branch"
+            "connection failure card must render after conversation timeline branch"
         );
 
         server.stop().await;

@@ -1874,3 +1874,116 @@ Current real root cause split:
   - previous blocker `device_locked_or_dreaming` is cleared for this device run.
   - mobile WebUI/Android WebView goal now has both S-profile browser evidence and Android true-device foreground WebView evidence.
   - final full local gate after Android pass: `make ci` -> exit 0.
+
+# 2026-07-06 phone UI stale asset correction
+
+- user reported phone UI did not update after the closeout.
+- root cause:
+  - Android app is configured for release/Tailscale daemon `100.66.1.82:4041`, while the freshest WebUI assets were only proven on S profile `127.0.0.1:4042`.
+  - before global reinstall, served release hashes did not match workspace:
+    - workspace `webui.css`: `8ed33b2d1d8be68632668d5375d2455bd44e1b93fefb1c3eb64a07ce39bda1a1`
+    - workspace `webui.js`: `2a7cc005245ed0f017d7a4f4f7761e15e9975733785f8a3f6844f333c19c21af`
+    - old `100.66.1.82:4041` `webui.css`: `13100627a7bbbc91c025a9ef48adaff14d3f4621267c23256a065e34c986ca9f`
+    - old `100.66.1.82:4041` `webui.js`: `0775ab6e51a6687b0b596e2ae8058d452fff91110c969add28447837e0ad19b3`
+- correction:
+  - ran `scripts/install-global.sh && scripts/install-launchd.sh restart`.
+  - release daemon now runs `com.freehand.daemon` on `100.66.1.82:4041`.
+  - release served CSS/JS hashes now match workspace exactly.
+  - `curl -4fsS http://100.66.1.82:4041/health` -> `ok`.
+  - Android verifier passed: `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` -> `artifacts/android-device/20260706T042507Z-100.104.163.65_5555-11074`.
+  - screenshot visual check: phone now shows updated mobile WebUI header tags (`Master`, `Task cwd`, `runtime-turn-99-r2`) and updated tool/card rendering.
+  - logcat layout probe: `shape=tall_phone`, `conversationPrimary=true`, session/detail drawers fixed but offscreen.
+- lesson:
+  - S-profile online proof is not enough for phone UI proof when Android points to release 4041.
+  - phone verification must include release served asset hash check before Android screenshot acceptance.
+# 2026-07-06 WebUI new-session clean-state release verification
+
+- root cause found on release 4041: served root HTML and assets were updated, but `/new` still failed in browser because `crypto.randomUUID` is unavailable on non-secure Tailscale HTTP (`http://100.66.1.82:4041`), leaving the old selected session visible and reporting `new session failed: crypto.randomUUID is not a function`.
+- implementation:
+  - `apps/freehand-server/assets/webui.js` now uses `browserRandomId()` for draft session ids and local request ids; it prefers `crypto.randomUUID`, falls back to `crypto.getRandomValues`, then a local timestamp/random suffix.
+  - `scripts/webui_verify_online.mjs` now removes existing sessions through ADP `DeleteSession` before creating a new session, then asserts clean `/new` state before submitting samples.
+  - `apps/freehand-server/src/lib.rs` asset smoke now locks the shared id helper and forbids direct `crypto.randomUUID().slice` use for draft ids.
+  - synchronized `app.webui-smoke` function map and test design.
+- verification:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `node --check scripts/webui_verify_online.mjs`
+  - `cargo test -p freehand-server -- --nocapture`
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `scripts/install-global.sh`
+  - `FREEHAND_DAEMON_BIND=100.66.1.82:4041 scripts/install-launchd.sh restart`
+  - `curl -4fsS http://100.66.1.82:4041/health` -> `ok`
+  - `~/.local/bin/freehand-cli adp-smoke --url ws://100.66.1.82:4041/adp` -> `adp_smoke_ok`
+  - `FREEHAND_WEBUI_BASE_URL=http://100.66.1.82:4041/ FREEHAND_WEBUI_ADP_URL=ws://100.66.1.82:4041/adp FREEHAND_WEBUI_CLI=$HOME/.local/bin/freehand-cli FREEHAND_WEBUI_PROFILE=4041 node scripts/webui_verify_online.mjs`
+  - latest evidence: `artifacts/webui-online/20260706-verify-4041-1783329891362/summary.json`.
+  - verifier removed old session `webui-session-20260706091227-20c2b581`; after cleanup ADP reported `sessions=0`.
+  - new draft `webui-session-20260706092451-c6f51f63` showed `selectedTurn=-`, `messageCount=0`, `messageText="New conversation\nSend a message to start this session."`, `newSessionStartsClean=true`, and `newSessionDoesNotLeakPreviousTurn=true`.
+  - same run completed success + failed-tool continuation samples; ADP reported `turn_ids=runtime-turn-112,runtime-turn-113,runtime-turn-113-r2`, `terminal2NoLive=true`, and no stale historical live animation.
+
+# 2026-07-06 WebUI session truth gate trace
+
+- user issue: after removing old sessions and creating/refreshing a new WebUI session, old assistant/tool cards could still appear.
+- root cause:
+  - `DeleteSession` is non-destructive metadata removal, so old turn truth can remain queryable as `latest-active-turn`.
+  - WebUI had multiple render inputs: session list/transcript truth plus latest-active query/subscription/SSE fallback.
+  - when ADP session list was empty or the selected session had been removed, latest-active turn projection could still be accepted and render old `runtime-turn-*` content.
+- implementation:
+  - `state.sessionListLoaded` marks when session list truth exists.
+  - after session list truth exists, `sessionTruthAllowsSessionId` gates latest-turn query, ADP subscription event, SSE event, and selected-session transcript projection.
+  - allowed exceptions are only current draft session and current pending-submit session.
+  - rejected stale projections clear local render truth instead of selecting the old session.
+  - asset smoke now locks `sessionTruthAllowsSessionId` and transcript gate snippets.
+- verification:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `cargo test -p freehand-server -- --nocapture` -> 12 passed.
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+  - `scripts/install-global.sh` -> full release regression/build/install passed.
+  - `FREEHAND_DAEMON_BIND=100.66.1.82:4041 scripts/install-launchd.sh restart`
+  - `curl -4fsS http://100.66.1.82:4041/health` -> `ok`.
+  - `~/.local/bin/freehand-cli adp-smoke --url ws://100.66.1.82:4041/adp` -> `adp_smoke_ok`.
+  - release served asset hashes match workspace:
+    - `webui.js`: `9954f9bdb1f85a55c69f84abbdf8cc58975892c731bef895b982f7eea7d53841`
+    - `webui.css`: `b207c63c9bf20ae6697b68d899a9821d9608ac0ae953bc08915272a99647dbcc`
+  - `FREEHAND_WEBUI_BASE_URL=http://100.66.1.82:4041/ FREEHAND_WEBUI_ADP_URL=ws://100.66.1.82:4041/adp FREEHAND_WEBUI_CLI=$HOME/.local/bin/freehand-cli FREEHAND_WEBUI_PROFILE=4041 node scripts/webui_verify_online.mjs`
+  - latest evidence: `artifacts/webui-online/20260706-verify-4041-1783332261674/summary.json`.
+  - verifier first created old latest turn `cli-adp-sample-success-1783332254816883000` (`runtime-turn-118`), then removed all sessions by ADP; cleanup after-state reported `sessions=0`.
+  - clean new draft `webui-session-20260706100422-93a7a172` showed `selectedTurn=-`, `messageCount=0`, `messageText="New conversation\nSend a message to start this session."`, `newSessionStartsClean=true`, and `newSessionDoesNotLeakPreviousTurn=true`.
+  - same run completed success plus failed-tool continuation; ADP reported `turn_ids=runtime-turn-119,runtime-turn-120,runtime-turn-120-r2`, `terminal2NoLive=true`, and stale historical live count `0`.
+
+# 2026-07-06 user-visible protocol wording cleanup
+
+- user issue: ADP is an internal protocol and should be transparent to users; WebUI/Android visible status/cards/prompts must not show `ADP`.
+- implementation:
+  - WebUI status text now says connection/service/request/conversation instead of ADP.
+  - WebUI pending cards say `Request accepted. Waiting for service dispatch.`
+  - WebUI failure bubble title is `Connection`, not `ADP`.
+  - WebUI verifier prompts now use `Online success sample` / `Online failure sample`, so screenshots do not show ADP in user messages.
+  - Android `TimelineProjector` protocol failure public projection now uses `Connection` / `connection failure`.
+  - Android command send errors now use `service connection is not ready`, `request send failed`, and `request sent`.
+  - local skill now records ADP as internal terminology only.
+- verification:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `node --check scripts/webui_verify_online.mjs`
+  - `cargo test -p freehand-server -- --nocapture` -> 12 passed.
+  - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest` -> passed.
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+  - `scripts/install-global.sh` -> full release regression/build/install passed.
+  - `FREEHAND_DAEMON_BIND=100.66.1.82:4041 scripts/install-launchd.sh restart`
+  - `curl -4fsS http://100.66.1.82:4041/health` -> `ok`.
+  - `~/.local/bin/freehand-cli adp-smoke --url ws://100.66.1.82:4041/adp` -> `adp_smoke_ok`.
+  - release served asset hashes match workspace:
+    - `webui.js`: `e4a01ee878de0fdbfb4bddd3f07245d4da148f4beb58d380df9729178b71a7bd`
+    - `webui.css`: `b207c63c9bf20ae6697b68d899a9821d9608ac0ae953bc08915272a99647dbcc`
+  - online WebUI evidence: `artifacts/webui-online/20260706-verify-4041-1783348272047/summary.json`.
+  - WebUI checks all true; `messageTextContainsADP=false`; command statuses include `new conversation ready`, `dispatching...`, `thinking after tool result...`, and `turn completed`.
+  - Android true-device evidence: `artifacts/android-device/20260706T143159Z-100.104.163.65_5555-81364/summary.json`, `status=passed`.

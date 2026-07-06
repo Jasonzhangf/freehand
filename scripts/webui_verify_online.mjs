@@ -10,14 +10,20 @@ const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const cliPath = process.env.FREEHAND_WEBUI_CLI || `${process.env.HOME}/.local/bin/freehand-cliS`;
 const profileName = process.env.FREEHAND_WEBUI_PROFILE || portLabelFromBaseUrl(baseUrl);
 const successPrompt =
-  'ADP success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.';
+  'Online success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.';
 const failurePrompt =
-  'ADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.';
+  'Online failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.';
 
 const runId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-verify-${profileName}-${Date.now()}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
 
 await fs.mkdir(artifactDir, { recursive: true });
+
+const cleanupResult = await removeExistingSessions();
+if (cleanupResult.failed.length > 0) {
+  await fs.writeFile(path.join(artifactDir, 'session-cleanup-failed.json'), JSON.stringify(cleanupResult, null, 2));
+  throw new Error(`failed to remove existing sessions before /new: ${cleanupResult.failed.map((entry) => entry.sessionId).join(', ')}`);
+}
 
 const chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-webui-verify-'));
 let chrome;
@@ -95,7 +101,7 @@ try {
     10_000,
     'new conversation draft selected',
   );
-  await captureState(cdp, '01-after-new-conversation');
+  const cleanNewSession = await captureState(cdp, '01-after-new-conversation');
 
   const prompt1 = `verify pending input success ${Date.now()}`;
   await submitPrompt(cdp, `${successPrompt}\nMarker: ${prompt1}`);
@@ -160,7 +166,9 @@ try {
     adpUrl,
     cliPath,
     sessionId,
+    cleanupResult,
     checks: {
+      removedExistingSessions: cleanupResult.failed.length === 0,
       firstSubmitComposerCleared: postSubmit1.state.composer === '',
       firstPromptVisibleAfterSubmit: materialized1.state.messageText.includes(prompt1),
       secondSubmitComposerCleared: postSubmit2.state.composer === '',
@@ -188,6 +196,15 @@ try {
         mobileDrawerProof.sessionOpen.state.mobileDrawer === 'sessions' &&
         mobileDrawerProof.sessionOpen.state.sessionDrawerVisible &&
         !mobileDrawerProof.sessionOpen.state.detailDrawerVisible,
+      mobileSessionDrawerSwipeOpens:
+        mobileDrawerProof.swipeSessionOpen.state.mobileDrawer === 'sessions' &&
+        mobileDrawerProof.swipeSessionOpen.state.sessionDrawerVisible &&
+        mobileDrawerProof.swipeSessionOpen.state.sessionAgentGroupCount >= 1 &&
+        mobileDrawerProof.swipeSessionOpen.state.sessionAgentNestedCount >= 1,
+      mobileSessionDrawerAgentHierarchy:
+        mobileDrawerProof.sessionOpen.state.sessionAgentGroupCount >= 1 &&
+        mobileDrawerProof.sessionOpen.state.sessionAgentNestedCount >= 1 &&
+        mobileDrawerProof.sessionOpen.state.sessionAgentExpandedCount >= 1,
       mobileDetailDrawerOpens:
         mobileDrawerProof.detailOpen.state.mobileDrawer === 'details' &&
         mobileDrawerProof.detailOpen.state.detailDrawerVisible &&
@@ -197,8 +214,20 @@ try {
         !mobileDrawerProof.afterSessionClose.state.sessionDrawerVisible &&
         !mobileDrawerProof.afterDetailClose.state.mobileDrawer &&
         !mobileDrawerProof.afterDetailClose.state.detailDrawerVisible,
+      newSessionStartsClean:
+        cleanNewSession.state.selectedTurn === '-' &&
+        cleanNewSession.state.messageCount === 0 &&
+        cleanNewSession.state.messageText.includes('New conversation') &&
+        cleanNewSession.state.messageText.includes('Send a message to start this session.'),
+      newSessionDoesNotLeakPreviousTurn:
+        !cleanNewSession.state.messageText.includes('Online success sample') &&
+        !cleanNewSession.state.messageText.includes('Online failure sample') &&
+        !cleanNewSession.state.messageText.includes('Read file') &&
+        !cleanNewSession.state.messageText.includes('WebUI 正在查询最新 turn。') &&
+        !cleanNewSession.state.messageText.includes('等待数据'),
     },
     snapshots: {
+      cleanNewSession,
       postSubmit1,
       materialized1,
       terminal1,
@@ -273,6 +302,9 @@ async function captureState(cdp, label) {
       mobileDetailButtonVisible: isVisible(document.getElementById('open-detail-drawer-button')),
       sessionDrawerVisible: isVisible(document.querySelector('.sidebar')),
       detailDrawerVisible: isVisible(document.querySelector('.inspector')),
+      sessionAgentGroupCount: document.querySelectorAll('.session-agent-group').length,
+      sessionAgentNestedCount: document.querySelectorAll('.session-agent-sessions .session-item').length,
+      sessionAgentExpandedCount: document.querySelectorAll('.session-agent-group[data-expanded="true"]').length,
       composerRect: rectOf(document.getElementById('composer-form')),
       composerCardRect: rectOf(document.querySelector('.composer-card')),
       messageListRect: rectOf(document.getElementById('message-list')),
@@ -390,6 +422,37 @@ async function captureMobileDrawerProof(cdp) {
     'mobile drawer proof layout',
   );
   const closed = await captureState(cdp, '16-mobile-drawer-closed-default');
+  await dispatchRightSwipe(cdp, 120, 320, 260, 326);
+  await waitForFunction(
+    cdp,
+    () => {
+      const node = document.querySelector('.sidebar');
+      const rect = node?.getBoundingClientRect();
+      return document.body.dataset.mobileDrawer === 'sessions' &&
+        document.querySelectorAll('.session-agent-group').length >= 1 &&
+        document.querySelectorAll('.session-agent-sessions .session-item').length >= 1 &&
+        !!rect &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom >= 0 &&
+        rect.top <= window.innerHeight &&
+        rect.right >= 0 &&
+        rect.left <= 1;
+    },
+    5_000,
+    'session drawer opened by right swipe',
+  );
+  await delay(260);
+  const swipeSessionOpen = await captureState(cdp, '17-mobile-session-drawer-open-swipe');
+  await evalInPage(cdp, () => {
+    document.getElementById('close-session-drawer-button')?.click();
+  });
+  await waitForFunction(
+    cdp,
+    () => !document.body.dataset.mobileDrawer,
+    5_000,
+    'swipe-opened session drawer closed',
+  );
   await evalInPage(cdp, () => {
     document.getElementById('open-session-drawer-button')?.click();
   });
@@ -422,7 +485,7 @@ async function captureMobileDrawerProof(cdp) {
     'session drawer open',
   );
   await delay(260);
-  const sessionOpen = await captureState(cdp, '17-mobile-session-drawer-open');
+  const sessionOpen = await captureState(cdp, '18-mobile-session-drawer-open');
   await evalInPage(cdp, () => {
     document.getElementById('close-session-drawer-button')?.click();
   });
@@ -443,7 +506,7 @@ async function captureMobileDrawerProof(cdp) {
     5_000,
     'session drawer closed',
   );
-  const afterSessionClose = await captureState(cdp, '18-mobile-session-drawer-closed');
+  const afterSessionClose = await captureState(cdp, '19-mobile-session-drawer-closed');
   await evalInPage(cdp, () => {
     document.getElementById('open-detail-drawer-button')?.click();
   });
@@ -477,7 +540,7 @@ async function captureMobileDrawerProof(cdp) {
     'detail drawer open',
   );
   await delay(260);
-  const detailOpen = await captureState(cdp, '19-mobile-detail-drawer-open');
+  const detailOpen = await captureState(cdp, '20-mobile-detail-drawer-open');
   await evalInPage(cdp, () => {
     document.getElementById('close-detail-drawer-button')?.click();
   });
@@ -498,9 +561,31 @@ async function captureMobileDrawerProof(cdp) {
     5_000,
     'detail drawer closed',
   );
-  const afterDetailClose = await captureState(cdp, '20-mobile-detail-drawer-closed');
+  const afterDetailClose = await captureState(cdp, '21-mobile-detail-drawer-closed');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  return { closed, sessionOpen, afterSessionClose, detailOpen, afterDetailClose };
+  return { closed, swipeSessionOpen, sessionOpen, afterSessionClose, detailOpen, afterDetailClose };
+}
+
+async function dispatchRightSwipe(cdp, startX, startY, endX, endY) {
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ id: 1, x: startX, y: startY, radiusX: 2, radiusY: 2, force: 1 }],
+  });
+  await delay(80);
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ id: 1, x: Math.round((startX + endX) / 2), y: Math.round((startY + endY) / 2), radiusX: 2, radiusY: 2, force: 1 }],
+  });
+  await delay(80);
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ id: 1, x: endX, y: endY, radiusX: 2, radiusY: 2, force: 1 }],
+  });
+  await delay(40);
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [],
+  });
 }
 
 function isMobileDrawerShape(shape) {
@@ -589,6 +674,50 @@ async function runCommand(argv) {
       resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() });
     });
   });
+}
+
+async function removeExistingSessions() {
+  const query = await runCommand([cliPath, 'adp-session-query', '--url', adpUrl]);
+  const sessionIds = parseSessionIds(query.stdout);
+  const removed = [];
+  const failed = [];
+  for (const sessionId of sessionIds) {
+    const result = await runCommand([
+      cliPath,
+      'adp-session-manage',
+      '--url',
+      adpUrl,
+      '--action',
+      'delete',
+      '--session',
+      sessionId,
+    ]);
+    const entry = { sessionId, code: result.code, stdout: result.stdout, stderr: result.stderr };
+    if (result.code === 0) {
+      removed.push(entry);
+    } else {
+      failed.push(entry);
+    }
+  }
+  const after = await runCommand([cliPath, 'adp-session-query', '--url', adpUrl]);
+  return {
+    before: query,
+    after,
+    requested: sessionIds,
+    removed,
+    failed,
+  };
+}
+
+function parseSessionIds(stdout) {
+  const match = `${stdout || ''}`.match(/\bids=([^\s]+)/);
+  if (!match || !match[1] || match[1] === '-') {
+    return [];
+  }
+  return match[1]
+    .split(',')
+    .map((entry) => entry.split(':')[0].trim())
+    .filter(Boolean);
 }
 
 function createCdpClient(webSocketUrl) {
