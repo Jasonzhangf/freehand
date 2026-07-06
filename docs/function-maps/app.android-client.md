@@ -50,7 +50,7 @@
 - connection profile failures must expose active profile, endpoint, and concrete failure class; the client must not silently fall back to localhost, LAN scan, relay, or another profile
 - provider / reason / debug error from `ui.protocol` is rendered as a red status pill; never re-projected as success
 - cancel-without-active-turn clears only local input draft; does not invent a runtime mutation
-- Android device validation script fails explicitly and records blocker evidence when ADB is offline, the device is locked, the Freehand activity is not foreground, or fatal logcat entries are present
+- Android device validation script fails explicitly and records failed evidence when the APK is missing the configured launcher activity class or Freehand emits fatal/exception logcat, and records blocker evidence only when ADB is offline, the device is locked, or Freehand is not foreground without app fatal evidence
 
 ## Shared Multi-Reference Functions
 
@@ -87,7 +87,7 @@
 | 15 | `DaemonConnectionConfigStore::write` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt` | persist validated daemon config to the app-owned JSON file | `DaemonConnectionConfig` | normalized JSON file or explicit config error | `MainActivity::saveHostConfig` | file IO + schema validator | bound |
 | 16 | `MainActivity::saveHostConfig` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | update the active profile endpoint, write app-owned JSON, and reconnect only after write success | edited `HostConfig` | updated config or visible config error | `DrawerController` callback | `DaemonConnectionConfigStore::write` | bound |
 | 17 | `handle_android_mock` | `apps/freehand-server/src/lib.rs` | serve self-contained `mobile-mock.html` for design review | HTTP GET `/mock/android` | HTML body | design-review operator | embedded mock asset | bound |
-| 18 | `verify_device_ui` | `apps/freehand-android/scripts/verify-device-ui.sh` | validate explicit-serial Android device UI foreground state and capture blocker/failure evidence | adb serial + debug APK | passed/blocked/failed artifact directory | operator | adb install/start/dumpsys/logcat/screencap | bound |
+| 18 | `verify_device_ui` | `apps/freehand-android/scripts/verify-device-ui.sh` | validate explicit-serial Android device UI foreground state and capture blocker/failure evidence; APK launcher-class and fatal-logcat failures are classified before not-foreground blockers | adb serial + debug APK | passed/blocked/failed artifact directory | operator | adb install/start/dumpsys/logcat/screencap | bound |
 
 ## Sync Status Against Code
 

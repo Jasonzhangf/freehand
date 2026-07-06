@@ -38,6 +38,33 @@ write_summary() {
 JSON
 }
 
+launcher_activity_class() {
+  if [[ "$activity_name" == .* ]]; then
+    printf '%s%s\n' "$package_name" "$activity_name"
+  else
+    printf '%s\n' "$activity_name"
+  fi
+}
+
+verify_apk_contains_activity() {
+  if [[ ! -f "$apk_path" || "${FREEHAND_ANDROID_SKIP_INSTALL:-0}" == "1" ]]; then
+    return
+  fi
+
+  local apkanalyzer="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/cmdline-tools/latest/bin/apkanalyzer"
+  if [[ ! -x "$apkanalyzer" ]]; then
+    return
+  fi
+
+  local activity_class
+  activity_class="$(launcher_activity_class)"
+  if ! "$apkanalyzer" dex packages "$apk_path" | grep -Fq "$activity_class"; then
+    write_summary "failed" "apk_missing_launcher_activity_class"
+    echo "[freehand-android-device] failed: APK missing $activity_class; see $artifact_dir" >&2
+    exit 1
+  fi
+}
+
 verify_device_ui() {
   if [[ -z "$serial" ]]; then
     usage
@@ -56,6 +83,7 @@ verify_device_ui() {
   fi
 
   if [[ -f "$apk_path" && "${FREEHAND_ANDROID_SKIP_INSTALL:-0}" != "1" ]]; then
+    verify_apk_contains_activity
     adb -s "$serial" install -r "$apk_path" >"$artifact_dir/install.txt" 2>&1
   fi
 
@@ -69,6 +97,14 @@ verify_device_ui() {
   adb -s "$serial" logcat -d -t 1500 >"$artifact_dir/logcat.txt" 2>&1 || true
   adb -s "$serial" exec-out screencap -p >"$artifact_dir/screenshot.png" 2>"$artifact_dir/screencap.stderr" || true
 
+  if grep -E "AndroidRuntime|FATAL EXCEPTION|${package_name}.*(Exception|Error)" "$artifact_dir/logcat.txt" >/dev/null; then
+    grep -E "AndroidRuntime|FATAL EXCEPTION|${package_name}.*(Exception|Error)" "$artifact_dir/logcat.txt" \
+      >"$artifact_dir/fatal-logcat.txt" || true
+    write_summary "failed" "fatal_or_exception_logcat"
+    echo "[freehand-android-device] failed: fatal/exception logcat found; see $artifact_dir" >&2
+    exit 1
+  fi
+
   if grep -Eq 'mDreamingLockscreen=true|mShowingLockscreen=true' "$artifact_dir/dumpsys-window.txt"; then
     write_summary "blocked" "device_locked_or_dreaming"
     echo "[freehand-android-device] blocked: device is locked/dozing; see $artifact_dir" >&2
@@ -79,14 +115,6 @@ verify_device_ui() {
     write_summary "blocked" "freehand_activity_not_foreground"
     echo "[freehand-android-device] blocked: Freehand activity is not foreground; see $artifact_dir" >&2
     exit 2
-  fi
-
-  if grep -E "AndroidRuntime|FATAL EXCEPTION|${package_name}.*(Exception|Error)" "$artifact_dir/logcat.txt" >/dev/null; then
-    grep -E "AndroidRuntime|FATAL EXCEPTION|${package_name}.*(Exception|Error)" "$artifact_dir/logcat.txt" \
-      >"$artifact_dir/fatal-logcat.txt" || true
-    write_summary "failed" "fatal_or_exception_logcat"
-    echo "[freehand-android-device] failed: fatal/exception logcat found; see $artifact_dir" >&2
-    exit 1
   fi
 
   write_summary "passed" "freehand_activity_foreground_no_fatal_logcat"

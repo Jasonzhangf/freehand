@@ -1763,3 +1763,23 @@ Current real root cause split:
 - blocked decision:
   - same external blocker has now repeated across consecutive goal continuations with no available local progress path: ADB device `100.104.163.65:5555` is unavailable.
   - next meaningful progress requires the Android device/emulator to be connected and unlocked, then rerun `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`.
+
+# 2026-07-06 Android verifier classification fix
+
+- device state:
+  - `adb connect 100.104.163.65:5555` succeeded and `adb devices -l` showed `100.104.163.65:5555 device product:PLZ110 model:PLZ110`.
+  - first verifier run after reconnect reported `freehand_activity_not_foreground`.
+- root cause trace:
+  - manual launch with cleared logcat showed `AndroidRuntime` crash: `ClassNotFoundException: com.freehand.android.ui.MainActivity`.
+  - source and compile output had `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` and `build/tmp/kotlin-classes/debug/com/freehand/android/ui/MainActivity.class`.
+  - stale/incremental APK initially lacked `com.freehand.android.ui.MainActivity`; `cd apps/freehand-android && ./gradlew clean assembleDebug` rebuilt an APK whose dex contained the activity.
+- implementation:
+  - `apps/freehand-android/scripts/verify-device-ui.sh` now preflights APK launcher activity class via `apkanalyzer` when available.
+  - verifier now checks Freehand fatal/exception logcat before lockscreen/not-foreground blocker classification, so app crashes become `failed` rather than `blocked`.
+  - `docs/function-maps/app.android-client.md` and `docs/testing/app.android-client.md` document the failed-vs-blocked split.
+- verification:
+  - `bash -n apps/freehand-android/scripts/verify-device-ui.sh` -> ok.
+  - `FREEHAND_ANDROID_ACTIVITY=.ui.DoesNotExist apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` -> failed with `apk_missing_launcher_activity_class`; evidence `artifacts/android-device/20260706T002036Z-100.104.163.65_5555/summary.json`.
+  - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest assembleDebug` -> `BUILD SUCCESSFUL`.
+  - `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `git diff --check` -> ok.
+  - current real-device acceptance still blocked by `device_locked_or_dreaming`; evidence `artifacts/android-device/20260706T002048Z-100.104.163.65_5555/summary.json`.

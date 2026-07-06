@@ -42,6 +42,7 @@
 31. target mobile closeout: connection failure projection includes active profile, endpoint, and concrete failure class
 32. target mobile closeout: aspect-ratio shape selection maps phone portrait, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop-like WebView into the expected layout mode without changing session/protocol truth
 33. `apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` validates true-device foreground state and captures explicit blocker/failure evidence when ADB/device/UI is not usable
+34. `apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` classifies APK launcher activity missing and Freehand fatal/exception logcat as failed, not as device/not-foreground blockers
 
 ## White-Box Plan
 
@@ -51,6 +52,7 @@
 - aspect-ratio layout classifier tests: map viewport width/height pairs to mobile/foldable/tablet/desktop layout modes without mutating selected session or draft state
 - `CommandIngressProtocolTest`: covers SubmitUserInput shape, CancelLatestActiveTurn shape, ADP command frame shape, ADP subscribe frame shape, query-as-command negative frame shape, old type-field negative, special characters, empty text
 - Android device validation script static checks: explicit serial required, no broad process kill, records `adb devices`, foreground/window dumps, logcat, screenshot, and summary status
+- Android device validation ordering checks: launcher activity class exists in the APK before install when `apkanalyzer` is available; after launch, Freehand fatal/exception logcat is classified as `failed` before lockscreen/not-foreground blocker decisions
 
 ### Protocol Replay Harness
 
@@ -71,6 +73,7 @@
 - `ProtocolClient::postCommand` remains a compatibility HTTP request body path
 - `handle_android_mock` returns HTTP 200 with `mock-mobile` class (existing server test)
 - `apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` exits with `passed`, `blocked`, or `failed` summary JSON and never treats offline/locked/not-foreground states as success
+- `apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` never masks an app crash or missing launcher activity class as a device blocker
 
 ## Project Black-Box Impact
 
