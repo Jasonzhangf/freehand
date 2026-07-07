@@ -468,6 +468,13 @@ function setCommandStatus(message, options = {}) {
   renderCommandStatus();
 }
 
+function providerConfigReceiptStatus(receipt) {
+  if (receipt && receipt.dispatch_status === "provider_config_saved_restart_required") {
+    return "Provider config saved. Restart required.";
+  }
+  throw new Error("Config save returned an unexpected service status.");
+}
+
 function setBackgroundCommandStatus(message) {
   if (state.commandStatusStickyUntil > Date.now()) {
     return;
@@ -3048,7 +3055,7 @@ async function submitProviderConfigUpdate(event) {
   renderSettingsShell();
   try {
     const receipt = await adpCommand({ UpdateProviderConfig: { update } });
-    setCommandStatus(`${receipt.dispatch_status} -> ${receipt.target_feature_id}`, { stickyMs: 5000 });
+    setCommandStatus(providerConfigReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
     setText("settings-provider-save-status", "Saved. Restart required before active runtime changes.");
   } catch (error) {

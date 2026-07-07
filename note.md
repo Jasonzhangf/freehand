@@ -2150,3 +2150,24 @@ Current real root cause split:
 - correction:
   - Do not treat Minis phone-local mount/share features as Freehand phone task-mount requirements.
   - If Freehand needs storage/workspace UX, it should be a computer-daemon workspace/files projection or permission/status design, not phone-local mount semantics.
+
+# 2026-07-07 provider edit Batch 3 audit
+
+- objective attachment required auditing OpenMinis config UI Batch 3 provider/model edit completion.
+- evidence checked:
+  - `docs/goals/openminis-config-ui-provider-edit-plan.md`
+  - function/test maps for `config.core`, `ui.protocol`, `runtime.ui-command-dispatch`, `app.webui-smoke`
+  - code symbols `ProviderConfigUpdate`, `update_provider_config_in_path`, `UiCommand::UpdateProviderConfig`, `RuntimeCommandDispatcher::dispatch_update_provider_config`, `submitProviderConfigUpdate`
+  - online artifact `artifacts/webui-online/20260707-verify-4042-1783388440427/summary.json`
+- issue found:
+  - provider config save path was functionally owner-backed, but WebUI command status displayed internal strings `provider_config_saved_restart_required -> config.core`.
+- fix:
+  - WebUI maps provider config receipts to `Provider config saved. Restart required.`
+  - follow-up audit found the first mapping used a generic success fallback for unknown receipt status; fixed to throw `Config save returned an unexpected service status.` instead of pretending success.
+  - server asset smoke rejects the old provider-save status template.
+  - server asset smoke rejects the generic provider config success fallback.
+  - online verifier asserts provider valid-save command status does not contain `provider_config_saved_restart_required` or `config.core`.
+- validation:
+  - owner tests passed: config 16, ui-protocol 47, CLI 13, runtime provider update success/no-overwrite tests, server asset smoke.
+  - `make verify-webui-online` passed with `artifacts/webui-online/20260707-verify-4042-1783399680000/summary.json`; valid save status is `Provider config saved. Restart required.`, Settings secret scan passed, page/console errors empty.
+  - real `~/.freehand/config.toml` and `daemonS.env` restored; `freehand-cliS adp-config-query` reports `auth_source=inline`.

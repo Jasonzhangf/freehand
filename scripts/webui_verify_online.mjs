@@ -213,7 +213,9 @@ try {
         settingsProof.validUpdate.state.settingsProviderSaveStatus.toLowerCase().includes('restart required') &&
         settingsProof.validUpdate.state.settingsProvider === configUpdateProviderId &&
         settingsProof.validUpdate.state.settingsModel === configUpdateModel &&
-        settingsProof.validUpdate.state.settingsProviderHost === 'api.minimaxi.com',
+        settingsProof.validUpdate.state.settingsProviderHost === 'api.minimaxi.com' &&
+        !settingsProof.validUpdate.state.commandStatus.includes('provider_config_saved_restart_required') &&
+        !settingsProof.validUpdate.state.commandStatus.includes('config.core'),
       settingsUpdateNoSecretLeak:
         settingsProof.validUpdate.state.passwordInputCount === 0 &&
         settingsProof.validUpdate.state.apiKeyTextVisible === false &&

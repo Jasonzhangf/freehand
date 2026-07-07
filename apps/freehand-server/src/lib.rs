@@ -1287,6 +1287,11 @@ mod tests {
         assert!(js_body.contains("settings-config-error"));
         assert!(js_body.contains("UpdateProviderConfig"));
         assert!(js_body.contains("function submitProviderConfigUpdate"));
+        assert!(js_body.contains("function providerConfigReceiptStatus"));
+        assert!(js_body.contains("Provider config saved. Restart required."));
+        assert!(js_body.contains("Config save returned an unexpected service status."));
+        assert!(!js_body.contains("return \"Provider config saved.\""));
+        assert!(!js_body.contains("`${receipt.dispatch_status} -> ${receipt.target_feature_id}`"));
         assert!(js_body.contains("function settingsAuthTypeLabel"));
         assert!(js_body.contains("authType === \"apikey\" ? \"credential\""));
         assert!(js_body.contains("open-settings-drawer-button"));
