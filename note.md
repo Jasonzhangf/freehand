@@ -2079,3 +2079,25 @@ Current real root cause split:
   - `git diff --check` -> ok.
 - remaining:
   - Provider/model edit flow is still locked for future Batch 3. No config writes were implemented.
+# 2026-07-07 OpenMinis config UI L2 Batch 3 provider/model edit closeout
+
+- task:
+  - Continue OpenMinis config UI closeout loop.
+  - Close Batch 3 provider/model edit flow through the owner chain only: `app.webui-smoke` -> `ui.protocol` -> `runtime.ui-command-dispatch` -> `config.core`.
+- implementation:
+  - `config.core` owns `ProviderConfigUpdate` and `update_provider_config_in_path`; valid env-var auth updates are persisted atomically, invalid URLs fail before overwrite, and saved config writes `api_key_env` instead of resolved credential values.
+  - `ui.protocol` owns `UiProviderConfigUpdate` and `UiCommand::UpdateProviderConfig`; command validation rejects empty fields and unsupported protocol, and serialization has no raw credential field.
+  - `runtime.ui-command-dispatch` routes config updates to `config.core`, stores pending restart-required config projection, and does not hot-reload the active runtime provider/model before restart.
+  - WebUI Settings form now submits provider endpoint/default model/credential env var via protocol command, shows visible save failure or restart-required success, and re-queries config projection.
+  - `scripts/webui_verify_online.mjs` now validates invalid and valid Settings saves online; Settings credential-leak checks scan the Settings surface instead of the whole conversation body, because provider/runtime error text in chat is not the Settings config projection.
+  - `scripts/install-launchd.sh restartS` refreshes S symlink binaries, rewrites plist, service-scope reloads launchd, and sources env file from ProgramArguments; `xtask` gate now accepts the XML-escaped plist string for the env-source snippet.
+- validation:
+  - Restored real `~/.freehand/config.toml` and `~/.freehand/daemonS.env` from `/tmp/freehand-config-verify.1szrlj` before live reasoning.
+  - Temporarily added verification env vars to `daemonS.env` only for the valid env-auth save branch, then restored both files again after browser proof.
+  - `scripts/install-launchd.sh restartS`; `curl -4fsS http://127.0.0.1:4042/health`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp`.
+  - Online browser evidence: `artifacts/webui-online/20260707-verify-4042-1783388440427/summary.json`; all checks true, including invalid update visible, valid update restart-required, no Settings credential leak, multi-round failed-tool continuation terminal, mobile Settings drawer, and no stale live animation.
+  - Post-restore query: `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` returned `auth_source=inline`, confirming real config/env were restored.
+  - Final gates: `cargo test -p freehand-config -- --nocapture` -> 16 passed; `cargo test -p freehand-ui-protocol -- --nocapture` -> 47 passed; `cargo test -p freehand-runtime -- --nocapture` -> 77 passed; `cargo test -p freehand-server -- --nocapture` -> 12 passed; `cargo test -p freehand-cli -- --nocapture` -> 13 passed; `cargo test -p xtask ci_cd -- --nocapture` -> 4 passed; `node --check apps/freehand-server/assets/webui.js`; `node --check scripts/webui_verify_online.mjs`; `cargo fmt --check`; `git diff --check`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`.
+- remaining:
+  - Batch 3 does not implement model groups, provider health checks, secret store, Android native pre-connection redesign, or release 4041 proof.
+  - Android/release proof is separate because this batch only claims S-profile WebUI 4042.

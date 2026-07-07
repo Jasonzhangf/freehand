@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
@@ -129,6 +130,17 @@ pub struct SelectedProviderConfig {
     pub auth_type: ProviderAuthType,
     pub auth_source: ProviderAuthSourceKind,
     pub api_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderConfigUpdate {
+    pub agent_name: String,
+    pub provider_id: String,
+    pub provider_type: String,
+    pub protocol: String,
+    pub base_url: String,
+    pub default_model: String,
+    pub api_key_env: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -314,6 +326,20 @@ pub enum ConfigError {
     },
     #[error("provider `{provider_id}` base_url must be non-empty")]
     EmptyProviderBaseUrl { provider_id: String },
+    #[error("provider `{provider_id}` id must use only letters, numbers, `_`, `-`, or `.`")]
+    InvalidProviderId { provider_id: String },
+    #[error("provider `{provider_id}` base_url must be an http(s) URL with a host")]
+    InvalidProviderBaseUrl { provider_id: String },
+    #[error("provider `{provider_id}` type `{provider_type}` is not supported")]
+    UnsupportedProviderType {
+        provider_id: String,
+        provider_type: String,
+    },
+    #[error("provider `{provider_id}` protocol `{protocol}` is not supported")]
+    UnsupportedProviderProtocol {
+        provider_id: String,
+        protocol: String,
+    },
     #[error("provider `{provider_id}` default_model must be non-empty")]
     EmptyProviderDefaultModel { provider_id: String },
     #[error("provider `{provider_id}` must declare an explicit protocol")]
@@ -353,6 +379,28 @@ pub enum ConfigError {
     EmptyEnvVar {
         env_var: String,
         owner: ConfigEnvOwner,
+    },
+    #[error("config file `{path}` must be a TOML table")]
+    InvalidConfigRoot { path: PathBuf },
+    #[error("config file `{path}` is missing table `{table}`")]
+    MissingConfigTable { path: PathBuf, table: String },
+    #[error("failed to serialize config file `{path}`: {source}")]
+    SerializeConfig {
+        path: PathBuf,
+        #[source]
+        source: toml::ser::Error,
+    },
+    #[error("failed to write config file `{path}`: {source}")]
+    WriteConfig {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to replace config file `{path}`: {source}")]
+    ReplaceConfig {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
     },
 }
 
@@ -431,6 +479,48 @@ pub fn load_config_from_path(path: impl AsRef<Path>) -> Result<LoadedConfig, Con
     parse_config(path, &raw)
 }
 
+pub fn update_provider_config_in_path(
+    path: impl AsRef<Path>,
+    update: ProviderConfigUpdate,
+) -> Result<SelectedAgentConfig, ConfigError> {
+    validate_provider_id(&update.provider_id)?;
+    validate_provider_base_url(&update.provider_id, &update.base_url)?;
+    let provider_type = parse_provider_type(&update.provider_id, &update.provider_type)?;
+    let protocol = parse_provider_protocol(&update.provider_id, &update.protocol)?;
+    resolve_provider_protocol(&update.provider_id, provider_type, Some(protocol))?;
+    if update.default_model.trim().is_empty() {
+        return Err(ConfigError::EmptyProviderDefaultModel {
+            provider_id: update.provider_id,
+        });
+    }
+    if update.api_key_env.trim().is_empty() {
+        return Err(ConfigError::EmptyProviderApiKeyEnv {
+            provider_id: update.provider_id,
+        });
+    }
+
+    let path = path.as_ref();
+    let raw = fs::read_to_string(path).map_err(|source| ConfigError::ReadConfig {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut document: toml::Value =
+        toml::from_str(&raw).map_err(|source| ConfigError::ParseConfig {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    apply_provider_config_update(path, &mut document, &update, provider_type, protocol)?;
+    let updated =
+        toml::to_string_pretty(&document).map_err(|source| ConfigError::SerializeConfig {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let loaded = parse_config(path, &updated)?;
+    let selected = loaded.select_agent(&update.agent_name)?;
+    persist_config_atomically(path, &updated)?;
+    Ok(selected)
+}
+
 fn parse_config(path: &Path, raw: &str) -> Result<LoadedConfig, ConfigError> {
     let parsed: RawConfig = toml::from_str(raw).map_err(|source| ConfigError::ParseConfig {
         path: path.to_path_buf(),
@@ -455,11 +545,7 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
                 field_name: raw_provider.id,
             });
         }
-        if raw_provider.base_url.trim().is_empty() {
-            return Err(ConfigError::EmptyProviderBaseUrl {
-                provider_id: raw_provider.id,
-            });
-        }
+        validate_provider_base_url(&raw_provider.id, &raw_provider.base_url)?;
         if raw_provider.default_model.trim().is_empty() {
             return Err(ConfigError::EmptyProviderDefaultModel {
                 provider_id: raw_provider.id,
@@ -557,6 +643,176 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
     }
 
     Ok(LoadedConfig { agents, providers })
+}
+
+fn apply_provider_config_update(
+    path: &Path,
+    document: &mut toml::Value,
+    update: &ProviderConfigUpdate,
+    provider_type: ProviderType,
+    protocol: ProviderProtocol,
+) -> Result<(), ConfigError> {
+    let root = document
+        .as_table_mut()
+        .ok_or_else(|| ConfigError::InvalidConfigRoot {
+            path: path.to_path_buf(),
+        })?;
+    let providers = root
+        .get_mut("providers")
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| ConfigError::MissingConfigTable {
+            path: path.to_path_buf(),
+            table: "providers".to_owned(),
+        })?;
+    let mut provider = toml::map::Map::new();
+    provider.insert(
+        "id".to_owned(),
+        toml::Value::String(update.provider_id.clone()),
+    );
+    provider.insert("enabled".to_owned(), toml::Value::Boolean(true));
+    provider.insert(
+        "type".to_owned(),
+        toml::Value::String(provider_type.as_str().to_owned()),
+    );
+    provider.insert(
+        "protocol".to_owned(),
+        toml::Value::String(protocol.as_str().to_owned()),
+    );
+    provider.insert(
+        "base_url".to_owned(),
+        toml::Value::String(update.base_url.trim().to_owned()),
+    );
+    provider.insert(
+        "default_model".to_owned(),
+        toml::Value::String(update.default_model.trim().to_owned()),
+    );
+    let mut auth = toml::map::Map::new();
+    auth.insert("type".to_owned(), toml::Value::String("apikey".to_owned()));
+    auth.insert(
+        "api_key_env".to_owned(),
+        toml::Value::String(update.api_key_env.trim().to_owned()),
+    );
+    provider.insert("auth".to_owned(), toml::Value::Table(auth));
+    providers.insert(update.provider_id.clone(), toml::Value::Table(provider));
+
+    let agents = root
+        .get_mut("agents")
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| ConfigError::MissingConfigTable {
+            path: path.to_path_buf(),
+            table: "agents".to_owned(),
+        })?;
+    let agent = agents
+        .get_mut(&update.agent_name)
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| ConfigError::AgentNotFound {
+            agent_name: update.agent_name.clone(),
+        })?;
+    agent.insert(
+        "provider".to_owned(),
+        toml::Value::String(update.provider_id.clone()),
+    );
+    Ok(())
+}
+
+fn persist_config_atomically(path: &Path, contents: &str) -> Result<(), ConfigError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("config.toml");
+    let tmp_path = parent.join(format!(".{file_name}.tmp-{}", std::process::id()));
+    let mut tmp = fs::File::create(&tmp_path).map_err(|source| ConfigError::WriteConfig {
+        path: tmp_path.clone(),
+        source,
+    })?;
+    tmp.write_all(contents.as_bytes())
+        .and_then(|_| tmp.sync_all())
+        .map_err(|source| ConfigError::WriteConfig {
+            path: tmp_path.clone(),
+            source,
+        })?;
+    fs::rename(&tmp_path, path).map_err(|source| ConfigError::ReplaceConfig {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(())
+}
+
+fn validate_provider_id(provider_id: &str) -> Result<(), ConfigError> {
+    let valid = !provider_id.trim().is_empty()
+        && provider_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(ConfigError::InvalidProviderId {
+            provider_id: provider_id.to_owned(),
+        })
+    }
+}
+
+fn validate_provider_base_url(provider_id: &str, base_url: &str) -> Result<(), ConfigError> {
+    let trimmed = base_url.trim();
+    if trimmed.is_empty() {
+        return Err(ConfigError::EmptyProviderBaseUrl {
+            provider_id: provider_id.to_owned(),
+        });
+    }
+    let Some((scheme, rest)) = trimmed.split_once("://") else {
+        return Err(ConfigError::InvalidProviderBaseUrl {
+            provider_id: provider_id.to_owned(),
+        });
+    };
+    if !matches!(scheme, "http" | "https")
+        || rest.trim().is_empty()
+        || rest.contains(char::is_whitespace)
+    {
+        return Err(ConfigError::InvalidProviderBaseUrl {
+            provider_id: provider_id.to_owned(),
+        });
+    }
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    if host.trim().is_empty() {
+        return Err(ConfigError::InvalidProviderBaseUrl {
+            provider_id: provider_id.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn parse_provider_type(
+    provider_id: &str,
+    provider_type: &str,
+) -> Result<ProviderType, ConfigError> {
+    match provider_type.trim() {
+        "openai" => Ok(ProviderType::OpenAi),
+        "anthropic" => Ok(ProviderType::Anthropic),
+        value => Err(ConfigError::UnsupportedProviderType {
+            provider_id: provider_id.to_owned(),
+            provider_type: value.to_owned(),
+        }),
+    }
+}
+
+fn parse_provider_protocol(
+    provider_id: &str,
+    protocol: &str,
+) -> Result<ProviderProtocol, ConfigError> {
+    match protocol.trim() {
+        "responses" => Ok(ProviderProtocol::Responses),
+        "chat_completions" => Ok(ProviderProtocol::ChatCompletions),
+        "messages" => Ok(ProviderProtocol::Messages),
+        value => Err(ConfigError::UnsupportedProviderProtocol {
+            provider_id: provider_id.to_owned(),
+            protocol: value.to_owned(),
+        }),
+    }
 }
 
 fn validate_provider_auth(
@@ -1315,6 +1571,137 @@ provider = "minimonth"
 
         let err = load_config_from_path(&path).expect_err("should fail");
         assert!(matches!(err, ConfigError::ParseConfig { .. }));
+
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn update_provider_config_persists_env_based_provider_without_secret_projection() {
+        let pair_token_env = unique_env_name("FREEHAND_UPDATE_PAIR_TOKEN");
+        let provider_key_env = unique_env_name("FREEHAND_UPDATE_PROVIDER_KEY");
+        let path = write_temp_config(&format!(
+            r#"
+[providers.old]
+id = "old"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://old.example.test/v1"
+default_model = "old-model"
+
+[providers.old.auth]
+type = "apikey"
+api_key = "sk-inline-should-disappear"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
+pair_token = "{pair_token_env}"
+provider = "old"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "WORKER_TOKEN"
+provider = "old"
+"#
+        ));
+        // SAFETY: test process controls these environment variables in a scoped test.
+        unsafe {
+            env::set_var(&pair_token_env, "pair-token");
+            env::set_var(&provider_key_env, "provider-secret");
+        }
+
+        let selected = update_provider_config_in_path(
+            &path,
+            ProviderConfigUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: "minimax".to_owned(),
+                provider_type: "openai".to_owned(),
+                protocol: "responses".to_owned(),
+                base_url: "https://api.minimaxi.com/v1".to_owned(),
+                default_model: "MiniMax-M3".to_owned(),
+                api_key_env: provider_key_env.clone(),
+            },
+        )
+        .expect("update provider config");
+
+        assert_eq!(selected.provider.id, "minimax");
+        assert_eq!(selected.provider.default_model, "MiniMax-M3");
+        assert_eq!(selected.provider.auth_source, ProviderAuthSourceKind::Env);
+        assert_eq!(selected.provider.api_key, "provider-secret");
+        assert!(selected.restart_required_on_change);
+
+        let raw = fs::read_to_string(&path).expect("read updated config");
+        assert!(raw.contains("[providers.minimax]"));
+        assert!(raw.contains(&format!("api_key_env = \"{provider_key_env}\"")));
+        assert!(!raw.contains("provider-secret"));
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe {
+            env::remove_var(&pair_token_env);
+            env::remove_var(&provider_key_env);
+        }
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn update_provider_config_rejects_invalid_url_without_overwriting_config() {
+        let path = write_temp_config(
+            r#"
+[providers.old]
+id = "old"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://old.example.test/v1"
+default_model = "old-model"
+
+[providers.old.auth]
+type = "apikey"
+api_key = "sk-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
+pair_token = "FREEHAND_MASTER_TOKEN"
+provider = "old"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "WORKER_TOKEN"
+provider = "old"
+"#,
+        );
+        let before = fs::read_to_string(&path).expect("read original config");
+        let err = update_provider_config_in_path(
+            &path,
+            ProviderConfigUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: "bad".to_owned(),
+                provider_type: "openai".to_owned(),
+                protocol: "responses".to_owned(),
+                base_url: "not-a-url".to_owned(),
+                default_model: "model".to_owned(),
+                api_key_env: "FREEHAND_API_KEY".to_owned(),
+            },
+        )
+        .expect_err("invalid URL must fail");
+        assert!(matches!(
+            err,
+            ConfigError::InvalidProviderBaseUrl { provider_id } if provider_id == "bad"
+        ));
+        let after = fs::read_to_string(&path).expect("read config after failed update");
+        assert_eq!(after, before);
 
         fs::remove_file(path).expect("cleanup");
     }

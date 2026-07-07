@@ -156,7 +156,7 @@ write_launchd_plist() {
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>cd "$workdir" &amp;&amp; exec "$daemon_bin" serve --agent "$agent" --bind "$bind_addr"</string>
+    <string>set -a; [ -f "$env_file" ] &amp;&amp; . "$env_file"; set +a; cd "$workdir" &amp;&amp; exec "$daemon_bin" serve --agent "$agent" --bind "$bind_addr"</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -210,7 +210,9 @@ run_install_launchd() {
 }
 
 restart_launchd() {
-  launchctl kickstart -k "gui/$(id -u)/$label"
+  launchctl bootout "gui/$(id -u)" "$plist_path" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$plist_path"
+  launchctl enable "gui/$(id -u)/$label"
   wait_for_health
   echo "[freehand-launchd] restarted $label"
 }
@@ -250,6 +252,8 @@ case "$command" in
     ;;
   restartS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
+    write_launchd_env
+    write_launchd_plist
     restart_launchd
     ;;
 esac

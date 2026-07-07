@@ -28,6 +28,7 @@
 - ADP/read-only task query requests enter through `UiRuntimeQueryPort` and route to `TaskRuntime::list_tasks` or `TaskRuntime::task_history` without duplicating task filtering or ledger ordering in runtime
 - ADP/read-only error-center query requests enter through `UiRuntimeQueryPort` and route to runtime-owned metadata ledger projection without exposing raw provider/tool/request text
 - ADP/read-only config status query requests enter through `UiRuntimeQueryPort` and project the selected live agent/provider config without exposing API keys, pair tokens, or credential-bearing URLs
+- provider/model update commands enter through a protocol dispatch envelope, route to `config.core::update_provider_config_in_path`, and must not duplicate config validation or persistence logic in runtime
 - successful task tool mutations publish a runtime-owned task list projection into `UiProtocolState` so ADP task list subscribers observe lifecycle changes without UI polling
 
 ## Response Mainline
@@ -58,6 +59,7 @@
 - runtime-backed task list and task history queries return UI-safe task projections sourced from `task.orchestration` snapshot and ledger APIs
 - runtime-backed error-center queries return UI-safe projections sourced from `metadata.core` ledger rows written by `error.center`
 - runtime-backed config status queries return UI-safe projections sourced from `config.core` selected agent truth and include auth source type only
+- successful provider/model updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and leave the active runtime/live provider config unchanged until daemon restart
 - runtime-backed task list subscription updates reuse the same projection helper and source task truth from `TaskRuntime::list_tasks`
 
 ## Error Mainline
@@ -78,6 +80,7 @@
 - task query misses map to explicit dispatch target-not-found failures; invalid task status filters and task persistence failures map to dispatch failures
 - error-center metadata ledger load/parse failures map to explicit dispatch failures; incomplete rows are skipped instead of being repaired into guessed semantics
 - config status query without live selected config returns no runtime result rather than inventing app-local config truth
+- provider/model update without a live runtime home or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake hot reload
 - task list publication failures after task mutation are explicit dispatch failures and must not be silently swallowed as a successful task tool result
 
 ## Shared Multi-Reference Functions
@@ -103,8 +106,8 @@
 - `project_config_status_for_ui`
   - owner: `crates/freehand-runtime/src/lib.rs`
   - purpose: build UI-safe active config projection from `config.core` selected agent truth
-  - allowed callers: `RuntimeCommandDispatcher::query_runtime`
-  - related tests: `runtime_query_projects_config_status_without_secrets`
+  - allowed callers: `RuntimeCommandDispatcher::query_runtime`, `RuntimeCommandDispatcher::dispatch_update_provider_config`
+  - related tests: `runtime_query_projects_config_status_without_secrets`, `runtime_dispatch_updates_provider_config_without_hot_reloading_active_model`
   - why shared: keeps config-to-UI projection in runtime owner while app transports stay protocol-only
 
 ## Function Call Table
@@ -129,6 +132,8 @@
 | 14 | `task_list_projection_from_runtime` / `UiProtocolState::publish_task_list_projection` | `crates/freehand-runtime/src/lib.rs` / `crates/freehand-ui-protocol/src/lib.rs` | publish runtime-owned task list projection after successful task tool mutation | task runtime snapshot | UI task list subscription event | live task tool bridge | ui.protocol subscription channel | bound |
 | 15 | `query_error_center_events_for_ui` | `crates/freehand-runtime/src/lib.rs` | read session metadata ledger and filter `error.center` rows by trace, turn, and domain | runtime home plus query filters | UI-safe error-center event list | `RuntimeCommandDispatcher::query_runtime` | metadata center | bound |
 | 16 | `project_error_center_event_for_ui` | `crates/freehand-runtime/src/lib.rs` | convert one watermarked error-center metadata row into ADP DTO fields | metadata envelope | `UiErrorCenterEventProjection` or skipped row | runtime query bridge | ui.protocol DTO | bound |
+| 17 | `RuntimeCommandDispatcher::dispatch_update_provider_config` | `crates/freehand-runtime/src/lib.rs` | route provider/model update dispatch into the config owner and store pending restart-required UI projection without hot-reloading active runtime | `UiProviderConfigUpdate` dispatch envelope | dispatch receipt or explicit dispatch failure | `RuntimeCommandDispatcher::dispatch` | `update_provider_config_in_path` | bound |
+| 18 | `update_provider_config_in_path` | `crates/freehand-config/src/lib.rs` | validate and atomically persist provider/model update through canonical config owner | runtime config path + provider update | selected agent config projection from saved TOML | `RuntimeCommandDispatcher::dispatch_update_provider_config` | config.core persistence | bound |
 
 ## Sync Status Against Code
 
@@ -159,6 +164,7 @@
 - runtime task query dispatch is bound as a thin read-only route to `task.orchestration`
 - runtime error-center query dispatch is bound as a thin read-only route to `metadata.core` rows written by `error.center`
 - runtime config status query dispatch is bound as a thin read-only route from selected `config.core` truth to `UiConfigStatusProjection`
+- runtime provider/model update dispatch is bound as a thin mutation route into `config.core`; successful saves project restart-required pending status and active runtime config remains unchanged until restart
 - runtime task list projection publication is bound as a thin route from task mutation to `ui.protocol`
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever

@@ -133,6 +133,9 @@ pub enum UiCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         domain: Option<String>,
     },
+    UpdateProviderConfig {
+        update: UiProviderConfigUpdate,
+    },
     QueryNodeStatus {
         node_id: String,
     },
@@ -157,6 +160,17 @@ pub enum UiCommand {
     ResumeTurn {
         turn_id: TurnId,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiProviderConfigUpdate {
+    pub agent_name: String,
+    pub provider_id: String,
+    pub provider_type: String,
+    pub provider_protocol: String,
+    pub base_url: String,
+    pub default_model: String,
+    pub api_key_env: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -698,6 +712,20 @@ pub enum UiProtocolError {
     EmptyCheckpointId,
     #[error("task query requires non-empty task id")]
     EmptyTaskId,
+    #[error("config update requires non-empty agent name")]
+    EmptyConfigAgentName,
+    #[error("config update requires non-empty provider id")]
+    EmptyProviderId,
+    #[error("config update requires non-empty provider type")]
+    EmptyProviderType,
+    #[error("config update requires non-empty provider protocol")]
+    EmptyProviderProtocol,
+    #[error("config update requires non-empty provider base URL")]
+    EmptyProviderBaseUrl,
+    #[error("config update requires non-empty default model")]
+    EmptyProviderDefaultModel,
+    #[error("config update requires non-empty API key environment variable name")]
+    EmptyProviderApiKeyEnv,
     #[error("command ingress route only accepts mutation-intent commands")]
     IngressCommandKindMismatch,
     #[error("stream kind mismatch for requested projection")]
@@ -1291,6 +1319,29 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::QueryTaskHistory { task_id } if task_id.trim().is_empty() => {
             Err(UiProtocolError::EmptyTaskId)
         }
+        UiCommand::UpdateProviderConfig { update } if update.agent_name.trim().is_empty() => {
+            Err(UiProtocolError::EmptyConfigAgentName)
+        }
+        UiCommand::UpdateProviderConfig { update } if update.provider_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyProviderId)
+        }
+        UiCommand::UpdateProviderConfig { update } if update.provider_type.trim().is_empty() => {
+            Err(UiProtocolError::EmptyProviderType)
+        }
+        UiCommand::UpdateProviderConfig { update }
+            if update.provider_protocol.trim().is_empty() =>
+        {
+            Err(UiProtocolError::EmptyProviderProtocol)
+        }
+        UiCommand::UpdateProviderConfig { update } if update.base_url.trim().is_empty() => {
+            Err(UiProtocolError::EmptyProviderBaseUrl)
+        }
+        UiCommand::UpdateProviderConfig { update } if update.default_model.trim().is_empty() => {
+            Err(UiProtocolError::EmptyProviderDefaultModel)
+        }
+        UiCommand::UpdateProviderConfig { update } if update.api_key_env.trim().is_empty() => {
+            Err(UiProtocolError::EmptyProviderApiKeyEnv)
+        }
         UiCommand::QueryErrorCenterEvents { session_id, .. }
         | UiCommand::SubscribeErrorCenterEvents { session_id, .. }
             if session_id.as_str().trim().is_empty() =>
@@ -1323,6 +1374,13 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptySlaveMessage => "empty_slave_message",
         UiProtocolError::EmptyCheckpointId => "empty_checkpoint_id",
         UiProtocolError::EmptyTaskId => "empty_task_id",
+        UiProtocolError::EmptyConfigAgentName => "empty_config_agent_name",
+        UiProtocolError::EmptyProviderId => "empty_provider_id",
+        UiProtocolError::EmptyProviderType => "empty_provider_type",
+        UiProtocolError::EmptyProviderProtocol => "empty_provider_protocol",
+        UiProtocolError::EmptyProviderBaseUrl => "empty_provider_base_url",
+        UiProtocolError::EmptyProviderDefaultModel => "empty_provider_default_model",
+        UiProtocolError::EmptyProviderApiKeyEnv => "empty_provider_api_key_env",
         UiProtocolError::IngressCommandKindMismatch => "ingress_command_kind_mismatch",
         UiProtocolError::StreamKindMismatch => "stream_kind_mismatch",
     };
@@ -1899,6 +1957,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryTaskList { .. } => "query_task_list",
         UiCommand::QueryTaskHistory { .. } => "query_task_history",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
+        UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",
@@ -1921,6 +1980,7 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::DeleteSession { .. }
             | UiCommand::RollbackLatestSessionTurn { .. }
             | UiCommand::SubmitUserInput { .. }
+            | UiCommand::UpdateProviderConfig { .. }
             | UiCommand::SendDirectMessageToSlave { .. }
             | UiCommand::RewindCheckpoint { .. }
             | UiCommand::CancelTurn { .. }
@@ -1946,6 +2006,7 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         UiCommand::RewindCheckpoint { .. } => {
             ("runtime.checkpoint-rewind", "crates/freehand-runtime")
         }
+        UiCommand::UpdateProviderConfig { .. } => ("config.core", "crates/freehand-config"),
         UiCommand::SendDirectMessageToSlave { .. } => ("node.master-slave", "crates/freehand-node"),
         _ => ("ui.protocol", "crates/freehand-ui-protocol"),
     }
@@ -3342,6 +3403,62 @@ mod tests {
         assert!(!encoded.contains("api_key"));
         assert!(!encoded.contains("pair_token"));
         assert!(!encoded.contains("secret"));
+    }
+
+    #[test]
+    fn provider_config_update_routes_to_config_owner_and_rejects_empty_fields() {
+        let command = UiCommand::UpdateProviderConfig {
+            update: UiProviderConfigUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: "minimax".to_owned(),
+                provider_type: "openai".to_owned(),
+                provider_protocol: "responses".to_owned(),
+                base_url: "https://api.minimaxi.com/v1".to_owned(),
+                default_model: "MiniMax-M3".to_owned(),
+                api_key_env: "MINIMAX_API_KEY".to_owned(),
+            },
+        };
+        validate_command(&command).expect("valid provider update command");
+        let envelope = build_command_dispatch_envelope(&command).expect("dispatch envelope");
+        assert_eq!(envelope.target_feature_id, "config.core");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-config");
+        assert_eq!(envelope.ingress.command_kind, "update_provider_config");
+
+        let err = validate_command(&UiCommand::UpdateProviderConfig {
+            update: UiProviderConfigUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: "minimax".to_owned(),
+                provider_type: "openai".to_owned(),
+                provider_protocol: "responses".to_owned(),
+                base_url: "https://api.minimaxi.com/v1".to_owned(),
+                default_model: String::new(),
+                api_key_env: "MINIMAX_API_KEY".to_owned(),
+            },
+        })
+        .expect_err("empty model rejected");
+        assert_eq!(err, UiProtocolError::EmptyProviderDefaultModel);
+        assert_eq!(protocol_rejection(err).code, "empty_provider_default_model");
+    }
+
+    #[test]
+    fn provider_config_update_serialization_does_not_include_secret_field() {
+        let command = UiCommand::UpdateProviderConfig {
+            update: UiProviderConfigUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: "minimax".to_owned(),
+                provider_type: "openai".to_owned(),
+                provider_protocol: "responses".to_owned(),
+                base_url: "https://api.minimaxi.com/v1".to_owned(),
+                default_model: "MiniMax-M3".to_owned(),
+                api_key_env: "MINIMAX_API_KEY".to_owned(),
+            },
+        };
+        let encoded = serde_json::to_string(&command).expect("update command json");
+        assert!(encoded.contains("UpdateProviderConfig"));
+        assert!(encoded.contains("api_key_env"));
+        assert!(!encoded.contains("api_key\""));
+        assert!(!encoded.contains("secret"));
+        assert!(!encoded.contains("sk-"));
     }
 
     #[test]

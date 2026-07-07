@@ -24,7 +24,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
 - symlink install script builds debug host binaries, exposes S-suffixed development commands, and installs a prefix-local launchd wrapper without replacing global release commands
 - launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths
-- launchd install script supports a coexisting symlink profile through installS and restartS with a separate label, env file, bind, binary, and logs; restartS refreshes the debug daemon binary copy before service kickstart and health-checks the env-backed bind so Tailscale defaults cannot move the S profile off loopback
+- launchd install script supports a coexisting symlink profile through installS and restartS with a separate label, env file, bind, binary, and logs; restartS refreshes the debug daemon binary copy, rewrites the plist, reloads only the service-scoped launchd label, sources the env file at daemon start, and health-checks the env-backed bind so Tailscale defaults cannot move the S profile off loopback
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 - framework loop governance starts in L1 report-only under docs/loops/freehand-framework-loop and must not automate code/config changes until signal quality and checker gates are proven

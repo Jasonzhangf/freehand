@@ -11,6 +11,7 @@
   - runtime-backed read-only task queries route to task owner APIs and return UI-safe projections without becoming task truth writers
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries route from selected live config to UI-safe projection without becoming config truth writers
+  - runtime-backed provider/model update commands route to `config.core` persistence, then expose pending restart-required projection without hot-reloading active runtime config
   - successful task tool mutations publish a runtime-owned task list projection into shared UI protocol state so ADP task subscribers receive owner-backed lifecycle changes
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
   - session rollback dispatch routes `RollbackLatestSessionTurn` to reason persistence, reloads effective turn snapshots, and replaces the shared UI session transcript projection
@@ -60,6 +61,7 @@
   - missing task history query target-not-found coverage
   - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
   - config status runtime query coverage, including base URL host projection, auth source projection, and no API key/pair token leakage
+  - provider/model update dispatch coverage, including valid save, invalid no-overwrite, no secret projection, and active runtime model/provider unchanged until restart
   - task list publication coverage after successful task tool mutation
 - live reason hook-to-ui-state coverage
 - live provider-request-built debug-to-model-waiting UI coverage
@@ -90,6 +92,7 @@
   - daemon ADP task list/history query smoke over the shared runtime query port
   - daemon ADP error-center query smoke over the shared runtime query port
   - daemon ADP config status query smoke over the shared runtime query port
+  - daemon/WebUI provider/model update smoke over the shared ADP command/query path, including visible invalid error and restart-required success state
   - daemon ADP task list subscription smoke over the shared runtime projection channel
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
@@ -133,6 +136,7 @@
   - daemon ADP task query bridge is covered by `daemon_adp_queries_runtime_task_truth`
   - runtime error-center query bridge is covered by `runtime_query_reads_error_center_metadata_without_raw_text`
   - runtime config status query bridge is covered by `runtime_query_projects_config_status_without_secrets`
+  - runtime provider/model update dispatch is covered by `runtime_dispatch_updates_provider_config_without_hot_reloading_active_model` and `runtime_dispatch_rejects_invalid_provider_config_without_overwrite`
   - daemon ADP error-center query bridge is covered by `daemon_adp_queries_runtime_error_center_truth`
   - runtime task list push bridge is planned for `runtime_task_tool_mutation_publishes_task_list_projection`
   - daemon ADP task list subscribe bridge is planned for `daemon_adp_subscribes_runtime_task_truth`

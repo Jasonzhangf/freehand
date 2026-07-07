@@ -984,6 +984,36 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         "env_bind=\"$(awk -F= '$1 == \"FREEHAND_DAEMON_BIND\"",
         "scripts/install-launchd.sh",
     )?;
+    if !install_launchd.contains("set -a; [ -f \"$env_file\" ] && . \"$env_file\"; set +a;")
+        && !install_launchd
+            .contains("set -a; [ -f \"$env_file\" ] &amp;&amp; . \"$env_file\"; set +a;")
+    {
+        return Err(
+            "mainline manifest cross-link missing launchd env-file sourcing in scripts/install-launchd.sh"
+                .to_string(),
+        );
+    }
+    require_contains(&install_launchd, "restartS)", "scripts/install-launchd.sh")?;
+    require_contains(
+        &install_launchd,
+        "write_launchd_plist",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "restart_launchd",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "launchctl bootout \"gui/$(id -u)\" \"$plist_path\"",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "launchctl bootstrap \"gui/$(id -u)\" \"$plist_path\"",
+        "scripts/install-launchd.sh",
+    )?;
 
     let pre_push = fs::read_to_string(root.join(".githooks/pre-push"))
         .map_err(|err| format!("read .githooks/pre-push: {err}"))?;
@@ -2066,7 +2096,8 @@ bind_addr=\"$default_bind_addr\"\n"
             CiFixtureMode::Aligned
             | CiFixtureMode::MakeCiMissingMainlines
             | CiFixtureMode::CiWorkflowPartialGate => {
-                "#!/usr/bin/env bash\n\
+                concat!(
+                    "#!/usr/bin/env bash\n\
 default_daemon_bind() {\n\
   local port=\"$1\"\n\
   local profile_suffix=\"${2:-}\"\n\
@@ -2080,7 +2111,16 @@ if [[ -n \"${FREEHAND_DAEMON_BIND:-}\" ]]; then\n\
   bind_addr=\"$FREEHAND_DAEMON_BIND\"\n\
 elif [[ -f \"$env_file\" ]]; then\n\
   env_bind=\"$(awk -F= '$1 == \"FREEHAND_DAEMON_BIND\" { print $2; exit }' \"$env_file\")\"\n\
-fi\n"
+fi\n",
+                    "set -a; [ -f \"$env_file\" ] && . \"$env_file\"; set +a;\n",
+                    "restartS)\n\
+    env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh\n\
+    write_launchd_env\n\
+    write_launchd_plist\n\
+    launchctl bootout \"gui/$(id -u)\" \"$plist_path\"\n\
+    launchctl bootstrap \"gui/$(id -u)\" \"$plist_path\"\n\
+    restart_launchd\n",
+                )
             }
         };
         fs::write(root.join("scripts/install-launchd.sh"), launchd_script)

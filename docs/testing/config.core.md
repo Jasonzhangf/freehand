@@ -11,10 +11,13 @@
   - select one enabled provider per agent
   - resolve provider auth source without leaking secret projection
   - preserve safe auth source kind on selected provider config for downstream UI-safe status projection
+  - validate and persist owner-backed provider/model update requests through the canonical config path
   - validate restart-only config activation
 - white-box plan:
   - parse and validate agent/provider schema, reciprocal peer-topology invariants, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
   - assert inline and env auth providers project `ProviderAuthSourceKind` while resolved API keys remain runtime-only
+  - assert provider/model update accepts valid env-var auth, writes only `api_key_env`, returns a restart-required selected-agent projection, and does not write resolved API-key values
+  - assert invalid provider update input fails before overwrite so the original config bytes remain unchanged
   - positive peer-topology coverage locks selected-agent projection of local node id, paired agent name, paired mode, paired node id, paired allowed IP, and paired pair-token env
   - negative peer-topology coverage locks self-pairing, missing paired agent, same-mode paired agents, and non-reciprocal paired agents
 - module black-box plan:
@@ -22,6 +25,7 @@
 - project black-box impact:
   - CLI startup path consumes one named agent configuration and projects selected provider metadata without exposing API key
   - runtime/UI config status queries can consume `auth_source` without reading raw provider auth fields or resolved API keys
+  - runtime/UI config update commands can persist provider/model edits only through `config.core` and must surface restart-required semantics instead of hot-reload success
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - config fixtures under crate test fixtures
@@ -31,4 +35,5 @@
 - sync status between design and implementation:
   - white-box, module black-box, and project black-box baseline cover multi-provider registry, reciprocal peer topology, and selected-provider projection
   - selected-provider auth source is regression-locked for inline and env configurations
+  - provider/model update positive and invalid-input no-overwrite paths are regression-locked
   - migrated mainline-call source and generated wiki are kept in sync with this test design

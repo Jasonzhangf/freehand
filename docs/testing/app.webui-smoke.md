@@ -18,7 +18,7 @@
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
 - WebUI control strip and session rail expose session switching, `/new` New dialog, `/task` task mode in that dialog, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
-- WebUI settings shell exposes OpenMinis-inspired read-only sections for connection, owner-backed active agent/provider/model status, sessions/workspace, skills, files, tasks, and diagnostics without parsing or mutating daemon config files
+- WebUI settings shell exposes OpenMinis-inspired sections for connection, owner-backed active agent/provider/model status and provider/model edits, sessions/workspace, skills, files, tasks, and diagnostics without parsing or directly mutating daemon config files
 - WebUI aspect-ratio layout classifier applies presentation-only shape attributes for phone portrait, tall phone, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop large without mutating protocol/session state
 - WebUI root route renders `?client=android-webview` with server-side `tablet_portrait` initial layout attributes before JS loads, while the normal browser root remains unpinned
 - WebUI phone/tall-phone/tablet-portrait layout defaults to the conversation workspace; sessions and debug/config detail panels are hidden in explicit overlay drawers and never consume the normal conversation flow
@@ -52,7 +52,7 @@
   - WebUI attachment control smoke for add/remove/preview and session-scoped draft retention
   - WebUI attachment success-clear smoke
   - WebUI attachment failure-retain smoke
-  - WebUI settings shell smoke for desktop/mobile entry points, compact read-only cards, disabled provider/model/config mutation controls, owner-backed `QueryConfigStatus` rendering, no API-key/password inputs, no credential text, and no direct config write helpers
+  - WebUI settings shell smoke for desktop/mobile entry points, compact cards/forms, owner-backed `QueryConfigStatus` rendering, owner-backed provider/model update command wiring, visible invalid-save errors, visible restart-required success, disabled unsupported advanced config controls, no API-key/password inputs, no credential text, and no direct config write helpers
   - WebUI submit-success path refresh smoke
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
@@ -81,7 +81,7 @@
 - WebUI layout-shape verifier locks the pure classifier against required viewport pairs: phone portrait, tall phone, phone landscape, tablet portrait, tablet/foldable landscape, foldable unfolded, and desktop large
 - WebUI root shell smoke locks both branches of first paint: normal root has no Android layout attributes, and `/?client=android-webview` has `data-layout-client="android-webview"` plus `data-layout-shape="tablet_portrait"` on `body` and shell
 - WebUI online mobile drawer verifier locks content-area right-swipe opening, button opening, drawer close, and agent -> nested sessions hierarchy inside the drawer
-- WebUI online settings verifier locks opening the settings panel on desktop/mobile, visible read-only provider/model/connection/session cards, disabled edit controls, no secret inputs, and conversation rendering still intact after closing the panel
+- WebUI online settings verifier locks opening the settings panel on desktop/mobile, visible provider/model/connection/session cards, invalid update failure, valid update restart-required success, no secret inputs, and conversation rendering still intact after closing the panel
 - WebUI online settings verifier locks that active agent, provider id, provider host, provider auth source, and model values are not loading placeholders and come from the runtime query path
 - WebUI JS asset smoke locks the render projection boundary: `buildConversationRenderModel`, `buildRenderTurn`, `buildRenderRows`, `buildToolActivityRenderRow`, `buildModelRequestRenderRow`, `turnIsCurrentLiveTurn`, and `renderModelHasLiveLifecycle` must exist, while old global model-request status helpers must not return.
 - WebUI JS asset smoke locks that visible turns come from one selector preserving transcript order and merging selected-session transcript with the latest same-session turn by replace-or-append, then render through `RenderConversation` / `RenderTurn` / `RenderRow`, so stale transcript state cannot hide an in-flight or newly completed continuation after submit, historical turns cannot inherit current live lifecycle animation, and restarted/runtime-reused turn ordinals do not move new cards above older transcript rows
@@ -126,7 +126,7 @@
 - WebUI mobile portrait drawer layout is landed: phone/tall-phone/tablet-portrait default to the conversation workspace, while session CRUD/list and debug/config detail panels open through mobile overlay controls without changing ADP/session truth
   - WebUI mobile session drawer right-swipe gesture and agent -> sessions hierarchy are landed and covered by asset smoke plus `scripts/webui_verify_online.mjs`
   - WebUI session rail now supports `/new` as the New dialog for global conversation or cwd-bound task creation, compact session summaries, and selected-session draft creation without inventing a separate navigation path
-  - WebUI settings shell is landed as a read-only config/status drawer; it consumes owner-backed `QueryConfigStatus`, and editing provider/model/agent config is intentionally disabled until config write contracts exist
+  - WebUI settings shell is landed as a config/status drawer; it consumes owner-backed `QueryConfigStatus`, provider/model edits route through `UpdateProviderConfig`, and unsupported agent/advanced config edits remain disabled until owner-backed write contracts exist
   - WebUI New dialog task path selection and composer cwd input are landed; new task requires an explicit selected or typed cwd and creates a cwd-bound session through ADP `CreateSession`, while new conversation can submit without cwd and rely on runtime default cwd
   - WebUI root shell intentionally does not expose persistent success/failure buttons, while WebUI JS still carries paired diagnostic prompts for slash commands and shortcuts
   - WebUI terminal display defaults to summary-only; evidence, learned notes, and completion reason require debug details to be enabled

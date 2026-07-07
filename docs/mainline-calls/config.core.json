@@ -11,16 +11,19 @@
     "one requested agent name selects one `[agents.<name>]` entry",
     "selected agent also resolves explicit peer-topology metadata from the same agent registry",
     "selected agent references one `[providers.<id>]` entry",
-    "validation resolves startup mode, reciprocal peer binding, provider binding, explicit protocol declaration, auth-source invariants, and unknown-field rejection"
+    "validation resolves startup mode, reciprocal peer binding, provider binding, explicit protocol declaration, auth-source invariants, and unknown-field rejection",
+    "provider/model update requests enter only through ProviderConfigUpdate and update_provider_config_in_path; the config owner validates provider id, provider type, protocol, base URL, model, and env-var auth before persistence"
   ],
   "response_mainline": [
     "validated config returns one selected agent runtime configuration plus one selected provider runtime configuration",
     "selected agent runtime configuration includes explicit local node id, paired agent name, paired mode, paired node id, paired allowed IP, and paired pair-token env metadata for runtime bootstrap",
     "selected provider runtime configuration includes explicit protocol, auth source, and safe projection metadata only",
+    "provider/model updates persist to the canonical config path with env-var auth only, return a selected-agent safe projection, and mark restart-required semantics for runtime/UI consumers",
     "restart is required before config changes take effect"
   ],
   "error_mainline": [
     "missing config, invalid agent selection, self-pairing, missing paired agent, same-mode paired agents, non-reciprocal pairing, invalid provider binding, invalid auth source, unknown provider fields, disabled provider selection, or permission mismatch return explicit errors",
+    "invalid provider update inputs or missing env-var auth fail before overwrite; failed updates must leave previous config bytes intact",
     "no fallback config source exists",
     "safe config projection must not expose resolved provider secrets"
   ],
@@ -102,6 +105,50 @@
       "caller": "CLI/server startup",
       "callee": "env resolver",
       "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "ProviderAuthConfig::source_kind",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "expose safe provider auth source classification without returning key material",
+      "input_semantic": "provider auth config",
+      "output_semantic": "inline or env source kind",
+      "caller": "config selector/runtime config projection",
+      "callee": "auth source classifier",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "ProviderConfigUpdate",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "carry owner-backed provider/model update intent",
+      "input_semantic": "agent/provider/model/base-url/env-var fields",
+      "output_semantic": "validated config-owner update input",
+      "caller": "runtime.ui-command-dispatch",
+      "callee": "config owner DTO",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "update_provider_config_in_path",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "validate, apply, reparse, select, and atomically persist provider/model config changes",
+      "input_semantic": "config path plus provider update",
+      "output_semantic": "selected agent projection from saved config",
+      "caller": "runtime.ui-command-dispatch / tests",
+      "callee": "config persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11",
+      "symbol_path": "persist_config_atomically",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "write new config through temp file plus rename after validation succeeds",
+      "input_semantic": "validated TOML text",
+      "output_semantic": "replaced canonical config file",
+      "caller": "update_provider_config_in_path",
+      "callee": "filesystem persistence",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -109,6 +156,7 @@
     "selected-agent projection now includes reciprocal peer-topology metadata and one bound provider runtime configuration",
     "provider protocol must be explicit and unknown provider fields are rejected",
     "safe provider projection must not expose resolved API keys or tokens",
+    "provider/model update is bound through ProviderConfigUpdate and update_provider_config_in_path; invalid updates do not overwrite config and saved env-var auth never writes resolved secret values",
     "generated wiki must be regenerated from `docs/mainline-calls/config.core.json` when this function-map truth changes"
   ]
 }

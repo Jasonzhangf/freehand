@@ -13,6 +13,13 @@ const successPrompt =
   'Online success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.';
 const failurePrompt =
   'Online failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.';
+const configUpdateEnvName = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_ENV || 'FREEHAND_WEBUI_VERIFY_CREDENTIAL';
+const configUpdateProviderId = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_PROVIDER || 'minimax';
+const configUpdateBaseUrl =
+  process.env.FREEHAND_WEBUI_CONFIG_UPDATE_BASE_URL || 'https://api.minimaxi.com/anthropic';
+const configUpdateModel = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_MODEL || 'MiniMax-M3';
+const configUpdateType = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_TYPE || 'anthropic';
+const configUpdateProtocol = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_PROTOCOL || 'messages';
 
 const runId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-verify-${profileName}-${Date.now()}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
@@ -182,8 +189,8 @@ try {
       viewportShapesCovered: viewportSnapshots.every((entry) => entry.state.layoutShape === entry.expectedShape),
       desktopSettingsOpensReadOnly:
         settingsProof.desktopOpen.state.settingsShellVisible &&
-        settingsProof.desktopOpen.state.settingsReadonlyButtonCount >= 3 &&
-        settingsProof.desktopOpen.state.settingsDisabledButtonCount >= 3 &&
+        settingsProof.desktopOpen.state.settingsReadonlyButtonCount >= 2 &&
+        settingsProof.desktopOpen.state.settingsDisabledButtonCount >= 2 &&
         settingsProof.desktopOpen.state.settingsText.includes('Provider and model') &&
         settingsProof.desktopOpen.state.settingsText.includes('Active agent') &&
         settingsProof.desktopOpen.state.settingsAgent !== '' &&
@@ -199,6 +206,18 @@ try {
         settingsProof.desktopOpen.state.passwordInputCount === 0 &&
         settingsProof.desktopOpen.state.apiKeyTextVisible === false &&
         settingsProof.desktopOpen.state.secretTextVisible === false,
+      settingsInvalidUpdateVisible:
+        settingsProof.invalidUpdate.state.settingsProviderSaveStatus.toLowerCase().includes('save failed') &&
+        settingsProof.invalidUpdate.state.settingsProviderSaveStatus.toLowerCase().includes('base_url'),
+      settingsValidUpdateRestartRequired:
+        settingsProof.validUpdate.state.settingsProviderSaveStatus.toLowerCase().includes('restart required') &&
+        settingsProof.validUpdate.state.settingsProvider === configUpdateProviderId &&
+        settingsProof.validUpdate.state.settingsModel === configUpdateModel &&
+        settingsProof.validUpdate.state.settingsProviderHost === 'api.minimaxi.com',
+      settingsUpdateNoSecretLeak:
+        settingsProof.validUpdate.state.passwordInputCount === 0 &&
+        settingsProof.validUpdate.state.apiKeyTextVisible === false &&
+        settingsProof.validUpdate.state.secretTextVisible === false,
       settingsCloseKeepsConversation:
         !settingsProof.afterClose.state.settingsShellVisible &&
         settingsProof.afterClose.state.messageText.includes(prompt1) &&
@@ -238,7 +257,7 @@ try {
         mobileDrawerProof.settingsOpen.state.mobileDrawer === 'settings' &&
         mobileDrawerProof.settingsOpen.state.detailDrawerVisible &&
         mobileDrawerProof.settingsOpen.state.settingsShellVisible &&
-        mobileDrawerProof.settingsOpen.state.settingsReadonlyButtonCount >= 3 &&
+        mobileDrawerProof.settingsOpen.state.settingsReadonlyButtonCount >= 2 &&
         !mobileDrawerProof.settingsOpen.state.sessionDrawerVisible,
       mobileDrawerCloses:
         !mobileDrawerProof.afterSessionClose.state.mobileDrawer &&
@@ -345,10 +364,12 @@ async function captureState(cdp, label) {
       settingsProviderAuth: document.getElementById('settings-provider-auth')?.textContent?.trim() || '',
       settingsModel: document.getElementById('settings-model-value')?.textContent?.trim() || '',
       settingsConfigError: document.getElementById('settings-config-error')?.textContent?.trim() || '',
+      settingsProviderSaveStatus: document.getElementById('settings-provider-save-status')?.textContent?.trim() || '',
       settingsReadonlyButtonCount: document.querySelectorAll('#settings-shell .settings-readonly-action').length,
       settingsDisabledButtonCount: document.querySelectorAll('#settings-shell .settings-readonly-action:disabled').length,
       passwordInputCount: document.querySelectorAll('input[type="password"]').length,
-      apiKeyTextVisible: /api[-_ ]?key/i.test(document.body.innerText || ''),
+      apiKeyTextVisible: /api[-_ ]?key/i.test(document.getElementById('settings-shell')?.innerText || ''),
+      pageApiKeyTextVisible: /api[-_ ]?key/i.test(document.body.innerText || ''),
       secretTextVisible: /api_key|pair_token|sk-|secret/i.test(document.getElementById('settings-shell')?.innerText || ''),
       sessionAgentGroupCount: document.querySelectorAll('.session-agent-group').length,
       sessionAgentNestedCount: document.querySelectorAll('.session-agent-sessions .session-item').length,
@@ -479,7 +500,7 @@ async function captureSettingsProof(cdp) {
         settings.innerText.includes('Provider and model') &&
         settings.innerText.includes('Active agent') &&
         !settings.innerText.includes('loading') &&
-        settings.querySelectorAll('.settings-readonly-action:disabled').length >= 3 &&
+        settings.querySelectorAll('.settings-readonly-action:disabled').length >= 2 &&
         document.querySelectorAll('input[type="password"]').length === 0 &&
         !/api_key|pair_token|sk-|secret/i.test(settings.innerText);
     },
@@ -487,6 +508,22 @@ async function captureSettingsProof(cdp) {
     'desktop settings shell open',
   );
   const desktopOpen = await captureState(cdp, '09-settings-desktop-open');
+  const invalidUpdate = await submitSettingsConfigUpdate(cdp, {
+    providerId: configUpdateProviderId,
+    providerType: configUpdateType,
+    providerProtocol: configUpdateProtocol,
+    baseUrl: 'not-a-url',
+    model: configUpdateModel,
+    envName: configUpdateEnvName,
+  }, '09a-settings-invalid-update');
+  const validUpdate = await submitSettingsConfigUpdate(cdp, {
+    providerId: configUpdateProviderId,
+    providerType: configUpdateType,
+    providerProtocol: configUpdateProtocol,
+    baseUrl: configUpdateBaseUrl,
+    model: configUpdateModel,
+    envName: configUpdateEnvName,
+  }, '09b-settings-valid-update');
   await evalInPage(cdp, () => {
     document.getElementById('settings-shell-toggle')?.click();
   });
@@ -498,7 +535,40 @@ async function captureSettingsProof(cdp) {
   );
   const afterClose = await captureState(cdp, '10-settings-desktop-closed');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  return { desktopOpen, afterClose };
+  return { desktopOpen, invalidUpdate, validUpdate, afterClose };
+}
+
+async function submitSettingsConfigUpdate(cdp, values, label) {
+  await evalInPage(
+    cdp,
+    (payload) => {
+      const setValue = (id, value) => {
+        const node = document.getElementById(id);
+        if (!node) return;
+        node.value = value;
+        node.dispatchEvent(new Event('input', { bubbles: true }));
+        node.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      setValue('settings-provider-id-input', payload.providerId);
+      setValue('settings-provider-type-input', payload.providerType);
+      setValue('settings-provider-protocol-input', payload.providerProtocol);
+      setValue('settings-provider-url-input', payload.baseUrl);
+      setValue('settings-provider-model-input', payload.model);
+      setValue('settings-provider-env-input', payload.envName);
+      document.getElementById('settings-provider-form')?.requestSubmit();
+    },
+    values,
+  );
+  await waitForFunction(
+    cdp,
+    () => {
+      const status = document.getElementById('settings-provider-save-status')?.textContent || '';
+      return /Save failed|Saved\. Restart required/i.test(status);
+    },
+    20_000,
+    `${label} status`,
+  );
+  return captureState(cdp, label);
 }
 
 async function captureMobileDrawerProof(cdp) {

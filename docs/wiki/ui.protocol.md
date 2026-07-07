@@ -19,6 +19,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied
 - error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied
+- provider/model update is a protocol-owned mutation command shape that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to config.core
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 - CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id
 - SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation
@@ -55,6 +56,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth
 - error-center query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
 - task list subscription events carry UI-safe task list projections published by runtime owner code
+- provider/model update command receipts report owner dispatch status only; restart-required and saved provider/model state are observed by follow-up config status projection
 
 ## Error Mainline
 
@@ -73,6 +75,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse
 - empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse
 - task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching
+- provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO
 
 ## Shared Multi-Reference Functions
 
@@ -180,6 +183,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 21 | `UiProtocolState::publish_task_list_projection` | `crates/freehand-ui-protocol/src/lib.rs` | publish runtime-supplied task list projection to subscribers | UI task list projection | UI subscription event | runtime.ui-command-dispatch | protocol subscription channel | bound |
 | 22 | `subscription_selector / subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route task list subscription selectors to task list projection events | SubscribeTaskList command plus UI projection | subscription delivery decision | ADP/SSE subscription transport | protocol selector matcher | bound |
 | 23 | `UiCommand::QueryErrorCenterEvents / UiCommand::SubscribeErrorCenterEvents / UiErrorCenterEventProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center ADP query/subscribe shapes and UI-safe event DTOs | session/trace/turn/domain filters | ErrorCenterEvents query result or subscription projection | ADP/CLI/WebUI transports | runtime query port / protocol selector matcher | bound |
+| 24 | `UiProviderConfigUpdate / UiCommand::UpdateProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider/model update command DTO without credential values and route it to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to config.core | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -201,3 +205,4 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - ADP request and response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
 - task list/history query command DTOs and runtime query-port shape are landed
 - error-center query/subscribe command DTOs and UI-safe event projection are landed
+- provider/model update command DTO is landed, owner-routed to config.core, and serializes without credential/API-key values

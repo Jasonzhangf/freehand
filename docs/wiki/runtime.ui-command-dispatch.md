@@ -20,6 +20,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 - runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs
 - runtime read-only error-center queries enter through `UiRuntimeQueryPort` and read watermarked metadata rows through the runtime metadata projection owner
+- provider/model update commands enter through a protocol dispatch envelope, route to config.core::update_provider_config_in_path, and must not duplicate config validation or persistence logic in runtime
 - live submit registers an active turn cancel token before provider execution and releases the runtime mutex before running provider IO
 - CancelLatestActiveTurn resolves to the newest active live turn before falling back to latest persisted runtime turn
 - submit commands may carry selected cwd; runtime canonicalizes and binds cwd to the selected session
@@ -46,6 +47,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events
 - runtime error-center queries return UI-safe projections built from watermarked metadata rows and omit raw error/request/provider text
 - runtime task list subscription updates reuse the same UI-safe projection helper as task list queries
+- successful provider/model updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and leave active runtime/live provider config unchanged until daemon restart
 
 ## Error Mainline
 
@@ -65,6 +67,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - missing task history targets return explicit target-not-found and invalid task filters return dispatch failures
 - invalid error-center query filters or metadata read failures return explicit dispatch failures
 - task list publication failures after task mutation are explicit live bridge failures
+- provider/model update without a live runtime home or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake hot reload
 
 ## Shared Multi-Reference Functions
 
@@ -104,6 +107,12 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
   - allowed callers: RuntimeCommandDispatcher::query_runtime
   - related tests: runtime_query_reads_error_center_metadata_without_raw_text, daemon_adp_queries_runtime_error_center_truth
   - why shared: keeps metadata/error-center read projection in runtime owner instead of app transports
+- `project_config_status_for_ui`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: build UI-safe active or pending config projection from config.core selected agent truth
+  - allowed callers: RuntimeCommandDispatcher::query_runtime, RuntimeCommandDispatcher::dispatch_update_provider_config
+  - related tests: runtime_query_projects_config_status_without_secrets, runtime_dispatch_updates_provider_config_without_hot_reloading_active_model
+  - why shared: keeps config-to-UI projection in runtime owner while app transports stay protocol-only
 
 ## Function Call Table
 
@@ -124,6 +133,8 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 | 13 | `query_error_center_events_for_ui / project_error_center_event_for_ui` | `crates/freehand-runtime/src/lib.rs` | read watermarked error-center metadata and project UI-safe event DTOs | QueryErrorCenterEvents filters | ErrorCenterEvents query projection | RuntimeCommandDispatcher::query_runtime | metadata.core ledger plus ui.protocol DTO | bound |
 | 14 | `RuntimeCommandDispatcher::dispatch_session_management` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned session CRUD and rollback commands into reason persistence APIs and refresh shared UI projection | session CRUD or rollback dispatch envelope | dispatch receipt or explicit target-not-found/failure | RuntimeCommandDispatcher::dispatch | ReasonPersistence session metadata/rollback owner | bound |
 | 15 | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session transcript with persistence-owned effective projections after rollback | session id plus effective turn projections | queryable transcript excluding rolled-back logical turns | RuntimeCommandDispatcher::dispatch_session_management | ui.protocol state | bound |
+| 16 | `RuntimeCommandDispatcher::dispatch_update_provider_config` | `crates/freehand-runtime/src/lib.rs` | route provider/model update dispatch into the config owner and store pending restart-required UI projection without hot-reloading active runtime | UiProviderConfigUpdate dispatch envelope | dispatch receipt or explicit dispatch failure | RuntimeCommandDispatcher::dispatch | update_provider_config_in_path | bound |
+| 17 | `update_provider_config_in_path` | `crates/freehand-config/src/lib.rs` | validate and atomically persist provider/model update through canonical config owner | runtime config path plus provider update | selected agent config projection from saved TOML | RuntimeCommandDispatcher::dispatch_update_provider_config | config.core persistence | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -150,3 +161,4 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - missing CancelTurn, empty CancelLatestActiveTurn, and wrong-node direct-message dispatch paths now stay explicit target-not-found failures
 - runtime task query bridge routes list/history through task.orchestration and is covered by runtime and daemon ADP tests
 - runtime error-center query bridge routes metadata rows through a UI-safe projection and is covered by runtime and daemon ADP tests
+- runtime provider/model update dispatch is bound as a thin mutation route into config.core; successful saves project restart-required pending status and active runtime config remains unchanged until restart

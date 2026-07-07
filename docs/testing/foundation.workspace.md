@@ -13,7 +13,7 @@
   - global install script installs release host binaries into the configured prefix
   - symlink install script builds debug host binaries, exposes S-suffixed development commands, and installs a prefix-local launchd wrapper without replacing global release commands
   - launchd install script installs release host binaries, writes `~/Library/LaunchAgents/com.freehand.daemon.plist`, writes `~/.freehand/daemon.env` with explicit daemon binary path, starts the user service, and exposes fixed logs/WebUI
-  - launchd symlink profile writes `~/Library/LaunchAgents/com.freehand.daemonS.plist`, writes `~/.freehand/daemonS.env`, uses `freehand-daemonS-bin` for launchd execution, refreshes that debug binary copy during `restartS`, health-checks the env-backed bind, and exposes `127.0.0.1:4042` plus separate `daemonS.*.log` files
+  - launchd symlink profile writes `~/Library/LaunchAgents/com.freehand.daemonS.plist`, writes `~/.freehand/daemonS.env`, uses `freehand-daemonS-bin` for launchd execution, refreshes that debug binary copy during `restartS`, rewrites the plist, reloads only the service-scoped launchd label so new ProgramArguments/env sourcing are active, health-checks the env-backed bind, and exposes `127.0.0.1:4042` plus separate `daemonS.*.log` files
   - launchd install script does not leak daemon workspace root overrides into release/global-install regression subprocesses
   - gate command can validate policy locks
   - source-only search policy keeps implementation search out of generated/runtime outputs and rejects unsafe `rg` ignore-bypass options
@@ -36,7 +36,7 @@
   - symlink install S-suffix command, symlink target logic, and prefix-local launchd wrapper copy
   - launchd daemon binary prefix mismatch rejection
   - launchd S-profile label/env/bin/bind/log separation, including fixed loopback `127.0.0.1:4042` defaults and env-backed health checks on restart
-  - launchd `restartS` debug daemon binary refresh before kickstart
+  - launchd `restartS` debug daemon binary refresh, plist refresh, service-scoped launchd reload, and env-file sourcing before health check
   - launchd release subprocess daemon-workdir env isolation
   - source-only search policy checks `.ignore`, `scripts/source-search.sh`, debug docs, local skill snippets, and unsafe-argument rejection
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
@@ -66,7 +66,7 @@
   - `scripts/install-symlink.sh` installs `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` as symlinks
   - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
   - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`
-  - `scripts/install-launchd.sh restartS` refreshes S debug binaries, reads the existing env bind for health checks, and restarts only `com.freehand.daemonS`
+  - `scripts/install-launchd.sh restartS` refreshes S debug binaries, rewrites the env-sourcing plist, reloads only `com.freehand.daemonS`, reads the existing env bind for health checks, and restarts only that label
   - `make verify-webui-online` runs the fixed S-profile `127.0.0.1:4042` real-browser WebUI + ADP proof after symlink install/restartS and saves screenshots plus `summary.json` under `artifacts/webui-online/`; `make verify-webui-release-online` is the explicit release-profile `127.0.0.1:4041` proof
   - machine-readable mainline truth remains the only source for generated wiki artifacts
   - loop governance starts as report-only project control, not unattended automation

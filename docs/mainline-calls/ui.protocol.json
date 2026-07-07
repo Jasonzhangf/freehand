@@ -16,6 +16,7 @@
     "ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes",
     "task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied",
     "error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied",
+    "provider/model update is a protocol-owned mutation command shape that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to config.core",
     "subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams",
     "CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id",
     "SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation",
@@ -50,7 +51,8 @@
     "session list and transcript projections expose owner-supplied session title, archived state, cwd, and effective transcript projections after rollback",
     "rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth",
     "error-center query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
-    "task list subscription events carry UI-safe task list projections published by runtime owner code"
+    "task list subscription events carry UI-safe task list projections published by runtime owner code",
+    "provider/model update command receipts report owner dispatch status only; restart-required and saved provider/model state are observed by follow-up config status projection"
   ],
   "error_mainline": [
     "invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors",
@@ -67,7 +69,8 @@
     "empty session ids and empty session titles are rejected at the protocol boundary for session management commands, including rollback",
     "empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse",
     "empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse",
-    "task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching"
+    "task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching",
+    "provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO"
   ],
   "shared_functions": [
     {
@@ -527,6 +530,17 @@
       "caller": "ADP/CLI/WebUI transports",
       "callee": "runtime query port / protocol selector matcher",
       "binding_status": "bound"
+    },
+    {
+      "step": "24",
+      "symbol_path": "UiProviderConfigUpdate / UiCommand::UpdateProviderConfig",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "define provider/model update command DTO without credential values and route it to the config owner",
+      "input_semantic": "provider/model/base-url/env-var update",
+      "output_semantic": "validated mutation intent routed to config.core",
+      "caller": "WebUI/CLI ADP command transport",
+      "callee": "runtime.ui-command-dispatch",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -547,6 +561,7 @@
     "CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn",
     "ADP request and response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients",
     "task list/history query command DTOs and runtime query-port shape are landed",
-    "error-center query/subscribe command DTOs and UI-safe event projection are landed"
+    "error-center query/subscribe command DTOs and UI-safe event projection are landed",
+    "provider/model update command DTO is landed, owner-routed to config.core, and serializes without credential/API-key values"
   ]
 }

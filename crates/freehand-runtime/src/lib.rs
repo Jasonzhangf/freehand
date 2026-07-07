@@ -19,8 +19,8 @@ use freehand_blocks::{
     validate_completion_submission,
 };
 use freehand_config::{
-    AgentMode, ProviderProtocol as ConfigProviderProtocol, ProviderType, SelectedAgentConfig,
-    default_config_path, load_default_config,
+    AgentMode, ProviderConfigUpdate, ProviderProtocol as ConfigProviderProtocol, ProviderType,
+    SelectedAgentConfig, default_config_path, load_default_config, update_provider_config_in_path,
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
@@ -73,10 +73,10 @@ use freehand_ui_protocol::{
     UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
     UiCompletionSchemaRetryWaiting, UiConfigStatusProjection, UiErrorCenterEventListProjection,
     UiErrorCenterEventProjection, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
-    UiQueryResult, UiRuntimeQueryPort, UiSessionMetadataProjection, UiTaskHistoryProjection,
-    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskSnapshotProjection, UiTurnProjection,
-    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
-    turn_projection_from_events,
+    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSessionMetadataProjection,
+    UiTaskHistoryProjection, UiTaskLedgerEventProjection, UiTaskListProjection,
+    UiTaskSnapshotProjection, UiTurnProjection, checkpoint_projection_from_runtime_summary,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -2047,6 +2047,7 @@ struct RuntimeCommandDispatcherState {
     active_turns: Vec<ActiveRuntimeTurn>,
     node_runtime: LocalNodeRuntime,
     next_turn_ordinal: u64,
+    pending_config_status: Option<UiConfigStatusProjection>,
 }
 
 #[derive(Clone)]
@@ -2301,6 +2302,7 @@ impl RuntimeCommandDispatcher {
                 active_turns: Vec::new(),
                 node_runtime,
                 next_turn_ordinal,
+                pending_config_status: None,
             }),
         };
         dispatcher.refresh_checkpoint_projection().map_err(|err| {
@@ -2320,6 +2322,9 @@ impl RuntimeCommandDispatcher {
         let state = self.state.lock().expect("lock runtime dispatcher state");
         match command {
             UiCommand::QueryConfigStatus => {
+                if let Some(status) = state.pending_config_status.clone() {
+                    return Ok(Some(UiQueryResult::ConfigStatus(status)));
+                }
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
@@ -3272,6 +3277,9 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             UiCommand::CancelLatestActiveTurn {} => {
                 self.dispatch_cancel_latest_active_turn(&mut state, envelope)
             }
+            UiCommand::UpdateProviderConfig { update } => {
+                self.dispatch_update_provider_config(&mut state, envelope, update)
+            }
             UiCommand::ResumeTurn { turn_id } => self.dispatch_resume_turn(envelope, turn_id),
             UiCommand::SendDirectMessageToSlave { node_id, text } => {
                 self.dispatch_direct_message(&mut state, envelope, node_id, text)
@@ -3283,6 +3291,42 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
                 "command is not a runtime dispatch target".to_owned(),
             )),
         }
+    }
+}
+
+impl RuntimeCommandDispatcher {
+    fn dispatch_update_provider_config(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        update: UiProviderConfigUpdate,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let live = state.config.live.as_ref().ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "provider config update requires a live runtime home".to_owned(),
+            )
+        })?;
+        let config_path = live.runtime_home.join("config.toml");
+        let selected = update_provider_config_in_path(
+            &config_path,
+            ProviderConfigUpdate {
+                agent_name: update.agent_name,
+                provider_id: update.provider_id,
+                provider_type: update.provider_type,
+                protocol: update.provider_protocol,
+                base_url: update.base_url,
+                default_model: update.default_model,
+                api_key_env: update.api_key_env,
+            },
+        )
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        state.pending_config_status = Some(project_config_status_for_ui(&selected));
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: "provider_config_saved_restart_required".to_owned(),
+        })
     }
 }
 
@@ -5804,6 +5848,239 @@ mod tests {
             other => panic!("unexpected query result: {other:?}"),
         }
 
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_dispatch_updates_provider_config_without_hot_reloading_active_model() {
+        let runtime_home = temp_runtime_home();
+        fs::create_dir_all(&runtime_home).expect("create runtime home");
+        let config_path = runtime_home.join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[providers.old]
+id = "old"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "https://old.example.test/v1"
+default_model = "old-model"
+
+[providers.old.auth]
+type = "apikey"
+api_key_env = "FREEHAND_RUNTIME_PROVIDER_OLD"
+
+[agents.agent-live]
+name = "agent-live"
+mode = "master"
+node_id = "agent-live-node"
+paired_agent = "agent-live-worker"
+pair_token = "FREEHAND_RUNTIME_MASTER_TOKEN"
+provider = "old"
+
+[agents.agent-live-worker]
+name = "agent-live-worker"
+mode = "slave"
+node_id = "agent-live-worker-node"
+paired_agent = "agent-live"
+pair_token = "FREEHAND_RUNTIME_WORKER_TOKEN"
+provider = "old"
+"#,
+        )
+        .expect("write config");
+        // SAFETY: this test owns these unique variable names and removes them before exit.
+        unsafe {
+            std::env::set_var("FREEHAND_RUNTIME_PROVIDER_OLD", "old-secret");
+            std::env::set_var("FREEHAND_RUNTIME_PROVIDER_NEW", "new-secret");
+            std::env::set_var("FREEHAND_RUNTIME_MASTER_TOKEN", "pair-token");
+            std::env::set_var("FREEHAND_RUNTIME_WORKER_TOKEN", "pair-token");
+        }
+        let selected = freehand_config::load_config_from_path(&config_path)
+            .expect("load config")
+            .select_agent("agent-live")
+            .expect("select agent");
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &selected,
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+        let receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::UpdateProviderConfig {
+                    update: UiProviderConfigUpdate {
+                        agent_name: "agent-live".to_owned(),
+                        provider_id: "new-provider".to_owned(),
+                        provider_type: "anthropic".to_owned(),
+                        provider_protocol: "messages".to_owned(),
+                        base_url: "https://new.example.test/v1".to_owned(),
+                        default_model: "new-model".to_owned(),
+                        api_key_env: "FREEHAND_RUNTIME_PROVIDER_NEW".to_owned(),
+                    },
+                })
+                .expect("config update envelope"),
+            )
+            .expect("config update receipt");
+        assert_eq!(
+            receipt.dispatch_status,
+            "provider_config_saved_restart_required"
+        );
+
+        match runtime
+            .query_runtime(&UiCommand::QueryConfigStatus)
+            .expect("config query")
+            .expect("runtime-owned config result")
+        {
+            UiQueryResult::ConfigStatus(status) => {
+                assert_eq!(status.provider_id, "new-provider");
+                assert_eq!(status.provider_base_url_host, "new.example.test");
+                assert_eq!(status.default_model, "new-model");
+                assert_eq!(status.provider_auth_source, "env");
+                assert!(status.restart_required_on_change);
+                let encoded = serde_json::to_string(&status).expect("status json");
+                assert!(!encoded.contains("new-secret"));
+                assert!(!encoded.contains("old-secret"));
+                assert!(!encoded.contains("api_key"));
+            }
+            other => panic!("unexpected query result: {other:?}"),
+        }
+
+        {
+            let state = runtime.state.lock().expect("lock runtime state");
+            assert_eq!(state.config.model, "old-model");
+            assert_eq!(
+                state
+                    .config
+                    .live
+                    .as_ref()
+                    .unwrap()
+                    .selected_agent
+                    .provider
+                    .id,
+                "old"
+            );
+            assert_eq!(
+                state
+                    .config
+                    .live
+                    .as_ref()
+                    .unwrap()
+                    .selected_agent
+                    .provider
+                    .default_model,
+                "old-model"
+            );
+        }
+
+        let raw = fs::read_to_string(&config_path).expect("read saved config");
+        assert!(raw.contains("[providers.new-provider]"));
+        assert!(raw.contains("default_model = \"new-model\""));
+        assert!(raw.contains("api_key_env = \"FREEHAND_RUNTIME_PROVIDER_NEW\""));
+        assert!(!raw.contains("new-secret"));
+        assert!(!raw.contains("old-secret"));
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe {
+            std::env::remove_var("FREEHAND_RUNTIME_PROVIDER_OLD");
+            std::env::remove_var("FREEHAND_RUNTIME_PROVIDER_NEW");
+            std::env::remove_var("FREEHAND_RUNTIME_MASTER_TOKEN");
+            std::env::remove_var("FREEHAND_RUNTIME_WORKER_TOKEN");
+        }
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_dispatch_rejects_invalid_provider_config_without_overwrite() {
+        let runtime_home = temp_runtime_home();
+        fs::create_dir_all(&runtime_home).expect("create runtime home");
+        let config_path = runtime_home.join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[providers.old]
+id = "old"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "https://old.example.test/v1"
+default_model = "old-model"
+
+[providers.old.auth]
+type = "apikey"
+api_key_env = "FREEHAND_RUNTIME_PROVIDER_OLD_INVALID"
+
+[agents.agent-live]
+name = "agent-live"
+mode = "master"
+node_id = "agent-live-node"
+paired_agent = "agent-live-worker"
+pair_token = "FREEHAND_RUNTIME_MASTER_TOKEN_INVALID"
+provider = "old"
+
+[agents.agent-live-worker]
+name = "agent-live-worker"
+mode = "slave"
+node_id = "agent-live-worker-node"
+paired_agent = "agent-live"
+pair_token = "FREEHAND_RUNTIME_WORKER_TOKEN_INVALID"
+provider = "old"
+"#,
+        )
+        .expect("write config");
+        // SAFETY: this test owns these unique variable names and removes them before exit.
+        unsafe {
+            std::env::set_var("FREEHAND_RUNTIME_PROVIDER_OLD_INVALID", "old-secret");
+            std::env::set_var("FREEHAND_RUNTIME_MASTER_TOKEN_INVALID", "pair-token");
+            std::env::set_var("FREEHAND_RUNTIME_WORKER_TOKEN_INVALID", "pair-token");
+        }
+        let selected = freehand_config::load_config_from_path(&config_path)
+            .expect("load config")
+            .select_agent("agent-live")
+            .expect("select agent");
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &selected,
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+        let before = fs::read_to_string(&config_path).expect("read before");
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::UpdateProviderConfig {
+                    update: UiProviderConfigUpdate {
+                        agent_name: "agent-live".to_owned(),
+                        provider_id: "bad-provider".to_owned(),
+                        provider_type: "anthropic".to_owned(),
+                        provider_protocol: "messages".to_owned(),
+                        base_url: "not-a-url".to_owned(),
+                        default_model: "bad-model".to_owned(),
+                        api_key_env: "FREEHAND_RUNTIME_PROVIDER_NEW_INVALID".to_owned(),
+                    },
+                })
+                .expect("config update envelope"),
+            )
+            .expect_err("invalid update must fail");
+        let err_text = err.to_string();
+        assert!(
+            err_text.contains("bad-provider") && err_text.contains("base_url"),
+            "unexpected config update error: {err_text}"
+        );
+        let after = fs::read_to_string(&config_path).expect("read after");
+        assert_eq!(after, before);
+        assert!(
+            runtime
+                .query_runtime(&UiCommand::QueryConfigStatus)
+                .expect("config query")
+                .is_some()
+        );
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe {
+            std::env::remove_var("FREEHAND_RUNTIME_PROVIDER_OLD_INVALID");
+            std::env::remove_var("FREEHAND_RUNTIME_MASTER_TOKEN_INVALID");
+            std::env::remove_var("FREEHAND_RUNTIME_WORKER_TOKEN_INVALID");
+        }
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
 

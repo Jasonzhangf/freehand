@@ -983,7 +983,8 @@ mod tests {
         assert!(html.contains("id=\"settings-shell-toggle\""));
         assert!(html.contains("id=\"open-settings-drawer-button\""));
         assert!(html.contains("id=\"settings-shell\""));
-        assert!(html.contains("Provider editing locked"));
+        assert!(html.contains("id=\"settings-provider-form\""));
+        assert!(html.contains("Save provider config"));
         assert!(html.contains("Skill settings pending"));
         assert!(!html.contains("type=\"password\""));
         assert!(!html.contains("api-key"));
@@ -1149,7 +1150,8 @@ mod tests {
         assert!(root_body.contains("id=\"settings-provider-host\""));
         assert!(root_body.contains("id=\"settings-provider-auth\""));
         assert!(root_body.contains("id=\"settings-config-error\""));
-        assert!(root_body.contains("Provider editing locked"));
+        assert!(root_body.contains("id=\"settings-provider-form\""));
+        assert!(root_body.contains("Save provider config"));
         assert!(root_body.contains("Task settings pending"));
         assert!(!root_body.contains("type=\"password\""));
         assert!(!root_body.contains("api-key"));
@@ -1283,6 +1285,8 @@ mod tests {
         assert!(js_body.contains("settings-provider-host"));
         assert!(js_body.contains("settings-provider-auth"));
         assert!(js_body.contains("settings-config-error"));
+        assert!(js_body.contains("UpdateProviderConfig"));
+        assert!(js_body.contains("function submitProviderConfigUpdate"));
         assert!(js_body.contains("function settingsAuthTypeLabel"));
         assert!(js_body.contains("authType === \"apikey\" ? \"credential\""));
         assert!(js_body.contains("open-settings-drawer-button"));

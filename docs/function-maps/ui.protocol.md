@@ -24,6 +24,7 @@
   - `UiProtocolState::subscribe`
   - `UiProtocolState::query`
   - `UiRuntimeQueryPort::query_runtime`
+  - `UiProviderConfigUpdate`
 - `UiProtocolState::apply_semantic_event`
   - `UiProtocolState::apply_tool_call`
   - `UiProtocolState::apply_tool_result`
@@ -50,6 +51,7 @@
 - task list subscriptions are protocol-owned ADP/subscribe command shapes; task list projection contents must be supplied by runtime/task owners and remain read-only UI DTOs
 - error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
 - config status query is a protocol-owned ADP/query command shape, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
+- provider/model update is a protocol-owned mutation command shape (`UpdateProviderConfig`) that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to `config.core`; WebUI and CLI must not write config files directly
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 
 ## Response Mainline
@@ -74,6 +76,7 @@
 - task list subscription events expose the same UI-safe task list projection as query results so task panels can refresh from push without polling or app-local task state
 - error-center event query results expose UI-safe watermarked metadata fields plus raw hash only; raw provider/tool/request/user/assistant text is not part of the protocol DTO
 - config status query results expose UI-safe active agent/provider/model fields plus auth source type only; API keys, pair tokens, provider raw payloads, and full credential-bearing URLs are not part of the DTO
+- provider/model update command receipts report owner dispatch status only; the restart-required and saved provider/model state is observed by a follow-up config status query/projection, not by protocol-local config truth
 - error-center subscription initial snapshots use the same `UiErrorCenterEventListProjection` as query results
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards; tool status/outcome is conveyed by the status field while the public body stays semantic and target-focused instead of echoing success/failure result text
 - public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/parameters/result without parsing raw tool terms
@@ -102,6 +105,7 @@
 - empty error-center session ids are rejected at the protocol boundary as `empty_session_id`
 - task list/history commands sent to command ingress are rejected as query-route misuse instead of mutating task truth
 - config status command sent to command ingress is rejected as query-route misuse instead of becoming a UI-local config read or mutation
+- provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO
 - task history remains query-only; task list subscribe accepts only list filters and must reject history/query misuse on the subscribe route
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
 - source identity fields remain explicit across success and error paths
@@ -197,6 +201,7 @@
 | 19a | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session's effective transcript projection after persistence-owned rollback | session id plus effective turn projections | queryable session transcript without rolled-back turns | runtime.ui-command-dispatch | protocol state | bound |
 | 20 | `UiRuntimeQueryPort::query_runtime` | `crates/freehand-ui-protocol/src/lib.rs` | define runtime-backed read-only query extension point without making app transports import runtime owners | UI query command | optional runtime-owned query result or explicit dispatch failure | WebUI/daemon ADP query transport | runtime query owner | bound |
 | 20a | `UiCommand::QueryConfigStatus` / `UiQueryResult::ConfigStatus` / `UiConfigStatusProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define UI-safe active config query/result DTO without secrets | config status query | active agent/provider/model/auth-source projection | ADP query transport | runtime query port | bound |
+| 20b | `UiProviderConfigUpdate` / `UiCommand::UpdateProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider/model update command DTO without credential values and route it to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 21 | `UiCommand::QueryErrorCenterEvents` / `UiQueryResult::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center query/result DTOs | session/trace/turn/domain filters | UI-safe error-center projection | ADP query transport | runtime query port | bound |
 | 22 | `UiCommand::SubscribeErrorCenterEvents` / `UiProjection::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define error-center subscription command and projection event shape | error-center subscription filters | UI-safe error-center subscription event | ADP subscribe transport | protocol selector matcher | bound |
 
@@ -223,4 +228,5 @@
 - task list subscription projection is protocol-bound; runtime owner code publishes task list projection events into `UiProtocolState`
 - error-center query/subscription DTOs and runtime query-port routing are protocol-bound; runtime owner code supplies metadata-backed read projections
 - config status query/result DTO is protocol-bound; runtime owner code supplies selected config projection and protocol state rejects local handling
+- provider/model update command DTO is protocol-bound, owner-routed to `config.core`, rejects invalid/empty fields, and serializes without credential/API-key values
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

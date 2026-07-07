@@ -86,6 +86,14 @@ const inspectorTitle = document.getElementById("inspector-title");
 const inspectorCopy = document.getElementById("inspector-copy");
 const inspectorDebugPanel = document.getElementById("inspector-debug-panel");
 const settingsShell = document.getElementById("settings-shell");
+const settingsProviderForm = document.getElementById("settings-provider-form");
+const settingsProviderIdInput = document.getElementById("settings-provider-id-input");
+const settingsProviderTypeInput = document.getElementById("settings-provider-type-input");
+const settingsProviderProtocolInput = document.getElementById("settings-provider-protocol-input");
+const settingsProviderUrlInput = document.getElementById("settings-provider-url-input");
+const settingsProviderModelInput = document.getElementById("settings-provider-model-input");
+const settingsProviderEnvInput = document.getElementById("settings-provider-env-input");
+const settingsProviderSaveButton = document.getElementById("settings-provider-save-button");
 const newConversationButton = document.getElementById("new-conversation-button");
 const newTaskButton = document.getElementById("new-task-button");
 const taskCwdInput = document.getElementById("task-cwd-input");
@@ -165,6 +173,7 @@ const state = {
   checkpoints: [],
   configStatus: null,
   configStatusError: null,
+  configSaveInFlight: false,
   toolTimings: new Map(),
   lifecycleClocks: new Map(),
   pendingUserInput: null,
@@ -2992,11 +3001,64 @@ function renderSettingsShell() {
   setText("settings-workspace-value", workspace);
   setText("settings-attachment-count", `${attachments.length}`);
   setText("settings-attachment-value", `${attachments.length} draft item(s)`);
+  syncSettingsProviderForm();
   showInspectorPanel(state.inspectorPanel);
 }
 
 function settingsAuthTypeLabel(authType) {
   return authType === "apikey" ? "credential" : (authType || "credential");
+}
+
+function syncSettingsProviderForm() {
+  const status = state.configStatus;
+  setInputValueIfNotFocused(settingsProviderIdInput, status?.provider_id || "");
+  setInputValueIfNotFocused(settingsProviderTypeInput, status?.provider_type || "openai");
+  setInputValueIfNotFocused(settingsProviderProtocolInput, status?.provider_protocol || "responses");
+  setInputValueIfNotFocused(settingsProviderModelInput, status?.default_model || "");
+  if (settingsProviderSaveButton) {
+    settingsProviderSaveButton.disabled = state.configSaveInFlight;
+    settingsProviderSaveButton.textContent = state.configSaveInFlight ? "Saving..." : "Save provider config";
+  }
+}
+
+function setInputValueIfNotFocused(input, value) {
+  if (!input || document.activeElement === input) {
+    return;
+  }
+  input.value = value || "";
+}
+
+async function submitProviderConfigUpdate(event) {
+  event.preventDefault();
+  if (!state.configStatus) {
+    setText("settings-provider-save-status", "Config status is not loaded yet.");
+    return;
+  }
+  const update = {
+    agent_name: state.configStatus.agent_name,
+    provider_id: settingsProviderIdInput?.value.trim() || "",
+    provider_type: settingsProviderTypeInput?.value.trim() || "",
+    provider_protocol: settingsProviderProtocolInput?.value.trim() || "",
+    base_url: settingsProviderUrlInput?.value.trim() || "",
+    default_model: settingsProviderModelInput?.value.trim() || "",
+    api_key_env: settingsProviderEnvInput?.value.trim() || "",
+  };
+  state.configSaveInFlight = true;
+  setText("settings-provider-save-status", "Saving config...");
+  renderSettingsShell();
+  try {
+    const receipt = await adpCommand({ UpdateProviderConfig: { update } });
+    setCommandStatus(`${receipt.dispatch_status} -> ${receipt.target_feature_id}`, { stickyMs: 5000 });
+    await refreshConfigStatus();
+    setText("settings-provider-save-status", "Saved. Restart required before active runtime changes.");
+  } catch (error) {
+    state.configStatusError = error.message;
+    setText("settings-provider-save-status", `Save failed: ${error.message}`);
+    renderSettingsShell();
+  } finally {
+    state.configSaveInFlight = false;
+    renderSettingsShell();
+  }
 }
 
 function renderTurnMeta() {
@@ -3562,6 +3624,15 @@ if (settingsShellToggle) {
   settingsShellToggle.addEventListener("click", () => {
     showInspectorPanel(state.inspectorPanel === "settings" ? "debug" : "settings");
     renderAll();
+  });
+}
+if (settingsProviderForm) {
+  settingsProviderForm.addEventListener("submit", (event) => {
+    submitProviderConfigUpdate(event).catch((error) => {
+      state.configSaveInFlight = false;
+      setText("settings-provider-save-status", `Save failed: ${error.message}`);
+      renderSettingsShell();
+    });
   });
 }
 if (closeDetailDrawerButton) {

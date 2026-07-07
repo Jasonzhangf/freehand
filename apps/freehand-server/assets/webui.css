@@ -491,6 +491,51 @@ body.theme-dark .checkpoint-item {
   white-space: nowrap;
 }
 
+.settings-provider-form {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(31, 108, 88, 0.14);
+  border-radius: 12px;
+  background: rgba(247, 251, 248, 0.52);
+}
+
+.settings-provider-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.settings-provider-form input,
+.settings-provider-form select {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid rgba(31, 108, 88, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+  padding: 8px 9px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.settings-primary-action {
+  width: fit-content;
+  border: 0;
+  border-radius: 999px;
+  background: var(--master);
+  color: white;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.settings-primary-action:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .settings-readonly-action {
   width: fit-content;
   border: 1px solid rgba(31, 108, 88, 0.18);
@@ -515,6 +560,17 @@ body.theme-dark .settings-card {
 
 body.theme-dark .settings-row {
   background: rgba(255, 255, 255, 0.035);
+}
+
+body.theme-dark .settings-provider-form {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(88, 176, 141, 0.22);
+}
+
+body.theme-dark .settings-provider-form input,
+body.theme-dark .settings-provider-form select {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(88, 176, 141, 0.22);
 }
 
 .session-item.active {

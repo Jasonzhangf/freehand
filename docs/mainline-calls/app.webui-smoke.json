@@ -14,10 +14,11 @@
     "app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets",
     "app boundary keeps theme assets separate from WebUI layout assets",
     "front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames",
-    "front-end session rail exposes protocol-owned rename, archive, archived-session list, restore, and double-Esc rollback controls without storing session truth locally",
+    "front-end session rail exposes protocol-owned rename, remove via DeleteSession, and double-Esc rollback controls without storing session truth locally; archive/restore are intentionally absent from WebUI",
     "front-end selected empty-session rendering binds empty `SessionTurns` to the selected session, clears previous active turn and debug state, and suppresses generic waiting-data system cards so new sessions do not leak prior session content",
     "front-end keeps success and failure scenario prompts as hidden slash/keyboard diagnostic affordances without rendering persistent sample buttons in the composer",
     "front-end composer control strip exposes attachment buttons, preview, selected-session refresh, cwd input, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP",
+    "front-end provider/model edit form submits UpdateProviderConfig through ADP only, then re-queries QueryConfigStatus for restart-required saved projection; WebUI never reads or writes ~/.freehand/config.toml directly and never accepts raw API-key values",
     "front-end layout classifier maps viewport width plus aspect ratio into presentation-only shape attributes without changing protocol/session truth",
     "server-rendered root shell pins `client=android-webview` first paint to `tablet_portrait` on body and shell layout attributes so Android WebView does not flash the default desktop grid before JS refinement",
     "front-end mobile portrait layout keeps the conversation workspace as the primary surface; session CRUD/list and debug/config detail surfaces are hidden in explicit overlay drawers opened from mobile controls and must not occupy the normal document flow",
@@ -48,6 +49,7 @@
     "WebUI submit success path actively re-queries latest turn truth over ADP after command receipt to cover command-complete-before-browser-subscriber timing",
     "WebUI success/failure diagnostic prompts populate the composer through slash commands or keyboard shortcuts, then the operator can send them through the normal ADP submit path; these prompts must not appear as persistent composer buttons",
     "WebUI composer control strip renders low-noise controls below the composer without creating a second protocol or truth source",
+    "WebUI provider/model save renders field-level validation errors, disables duplicate save while in flight, re-queries owner-backed config status, and shows restart-required after a successful owner-backed save",
     "WebUI forwards selected cwd through SubmitUserInput.cwd and keeps draft-session empty state out of the chat stream",
     "WebUI selected empty sessions render a clean empty prompt and ignore latest-active turns from other sessions until the selected session has its own transcript or live turn",
     "WebUI Escape behavior is stateful: active/submit-in-flight cancels, non-empty composer clears, empty composer first Esc arms rollback, and second Esc calls `RollbackLatestSessionTurn` before refilling composer from the rolled-back user text",
@@ -92,7 +94,8 @@
     "restored attachment metadata without a current page file handle is visible as metadata-only and must not pretend the binary payload was rehydrated",
     "transient missing debug snapshots are rendered as pending debug state, not command failure",
     "debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state",
-    "task/error-center subscription initial query failures surface explicit ADP failure frames instead of app-owned fallback state"
+    "task/error-center subscription initial query failures surface explicit ADP failure frames instead of app-owned fallback state",
+    "settings provider/model update failures render explicit user-visible config errors and must not update local Settings state as if save succeeded"
   ],
   "shared_functions": [
     {
@@ -247,11 +250,11 @@
     },
     {
       "step": "11",
-      "symbol_path": "refreshTurn / refreshSessions / renderMessages / logicalSessionTurns / stripFreehandCompletionBlock / normalizePublicConversation / classifyLayoutShape / applyLayoutShape / viewportDimensionsForLayout / setMobileDrawer / closeMobileDrawer / syncMobileDrawerForLayout / installMobileSessionSwipeGesture / setComposerFocused / openNewSessionDialog / submitNewSessionDialog / renderCommandStatus / refreshDebug / submitUserInput / setSessionList / sessionAgentId / groupedSessionsByAgent / renderSessionAgentGroup / renderSessionItem / renameSelectedSession / deleteSelectedSessions / rollbackLatestSessionTurn",
+      "symbol_path": "refreshTurn / refreshSessions / refreshConfigStatus / syncSettingsProviderForm / submitProviderConfigUpdate / renderMessages / logicalSessionTurns / stripFreehandCompletionBlock / normalizePublicConversation / classifyLayoutShape / applyLayoutShape / viewportDimensionsForLayout / setMobileDrawer / closeMobileDrawer / syncMobileDrawerForLayout / installMobileSessionSwipeGesture / setComposerFocused / openNewSessionDialog / submitNewSessionDialog / renderCommandStatus / refreshDebug / submitUserInput / setSessionList / sessionAgentId / groupedSessionsByAgent / renderSessionAgentGroup / renderSessionItem / renameSelectedSession / deleteSelectedSessions / rollbackLatestSessionTurn",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "consume ADP query and subscription turn payloads, render semantic/tool/debug cards, expose protocol-owned session rename/remove/rollback controls, open the New dialog for global conversation or cwd-bound task creation, keep same-tool updates in one card, apply aspect-ratio layout shape attributes, keep mobile portrait session/detail surfaces in UI-only overlay drawers outside normal conversation flow, open the session drawer with a presentation-only content-area right-swipe gesture, render session summaries as agent -> sessions groups without owning session truth, keep mobile focused composer state presentation-only, and keep missing debug snapshots pending instead of failed",
-      "input_semantic": "`UiAdpResponse` frames plus debug snapshot/pending state plus command dispatch receipt plus selected session UI intent plus viewport size plus mobile drawer button and gesture events",
-      "output_semantic": "DOM message blocks, agent-grouped session lists, New dialog state, composer refill after rollback receipt, command status, layout shape attributes, composer focus attributes, and mobile drawer state attributes",
+      "responsibility": "consume ADP query and subscription turn payloads, render semantic/tool/debug cards, submit provider/model updates through protocol commands, expose protocol-owned session rename/remove/rollback controls, open the New dialog for global conversation or cwd-bound task creation, keep same-tool updates in one card, apply aspect-ratio layout shape attributes, keep mobile portrait session/detail surfaces in UI-only overlay drawers outside normal conversation flow, open the session drawer with a presentation-only content-area right-swipe gesture, render session summaries as agent -> sessions groups without owning session truth, keep mobile focused composer state presentation-only, and render settings from protocol/runtime config projection plus owner-backed save results without config file writes or credential values, and keep missing debug snapshots pending instead of failed",
+      "input_semantic": "`UiAdpResponse` frames plus debug snapshot/pending state plus config status/update frames plus command dispatch receipt plus selected session UI intent plus viewport size plus mobile drawer button and gesture events",
+      "output_semantic": "DOM message blocks, settings cards/forms/status, agent-grouped session lists, New dialog state, composer refill after rollback receipt, command status, layout shape attributes, composer focus attributes, and mobile drawer state attributes",
       "caller": "WebUI shell",
       "callee": "ADP protocol frames",
       "binding_status": "bound"
@@ -348,13 +351,14 @@
     "app dependency boundary is intended to remain protocol-only and must not import reason, provider, node, or config semantics",
     "app query transport now accepts an injected UiRuntimeQueryPort while remaining free of runtime/task/error-center imports",
     "app subscription transport now uses the injected UiRuntimeQueryPort for task list and error-center initial snapshots while keeping app dependency boundary protocol-only",
-    "WebUI session rail now exposes rename, archive, archived-session list, restore, and double-Esc rollback as protocol commands over ADP instead of local session truth",
+    "WebUI session rail now exposes rename, remove via DeleteSession, and double-Esc rollback as protocol commands over ADP instead of local session truth; archive/restore controls are intentionally absent",
     "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes",
     "WebUI Cancel button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input",
     "WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn",
     "WebUI tool cards now render protocol-projected waiting/completed/failed lifecycle states from ADP turn projection truth without exposing verbose term text by default",
     "WebUI same-tool lifecycle updates normalize by tool_call_id, waiting cards animate, elapsed timers render locally, and submit clears the composer immediately while retaining pending state in the conversation stream",
     "WebUI inactive text-only or restored turns render as neutral waiting or active state instead of fake streaming; animation requires submit-in-flight, waiting tool activity, or protocol-projected model request truth",
-    "WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending"
+    "WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending",
+    "WebUI settings provider/model save submits UpdateProviderConfig over ADP, shows validation errors or restart-required success, re-queries owner-backed config projection, and avoids raw API-key values/direct config writes"
   ]
 }
