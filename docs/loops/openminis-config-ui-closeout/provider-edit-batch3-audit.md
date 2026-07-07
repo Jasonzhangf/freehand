@@ -14,6 +14,7 @@
 | Config write validates before persistence and preserves old config on invalid input | `update_provider_config_in_path` validates provider id/base URL/type/protocol/model/env, reparses selected config before `persist_config_atomically`; tests `freehand-config` and runtime invalid no-overwrite test passed | Proven |
 | Persistence is atomic | `persist_config_atomically` writes temp file, syncs, then renames | Proven |
 | Valid save projects restart-required and does not hot reload active runtime | runtime stores `pending_config_status` and returns `provider_config_saved_restart_required`; test `runtime_dispatch_updates_provider_config_without_hot_reloading_active_model` passed | Proven |
+| Restart after valid save projects persisted config | S-profile proof temporarily saved `default_model=MiniMax-M3-Restart-Proof` with env-var auth, restarted `com.freehand.daemonS`, then `adp-config-query` still returned the updated model and `auth_source=env`; trap restored real config afterward | Proven |
 | Invalid save shows visible error | online proof `artifacts/webui-online/20260707-verify-4042-1783399147569/summary.json` has `settingsInvalidUpdateVisible=true` | Proven |
 | Valid env-var save shows restart-required | same online proof has `settingsValidUpdateRestartRequired=true`; `settingsProviderSaveStatus` is `Saved. Restart required before active runtime changes.` | Proven |
 | Credential/API key not projected or DOM-visible | online proof has `settingsUpdateNoSecretLeak=true`; WebUI has no password input and verifier scans Settings text for secret/API-key patterns | Proven for Settings surface |
@@ -59,6 +60,7 @@ Change:
 - Valid save command status: `Provider config saved. Restart required.`
 - Invalid save visible error: `Save failed: dispatch port failure: provider ... base_url must be an http(s) URL with a host`
 - Post-restore config query: `auth_source=inline`
+- Restart-after-save proof: temporary save projected `default_model=MiniMax-M3-Restart-Proof` / `auth_source=env` before and after `scripts/install-launchd.sh restartS`; post-validation restore returned `default_model=MiniMax-M3` / `auth_source=inline`
 
 ## Remaining Non-Batch-3 Gaps
 

@@ -2,10 +2,10 @@
 
 - loop_id: `openminis-config-ui-closeout`
 - current_mode: `L2`
-- status: `L2 Batch 4 release propagation verified; Android true-device proof blocked by no ADB device`
+- status: `L2 Batch 3 provider/model edit complete on S-profile; Batch 4 release propagation verified; Android true-device proof blocked by no ADB device`
 - kill_switch_state: `inactive`
 - owner_feature: `config.core`, `ui.protocol`, `runtime.ui-command-dispatch`, `app.webui-smoke`
-- last_baseline: `2026-07-07 L2 Batch 4 release 4041 propagation verified; served assets match workspace, config restored to auth_source=inline, Android true-device proof blocked because adb has no connected device`
+- last_baseline: `2026-07-07 L2 Batch 3 completion audit verified provider/model edit on S-profile 4042, including invalid visible error, valid restart-required save, no credential leak, no internal status leak, no success fallback for unknown provider-save receipts, restart-after-save projection consistency, and restored config auth_source=inline; Batch 4 release 4041 propagation also verified, Android true-device proof blocked because adb has no connected device`
 
 ## Current Findings
 
@@ -16,7 +16,7 @@
 5. `config.core` owns `~/.freehand/config.toml`; `app.webui-smoke` must not import config semantics or write config directly.
 6. L2 Batch 1 landed a read-only WebUI Settings shell.
 7. L2 Batch 2 replaced placeholder provider/model/agent values with `config.core` -> `ui.protocol` -> `runtime.ui-command-dispatch` projections.
-8. L2 Batch 3 landed owner-backed provider/model save through `app.webui-smoke` -> `ui.protocol` -> `runtime.ui-command-dispatch` -> `config.core`; invalid saves fail visibly without overwrite, valid env-var saves project restart-required status, active runtime config does not hot reload before restart, and WebUI evidence shows no credential leakage in Settings.
+8. L2 Batch 3 landed owner-backed provider/model save through `app.webui-smoke` -> `ui.protocol` -> `runtime.ui-command-dispatch` -> `config.core`; invalid saves fail visibly without overwrite, valid env-var saves project restart-required status, active runtime config does not hot reload before restart, WebUI evidence shows no credential leakage in Settings, user-facing provider-save status hides internal owner/status ids, and unknown provider-save receipt statuses fail explicitly instead of falling back to success.
 9. L2 Batch 4 fixed release launchd restart propagation: `scripts/install-launchd.sh restart` now rewrites env and plist before service-scoped restart, matching the S-profile restart semantics. Release 4041 currently serves workspace-matching WebUI JS/CSS and config query is restored to `auth_source=inline`.
 10. Latest Minis screenshots are a functional IA reference only, not a visual style source. They add future surface gaps: token usage, appearance, persona/SOUL.md, memory, MCP integrations, environment variables, storage/shared folders/mounts, permissions, background/notifications, logs, about/privacy/feedback.
 
@@ -49,7 +49,7 @@
 
 1. Settings shell and style alignment: completed in commit `292eab8`.
 2. Config projection API: completed for active agent, selected provider id/type/protocol/base URL host, default model, auth source type, and restart-required status.
-3. Provider/model config edit path: completed for provider endpoint/default model/env-var auth updates with restart-required semantics and no direct UI writes.
+3. Provider/model config edit path: completed for provider endpoint/default model/env-var auth updates with restart-required semantics, no direct UI writes, S-profile online evidence, and restart-after-save projection consistency.
 4. Android settings entry convergence: release propagation is verified on 4041; true-device Android screenshot proof remains blocked until an ADB device is connected/unlocked.
 5. Advanced surfaces: skills registry, session filesystem namespaces, task/background settings, and Minis-derived usage/appearance/persona/memory/MCP/storage/permissions/logs surfaces as separate owner-backed slices.
 

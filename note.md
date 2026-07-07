@@ -2170,4 +2170,5 @@ Current real root cause split:
 - validation:
   - owner tests passed: config 16, ui-protocol 47, CLI 13, runtime provider update success/no-overwrite tests, server asset smoke.
   - `make verify-webui-online` passed with `artifacts/webui-online/20260707-verify-4042-1783399680000/summary.json`; valid save status is `Provider config saved. Restart required.`, Settings secret scan passed, page/console errors empty.
+  - restart-after-save proof temporarily saved `default_model=MiniMax-M3-Restart-Proof` with env-var auth, restarted S-profile, and `adp-config-query` still returned the updated model/auth source; trap restored real config afterward.
   - real `~/.freehand/config.toml` and `daemonS.env` restored; `freehand-cliS adp-config-query` reports `auth_source=inline`.
