@@ -2127,3 +2127,17 @@ Current real root cause split:
     - JS `61e92a96c82ce0d4456fcce7896b03b6ae93f69f1b17ae6d7e713b84d77c9f1f`
     - CSS `1ab81aa107b1ba52da0721d162d3f120fd519b81b2315b609c9cf1c719c83b03`
   - current `adb devices -l` has no connected devices, so Android true-device proof is blocked and not claimed.
+
+# 2026-07-07 Minis screenshot functional fit L1 report
+
+- task:
+  - Jason clarified that before implementing screenshot-derived Minis functions, first determine what should be built and whether it fits Freehand.
+- scope:
+  - L1 report-only. No product code, runtime config, launchd, release, or Android device mutation.
+- owner checks:
+  - read feature map and function maps for `config.core`, `app.webui-smoke`, `app.android-client`, `instruction.capability-loader`, `reason.rewrite-policy`, `task.orchestration`, `debug.core`, and `tool.registry`.
+- report:
+  - wrote `docs/loops/openminis-config-ui-closeout/minis-screenshot-l1-report.md`.
+  - accepted near-term: provider registry/status, model/default update, connection diagnostics, sessions/workspace presentation, skills read-only registry, task read-only status, diagnostics/log summary.
+  - design-first: token usage, appearance persistence, persona/SOUL.md, memory CRUD, MCP, env-var manager, storage/shared folders/mounts, permissions, background/notifications, model groups.
+  - rejected now: copying Minis style, UI-local fake controls, raw API-key editor, duplicate Android connected settings, marketplace-like toggles without owner, archive product surface revival.
