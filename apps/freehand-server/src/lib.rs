@@ -1313,6 +1313,19 @@ mod tests {
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-card"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-control-strip"));
         assert!(webui_css_body.contains("max-height: min(20svh, 158px)"));
+        assert!(webui_css_body.contains("max-height: 132px"));
+        assert!(
+            webui_css_body.contains("padding-bottom: calc(112px + env(safe-area-inset-bottom))")
+        );
+        assert!(!webui_css_body.contains("padding-bottom: min(46svh, 330px)"));
+        assert!(!webui_css_body.contains("inset 2px 0 0"));
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"phone_portrait\"] .final-summary-item")
+        );
+        assert!(webui_css_body.contains("background: #eef3fb"));
+        assert!(webui_css_body.contains("background: #edf6ef"));
+        assert!(webui_css_body.contains("background: #f8ece9"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .command-status"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"] #send-button"));
 

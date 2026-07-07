@@ -3044,19 +3044,19 @@ body[data-layout-shape="tablet_portrait"] .chat-message-assistant {
 body[data-layout-shape="phone_portrait"] .chat-message-assistant.running-state,
 body[data-layout-shape="tall_phone"] .chat-message-assistant.running-state,
 body[data-layout-shape="tablet_portrait"] .chat-message-assistant.running-state {
-  box-shadow: inset 2px 0 0 #2f6fed;
+  background: #eef3fb;
 }
 
 body[data-layout-shape="phone_portrait"] .chat-message-assistant.success-state,
 body[data-layout-shape="tall_phone"] .chat-message-assistant.success-state,
 body[data-layout-shape="tablet_portrait"] .chat-message-assistant.success-state {
-  box-shadow: inset 2px 0 0 var(--success);
+  background: #edf6ef;
 }
 
 body[data-layout-shape="phone_portrait"] .chat-message-assistant.failed-state,
 body[data-layout-shape="tall_phone"] .chat-message-assistant.failed-state,
 body[data-layout-shape="tablet_portrait"] .chat-message-assistant.failed-state {
-  box-shadow: inset 2px 0 0 var(--fail);
+  background: #f8ece9;
 }
 
 body[data-layout-shape="phone_portrait"] .chat-message-meta,
@@ -3138,28 +3138,35 @@ body[data-layout-shape="tablet_portrait"] .chat-section-tool {
   border: 0;
   border-radius: 12px;
   background: #f2eee3;
-  box-shadow: inset 2px 0 0 var(--tool);
+  box-shadow: none;
 }
 
 body[data-layout-shape="phone_portrait"] .chat-section-tool.success,
 body[data-layout-shape="tall_phone"] .chat-section-tool.success,
 body[data-layout-shape="tablet_portrait"] .chat-section-tool.success {
   background: #edf6ef;
-  box-shadow: inset 2px 0 0 var(--success);
+  box-shadow: none;
 }
 
 body[data-layout-shape="phone_portrait"] .chat-section-tool.failed,
 body[data-layout-shape="tall_phone"] .chat-section-tool.failed,
 body[data-layout-shape="tablet_portrait"] .chat-section-tool.failed {
   background: #f8ece9;
-  box-shadow: inset 2px 0 0 var(--fail);
+  box-shadow: none;
 }
 
 body[data-layout-shape="phone_portrait"] .chat-section-tool.running,
 body[data-layout-shape="tall_phone"] .chat-section-tool.running,
 body[data-layout-shape="tablet_portrait"] .chat-section-tool.running {
   background: #eef3fb;
-  box-shadow: inset 2px 0 0 #2f6fed;
+  box-shadow: none;
+}
+
+body[data-layout-shape="phone_portrait"] .final-summary-item,
+body[data-layout-shape="tall_phone"] .final-summary-item,
+body[data-layout-shape="tablet_portrait"] .final-summary-item {
+  padding-left: 0;
+  border-left: 0;
 }
 
 body[data-layout-shape="phone_portrait"] .tool-chat-head,
@@ -3260,20 +3267,20 @@ body[data-layout-shape="tablet_portrait"] #send-button {
 body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .conversation-region,
 body[data-layout-shape="tall_phone"][data-composer-focused="true"] .conversation-region,
 body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .conversation-region {
-  padding-bottom: min(46svh, 330px);
+  padding-bottom: calc(112px + env(safe-area-inset-bottom));
 }
 
 body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .composer-card,
 body[data-layout-shape="tall_phone"][data-composer-focused="true"] .composer-card,
 body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .composer-card {
-  max-height: min(44svh, 330px);
-  padding: 8px;
-  overflow: auto;
+  max-height: 132px;
+  padding: 7px;
+  overflow: hidden;
 }
 
 body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .composer-input,
 body[data-layout-shape="tall_phone"][data-composer-focused="true"] .composer-input,
 body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .composer-input {
-  min-height: 92px;
-  max-height: 20svh;
+  min-height: 68px;
+  max-height: 76px;
 }

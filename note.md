@@ -2294,3 +2294,31 @@ Current real root cause split:
 - blocker:
   - True Android UI verification is blocked by `device_locked_or_dreaming`; artifact `artifacts/android-device/20260707T134429Z-100.104.163.65_5555-97306/summary.json`.
   - This run proves APK install, not foreground WebView acceptance.
+
+# 2026-07-07 WebUI phone no-left-edge and compact focused composer closeout
+
+- request:
+  - First commit previous state, then fix phone WebUI cards: no space-consuming borders, keep colored backgrounds.
+  - Remove the large input/composer obstruction above the mobile input.
+- prior checkpoint:
+  - Previous summary work was already committed as `6fb98d0 fix(webui): tighten mobile summary rendering`.
+- root source:
+  - `apps/freehand-server/assets/webui.css` mobile v3 reintroduced left state strips with `box-shadow: inset 2px 0 0 ...` for assistant and tool cards.
+  - The later mobile focused override reset `.conversation-region` to `padding-bottom: min(46svh, 330px)` and focused composer to `max-height: min(44svh, 330px)`, overriding the earlier compact mobile rules.
+  - `.final-summary-item` still inherited desktop `padding-left: 10px` and `border-left: 2px`.
+- implementation:
+  - Mobile assistant/tool states now use whole-card color backgrounds (`#eef3fb`, `#edf6ef`, `#f8ece9`) and `box-shadow: none`.
+  - Mobile final summary items now use `padding-left: 0` and `border-left: 0`.
+  - Focused mobile conversation padding is `calc(112px + env(safe-area-inset-bottom))`; focused composer max height is `132px`; focused input is `68px..76px`.
+  - `apps/freehand-server/src/lib.rs` asset smoke rejects `padding-bottom: min(46svh, 330px)` and `inset 2px 0 0`.
+  - `scripts/webui_verify_online.mjs` now accepts `FREEHAND_WEBUI_DEBUG_PORT`, probes mobile computed styles, and checks `mobileNoLeftEdgeIndicators`, `mobileFocusedComposerCompact`, and `mobileFocusedNoLeftEdgeIndicators`.
+  - Function map, test design, and local skill now lock mobile no-left-edge and compact composer behavior.
+- validation:
+  - Local: `node --check apps/freehand-server/assets/webui.js`; `node --check scripts/webui_verify_online.mjs`; `cargo test -p freehand-server -- --nocapture`; `cargo fmt --check`; `git diff --check`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`.
+  - S-profile: `scripts/install-launchd.sh restartS`; health `ok`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp`; served JS/CSS hash matched workspace.
+  - Online browser proof: `artifacts/webui-online/20260707-verify-4042-1783433140002/summary.json`; screenshot `26-mobile-focused-composer.png`; checks true for no left-edge indicators and compact focused composer. Probe measured assistant/tool/final `borderLeftWidth=0px`, `boxShadow=none`, final `paddingLeft=0px`, composer card height `92`, input height `76`, padding `112px`.
+  - Release: `scripts/install-global.sh` completed full Rust/workspace/Android JVM/release APK path; `scripts/install-launchd.sh restart`; release `http://100.66.1.82:4041/health` `ok`; release ADP smoke passed; served JS/CSS hashes matched workspace.
+  - Android: `FREEHAND_ANDROID_APK=dist/android/freehand-android-release-unsigned.apk apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passed; artifact `artifacts/android-device/20260707T142056Z-100.104.163.65_5555-51679/summary.json`; layout log `shape=tall_phone`, `conversationPrimary=true`.
+- notes:
+  - Browser plugin was unavailable (`agent.browsers.list()` returned `[]`); the accepted online browser evidence used the repo Chrome/CDP verifier with `FREEHAND_WEBUI_DEBUG_PORT=9237`.
+  - The verifier provider-config branch was run under config/env backup and restore, then S-profile was restarted; final `adp-config-query` returned `auth_source=inline`.

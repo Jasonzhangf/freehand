@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const debugPort = 9223;
+const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9223', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const cliPath = process.env.FREEHAND_WEBUI_CLI || `${process.env.HOME}/.local/bin/freehand-cliS`;
@@ -165,6 +165,7 @@ try {
   const settingsProof = await captureSettingsProof(cdp);
   const viewportSnapshots = await captureViewportMatrix(cdp);
   const mobileDrawerProof = await captureMobileDrawerProof(cdp);
+  const mobileComposerProof = await captureMobileComposerProof(cdp);
 
   const sessionId = refreshed.state.selectedSession || terminal2.state.selectedSession || terminal1.state.selectedSession;
   const adpQuery = sessionId
@@ -228,6 +229,19 @@ try {
         settingsProof.afterClose.state.messageText.includes('definitely-missing-freehand-file.txt'),
       viewportComposerVisible: viewportSnapshots.every((entry) => entry.state.composerVisible),
       viewportMessageListVisible: viewportSnapshots.every((entry) => entry.state.messageListVisible),
+      mobileNoLeftEdgeIndicators: viewportSnapshots
+        .filter((entry) => isMobileDrawerShape(entry.expectedShape))
+        .every((entry) => mobileChromeHasNoLeftEdge(entry.state)),
+      mobileFocusedComposerCompact:
+        mobileComposerProof.focused.state.layoutShape === 'tall_phone' &&
+        mobileComposerProof.focused.state.composerFocused &&
+        mobileComposerProof.focused.state.composerControlStripDisplay === 'none' &&
+        mobileComposerProof.focused.state.attachmentTrayDisplay === 'none' &&
+        mobileComposerProof.focused.state.commandStatusDisplay === 'none' &&
+        pxNumber(mobileComposerProof.focused.state.conversationRegionPaddingBottom) <= 132 &&
+        mobileComposerProof.focused.state.composerCardRect?.height <= 136 &&
+        mobileComposerProof.focused.state.composerInputRect?.height <= 84,
+      mobileFocusedNoLeftEdgeIndicators: mobileChromeHasNoLeftEdge(mobileComposerProof.focused.state),
       mobileConversationPrimary: viewportSnapshots
         .filter((entry) => isMobileDrawerShape(entry.expectedShape))
         .every((entry) =>
@@ -295,6 +309,7 @@ try {
       settingsProof,
       viewportSnapshots,
       mobileDrawerProof,
+      mobileComposerProof,
     },
     adpQuery,
     chromeProfileDir,
@@ -355,8 +370,13 @@ async function captureState(cdp, label) {
       layoutShape: document.body.dataset.layoutShape || '',
       shellLayoutShape: document.querySelector('[data-webui-shell="true"]')?.dataset.layoutShape || '',
       mobileDrawer: document.body.dataset.mobileDrawer || '',
+      composerFocused: document.body.dataset.composerFocused === 'true',
       composerVisible: isVisible(document.getElementById('composer-form')),
       messageListVisible: isVisible(document.getElementById('message-list')),
+      composerControlStripDisplay: displayOf(document.querySelector('.composer-control-strip')),
+      attachmentTrayDisplay: displayOf(document.getElementById('attachment-tray')),
+      commandStatusDisplay: displayOf(document.getElementById('command-status')),
+      conversationRegionPaddingBottom: styleValue(document.querySelector('.conversation-region'), 'paddingBottom'),
       mobileSessionButtonVisible: isVisible(document.getElementById('open-session-drawer-button')),
       mobileDetailButtonVisible: isVisible(document.getElementById('open-detail-drawer-button')),
       mobileSettingsButtonVisible: isVisible(document.getElementById('open-settings-drawer-button')),
@@ -379,6 +399,7 @@ async function captureState(cdp, label) {
       sessionAgentExpandedCount: document.querySelectorAll('.session-agent-group[data-expanded="true"]').length,
       composerRect: rectOf(document.getElementById('composer-form')),
       composerCardRect: rectOf(document.querySelector('.composer-card')),
+      composerInputRect: rectOf(document.getElementById('composer-input')),
       messageListRect: rectOf(document.getElementById('message-list')),
       sessionDrawerRect: rectOf(document.querySelector('.sidebar')),
       detailDrawerRect: rectOf(document.querySelector('.inspector')),
@@ -388,6 +409,15 @@ async function captureState(cdp, label) {
       nonLastLiveCount: live.filter((node) => node !== lastMessage).length,
       messageCount: messages.length,
       messageText: document.getElementById('message-list')?.innerText || '',
+      mobileChromeProbe: {
+        assistant: styleProbe('.chat-message-assistant'),
+        assistantSuccess: styleProbe('.chat-message-assistant.success-state'),
+        assistantFailed: styleProbe('.chat-message-assistant.failed-state'),
+        tool: styleProbe('.chat-section-tool'),
+        toolSuccess: styleProbe('.chat-section-tool.success'),
+        toolFailed: styleProbe('.chat-section-tool.failed'),
+        finalItem: styleProbe('.final-summary-item'),
+      },
       pageErrors: window.__freehandVerify?.pageErrors || [],
       consoleErrors: window.__freehandVerify?.consoleErrors || [],
     };
@@ -411,6 +441,26 @@ async function captureState(cdp, label) {
         right: rect.right,
         width: rect.width,
         height: rect.height,
+      };
+    }
+    function displayOf(node) {
+      if (!node) return '';
+      return window.getComputedStyle(node).display;
+    }
+    function styleValue(node, propertyName) {
+      if (!node) return '';
+      return window.getComputedStyle(node)[propertyName] || '';
+    }
+    function styleProbe(selector) {
+      const node = document.querySelector(selector);
+      if (!node) return null;
+      const style = window.getComputedStyle(node);
+      return {
+        borderLeftWidth: style.borderLeftWidth,
+        borderLeftStyle: style.borderLeftStyle,
+        boxShadow: style.boxShadow,
+        paddingLeft: style.paddingLeft,
+        backgroundColor: style.backgroundColor,
       };
     }
   });
@@ -473,6 +523,42 @@ async function captureViewportMatrix(cdp) {
   }
   await cdp.send('Emulation.clearDeviceMetricsOverride');
   return results;
+}
+
+async function captureMobileComposerProof(cdp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 1,
+    mobile: true,
+  });
+  await evalInPage(cdp, () => {
+    document.getElementById('close-session-drawer-button')?.click();
+    document.getElementById('close-detail-drawer-button')?.click();
+    window.dispatchEvent(new Event('resize'));
+    return window.__freehandLayout?.applyLayoutShape?.();
+  });
+  await waitForFunction(
+    cdp,
+    () => document.body.dataset.layoutShape === 'tall_phone' && !document.body.dataset.mobileDrawer,
+    10_000,
+    'mobile composer proof layout',
+  );
+  await evalInPage(cdp, () => {
+    const input = document.getElementById('composer-input');
+    input?.focus();
+    input?.dispatchEvent(new Event('focus', { bubbles: true }));
+  });
+  await waitForFunction(
+    cdp,
+    () => document.body.dataset.composerFocused === 'true',
+    5_000,
+    'mobile composer focused',
+  );
+  await delay(260);
+  const focused = await captureState(cdp, '26-mobile-focused-composer');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  return { focused };
 }
 
 async function captureSettingsProof(cdp) {
@@ -828,6 +914,24 @@ async function dispatchRightSwipe(cdp, startX, startY, endX, endY) {
 
 function isMobileDrawerShape(shape) {
   return ['phone_portrait', 'tall_phone', 'tablet_portrait'].includes(shape);
+}
+
+function mobileChromeHasNoLeftEdge(state) {
+  const probe = state.mobileChromeProbe || {};
+  const required = [probe.assistant, probe.tool, probe.finalItem];
+  const optional = [probe.assistantSuccess, probe.assistantFailed, probe.toolSuccess, probe.toolFailed].filter(Boolean);
+  return required.every(Boolean) && [...required, ...optional].every((entry) => {
+    if (!entry) return false;
+    const hasLeftBorder = entry.borderLeftStyle !== 'none' && pxNumber(entry.borderLeftWidth) > 0;
+    const hasInsetLeftShadow = /\binset\b/.test(entry.boxShadow || '') && /\b2px\b/.test(entry.boxShadow || '');
+    const hasFinalIndent = entry === probe.finalItem && pxNumber(entry.paddingLeft) > 0;
+    return !hasLeftBorder && !hasInsetLeftShadow && !hasFinalIndent;
+  });
+}
+
+function pxNumber(value) {
+  const parsed = Number.parseFloat(String(value || '').replace('px', ''));
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
 async function waitForTerminal(cdp, timeoutMs, label) {

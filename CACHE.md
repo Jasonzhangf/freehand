@@ -1,5 +1,13 @@
 # CACHE
 
+- Current verified WebUI phone no-left-edge closeout:
+  - `app.webui-smoke` mobile phone/tall/tablet portrait cards no longer render left borders or inset-left shadows for assistant/tool/final state; mobile state uses green/red/blue color-block backgrounds and compact status text.
+  - Focused mobile composer no longer reserves `min(46svh, 330px)` or expands to `44svh`; focused proof on tall phone measured `conversationRegionPaddingBottom=112px`, `composerCardRect.height=92`, `composerInputRect.height=76`, with control strip, attachment tray, and command status hidden.
+  - Online S-profile proof: `artifacts/webui-online/20260707-verify-4042-1783433140002/summary.json`; checks `mobileNoLeftEdgeIndicators`, `mobileFocusedComposerCompact`, and `mobileFocusedNoLeftEdgeIndicators` all true; screenshot `26-mobile-focused-composer.png`.
+  - Release proof: `scripts/install-global.sh` passed full release path; release `http://100.66.1.82:4041/health` returned `ok`; `freehand-cli adp-smoke --url ws://100.66.1.82:4041/adp` passed; served JS/CSS hashes matched workspace (`webui.css` `4e2dc6fff32e4766114f67c63de97afa6e598dd3b1568beacce022c238e242d8`).
+  - Android proof: release APK `dist/android/freehand-android-release-unsigned.apk` hash `fe036c5505f0345c5a9d1726af1476ccb273f1e716ef9044ae40f305c6eb8b20` installed and `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passed at `artifacts/android-device/20260707T142056Z-100.104.163.65_5555-51679/summary.json`; layout log reports `shape=tall_phone`, `conversationPrimary=true`.
+  - Browser plugin was unavailable (`agent.browsers.list()` returned `[]`), so live browser evidence used the repo Chrome/CDP verifier with `FREEHAND_WEBUI_DEBUG_PORT=9237`.
+
 - Current verified WebUI mobile composer + Final summary closeout:
   - `app.webui-smoke` keeps phone/tall/tablet portrait focused composer compact and prevents `.composer-control-strip`, `#attachment-tray`, and `#command-status` from reopening into the primary input surface.
   - Final rows render through `renderFinalSummary()` / `.final-summary` / `.final-summary-item`, preserving the actual response format: plain single-line summary stays one block; source newlines/labels/numbering become matching display blocks without changing ADP/session truth.
