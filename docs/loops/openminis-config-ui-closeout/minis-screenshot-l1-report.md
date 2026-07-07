@@ -59,7 +59,7 @@ These look valuable but are not implementation-ready. The next action is an owne
 | Memory management | Session history/rewrite exists, but no user-facing memory CRUD semantics | `reason.session-history` design for safe projection/mutation |
 | MCP integrations | No MCP/integration runtime owner in feature map | New tool/integration owner before UI |
 | Environment variable manager | Config can reference env vars, but UI must not manage shell secrets blindly | Config/secret owner decision; likely diagnostics-only first |
-| Storage/shared folders/mounts | Session cwd and attachments exist; shared-folder/mount permissions do not | File/storage owner plus permission model |
+| Storage/shared folders/mounts | Minis runs the agent on the phone, but Freehand phone is a remote UI for a computer daemon; phone-side task mount semantics do not apply | If needed, design computer-daemon workspace/files projection only; no phone-local mount feature |
 | Permissions preflight | Android/runtime permissions are platform-specific and not centralized | Permission/status owner and platform adapters |
 | Background/notifications | Task runtime exists, but scheduling/notification lifecycle does not | Task scheduling owner plus Android notification policy |
 | Model groups/fallback/load balance | Provider routing semantics do not exist | Provider routing owner and failure/retry policy before UI |
@@ -74,6 +74,7 @@ These should not be copied from Minis into Freehand as-is.
 | UI-local fake controls | Violates one-truth architecture and previous failures; every editable setting needs owner-backed command/query |
 | Raw API-key editor in WebUI | Current accepted path is env-var credential reference; raw secret storage/display needs a dedicated secret owner first |
 | Per-platform duplicate settings | Android connected mode must use daemon-hosted WebUI Settings; native Android settings stay pre-connection repair only |
+| Phone-local task mounts copied from Minis | Freehand execution/filesystem authority lives on the computer daemon, not the phone UI |
 | Marketplace-like skills/MCP toggles without runtime owner | Would imply runtime behavior that does not exist and cannot be verified |
 | `Archive` session product surface revival | Current WebUI intentionally removed archive/restore affordance; session deletion/CRUD needs clearer product semantics before exposing archive again |
 

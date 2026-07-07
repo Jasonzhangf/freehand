@@ -2141,3 +2141,12 @@ Current real root cause split:
   - accepted near-term: provider registry/status, model/default update, connection diagnostics, sessions/workspace presentation, skills read-only registry, task read-only status, diagnostics/log summary.
   - design-first: token usage, appearance persistence, persona/SOUL.md, memory CRUD, MCP, env-var manager, storage/shared folders/mounts, permissions, background/notifications, model groups.
   - rejected now: copying Minis style, UI-local fake controls, raw API-key editor, duplicate Android connected settings, marketplace-like toggles without owner, archive product surface revival.
+
+# 2026-07-07 correction: Minis phone-local mounts do not map to Freehand
+
+- Jason corrected the L1 fit report:
+  - Minis runs the agent on the phone, so its storage/shared-folder/task-mount IA is phone-local execution IA.
+  - Freehand phone is a UI; execution and filesystem authority live on the computer daemon.
+- correction:
+  - Do not treat Minis phone-local mount/share features as Freehand phone task-mount requirements.
+  - If Freehand needs storage/workspace UX, it should be a computer-daemon workspace/files projection or permission/status design, not phone-local mount semantics.

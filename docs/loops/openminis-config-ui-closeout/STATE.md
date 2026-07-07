@@ -36,7 +36,7 @@
 | Memory | Session history/rewrite exists | Missing memory visibility and management UI | `reason.session-history`, future memory UI owner |
 | MCP integrations | Not implemented as a user-facing integration surface | Missing integration registry/config UI | future tool/integration owner |
 | Environment variables | Config supports env-var credential references | Missing safe env-var diagnostics/editor; must not expose secret values | `config.core`, `runtime.ui-command-dispatch` |
-| Storage/shared folders/mounts | Session cwd and attachments exist | Missing storage/shared-folder/mount management | future file/storage owner, `reason.persistence` |
+| Storage/shared folders/mounts | Minis phone runs local agent; Freehand phone is only a remote UI for the computer daemon | Do not copy phone-local task mount semantics; if needed, design computer-daemon workspace/files projection | future file/storage owner, `reason.persistence` |
 | Permissions | Runtime/Android permissions are scattered by platform | Missing preflight permission status/remediation surface | `app.runtime-daemon`, `app.android-client` |
 | Background/notifications | Task orchestration exists; Android shell exists | Missing background execution and notification settings | `task.orchestration`, `app.android-client` |
 | Logs/about/privacy/feedback | Debug artifacts exist but no product settings page | Missing user-facing logs/about/privacy/feedback panels | `debug.core`, `app.webui-smoke`, docs owner |
