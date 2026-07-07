@@ -248,6 +248,8 @@ case "$command" in
     run_install_launchd
     ;;
   restart)
+    write_launchd_env
+    write_launchd_plist
     restart_launchd
     ;;
   restartS)

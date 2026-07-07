@@ -247,6 +247,8 @@ Use this skill for any non-trivial work in this repo.
 - Canonical full local gate is `make ci`.
 - Release closeout must run `scripts/release.sh` end-to-end and prove staged artifacts exist; global install closeout must run `scripts/install-global.sh` with a temp `FREEHAND_PREFIX` and prove installed host binaries execute.
 - Installed daemon closeout must use a temp `HOME` plus real `~/.freehand/config.toml` shape, start `freehand-daemon serve --agent <name>`, curl `/health` and `/`, then stop only the exact daemon PID.
+- Release WebUI/phone-facing closeout must prove the installed release daemon serves current workspace assets before UI/Android claims. Compare `apps/freehand-server/assets/webui.{js,css}` SHA-256 with `http://<release-bind>/assets/webui.{js,css}` and rerun the online verifier against release 4041.
+- Release launchd `restart` must rewrite env and plist before kickstart, matching `restartS`; otherwise launchd can keep stale env/plist wiring and owner-backed config update validation may fail only on release 4041.
 - Android release packaging currently disables release lint checks in Gradle config; do not reintroduce Android Lint Vital into the release path without first proving it no longer hangs/fails on the pinned local toolchain.
 - Minimum baseline:
   - `cargo build --workspace`

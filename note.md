@@ -2101,3 +2101,29 @@ Current real root cause split:
 - remaining:
   - Batch 3 does not implement model groups, provider health checks, secret store, Android native pre-connection redesign, or release 4041 proof.
   - Android/release proof is separate because this batch only claims S-profile WebUI 4042.
+
+# 2026-07-07 OpenMinis config UI L2 Batch 4 release propagation trace
+
+- scope:
+  - Close release/Android propagation slice after provider/model Settings batch.
+  - Keep Minis screenshots as functional IA reference only, not visual style source.
+- Minis screenshot-derived future gaps:
+  - provider/model groups/token usage/appearance/skills/persona or SOUL.md/memory/MCP/env vars/storage/shared folders/mount external folder/permissions/background notifications/logs/about/privacy/feedback.
+  - These must become owner-backed future slices; do not add fake editable controls before owner truth exists.
+- release 4041 trace:
+  - Initial release served stale WebUI assets after Batch 3.
+  - `scripts/install-global.sh` plus release restart updated release assets; `http://100.66.1.82:4041/assets/webui.js` and `.css` hashes now match workspace.
+  - First release online verifier failed because release `restart` did not rewrite launchd env/plist before restart, so newly added verification env vars did not enter the daemon process; a wrong CLI path also contributed to that run.
+  - Fix: `scripts/install-launchd.sh restart` now calls `write_launchd_env` and `write_launchd_plist` before `restart_launchd`, matching `restartS` propagation semantics.
+  - Release online proof after fix: `artifacts/webui-online/20260707-verify-4041-1783390967374/summary.json`; Settings invalid update visible, valid update restart-required, no Settings secret leak, mobile Settings drawer, and multi-round samples terminal.
+  - After validation, release config/env were restored; `freehand-cli adp-config-query --url ws://100.66.1.82:4041/adp` reports `auth_source=inline`.
+- validation:
+  - `bash -n scripts/install-launchd.sh`
+  - `cargo test -p xtask ci_cd -- --nocapture` -> 4 passed.
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+  - `curl -4fsS http://100.66.1.82:4041/health` -> `ok`.
+  - workspace/release hash match:
+    - JS `61e92a96c82ce0d4456fcce7896b03b6ae93f69f1b17ae6d7e713b84d77c9f1f`
+    - CSS `1ab81aa107b1ba52da0721d162d3f120fd519b81b2315b609c9cf1c719c83b03`
+  - current `adb devices -l` has no connected devices, so Android true-device proof is blocked and not claimed.
