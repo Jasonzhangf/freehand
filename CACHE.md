@@ -1,5 +1,14 @@
 # CACHE
 
+- Current verified WebUI mobile composer + Final summary closeout:
+  - `app.webui-smoke` keeps phone/tall/tablet portrait focused composer compact and prevents `.composer-control-strip`, `#attachment-tray`, and `#command-status` from reopening into the primary input surface.
+  - Final rows render through `renderFinalSummary()` / `.final-summary` / `.final-summary-item`, preserving the actual response format: plain single-line summary stays one block; source newlines/labels/numbering become matching display blocks without changing ADP/session truth.
+  - Local validation: `node --check apps/freehand-server/assets/webui.js`; `cargo test -p freehand-server -- --nocapture` -> 13 passed; `cargo fmt --check`; `git diff --check`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`.
+  - S-profile validation: `scripts/install-launchd.sh restartS`; `curl -4fsS http://127.0.0.1:4042/health` -> `ok`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`; served JS hash `27bac8d1c6aa4b65a446c2d43bbe243e92e8568a9122d7de98a3290e14552112` and CSS hash `0ebf4c8f03521d0d38de87ad8c1e7b2545781e0b4c0cc36dc9192f42deec2d6b` matched workspace.
+  - Browser evidence: `artifacts/webui-online/summary-format-1783430851153/summary.json`, `02-plain-terminal.png`, `03-structured-terminal.png`; checks true: ADP terminal plain summary had one source line and DOM rendered one `.final-summary-item`; ADP terminal structured summary had three source lines and DOM rendered matching three `.final-summary-item` blocks; debug fields stayed hidden; page/console errors empty.
+  - Release 4041 / Android true-device proof was not run for this dev closeout; run only if promoting to release/phone surface.
+  - MemoryPalace note: `mempalace mine .` dry-run did not show artifacts in the first 40 files, but later search returned artifact `summary.json` results. Future Freehand mining should use a curated source-only corpus or config before mining; implementation/source search must continue using `scripts/source-search.sh`.
+
 - Current verified mobile WebUI / restartS closeout:
   - `scripts/install-launchd.sh restartS` now uses S fixed default `127.0.0.1:4042` and health-checks the existing env-backed bind from `~/.freehand/daemonS.env`; it no longer recomputes a Tailscale `:4042` health URL when the S daemon is configured for loopback.
   - `scripts/webui_verify_online.mjs` now follows the real `/new` dialog flow: open New Conversation, wait for `new-session-dialog`, confirm, wait for a fresh draft session, then submit the success and failed-tool continuation prompts.

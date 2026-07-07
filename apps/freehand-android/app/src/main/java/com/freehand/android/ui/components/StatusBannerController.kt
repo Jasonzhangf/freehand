@@ -9,8 +9,8 @@ import android.widget.TextView
 import com.freehand.android.R
 
 /**
- * Transient status banner that surfaces connection state or runtime warnings.
- * It is a presentation layer only and does NOT write to session truth.
+ * Native shell banner for blocking connection/configuration problems only.
+ * Once the remote WebUI is active, user-visible lifecycle/status should stay in WebUI.
  */
 class StatusBannerController(
     context: Context,
@@ -24,7 +24,7 @@ class StatusBannerController(
             textSize = 12f
             setTextColor(Color.WHITE)
             setPadding(dp(12), dp(6), dp(12), dp(6))
-            setBackgroundColor(Color.parseColor("#7C3AED"))
+            setBackgroundColor(Color.parseColor("#1F2937"))
             visibility = View.GONE
         }
         root.addView(
@@ -39,10 +39,8 @@ class StatusBannerController(
         )
     }
 
-    fun showTransient(message: String) {
-        banner.text = message
-        banner.visibility = View.VISIBLE
-        banner.postDelayed({ banner.visibility = View.GONE }, 3000)
+    fun showTransient(@Suppress("UNUSED_PARAMETER") message: String) {
+        banner.visibility = View.GONE
     }
 
     fun showPersistent(message: String) {

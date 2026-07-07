@@ -104,7 +104,11 @@ try {
   });
   await waitForFunction(
     cdp,
-    () => !(document.getElementById('new-session-dialog')?.open) && (document.getElementById('strip-session')?.textContent || '').includes('webui-session-'),
+    () => {
+      const shell = document.querySelector('[data-webui-shell="true"]');
+      return !(document.getElementById('new-session-dialog')?.open) &&
+        (shell?.dataset.selectedSession || '').includes('webui-session-');
+    },
     10_000,
     'new conversation draft selected',
   );
@@ -187,14 +191,12 @@ try {
       refreshPreservedFailurePrompt: refreshed.state.messageText.includes('definitely-missing-freehand-file.txt'),
       terminal2NoLive: terminal2.state.liveCount === 0,
       viewportShapesCovered: viewportSnapshots.every((entry) => entry.state.layoutShape === entry.expectedShape),
-      desktopSettingsOpensReadOnly:
+      desktopSettingsOpensProviderConfig:
         settingsProof.desktopOpen.state.settingsShellVisible &&
-        settingsProof.desktopOpen.state.settingsReadonlyButtonCount >= 2 &&
-        settingsProof.desktopOpen.state.settingsDisabledButtonCount >= 2 &&
         settingsProof.desktopOpen.state.settingsText.includes('Provider and model') &&
-        settingsProof.desktopOpen.state.settingsText.includes('Active agent') &&
-        settingsProof.desktopOpen.state.settingsAgent !== '' &&
-        settingsProof.desktopOpen.state.settingsAgent !== 'loading' &&
+        !settingsProof.desktopOpen.state.settingsText.includes('Active agent') &&
+        !settingsProof.desktopOpen.state.settingsText.includes('Sessions and workspace') &&
+        !settingsProof.desktopOpen.state.settingsText.includes('Task settings pending') &&
         settingsProof.desktopOpen.state.settingsProvider !== '' &&
         settingsProof.desktopOpen.state.settingsProvider !== 'loading' &&
         settingsProof.desktopOpen.state.settingsProviderHost !== '' &&
@@ -202,7 +204,7 @@ try {
         settingsProof.desktopOpen.state.settingsProviderAuth !== '' &&
         settingsProof.desktopOpen.state.settingsProviderAuth !== 'loading' &&
         settingsProof.desktopOpen.state.settingsConfigError === 'none' &&
-        settingsProof.desktopOpen.state.settingsText.includes('Connection') &&
+        !settingsProof.desktopOpen.state.settingsText.includes('Connection state') &&
         settingsProof.desktopOpen.state.passwordInputCount === 0 &&
         settingsProof.desktopOpen.state.apiKeyTextVisible === false &&
         settingsProof.desktopOpen.state.secretTextVisible === false,
@@ -259,7 +261,8 @@ try {
         mobileDrawerProof.settingsOpen.state.mobileDrawer === 'settings' &&
         mobileDrawerProof.settingsOpen.state.detailDrawerVisible &&
         mobileDrawerProof.settingsOpen.state.settingsShellVisible &&
-        mobileDrawerProof.settingsOpen.state.settingsReadonlyButtonCount >= 2 &&
+        mobileDrawerProof.settingsOpen.state.settingsText.includes('Provider and model') &&
+        !mobileDrawerProof.settingsOpen.state.settingsText.includes('Active agent') &&
         !mobileDrawerProof.settingsOpen.state.sessionDrawerVisible,
       mobileDrawerCloses:
         !mobileDrawerProof.afterSessionClose.state.mobileDrawer &&
@@ -341,9 +344,10 @@ async function captureState(cdp, label) {
     const messages = Array.from(document.querySelectorAll('#message-list .chat-message'));
     const live = messages.filter((node) => node.dataset.live === 'true');
     const lastMessage = messages[messages.length - 1] || null;
+    const shell = document.querySelector('[data-webui-shell="true"]');
     return {
-      selectedSession: document.getElementById('strip-session')?.textContent?.trim() || '',
-      selectedTurn: document.getElementById('strip-turn')?.textContent?.trim() || '',
+      selectedSession: shell?.dataset.selectedSession || '',
+      selectedTurn: shell?.dataset.selectedTurn || '-',
       composer: document.getElementById('composer-input')?.value || '',
       commandStatus: document.getElementById('command-status')?.textContent?.trim() || '',
       turnStatus: document.getElementById('turn-status')?.textContent?.trim() || '',
@@ -360,15 +364,12 @@ async function captureState(cdp, label) {
       detailDrawerVisible: isVisible(document.querySelector('.inspector')),
       settingsShellVisible: isVisible(document.getElementById('settings-shell')),
       settingsText: document.getElementById('settings-shell')?.innerText || '',
-      settingsAgent: document.getElementById('settings-agent-value')?.textContent?.trim() || '',
       settingsProvider: document.getElementById('settings-provider-id')?.textContent?.trim() || '',
       settingsProviderHost: document.getElementById('settings-provider-host')?.textContent?.trim() || '',
       settingsProviderAuth: document.getElementById('settings-provider-auth')?.textContent?.trim() || '',
       settingsModel: document.getElementById('settings-model-value')?.textContent?.trim() || '',
       settingsConfigError: document.getElementById('settings-config-error')?.textContent?.trim() || '',
       settingsProviderSaveStatus: document.getElementById('settings-provider-save-status')?.textContent?.trim() || '',
-      settingsReadonlyButtonCount: document.querySelectorAll('#settings-shell .settings-readonly-action').length,
-      settingsDisabledButtonCount: document.querySelectorAll('#settings-shell .settings-readonly-action:disabled').length,
       passwordInputCount: document.querySelectorAll('input[type="password"]').length,
       apiKeyTextVisible: /api[-_ ]?key/i.test(document.getElementById('settings-shell')?.innerText || ''),
       pageApiKeyTextVisible: /api[-_ ]?key/i.test(document.body.innerText || ''),
@@ -500,9 +501,10 @@ async function captureSettingsProof(cdp) {
       const settings = document.getElementById('settings-shell');
       return !settings?.hidden &&
         settings.innerText.includes('Provider and model') &&
-        settings.innerText.includes('Active agent') &&
+        !settings.innerText.includes('Active agent') &&
+        !settings.innerText.includes('Sessions and workspace') &&
+        !settings.innerText.includes('Task settings pending') &&
         !settings.innerText.includes('loading') &&
-        settings.querySelectorAll('.settings-readonly-action:disabled').length >= 2 &&
         document.querySelectorAll('input[type="password"]').length === 0 &&
         !/api_key|pair_token|sk-|secret/i.test(settings.innerText);
     },

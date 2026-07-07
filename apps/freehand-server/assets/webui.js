@@ -537,6 +537,17 @@ function setText(id, value) {
   }
 }
 
+function setShellDataset(name, value) {
+  if (!shell) {
+    return;
+  }
+  if (value === null || value === undefined || value === "") {
+    delete shell.dataset[name];
+    return;
+  }
+  shell.dataset[name] = value;
+}
+
 function loadAttachmentDrafts() {
   try {
     const raw = window.localStorage.getItem(attachmentDraftStorageKey);
@@ -656,6 +667,30 @@ function addAttachmentFiles(files, forcedKind = null) {
   setCurrentAttachments(next);
   setCommandStatus(`${next.length} attachment draft(s) in selected session`, { stickyMs: 4000 });
 }
+
+function addAndroidAttachmentDrafts(kind, files) {
+  const next = [...currentAttachments()];
+  Array.from(files || []).forEach((file) => {
+    next.push({
+      id: browserRandomId(),
+      name: file.name || "attachment",
+      size: Number.isFinite(file.size) ? file.size : -1,
+      type: file.type || "application/octet-stream",
+      kind: attachmentKind({ type: file.type || "" }, kind),
+      added_at: new Date().toISOString(),
+      status: "ready",
+      available: true,
+      uri: file.uri || "",
+      file: null,
+    });
+  });
+  setCurrentAttachments(next);
+  setCommandStatus(`${next.length} attachment draft(s) in selected session`, { stickyMs: 4000 });
+}
+
+window.__freehandAndroidAttachmentSelected = (kind, files) => {
+  addAndroidAttachmentDrafts(kind, files);
+};
 
 function removeAttachment(id) {
   const next = currentAttachments().filter((attachment) => attachment.id !== id);
@@ -1104,7 +1139,11 @@ function chatAssistantSection(row) {
     }
     section.appendChild(heading);
   }
-  renderTextLines(body, row.body || []);
+  if (row.kind === "final") {
+    renderFinalSummary(body, row.body || []);
+  } else {
+    renderTextLines(body, row.body || []);
+  }
   section.appendChild(body);
   return section;
 }
@@ -1141,6 +1180,77 @@ function renderTextLines(container, lines) {
   });
 }
 
+function renderFinalSummary(container, lines) {
+  container.classList.add("final-summary");
+  const text = Array.isArray(lines) ? lines.join("\n") : `${lines || ""}`;
+  const blocks = finalSummaryBlocks(text);
+  if (blocks.length === 0) {
+    container.textContent = "";
+    return;
+  }
+  blocks.forEach((block, index) => {
+    const item = document.createElement("div");
+    item.className = [
+      "final-summary-item",
+      index === 0 ? "final-summary-lead" : "",
+      block.label ? "" : "final-summary-plain",
+    ].filter(Boolean).join(" ");
+    if (block.label) {
+      const label = document.createElement("span");
+      label.className = "final-summary-label";
+      label.textContent = block.label;
+      const value = document.createElement("span");
+      value.className = "final-summary-value";
+      value.textContent = block.text;
+      item.append(label, value);
+    } else {
+      item.textContent = block.text;
+    }
+    container.appendChild(item);
+  });
+}
+
+function finalSummaryBlocks(text) {
+  return `${text || ""}`
+    .split(/\n+/)
+    .flatMap((line) => normalizeFinalSummaryLine(line))
+    .map((line) => parseFinalSummaryLine(line))
+    .filter((block) => block.text || block.label);
+}
+
+function normalizeFinalSummaryLine(line) {
+  const normalized = `${line || ""}`.replace(/\s+/g, " ").trim();
+  return normalized ? [normalized] : [];
+}
+
+function parseFinalSummaryLine(line) {
+  const labelMatch = `${line || ""}`.match(/^([^:：]{2,18})[:：]\s*(.*)$/);
+  if (labelMatch) {
+    return {
+      label: labelMatch[1].trim(),
+      text: labelMatch[2].trim(),
+    };
+  }
+  const severityMatch = `${line || ""}`.match(/^[（(]([^）)]+)[）)]\s*(.+)$/);
+  if (severityMatch) {
+    return {
+      label: severityMatch[1].trim(),
+      text: severityMatch[2].trim(),
+    };
+  }
+  const numberMatch = `${line || ""}`.match(/^((?:\d+|[一二三四五六七八九十]+)[.、])\s*(.+)$/);
+  if (numberMatch) {
+    return {
+      label: numberMatch[1].trim(),
+      text: numberMatch[2].trim(),
+    };
+  }
+  return {
+    label: "",
+    text: `${line || ""}`.trim(),
+  };
+}
+
 function renderToolSection(section, row) {
   section.classList.add(toolStateClass(row.status));
   const display = row.display || null;
@@ -1156,9 +1266,13 @@ function renderToolSection(section, row) {
 
   const body = document.createElement("div");
   body.className = "tool-chat-body";
-  toolSemanticLines(row).forEach((line) => {
+  const semanticLines = toolSemanticLines(row);
+  semanticLines.forEach((line, index) => {
     const item = document.createElement("div");
-    item.className = line.kind === "command" ? "tool-command-line" : "tool-chat-line";
+    item.className = [
+      line.kind === "command" ? "tool-command-line" : "tool-chat-line",
+      index === 0 ? "tool-chat-line-primary" : "tool-chat-line-secondary",
+    ].join(" ");
     item.textContent = line.text;
     item.title = line.fullText || line.text;
     body.appendChild(item);
@@ -1180,35 +1294,86 @@ function toolStateClass(status) {
 function toolSemanticLines(row) {
   const display = row.display || null;
   const lines = [];
-  if (display && display.kind) {
-    lines.push({ text: `type: ${toolKindLabel(display.kind)}` });
-  }
-  if (display && display.target) {
-    lines.push({ text: `target: ${display.target}` });
-  }
+  const action = `${(display && display.action) || row.title || "Tool"}`.trim();
+  const target = display && display.target ? `${display.target}`.trim() : "";
+  const parameterSummary = display && display.parameter_summary ? `${display.parameter_summary}`.trim() : "";
+  const resultSummary = display && display.result ? `${display.result}`.trim() : "";
   const command = toolDisplayField(display, "command");
+
+  if (target) {
+    lines.push({ text: `${action} · ${target}` });
+  } else if (parameterSummary) {
+    lines.push({ text: `${action} · ${parameterSummary}` });
+  } else {
+    lines.push({ text: action });
+  }
+
   if (command) {
     lines.push({
       kind: "command",
-      text: `command: ${truncateForChat(command, 180)}`,
+      text: truncateForChat(command, 180),
       fullText: command,
     });
   }
-  if (display && Array.isArray(display.fields)) {
-    display.fields
-      .filter((field) => !["tool", "target", "command"].includes(`${field.label || ""}`))
-      .slice(0, 4)
-      .forEach((field) => lines.push({ text: `${field.label}: ${field.value}` }));
+
+  if (!command && resultSummary && !isGenericToolResult(resultSummary)) {
+    lines.push({ text: resultSummary });
   }
-  (row.body || []).forEach((bodyLine) => {
-    if (command && `${bodyLine || ""}`.startsWith("command=")) {
-      return;
-    }
-    if (bodyLine && !lines.some((line) => line.text.endsWith(bodyLine))) {
+
+  if (!command && !resultSummary && parameterSummary && target && shouldShowToolParameterSummary(parameterSummary, target)) {
+    lines.push({ text: parameterSummary });
+  }
+
+  compactToolBodyLines(row, command).forEach((bodyLine) => {
+    if (bodyLine && !lines.some((line) => line.text === bodyLine)) {
       lines.push({ text: bodyLine });
     }
   });
+
   return lines.length > 0 ? lines : [{ text: row.status || "tool activity" }];
+}
+
+function compactToolBodyLines(row, command) {
+  const rawLines = Array.isArray(row.body) ? row.body : [];
+  return rawLines
+    .map((bodyLine) => `${bodyLine || ""}`.trim())
+    .filter(Boolean)
+    .filter((bodyLine) => {
+      if (command && (bodyLine.startsWith("command=") || bodyLine === command)) {
+        return false;
+      }
+      if (/^(type|target|path|command)\s*[:=]/i.test(bodyLine)) {
+        return false;
+      }
+      return true;
+    })
+    .slice(0, 2);
+}
+
+function isGenericToolResult(text) {
+  const normalized = `${text || ""}`.trim().toLowerCase();
+  return (
+    normalized === "" ||
+    normalized === "success" ||
+    normalized === "completed" ||
+    normalized === "result returned" ||
+    normalized === "succeeded: result returned"
+  );
+}
+
+function shouldShowToolParameterSummary(summary, target) {
+  const normalized = `${summary || ""}`.trim();
+  const normalizedTarget = `${target || ""}`.trim();
+  if (!normalized || normalized === normalizedTarget) {
+    return false;
+  }
+  if (/^(type|target|path|command)\s*[:=]/i.test(normalized)) {
+    return false;
+  }
+  if (normalizedTarget && normalized.includes(normalizedTarget) && normalized.split(/[,\n;]/).length <= 2) {
+    return false;
+  }
+  return true;
 }
 
 function toolDisplayField(display, label) {
@@ -1832,17 +1997,25 @@ function terminalBodyForDisplay(text) {
   if (state.debugDetailsVisible) {
     return stripped;
   }
-  const summary = terminalSummaryLine(stripped);
+  const summary = terminalSummaryBlock(stripped);
   return summary || stripDebugTerminalLines(stripped);
 }
 
-function terminalSummaryLine(text) {
+function terminalSummaryBlock(text) {
   const lines = `${text || ""}`.split(/\r?\n/);
-  const summaryLine = lines.find((line) => /^summary\s*:/i.test(line.trim()));
-  if (!summaryLine) {
+  const summaryIndex = lines.findIndex((line) => /^summary\s*:/i.test(line.trim()));
+  if (summaryIndex < 0) {
     return "";
   }
-  return summaryLine.replace(/^summary\s*:\s*/i, "").trim();
+  const summaryLines = [lines[summaryIndex].replace(/^summary\s*:\s*/i, "")];
+  for (let index = summaryIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\s*(evidence|learned|completion reason)\s*:/i.test(line)) {
+      break;
+    }
+    summaryLines.push(line);
+  }
+  return summaryLines.join("\n").trim();
 }
 
 function stripDebugTerminalLines(text) {
@@ -2955,11 +3128,11 @@ function showInspectorPanel(panel) {
     inspectorEyebrow.textContent = showingSettings ? "settings" : "detail region";
   }
   if (inspectorTitle) {
-    inspectorTitle.textContent = showingSettings ? "Settings" : "Selected Turn Debug";
+    inspectorTitle.textContent = showingSettings ? "Provider Settings" : "Selected Turn Debug";
   }
   if (inspectorCopy) {
     inspectorCopy.textContent = showingSettings
-      ? "Read-only runtime and workspace controls. Editing unlocks only after owner-backed config contracts exist."
+      ? "Edit provider endpoint, model, and credential environment variable. Runtime status lives under Status."
       : "右侧只展示当前 turn 的调试摘要，不抢主消息流焦点。";
   }
   if (settingsShellToggle) {
@@ -2969,33 +3142,19 @@ function showInspectorPanel(panel) {
 }
 
 function renderSettingsShell() {
-  const selected = sessionSummaryForSelected();
-  const draftCount = state.draftSessionId ? 1 : 0;
-  const persistedCount = state.sessions.length;
-  const sessionCount = persistedCount + draftCount;
-  const selectedSessionId = state.selectedSessionId || "not selected";
-  const workspace = state.selectedCwd || selected?.cwd || activeTurnForSelectedSession()?.cwd || "runtime default";
   const modelLabel =
     state.configStatus?.default_model ||
     modelSelector?.selectedOptions?.[0]?.textContent ||
     modelSelector?.value ||
     "Runtime config";
-  const attachments = currentAttachments();
   const providerSummary = state.configStatus
     ? `${state.configStatus.provider_id} · ${state.configStatus.provider_protocol}`
     : state.configStatusError
       ? "unavailable"
       : "loading";
   setText("settings-status-pill", state.adpStatus || "connecting");
-  setText("settings-connection-summary", state.adpStatus || "connecting");
-  setText("settings-service-origin", window.location.origin || "same origin");
-  setText("settings-connection-state", state.adpStatus || "connecting");
   setText("settings-model-value", modelLabel);
   setText("settings-provider-summary", providerSummary);
-  setText("settings-agent-value", state.configStatus?.agent_name || "loading");
-  setText("settings-agent-mode", state.configStatus?.agent_mode || "loading");
-  setText("settings-agent-node", state.configStatus?.node_id || "loading");
-  setText("settings-paired-agent", state.configStatus ? `${state.configStatus.paired_agent_name} · ${state.configStatus.paired_agent_mode}` : "loading");
   setText("settings-provider-id", state.configStatus?.provider_id || "loading");
   setText("settings-provider-type", state.configStatus?.provider_type || "loading");
   setText("settings-provider-protocol", state.configStatus?.provider_protocol || "loading");
@@ -3003,11 +3162,6 @@ function renderSettingsShell() {
   setText("settings-provider-auth", state.configStatus ? `${settingsAuthTypeLabel(state.configStatus.provider_auth_type)} · ${state.configStatus.provider_auth_source}` : "loading");
   setText("settings-restart-required", state.configStatus?.restart_required_on_change ? "restart required after changes" : "no restart flag");
   setText("settings-config-error", state.configStatusError || "none");
-  setText("settings-session-count", `${sessionCount} session(s)`);
-  setText("settings-selected-session", selectedSessionId);
-  setText("settings-workspace-value", workspace);
-  setText("settings-attachment-count", `${attachments.length}`);
-  setText("settings-attachment-value", `${attachments.length} draft item(s)`);
   syncSettingsProviderForm();
   showInspectorPanel(state.inspectorPanel);
 }
@@ -3073,28 +3227,18 @@ function renderTurnMeta() {
   if (!turn) {
     setText("session-title", state.selectedSessionId || "waiting for service state");
     setText("session-copy", state.selectedSessionId ? "no turns in selected session" : "no active turn yet");
-    setText("strip-session", state.selectedSessionId || "-");
-    setText("strip-turn", "-");
-    setText("strip-cwd", state.selectedCwd || "-");
-    setText("worker-context-tag", "Master");
-    setText("task-context-tag", state.selectedCwd ? "Task cwd" : "Global");
-    setText("transport-context-tag", state.adpStatus || "waiting");
+    setShellDataset("selectedSession", state.selectedSessionId || "");
+    setShellDataset("selectedTurn", "");
+    setShellDataset("selectedCwd", state.selectedCwd || "");
     setText("turn-status", liveTurnStatus() || "waiting");
-    setText("strip-slave", "idle");
-    setText("slave-chip", "waiting");
-    setText("slave-title", "no slave card yet");
-    setText("slave-copy", "当前 turn 还没有 slave 子流。");
     return;
   }
 
   setText("session-title", turn.session_id);
   setText("session-copy", turn.cwd ? `${turn.turn_id} · ${turn.cwd}` : turn.turn_id);
-  setText("strip-session", turn.session_id);
-  setText("strip-turn", turn.turn_id);
-  setText("strip-cwd", turn.cwd || state.selectedCwd || "-");
-  setText("worker-context-tag", turn.slave_substream_card ? "Worker active" : "Master");
-  setText("task-context-tag", turn.cwd ? "Task cwd" : "Global");
-  setText("transport-context-tag", turn.turn_id || "service");
+  setShellDataset("selectedSession", turn.session_id || "");
+  setShellDataset("selectedTurn", turn.turn_id || "");
+  setShellDataset("selectedCwd", turn.cwd || state.selectedCwd || "");
   const runningTools = (turn.tool_activities || []).filter((tool) => tool.status === "Waiting" || tool.status === "waiting");
   const turnStatus = turn.terminal_text
     ? "completed"
@@ -3106,18 +3250,6 @@ function renderTurnMeta() {
           ? liveTurnStatus()
           : "waiting";
   setText("turn-status", turnStatus);
-
-  if (turn.slave_substream_card) {
-    setText("strip-slave", "substream active");
-    setText("slave-chip", "active");
-    setText("slave-title", "slave substream available");
-    setText("slave-copy", "当前 turn 启用了 slave 子流卡片，可继续扩展独立子流显示。");
-  } else {
-    setText("strip-slave", "idle");
-    setText("slave-chip", "idle");
-    setText("slave-title", "no slave substream");
-    setText("slave-copy", "当前 turn 没有 slave 子流卡片。");
-  }
 }
 
 setInterval(() => {
@@ -3711,9 +3843,6 @@ if (composerForm) {
     }, 120);
   });
 }
-attachFileButton.addEventListener("click", () => attachmentFileInput.click());
-attachImageButton.addEventListener("click", () => attachmentImageInput.click());
-attachVideoButton.addEventListener("click", () => attachmentVideoInput.click());
 attachmentFileInput.addEventListener("change", (event) => {
   addAttachmentFiles(event.target.files, "file");
   event.target.value = "";
@@ -3726,6 +3855,24 @@ attachmentVideoInput.addEventListener("change", (event) => {
   addAttachmentFiles(event.target.files, "video");
   event.target.value = "";
 });
+function bindAndroidAttachmentBridge(button, kind) {
+  const invoke = (event) => {
+    const picker = window.FreehandAndroidFilePicker;
+    if (!picker || typeof picker.request !== "function") {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    picker.request(kind);
+  };
+  button.addEventListener("click", invoke);
+  button.addEventListener("pointerup", invoke);
+  button.addEventListener("touchend", invoke, { passive: false });
+}
+
+bindAndroidAttachmentBridge(attachFileButton, "file");
+bindAndroidAttachmentBridge(attachImageButton, "image");
+bindAndroidAttachmentBridge(attachVideoButton, "video");
 previewAttachmentsButton.addEventListener("click", () => {
   state.attachmentsPreviewOpen = !state.attachmentsPreviewOpen;
   renderAttachmentTray();

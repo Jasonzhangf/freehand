@@ -12,6 +12,8 @@
   - `handle_query_checkpoints`
   - `handle_adp_socket`
   - `handle_adp_connection`
+  - `handle_android_update_manifest`
+  - `handle_android_update_apk`
 
 ## Request Mainline
 
@@ -29,16 +31,18 @@
 - front-end session rail exposes protocol-owned rename, remove via `DeleteSession`, and double-Esc rollback controls without storing session truth locally; archive/restore affordances are intentionally not rendered in WebUI
 - front-end keeps success and failure scenario prompts as hidden slash/keyboard diagnostic affordances without rendering persistent sample buttons in the composer
 - front-end composer control strip exposes attachment buttons, preview, selected-session refresh, cwd input, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP
-- front-end settings shell exposes OpenMinis-inspired read-only configuration/status cards for connection, owner-backed active agent/provider/model projection, sessions/workspace, skills, files, tasks, and diagnostics; controls that imply provider/model/agent/config mutation are visibly disabled until an owner-backed write path exists
+- front-end settings shell exposes only owner-backed editable provider/model/auth-env configuration. Read-only connection, active-agent, session/workspace, skills, files, tasks, and diagnostics projections are not rendered as Settings cards; they belong in Status/Debug/future owner-backed surfaces with actionable controls.
 - front-end provider/model edit form submits `UpdateProviderConfig` through ADP only, then re-queries `QueryConfigStatus` for restart-required saved projection; WebUI never reads or writes `~/.freehand/config.toml` directly and never accepts raw API-key values
 - front-end layout classifier maps viewport width plus aspect ratio into explicit shape attributes (`phone_portrait`, `tall_phone`, `phone_landscape`, `tablet_portrait`, `tablet_landscape`, `foldable_unfolded`, `desktop_large`) and may only rearrange existing components
 - server-rendered root shell pins `client=android-webview` first paint to `tablet_portrait` on `body` and shell layout attributes, so Android WebView does not flash the default desktop grid before JS refinement
 - front-end mobile portrait layout keeps the conversation workspace as the primary surface; session CRUD/list and debug/config detail surfaces are hidden in explicit overlay drawers opened from mobile controls and must not occupy the normal document flow
+- front-end mobile chrome is phone-first rather than a desktop surface scaled down: the visible topbar is a compact app bar, internal session/turn/cwd/worker/slave/protocol strips are absent from the conversation surface, verifier-only selected session/turn truth lives on shell `data-*` attributes, and focused composer expansion must not reopen the full attachment/CWD/model/status strip into the primary conversation flow
 - front-end mobile session drawer can be opened by a right-swipe gesture from the main interface content area; the gesture is presentation-only and must not mutate ADP/session truth, transcript truth, composer draft, pending submit, scroll anchor, or lifecycle timers
 - front-end session drawer renders protocol session summaries as an agent -> sessions hierarchy; grouping consumes protocol/future agent fields or known turn source identity and defaults unknown sessions to `master` without creating local session truth
 - front-end attachment drafts are scoped by selected session, persist metadata only, append placeholder lines to the current send, clear on command receipt, and remain available for retry after dispatch failure
 - transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot
 - transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection
+- app boundary also serves daemon-hosted Android APK update truth at `/android/update.json` and `/android/freehand-android.apk`; these routes are file/config-serving app surfaces only and must not invent a second release registry beyond runtime env plus staged artifact truth
 - transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history and error-center metadata before using protocol-state snapshots
 - transport-facing ADP subscribe route accepts protocol-owned task list and error-center subscriptions and obtains initial projections from the injected runtime query port
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
@@ -66,7 +70,7 @@
 - WebUI submit success path still actively re-queries latest turn truth over ADP after command receipt to cover command-complete-before-browser-subscriber timing
 - WebUI success/failure diagnostic prompts populate the composer through slash commands or keyboard shortcuts, then the operator can send them through the normal ADP submit path; these prompts must not appear as persistent composer buttons
 - WebUI composer control strip renders low-noise controls below the composer without creating a second protocol or truth source
-- WebUI settings shell renders low-noise compact cards/disclosures from protocol/runtime query projections plus session/browser connection state only; it does not parse `~/.freehand/config.toml`, expose credential values, or send config mutation commands
+- WebUI settings shell renders a low-noise provider/model form from the runtime config projection; it does not render decorative runtime/session status cards, parse `~/.freehand/config.toml`, expose credential values, or send unsupported config mutation commands
 - WebUI provider/model save renders field-level validation errors, disables duplicate save while in flight, and shows restart-required after a successful owner-backed save
 - WebUI attachment tray renders session-scoped draft metadata and file-handle availability; restored metadata stays visible but is not treated as rehydrated binary payload
 - WebUI sends attachment placeholders as current-send text only, clears the composer immediately after submit, and keeps submitted text recoverable through local Up/Down input history instead of refilling the composer after dispatch failure
@@ -85,6 +89,7 @@
 - front-end script must reject stale latest-turn and stale `SessionTurns` projections after session-list truth is known, so non-destructive `DeleteSession` metadata cannot rehydrate hidden old turn truth into a newly created or refreshed session
 - front-end script must not merge latest turn into transcript by `turn_id` alone; replacement requires same `turn_id` and same visible `user_text` so restarted/runtime-reused ordinals cannot overwrite historical rows with a new request
 - front-end script renders protocol-projected tool lifecycle status from ADP turn projections so tool calls can show waiting, completed, and failed states over the same WebSocket without surfacing verbose tool term text in the main card
+- front-end mobile tool blocks render as compact semantic rows inside assistant bubbles; status is conveyed by low-noise color/edge state and one target-focused line instead of a separate engineering card or verbose field list
 - front-end script normalizes tool cards by `tool_call_id`, renders waiting cards with animation and local elapsed timers, and clears the composer input immediately after submit while keeping the pending user card visible
 - front-end script renders submit/dispatch waiting as an animated pending card with elapsed time until a turn projection arrives, then switches visible lifecycle status to tool executing with elapsed time when tool activity is waiting; timer state is scoped by render lifecycle keys, not a single global model-request clock
 - front-end script keeps the submitted user input observable after the composer is cleared: pending submit renders after existing history, pending state is cleared only after the same user text is materialized in visible turn rows, a live turn with no public rows renders an explicit observable waiting row, and the latest terminal/interrupted turn remains renderable when selected-session transcript state is empty instead of producing a blank transcript
@@ -101,7 +106,7 @@
 - front-end script renders `runtime-turn-N` plus later `runtime-turn-N-rM` round projections as chronological per-round lifecycle cards instead of merging the whole execution into one summary card; internal runtime continuation prompts are hidden from user-message rows
 - front-end script keeps assistant text inside its owning round card, strips raw `<freehand_completion>` schema blocks from that card, and leaves final user-facing completion summary to the terminal card at the end of the round sequence
 - terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success
-- terminal cards default to summary-only display; evidence, learned notes, and completion reason remain hidden unless WebUI debug details are enabled
+- terminal cards default to summary-only display; evidence, learned notes, and completion reason remain hidden unless WebUI debug details are enabled, and summary text renders through the dedicated final-summary display path instead of generic paragraph rendering
 - main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible
 - theme module owns white/black theme switching and is separated from WebUI layout/runtime scripts
 - CLI and WebUI divergence remains a rendering decision only, not a protocol decision
@@ -115,6 +120,7 @@
 - ADP command/query/subscribe request timeouts are explicit UI failures so the composer cannot stay in a silent dispatching state
 - ADP failure cards must not render ahead of the current conversation timeline; transport failure is secondary to the current turn order
 - unknown static assets return explicit 404
+- missing staged Android APK returns explicit 404 from `/android/freehand-android.apk`; update manifest defaults remain explicit and must not pretend the APK exists
 - cancel without an active turn clears only local input and does not invent a runtime mutation
 - attachment dispatch failure preserves draft metadata/file handles for retry and must not silently drop the selected files
 - restored attachment metadata without a current page file handle is visible as metadata-only and must not pretend the binary payload was rehydrated
@@ -123,7 +129,7 @@
 - dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
 - runtime query port failures surface explicit ADP failure frames and do not become app-owned fallback state
 - task/error-center subscription initial query failures surface explicit ADP failure frames and do not become app-owned fallback state
-- settings controls that imply unsupported agent/advanced config mutation remain disabled/read-only until their owners expose read/write contracts; provider/model edits use the owner-backed `UpdateProviderConfig` path only
+- unsupported agent/session/workspace/skills/files/tasks/diagnostics settings controls stay absent until their owners expose read/write contracts; provider/model edits use the owner-backed `UpdateProviderConfig` path only
 - settings config query failures render an explicit unavailable status inside Settings; WebUI must not backfill provider/model values from local guesses
 - settings provider/model update failures render explicit user-visible config errors and must not update local Settings state as if save succeeded
 - direct reason/provider/node/config coupling is a policy violation, not a fallback path
@@ -150,6 +156,7 @@
 | 01 | `render_webui_smoke` / `render_webui_smoke_for_client` / `handle_root` | `apps/freehand-server/src/page.rs` / `apps/freehand-server/src/lib.rs` | render protocol-driven WebUI shell and endpoint bindings, including Android WebView initial layout attributes from the root query client | static page request plus optional `client` query | HTML shell with default or Android-pinned first-paint layout | app entrypoint/root route | page module | bound |
 | 02 | `assets::asset_response` | `apps/freehand-server/src/assets.rs` | serve split CSS/JS assets with explicit content type | asset path | CSS/JS response or 404 | app asset route | embedded assets | bound |
 | 03 | `build_webui_router` | `apps/freehand-server/src/lib.rs` | define shared protocol-only HTTP/SSE/ADP/static asset surface | protocol state + dispatch port | router with root/assets/query/subscribe/command/ADP routes | app entrypoint/tests/runtime host | app router | bound |
+| 03a | `handle_android_update_manifest` / `handle_android_update_apk` / `android_update_apk_path` | `apps/freehand-server/src/lib.rs` | serve the daemon-hosted Android update manifest from runtime env truth and the staged APK artifact from explicit path truth | runtime env + staged APK file path | JSON manifest or APK bytes / explicit 404 | Android updater / operator | process env + filesystem | bound |
 | 04 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | expose protocol-owned command-ingress transport endpoint backed by an injected dispatch port | HTTP JSON command | HTTP dispatch receipt/failure payload | WebUI transport | protocol owner | bound |
 | 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve shared protocol-only router on a listener | TCP listener + protocol state + dispatch port + runtime query port + shutdown future | live HTTP/SSE/ADP transport boundary | app entrypoint/tests/runtime host | app server | bound |
 | 06 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate slave-card visibility by client kind | turn projection + client kind | client-specific projection | app boundary | protocol owner | bound |
@@ -179,6 +186,7 @@
 - HTTP/POST routes remain compatibility transport surfaces; WebUI JS uses ADP for command/query/subscription truth and EventSource for latest-turn SSE display refresh
 - app boundary now surfaces explicit command-ingress dispatch-port failures and dispatch-task join failures instead of collapsing them into success
 - app boundary now serves static embedded assets through an explicit 404ing route
+- app boundary now serves Android update manifest/APK routes for the Android client; manifest version fields come from runtime env overrides when present, and missing APK artifacts fail explicitly with 404
 - runtime host reuse now happens through injected state and dispatch port, not by duplicating transport behavior
 - protocol-owned client-specific projection helper exists and is now a shared owner boundary for the app smoke
 - subscribe routes now keep one SSE connection open and stream later matching updates after the initial snapshot
@@ -191,8 +199,8 @@
 - WebUI tool cards now render protocol-projected waiting/completed/failed lifecycle states from ADP turn projection truth
 - WebUI success/failure diagnostic prompts remain available through slash commands and shortcuts, while persistent Success/Failure composer buttons are intentionally absent
 - WebUI composer control strip now exposes file/image/video attachment, preview, selected-session refresh, cwd input, and read-only model selector controls without changing ADP framing beyond the protocol-owned `SubmitUserInput.cwd`
-- WebUI settings shell is landed as compact OpenMinis-style cards/forms for connection, provider/model, sessions/workspace, skills, files, tasks, and diagnostics; unsupported advanced/agent config mutation controls remain disabled until owner-backed contracts exist
-- WebUI settings shell now queries `QueryConfigStatus` and renders owner-backed active agent/provider/model/auth-source values; provider/model saves route through `UpdateProviderConfig` and credential values are not rendered
+- WebUI settings shell is landed as a compact provider/model/auth-env edit form only; connection, active-agent, sessions/workspace, skills, files, tasks, and diagnostics cards are intentionally absent from Settings because they are status/debug projections, not editable settings
+- WebUI settings shell now queries `QueryConfigStatus` and renders owner-backed provider/model/auth-source values; provider/model saves route through `UpdateProviderConfig` and credential values are not rendered
 - WebUI settings provider/model save now submits `UpdateProviderConfig` over ADP, shows validation errors or restart-required success, re-queries owner-backed config projection, and still avoids raw API-key values/direct config writes
 - WebUI layout shape classifier and CSS shape rules are landed for phone portrait, tall phone, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop large; the classifier only writes DOM data attributes and does not mutate protocol/session state
 - WebUI root route now pins `?client=android-webview` first paint to `tablet_portrait` on the server-rendered body and shell while leaving normal Web roots unpinned for browser classification
@@ -215,9 +223,11 @@
 - WebUI inactive tool precursor cards now project completed tools as success cards and failed tools as failed cards instead of falling back to neutral waiting cards
 - WebUI execution card CSS now uses explicit blue/green/red status borders for running/success/failed states
 - WebUI main transcript now renders chat bubbles: user bubbles are right-aligned, assistant bubbles are left-aligned, tool activity is embedded in the assistant bubble as a semantic block, and model-wait/retry continuation rows use italic reasoning typography
+- WebUI mobile v3 CSS intentionally overrides desktop card weight for phone/tablet-portrait shapes: flat app bar, continuous conversation stream, lightweight assistant/user bubbles, compact tool semantics, fixed collapsed composer, and expanded composer controls only after focus
 - WebUI session rail now exposes Rename, Remove via `DeleteSession`, and double-Esc rollback through ADP commands; archive/restore controls are intentionally absent from the WebUI surface
 - WebUI `/new` opens the New dialog instead of directly creating a draft; the old selected-session/no-turns system card stays absent from the chat stream
 - WebUI assistant cards stay within their own round and strip raw `<freehand_completion>` blocks; final user-facing completion content remains in the terminal Final row at the bottom of the round sequence
+- WebUI Final rows now extract the complete terminal `Summary` block and use a dedicated source-format-preserving summary renderer, while phone focused composer keeps attachment/CWD/model/status detail collapsed out of the main input surface
 - WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending
 - WebUI user-facing labels, status rows, failure cards, and diagnostic prompts must not expose `ADP`; ADP remains an internal protocol/debug/automation term only
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics

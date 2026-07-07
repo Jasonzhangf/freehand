@@ -72,6 +72,45 @@ freehand_fatal_logcat_pattern() {
     "${package_name//./\\.}"
 }
 
+capture_webui_layout_logcat() {
+  adb -s "$serial" logcat -d -s FreehandWebUiLayout:I '*:S' 2>/dev/null || true
+}
+
+capture_activity_and_window() {
+  adb -s "$serial" shell dumpsys activity activities >"$artifact_dir/dumpsys-activity.txt" 2>&1 || true
+  adb -s "$serial" shell dumpsys window >"$artifact_dir/dumpsys-window.txt" 2>&1 || true
+}
+
+wait_for_package_available() {
+  for _ in $(seq 1 "${FREEHAND_ANDROID_PACKAGE_WAIT_SECONDS:-15}"); do
+    if adb -s "$serial" shell pm path "$package_name" 2>/dev/null | grep -F "$package_name" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+freehand_is_foreground() {
+  grep -Eq "topResumedActivity=.*${package_name//./\\.}|ResumedActivity:.*${package_name//./\\.}|mCurrentFocus=.*${package_name//./\\.}|mFocusedApp=.*${package_name//./\\.}" \
+    "$artifact_dir/dumpsys-activity.txt" "$artifact_dir/dumpsys-window.txt" 2>/dev/null
+}
+
+system_file_picker_is_foreground() {
+  grep -Eq 'topResumedActivity=.*(OPEN_DOCUMENT|filemanager|photopicker|PickerActivity)|mCurrentFocus=.*(filemanager|photopicker|PickerActivity)' \
+    "$artifact_dir/dumpsys-activity.txt" "$artifact_dir/dumpsys-window.txt" 2>/dev/null
+}
+
+wait_for_webui_layout_probe() {
+  for _ in $(seq 1 "${FREEHAND_ANDROID_SETTLE_SECONDS:-12}"); do
+    sleep 1
+    if capture_webui_layout_logcat | grep -F 'FreehandWebUiLayout' >/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 verify_device_ui() {
   if [[ -z "$serial" ]]; then
     usage
@@ -92,22 +131,29 @@ verify_device_ui() {
   if [[ -f "$apk_path" && "${FREEHAND_ANDROID_SKIP_INSTALL:-0}" != "1" ]]; then
     verify_apk_contains_activity
     adb -s "$serial" install -r "$apk_path" >"$artifact_dir/install.txt" 2>&1
+    if ! wait_for_package_available; then
+      write_summary "failed" "installed_package_not_available"
+      echo "[freehand-android-device] failed: installed package is not available; see $artifact_dir" >&2
+      exit 1
+    fi
   fi
 
   adb -s "$serial" logcat -c || true
   adb -s "$serial" shell am force-stop "$package_name" || true
   adb -s "$serial" shell input keyevent KEYCODE_WAKEUP || true
   adb -s "$serial" shell am start -n "${package_name}/${activity_name}" >"$artifact_dir/am-start.txt" 2>&1 || true
-  for _ in $(seq 1 "${FREEHAND_ANDROID_SETTLE_SECONDS:-12}"); do
-    sleep 1
-    if adb -s "$serial" logcat -d -t 3000 2>/dev/null | grep -F 'FreehandWebUiLayout' >/dev/null; then
-      break
-    fi
-  done
+  wait_for_webui_layout_probe || true
 
-  adb -s "$serial" shell dumpsys activity activities >"$artifact_dir/dumpsys-activity.txt" 2>&1 || true
-  adb -s "$serial" shell dumpsys window >"$artifact_dir/dumpsys-window.txt" 2>&1 || true
-  adb -s "$serial" logcat -d -t 3000 >"$artifact_dir/logcat.txt" 2>&1 || true
+  capture_activity_and_window
+  if ! capture_webui_layout_logcat | grep -F 'FreehandWebUiLayout' >/dev/null && system_file_picker_is_foreground; then
+    adb -s "$serial" shell input keyevent KEYCODE_BACK || true
+    adb -s "$serial" shell am start -n "${package_name}/${activity_name}" >>"$artifact_dir/am-start.txt" 2>&1 || true
+    wait_for_webui_layout_probe || true
+    capture_activity_and_window
+  fi
+
+  adb -s "$serial" logcat -d >"$artifact_dir/logcat.txt" 2>&1 || true
+  capture_webui_layout_logcat >"$artifact_dir/webui-layout-logcat.txt" || true
   adb -s "$serial" exec-out screencap -p >"$artifact_dir/screenshot.png" 2>"$artifact_dir/screencap.stderr" || true
 
   local fatal_pattern
@@ -126,13 +172,13 @@ verify_device_ui() {
     exit 2
   fi
 
-  if ! grep -Eq "${package_name}/|${package_name//./\\.}" "$artifact_dir/dumpsys-window.txt" "$artifact_dir/dumpsys-activity.txt"; then
+  if ! freehand_is_foreground; then
     write_summary "blocked" "freehand_activity_not_foreground"
     echo "[freehand-android-device] blocked: Freehand activity is not foreground; see $artifact_dir" >&2
     exit 2
   fi
 
-  if ! grep -F 'FreehandWebUiLayout' "$artifact_dir/logcat.txt" >"$artifact_dir/webui-layout-logcat.txt"; then
+  if ! grep -F 'FreehandWebUiLayout' "$artifact_dir/webui-layout-logcat.txt" >/dev/null; then
     write_summary "failed" "missing_webui_layout_probe"
     echo "[freehand-android-device] failed: missing WebUI layout probe; see $artifact_dir" >&2
     exit 1

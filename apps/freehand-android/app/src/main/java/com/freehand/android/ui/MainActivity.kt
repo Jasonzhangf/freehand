@@ -1,21 +1,34 @@
 package com.freehand.android.ui
 
 import android.content.res.Configuration
+import android.content.Intent
+import android.provider.OpenableColumns
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.freehand.android.BuildConfig
 import com.freehand.android.R
 import com.freehand.android.data.AdpEventStream
+import com.freehand.android.data.ApkUpdateClient
 import com.freehand.android.data.ClientConfig
 import com.freehand.android.data.CommandIngress
 import com.freehand.android.data.DaemonConnectionConfig
@@ -30,6 +43,9 @@ import com.freehand.android.ui.components.SlaveStripController
 import com.freehand.android.ui.components.StatusBannerController
 import com.freehand.android.ui.components.TopBarController
 import okhttp3.OkHttpClient
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -48,14 +64,31 @@ class MainActivity : AppCompatActivity() {
     private var adp: AdpEventStream? = null
     private var configLoadError: String? = null
     private var remoteWebUiLoaded = false
+    private lateinit var updateClient: ApkUpdateClient
+    private var updateCheckInFlight = false
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private var nativeAttachmentKind: String? = null
+    private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val attachmentKind = nativeAttachmentKind
+            if (attachmentKind != null) {
+                nativeAttachmentKind = null
+                injectAndroidAttachmentSelection(attachmentKind, result.data)
+                return@registerForActivityResult
+            }
+            val callback = fileChooserCallback ?: return@registerForActivityResult
+            fileChooserCallback = null
+            callback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        }
 
         httpClient = OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.MILLISECONDS)
             .build()
+        updateClient = ApkUpdateClient(httpClient, BuildConfig.VERSION_CODE.toLong())
         projector = TimelineProjector()
         configStore = ClientConfig.store(applicationContext)
         val loadedConfig = try {
@@ -85,6 +118,40 @@ class MainActivity : AppCompatActivity() {
             settings.loadWithOverviewMode = false
             settings.textZoom = 100
             clearCache(true)
+            addJavascriptInterface(AndroidFilePickerBridge(), "FreehandAndroidFilePicker")
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowFileChooser(
+                    webView: WebView?,
+                    filePathCallback: ValueCallback<Array<Uri>>?,
+                    fileChooserParams: FileChooserParams?,
+                ): Boolean {
+                    fileChooserCallback?.onReceiveValue(null)
+                    fileChooserCallback = filePathCallback
+                    val intent = try {
+                        fileChooserParams?.createIntent()
+                    } catch (e: Exception) {
+                        fileChooserCallback?.onReceiveValue(null)
+                        fileChooserCallback = null
+                        showUpdateStatus("file picker request failed: ${e.message ?: e::class.java.simpleName}")
+                        return false
+                    }
+                    if (intent == null) {
+                        fileChooserCallback?.onReceiveValue(null)
+                        fileChooserCallback = null
+                        showUpdateStatus("file picker request failed")
+                        return false
+                    }
+                    return try {
+                        fileChooserLauncher.launch(intent)
+                        true
+                    } catch (e: Exception) {
+                        fileChooserCallback?.onReceiveValue(null)
+                        fileChooserCallback = null
+                        showUpdateStatus("file picker unavailable: ${e.message ?: e::class.java.simpleName}")
+                        false
+                    }
+                }
+            }
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
@@ -133,11 +200,17 @@ class MainActivity : AppCompatActivity() {
             },
         )
         inputBar = InputBarController(this, root) { text -> ingress.submit(text) }
-        drawer = DrawerController(this, root, onHostChanged = { newHost ->
-            if (saveHostConfig(newHost)) {
-                connectToDaemon(newHost)
-            }
-        }, initialHost = initialHost)
+        drawer = DrawerController(
+            this,
+            root,
+            onHostChanged = { newHost ->
+                if (saveHostConfig(newHost)) {
+                    connectToDaemon(newHost)
+                }
+            },
+            onCheckUpdate = { checkForApkUpdate(auto = false) },
+            initialHost = initialHost,
+        )
 
         applyInsets(root)
         setContentView(root)
@@ -149,6 +222,7 @@ class MainActivity : AppCompatActivity() {
             topBar.setAgent("freehand", "config error")
             inputBar.setEnabledState(false)
         } else {
+            checkForApkUpdate(auto = true)
             discoverDaemon()
         }
     }
@@ -248,11 +322,101 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl("${host.baseUrl}/?client=android-webview")
     }
 
+    private inner class AndroidFilePickerBridge {
+        @JavascriptInterface
+        fun request(kind: String) {
+            runOnUiThread {
+                openAndroidAttachmentPicker(kind)
+            }
+        }
+    }
+
+    private fun openAndroidAttachmentPicker(kind: String) {
+        val normalizedKind = when (kind) {
+            "image", "video", "file" -> kind
+            else -> "file"
+        }
+        nativeAttachmentKind = normalizedKind
+        fileChooserCallback?.onReceiveValue(null)
+        fileChooserCallback = null
+        val mimeType = when (normalizedKind) {
+            "image" -> "image/*"
+            "video" -> "video/*"
+            else -> "*/*"
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        try {
+            fileChooserLauncher.launch(intent)
+        } catch (e: Exception) {
+            nativeAttachmentKind = null
+            showUpdateStatus("file picker unavailable: ${e.message ?: e::class.java.simpleName}")
+        }
+    }
+
+    private fun injectAndroidAttachmentSelection(kind: String, data: Intent?) {
+        val uris = selectedUris(data)
+        if (uris.isEmpty()) {
+            return
+        }
+        val files = JSONArray()
+        uris.forEach { uri ->
+            files.put(
+                JSONObject()
+                    .put("name", displayName(uri))
+                    .put("size", displaySize(uri))
+                    .put("type", contentResolver.getType(uri) ?: "application/octet-stream")
+                    .put("uri", uri.toString()),
+            )
+        }
+        val script = "window.__freehandAndroidAttachmentSelected && window.__freehandAndroidAttachmentSelected(${JSONObject.quote(kind)}, $files);"
+        webView.evaluateJavascript(script, null)
+    }
+
+    private fun selectedUris(data: Intent?): List<Uri> {
+        val clipData = data?.clipData
+        if (clipData != null && clipData.itemCount > 0) {
+            return (0 until clipData.itemCount).mapNotNull { clipData.getItemAt(it).uri }
+        }
+        return data?.data?.let { listOf(it) } ?: emptyList()
+    }
+
+    private fun displayName(uri: Uri): String {
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) {
+                    val name = cursor.getString(index)
+                    if (!name.isNullOrBlank()) return name
+                }
+            }
+        }
+        return uri.lastPathSegment ?: "attachment"
+    }
+
+    private fun displaySize(uri: Uri): Long {
+        contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (index >= 0 && !cursor.isNull(index)) {
+                    return cursor.getLong(index)
+                }
+            }
+        }
+        return -1L
+    }
+
     private fun showNativeShell(visible: Boolean) {
         val visibility = if (visible) View.VISIBLE else View.GONE
         topBar.root().visibility = visibility
         slaveStrip.root().visibility = if (visible) View.GONE else View.GONE
         inputBar.root().visibility = visibility
+        if (!visible) {
+            statusBanner.hide()
+        }
     }
 
     private fun pushSnapshotToWebView() {
@@ -274,9 +438,9 @@ class MainActivity : AppCompatActivity() {
         }
         inputBar.setEnabledState(shouldEnableInput)
 
-        // Surface turn-level progress on the status banner. Hides automatically
-        // when state is terminal/idle so we don't leave stale text hanging.
-        if (connectionState == "open") {
+        // Native banner is pre-connection shell only. Once remote WebUI owns the
+        // screen, do not overlay legacy Android status chrome on top of it.
+        if (!remoteWebUiLoaded && connectionState == "open") {
             statusBanner.showTurnProgress(turnState)
         } else if (connectionState != "config_error" && connectionState != "error") {
             statusBanner.hide()
@@ -289,12 +453,8 @@ class MainActivity : AppCompatActivity() {
         } ?: emptyList()
         slaveStrip.render(slaves.map { it.first to it.second.pairingState })
 
-        // Build bridge snapshot with all accumulated turns for multi-turn rendering.
-        // Preferred shape: { all_turns: [ UiPublicTurnProjection, ... ] }.
-        // Falls back to latest single turn or legacy flat list if no projections yet.
+        // Build the single bridge projection shape for multi-turn rendering.
         val allTurnsJson = projector.allTurnsProjectionJson()
-            ?: projector.latestTurnProjectionJson()
-            ?: projector.fallbackTurnsJson()
 
         webView.evaluateJavascript(
             "if(window.__freehand&&window.__freehand.applySnapshot){window.__freehand.applySnapshot($allTurnsJson);}else{window.__freehandPending=$allTurnsJson;}",
@@ -369,6 +529,82 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun checkForApkUpdate(auto: Boolean) {
+        if (updateCheckInFlight) {
+            if (!auto) showUpdateStatus("update check already running")
+            return
+        }
+        val host = try {
+            clientConfig?.activeHostConfig()
+                ?: throw DaemonConnectionConfigException("daemon connection config is not loaded")
+        } catch (e: DaemonConnectionConfigException) {
+            showUpdateStatus("update check failed: ${e.message}")
+            return
+        }
+        updateCheckInFlight = true
+        showUpdateStatus("checking for Android update...")
+        Thread {
+            try {
+                val result = updateClient.check(host.updateManifestUrl)
+                val manifest = result.manifest
+                if (!result.updateAvailable || manifest == null) {
+                    runOnUiThread { showUpdateStatus("app is up to date") }
+                    return@Thread
+                }
+                runOnUiThread {
+                    showUpdateStatus("downloading Freehand ${manifest.versionName}...")
+                }
+                val apk = updateClient.download(
+                    manifest,
+                    File(cacheDir, "apk-updates/freehand-${manifest.versionCode}.apk"),
+                )
+                runOnUiThread {
+                    showUpdateStatus("downloaded ${manifest.versionName}; opening installer.")
+                    openApkInstaller(apk)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!auto) {
+                        showUpdateStatus("update failed: ${e.message ?: e::class.java.simpleName}")
+                    }
+                }
+            } finally {
+                updateCheckInFlight = false
+            }
+        }.start()
+    }
+
+    private fun showUpdateStatus(message: String) {
+        drawer.setUpdateStatus(message)
+    }
+
+    private fun openApkInstaller(apk: File) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            val settingsIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                data = Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(settingsIntent)
+            showUpdateStatus("allow Freehand to install updates, then check again.")
+            return
+        }
+        val uri: Uri = FileProvider.getUriForFile(
+            this,
+            "${BuildConfig.APPLICATION_ID}.apkupdates",
+            apk,
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            showUpdateStatus("installer unavailable: ${e.message ?: e::class.java.simpleName}")
+        }
+    }
+
     private fun HostConfig.toConnectionProfile(): com.freehand.android.data.DaemonConnectionProfile =
         com.freehand.android.data.DaemonConnectionProfile(
             id = profileId,
@@ -408,4 +644,5 @@ class MainActivity : AppCompatActivity() {
         }
         return super.onKeyDown(keyCode, event)
     }
+
 }

@@ -3,14 +3,18 @@ mod page;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::fs;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Html;
 use axum::response::IntoResponse;
+use axum::response::Response;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -73,6 +77,11 @@ pub fn build_webui_router(
     Router::new()
         .route("/", get(handle_root))
         .route("/mock/android", get(handle_android_mock))
+        .route("/android/update.json", get(handle_android_update_manifest))
+        .route(
+            "/android/freehand-android.apk",
+            get(handle_android_update_apk),
+        )
         .route("/assets/{*path}", get(handle_asset))
         .route("/health", get(handle_health))
         .route("/ui/command", post(handle_command_ingress))
@@ -141,6 +150,49 @@ async fn handle_root(Query(params): Query<HashMap<String, String>>) -> Html<Stri
 
 async fn handle_android_mock() -> Html<String> {
     Html(include_str!("../assets/mocks/android/mobile-mock.html").to_owned())
+}
+
+async fn handle_android_update_manifest() -> Result<impl IntoResponse, StatusCode> {
+    let version_code = std::env::var("FREEHAND_ANDROID_VERSION_CODE")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(1);
+    let version_name =
+        std::env::var("FREEHAND_ANDROID_VERSION_NAME").unwrap_or_else(|_| "0.1.0".to_owned());
+    let body = serde_json::json!({
+        "versionCode": version_code,
+        "versionName": version_name,
+        "apkUrl": "/android/freehand-android.apk",
+        "releaseNotes": "Freehand Android release artifact served by the current daemon.",
+        "required": false
+    });
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        )],
+        body.to_string(),
+    ))
+}
+
+async fn handle_android_update_apk() -> Result<Response, StatusCode> {
+    let path = android_update_apk_path();
+    let body = fs::read(path).map_err(|_| StatusCode::NOT_FOUND)?;
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            "application/vnd.android.package-archive",
+        )
+        .body(Body::from(body))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(response)
+}
+
+fn android_update_apk_path() -> PathBuf {
+    std::env::var_os("FREEHAND_ANDROID_APK_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("dist/android/freehand-android-release-unsigned.apk"))
 }
 
 async fn handle_asset(Path(path): Path<String>) -> Result<impl IntoResponse, StatusCode> {
@@ -976,6 +1028,8 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/webui.js"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
+        assert!(html.contains("data-selected-session=\"\""));
+        assert!(html.contains("data-selected-turn=\"\""));
         assert!(html.contains("id=\"session-list\""));
         assert!(html.contains("id=\"new-conversation-button\""));
         assert!(html.contains("id=\"new-task-button\""));
@@ -985,7 +1039,10 @@ mod tests {
         assert!(html.contains("id=\"settings-shell\""));
         assert!(html.contains("id=\"settings-provider-form\""));
         assert!(html.contains("Save provider config"));
-        assert!(html.contains("Skill settings pending"));
+        assert!(!html.contains("Skill settings pending"));
+        assert!(!html.contains("Task settings pending"));
+        assert!(!html.contains("Active agent"));
+        assert!(!html.contains("Sessions and workspace"));
         assert!(!html.contains("type=\"password\""));
         assert!(!html.contains("api-key"));
         assert!(html.contains("id=\"new-session-dialog\""));
@@ -1004,13 +1061,18 @@ mod tests {
         assert!(html.contains("id=\"preview-attachments-button\""));
         assert!(html.contains("id=\"refresh-session-button\""));
         assert!(html.contains("id=\"cwd-input\""));
-        assert!(html.contains("id=\"strip-cwd\""));
         assert!(html.contains("id=\"model-selector\""));
         assert!(html.contains("id=\"attachment-tray\""));
-        assert!(html.contains("work-context-tags"));
-        assert!(html.contains("id=\"worker-context-tag\""));
-        assert!(html.contains("id=\"task-context-tag\""));
-        assert!(html.contains("id=\"transport-context-tag\""));
+        assert!(!html.contains("work-context-tags"));
+        assert!(!html.contains("topbar-strip"));
+        assert!(!html.contains("slave-drawer"));
+        assert!(!html.contains("id=\"strip-session\""));
+        assert!(!html.contains("id=\"strip-turn\""));
+        assert!(!html.contains("id=\"strip-cwd\""));
+        assert!(!html.contains("id=\"slave-chip\""));
+        assert!(!html.contains("id=\"worker-context-tag\""));
+        assert!(!html.contains("id=\"task-context-tag\""));
+        assert!(!html.contains("id=\"transport-context-tag\""));
         assert!(!html.contains("id=\"conversation-turn\""));
     }
 
@@ -1146,13 +1208,15 @@ mod tests {
         assert!(root_body.contains("id=\"settings-shell-toggle\""));
         assert!(root_body.contains("id=\"open-settings-drawer-button\""));
         assert!(root_body.contains("id=\"settings-shell\""));
-        assert!(root_body.contains("id=\"settings-agent-value\""));
         assert!(root_body.contains("id=\"settings-provider-host\""));
         assert!(root_body.contains("id=\"settings-provider-auth\""));
         assert!(root_body.contains("id=\"settings-config-error\""));
         assert!(root_body.contains("id=\"settings-provider-form\""));
         assert!(root_body.contains("Save provider config"));
-        assert!(root_body.contains("Task settings pending"));
+        assert!(!root_body.contains("id=\"settings-agent-value\""));
+        assert!(!root_body.contains("Task settings pending"));
+        assert!(!root_body.contains("Active agent"));
+        assert!(!root_body.contains("Sessions and workspace"));
         assert!(!root_body.contains("type=\"password\""));
         assert!(!root_body.contains("api-key"));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
@@ -1205,6 +1269,8 @@ mod tests {
         assert!(webui_css_body.contains(".chat-empty-title"));
         assert!(webui_css_body.contains(".chat-message-user"));
         assert!(webui_css_body.contains(".chat-message-assistant"));
+        assert!(webui_css_body.contains(".final-summary"));
+        assert!(webui_css_body.contains(".final-summary-item"));
         assert!(webui_css_body.contains(".chat-section-tool"));
         assert!(webui_css_body.contains(".chat-reasoning-body"));
         assert!(webui_css_body.contains(".tool-command-line"));
@@ -1233,19 +1299,21 @@ mod tests {
         assert!(webui_css_body.contains(".settings-shell[hidden]"));
         assert!(webui_css_body.contains(".inspector-debug-panel[hidden]"));
         assert!(webui_css_body.contains(".settings-card"));
-        assert!(webui_css_body.contains(".settings-readonly-action:disabled"));
+        assert!(!webui_css_body.contains(".settings-readonly-action"));
         assert!(webui_css_body.contains(".session-agent-group"));
         assert!(webui_css_body.contains(".session-agent-button"));
         assert!(webui_css_body.contains(".session-agent-sessions"));
         assert!(webui_css_body.contains(".session-item[data-session-kind=\"task\"]"));
         assert!(webui_css_body.contains("env(safe-area-inset-bottom)"));
-        assert!(webui_css_body.contains(".work-context-tags"));
-        assert!(webui_css_body.contains(".context-tag"));
+        assert!(!webui_css_body.contains(".work-context-tags"));
+        assert!(!webui_css_body.contains(".context-tag"));
         assert!(webui_css_body.contains(".new-session-dialog"));
         assert!(webui_css_body.contains(".new-task-path-presets"));
         assert!(webui_css_body.contains(".path-preset-button"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-card"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-control-strip"));
+        assert!(webui_css_body.contains("max-height: min(20svh, 158px)"));
+        assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .command-status"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"] #send-button"));
 
         let js = client
@@ -1325,9 +1393,9 @@ mod tests {
         assert!(!js_body.contains("ArchiveSession"));
         assert!(!js_body.contains("RestoreSession"));
         assert!(!js_body.contains("QueryArchivedSessionList"));
-        assert!(js_body.contains("worker-context-tag"));
-        assert!(js_body.contains("task-context-tag"));
-        assert!(js_body.contains("transport-context-tag"));
+        assert!(!js_body.contains("worker-context-tag"));
+        assert!(!js_body.contains("task-context-tag"));
+        assert!(!js_body.contains("transport-context-tag"));
         assert!(js_body.contains("open-session-drawer-button"));
         assert!(js_body.contains("open-detail-drawer-button"));
         assert!(js_body.contains("setMobileDrawer(\"settings\")"));
@@ -1380,6 +1448,12 @@ mod tests {
         assert!(js_body.contains("function userChatBubble"));
         assert!(js_body.contains("function assistantChatBubble"));
         assert!(js_body.contains("function renderToolSection"));
+        assert!(js_body.contains("function renderFinalSummary"));
+        assert!(js_body.contains("function finalSummaryBlocks"));
+        assert!(js_body.contains("function normalizeFinalSummaryLine"));
+        assert!(!js_body.contains("function splitFinalSummaryInlineStructure"));
+        assert!(!js_body.contains("function inlineStructureIndexes"));
+        assert!(!js_body.contains("function collectInlineStructureIndexes"));
         assert!(js_body.contains("function toolSemanticLines"));
         assert!(js_body.contains("function buildConversationRenderModel"));
         assert!(js_body.contains("function buildRenderTurn"));
@@ -1509,7 +1583,8 @@ mod tests {
             "left.session_id &&\n    right.session_id &&\n    left.session_id === right.session_id"
         ));
         assert!(js_body.contains("terminalBodyForDisplay"));
-        assert!(js_body.contains("terminalSummaryLine"));
+        assert!(js_body.contains("terminalSummaryBlock"));
+        assert!(!js_body.contains("function terminalSummaryLine"));
         assert!(js_body.contains("stripDebugTerminalLines"));
         assert!(js_body.contains("debugDetailsVisible"));
         assert!(js_body.contains("debugDetailsToggle"));
@@ -1630,6 +1705,61 @@ mod tests {
         );
 
         server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn android_update_routes_return_manifest_and_explicit_missing_apk() {
+        let previous_version_code = std::env::var_os("FREEHAND_ANDROID_VERSION_CODE");
+        let previous_version_name = std::env::var_os("FREEHAND_ANDROID_VERSION_NAME");
+        let previous_apk_path = std::env::var_os("FREEHAND_ANDROID_APK_PATH");
+        unsafe {
+            std::env::set_var("FREEHAND_ANDROID_VERSION_CODE", "42");
+            std::env::set_var("FREEHAND_ANDROID_VERSION_NAME", "0.4.2");
+            std::env::set_var(
+                "FREEHAND_ANDROID_APK_PATH",
+                "/tmp/freehand-missing-test-android.apk",
+            );
+        }
+
+        let server = TestServer::spawn_empty().await;
+        let client = Client::builder().build().expect("client");
+
+        let manifest = client
+            .get(format!("{}/android/update.json", server.base_url))
+            .send()
+            .await
+            .expect("manifest response");
+        assert_eq!(manifest.status(), StatusCode::OK);
+        let manifest_json: serde_json::Value = manifest.json().await.expect("manifest json");
+        assert_eq!(manifest_json["versionCode"], 42);
+        assert_eq!(manifest_json["versionName"], "0.4.2");
+        assert_eq!(
+            manifest_json["apkUrl"],
+            serde_json::Value::String("/android/freehand-android.apk".to_owned())
+        );
+
+        let apk = client
+            .get(format!("{}/android/freehand-android.apk", server.base_url))
+            .send()
+            .await
+            .expect("apk response");
+        assert_eq!(apk.status(), StatusCode::NOT_FOUND);
+
+        server.stop().await;
+        unsafe {
+            match previous_version_code {
+                Some(value) => std::env::set_var("FREEHAND_ANDROID_VERSION_CODE", value),
+                None => std::env::remove_var("FREEHAND_ANDROID_VERSION_CODE"),
+            }
+            match previous_version_name {
+                Some(value) => std::env::set_var("FREEHAND_ANDROID_VERSION_NAME", value),
+                None => std::env::remove_var("FREEHAND_ANDROID_VERSION_NAME"),
+            }
+            match previous_apk_path {
+                Some(value) => std::env::set_var("FREEHAND_ANDROID_APK_PATH", value),
+                None => std::env::remove_var("FREEHAND_ANDROID_APK_PATH"),
+            }
+        }
     }
 
     #[tokio::test]

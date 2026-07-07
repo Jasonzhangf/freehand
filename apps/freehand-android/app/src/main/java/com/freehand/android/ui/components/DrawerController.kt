@@ -21,9 +21,11 @@ class DrawerController(
     context: Context,
     root: FrameLayout,
     private val onHostChanged: (HostConfig) -> Unit,
+    private val onCheckUpdate: () -> Unit,
     private val initialHost: HostConfig,
 ) {
     private val panel: LinearLayout
+    private val updateStatus: TextView
     private val density = context.resources.displayMetrics.density
     private var open = false
 
@@ -33,6 +35,11 @@ class DrawerController(
             setPadding(dp(20), dp(28), dp(20), dp(20))
             setBackgroundColor(Color.parseColor("#0F172A"))
             visibility = View.GONE
+        }
+        updateStatus = TextView(context).apply {
+            text = context.getString(R.string.update_status_idle)
+            textSize = 12f
+            setTextColor(Color.parseColor("#94A3B8"))
         }
         buildContents()
         root.addView(
@@ -93,6 +100,14 @@ class DrawerController(
             onHostChanged(newHost)
             toggle()
         })
+        panel.addView(spacer(16))
+        panel.addView(sectionLabel(panel.context.getString(R.string.section_updates)))
+        panel.addView(spacer(6))
+        panel.addView(updateStatus)
+        panel.addView(spacer(8))
+        panel.addView(actionButton(panel.context.getString(R.string.action_check_update)) {
+            onCheckUpdate()
+        })
     }
 
     private fun sectionLabel(text: String) = TextView(panel.context).apply {
@@ -126,6 +141,10 @@ class DrawerController(
     }
 
     fun isOpen(): Boolean = open
+
+    fun setUpdateStatus(message: String) {
+        updateStatus.text = message
+    }
 
     private fun dp(v: Int): Int = (v * density).toInt()
 }

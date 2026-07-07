@@ -22,6 +22,15 @@ Release artifacts:
 - `dist/bin/freehand-daemon`
 - `dist/android/freehand-android-release-unsigned.apk`
 
+Android update serving truth:
+
+- the daemon serves `GET /android/update.json`
+- the daemon serves `GET /android/freehand-android.apk`
+- default APK source path is `dist/android/freehand-android-release-unsigned.apk`
+- override APK path with runtime env `FREEHAND_ANDROID_APK_PATH`
+- override manifest version fields with runtime env `FREEHAND_ANDROID_VERSION_CODE` and `FREEHAND_ANDROID_VERSION_NAME`
+- Android clients may auto-check and auto-download this APK, but installation still goes through the Android system installer and requires user confirmation and any one-time unknown-sources permission
+
 The GitHub release workflow calls the same script after the full gate, then uploads `dist/bin/*` and `dist/android/*`.
 
 ## Alpha Closeout Gate

@@ -441,9 +441,8 @@ class TimelineProjector {
         else -> "completed"
     }
 
-    /** Emit all accumulated turns as a JSON array of UiPublicTurnProjection shapes for the bridge. */
-    fun allTurnsProjectionJson(): String? {
-        if (rawProjectionsByTurn.isEmpty()) return null
+    /** Emit the single bridge projection shape used by the WebView host. */
+    fun allTurnsProjectionJson(): String {
         val arr = JsonArray()
         for ((_, proj) in rawProjectionsByTurn) {
             arr.add(proj.deepCopy())
@@ -471,10 +470,8 @@ class TimelineProjector {
             "node_id" to v.nodeId,
             "pairing_state" to v.pairingState,
         ) }
-        // Prefer the canonical daemon wire shape (turn + public_conversation);
-        // fall back to the legacy flat `turns` list only when no public projection
-        // has been received yet. When both are present we emit both so any
-        // historical consumer of the flat list still works.
+        // Preserve debug snapshot fields while bridge rendering consumes the
+        // canonical all_turns projection from allTurnsProjectionJson().
         val latestTurn = latestRawTurnProjection?.deepCopy()
         return mapOf(
             "agent_id" to currentAgentId,
@@ -490,26 +487,6 @@ class TimelineProjector {
     fun snapshotJson(): String = gson.toJson(snapshot())
 
     fun latestTurnProjectionJson(): String? = latestRawTurnProjection?.toString()
-
-    fun fallbackTurnsJson(): String = gson.toJson(
-        mapOf(
-            "turns" to orderedTurns.map { card ->
-                mapOf(
-                    "id" to card.turnId,
-                    "session_id" to card.sessionId,
-                    "source_agent_id" to card.sourceAgentId,
-                    "source_node_id" to card.sourceNodeId,
-                    "user_text" to card.userText,
-                    "reasoning" to card.reasoning,
-                    "text" to card.text,
-                    "tool_calls" to card.toolCalls,
-                    "usage" to card.usage,
-                    "terminal_status" to card.terminalStatus,
-                    "terminal_text" to card.terminalText,
-                )
-            }
-        )
-    )
 }
 
 data class TurnCard(

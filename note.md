@@ -1,5 +1,28 @@
 # note.md
 
+# 2026-07-07 Android legacy banner removal and device verifier repair
+
+- user report: Android/WebUI surface still showed old native notification banners such as `Freehand APK is up to date`; these overlays are noisy and must not appear on the conversation surface.
+- owner: `app.android-client`.
+- implementation:
+  - `StatusBannerController` is now scoped to blocking native-shell connection/configuration problems only.
+  - APK update status and file picker status are routed into the drawer status area, not the top overlay banner.
+  - remote WebUI load hides the native banner so Android does not overlay legacy chrome on the shared WebUI conversation surface.
+  - `verify-device-ui.sh` now waits for installed package availability before launching, requires current resumed/focused activity to be Freehand, and backs out of a system picker before relaunching Freehand for WebUI layout validation.
+- root-cause details:
+  - previous true-device verifier defaulted to debug APK unless `FREEHAND_ANDROID_APK` was explicitly set, so release validation could be overwritten by debug install.
+  - previous foreground check matched any historical Freehand task/window mention in dumpsys; it could then report `missing_webui_layout_probe` while another app was actually focused.
+  - Android package replacement can race Activity start; logcat showed `Invalid packageName: com.freehand.android` before package availability stabilized.
+- verified:
+  - `bash -n apps/freehand-android/scripts/verify-device-ui.sh`
+  - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest`
+  - `scripts/install-global.sh`
+  - `scripts/install-launchd.sh restart`
+  - `curl -fsS http://100.66.1.82:4041/health`
+  - `~/.local/bin/freehand-cli adp-smoke --url ws://100.66.1.82:4041/adp`
+  - `FREEHAND_ANDROID_APK=/Users/fanzhang/Documents/code/freehand/dist/android/freehand-android-release-unsigned.apk FREEHAND_ANDROID_SETTLE_SECONDS=18 apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`
+  - final true-device evidence: `artifacts/android-device/20260707T115207Z-100.104.163.65_5555-61741/summary.json`; screenshot shows Freehand WebUI foreground with no old native top notification; layout probe reports `shape=tall_phone`, `conversationPrimary=true`, both drawers fixed and offscreen.
+
 # 2026-07-05 same-session continuation history repair
 
 - user report: WebUI same-session follow-up appeared not to include prior turns; continuation must include all historical turns.
@@ -2172,3 +2195,102 @@ Current real root cause split:
   - `make verify-webui-online` passed with `artifacts/webui-online/20260707-verify-4042-1783399680000/summary.json`; valid save status is `Provider config saved. Restart required.`, Settings secret scan passed, page/console errors empty.
   - restart-after-save proof temporarily saved `default_model=MiniMax-M3-Restart-Proof` with env-var auth, restarted S-profile, and `adp-config-query` still returned the updated model/auth source; trap restored real config afterward.
   - real `~/.freehand/config.toml` and `daemonS.env` restored; `freehand-cliS adp-config-query` reports `auth_source=inline`.
+# 2026-07-07 Android/WebUI phone top chrome cleanup
+
+- user issue: phone WebUI displayed non-actionable top chips (`Master`, `Task cwd`, raw `runtime-turn-*`) above the conversation, creating visual noise and exposing internal runtime/session plumbing.
+- root source:
+  - `apps/freehand-server/src/page.rs` hardcoded `work-context-tags` and the three chip buttons.
+  - `apps/freehand-server/assets/webui.js::renderTurnMeta` wrote worker/cwd/turn id values into those tags.
+  - `apps/freehand-server/assets/webui.css` reserved phone header space for the tags.
+- fix:
+  - physically removed the `work-context-tags` DOM from the conversation header.
+  - removed JS writes to `worker-context-tag`, `task-context-tag`, and `transport-context-tag`.
+  - removed CSS for those tags and changed the conversation header to only keep the real turn status on the right.
+  - server asset smoke now asserts those ids/classes are absent.
+  - local skill now records that phone/WebUI visible chrome must not expose non-actionable internal runtime labels; put diagnostic detail behind Status/Debug/Settings instead.
+- verification:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `cargo test -p freehand-server -- --nocapture`
+  - `scripts/install-global.sh` full release build/regression/install passed.
+  - `scripts/install-launchd.sh restart`; release health `http://100.66.1.82:4041/health` returned `ok`.
+  - served asset hashes matched workspace:
+    - `webui.js` `fbe9194e1da3e19dde7b54484738d287ead42e1db211c7aef499ed41840827a0`
+    - `webui.css` `40350269f9da1cb067f17bf1f7910a5e049a3d061509aa3a1acb465b9b93ba0e`
+  - APK installed to `100.104.163.65:5555`.
+  - `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passed with artifact `artifacts/android-device/20260707T073843Z-100.104.163.65_5555-33325`; layout log reports `shape=tall_phone`, `conversationPrimary=true`, and session/detail drawers offscreen.
+
+# 2026-07-07 phone whitespace and Settings IA correction
+
+- user issue:
+  - Phone WebUI still had a large blank strip between conversation content and the fixed composer.
+  - Settings displayed read-only runtime/status cards (`Connection`, `Active agent`, sessions/workspace, skills/files/tasks/diagnostics) that could not be edited, so they were status/debug information rather than settings.
+- root source:
+  - `apps/freehand-server/assets/webui.css` used `padding-bottom: min(52svh, 420px)` for phone portrait conversation scroll space, which reserved up to half the viewport even when no content needed it.
+  - `apps/freehand-server/src/page.rs` hardcoded non-actionable Settings cards, and `apps/freehand-server/assets/webui.js::renderSettingsShell` populated them from local/runtime status.
+  - `docs/function-maps/app.webui-smoke.md` and `docs/testing/app.webui-smoke.md` still described Settings as a config/status drawer, encouraging fake disabled status controls.
+- fix:
+  - Settings now shows only the owner-backed provider/model/auth-env edit form.
+  - Read-only connection, active-agent, sessions/workspace, skills/files/tasks, and diagnostics cards are absent from Settings; they must move to Status/Debug/future owner-backed surfaces only when actionable.
+  - Phone portrait conversation padding now reserves composer safe-area height instead of half the viewport.
+  - Asset and online verifiers now assert provider/model Settings presence and read-only status card absence.
+- verification plan:
+  - local syntax/unit/gate checks, then release install/restart on fixed `100.66.1.82:4041`.
+  - compare served JS/CSS hashes against workspace.
+  - run Android true-device WebView verifier against `100.104.163.65:5555` and visually inspect screenshot for reduced blank space and Settings IA.
+
+# 2026-07-07 WebUI mobile focused composer and Final summary closeout
+
+- objective:
+  - Close focused mobile composer blocking noise and dense Final/Summary rendering.
+  - Keep work inside `app.webui-smoke`; no ADP/protocol/reasoning/session truth changes.
+- implementation:
+  - Added plan doc `docs/goals/webui-mobile-composer-final-summary-closeout-plan.md`.
+  - Updated `docs/testing/app.webui-smoke.md` and `docs/function-maps/app.webui-smoke.md` to lock focused composer and Final summary behavior.
+  - `apps/freehand-server/assets/webui.css` keeps focused phone/tall/tablet portrait composer compact and keeps `.composer-control-strip`, `#attachment-tray`, and `#command-status` hidden instead of reopening attachment/CWD/model/status into the main input area.
+  - `apps/freehand-server/assets/webui.js` routes final rows through `renderFinalSummary()` / `finalSummaryBlocks()` and splits long summary lines into structured `.final-summary-item` blocks without changing protocol/session truth.
+  - `apps/freehand-server/src/lib.rs` asset smoke locks the new CSS/JS classes and functions.
+- validation:
+  - local: `node --check apps/freehand-server/assets/webui.js`; `cargo test -p freehand-server -- --nocapture` -> 13 passed; `cargo fmt --check`; `git diff --check`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`.
+  - S profile: `scripts/install-launchd.sh restartS`; `curl -4fsS http://127.0.0.1:4042/health` -> `ok`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - served asset hashes matched workspace:
+    - JS `172c210d8410f093a88a3d0b54a69e80cf5bac5b0269e83fda6ea5822a89e167`
+    - CSS `0ebf4c8f03521d0d38de87ad8c1e7b2545781e0b4c0cc36dc9192f42deec2d6b`
+  - real browser mobile proof: `artifacts/webui-online/mobile-summary-1783427720726/summary.json`, screenshots `01-focused-composer.png` and `02-final-summary.png`.
+  - browser checks all true: `layoutShape=tall_phone`, focused composer height `110`, control strip/tray/status display `none`, no `no draft attachments`/CWD/model visible, one `.final-summary`, three `.final-summary-item`, no page/console errors.
+- remaining:
+  - Release 4041 / Android true-device proof not run for this dev closeout; run only if promoting this slice to release/phone surface.
+
+# 2026-07-07 Final summary source-format correction
+
+- correction:
+  - Final/Summary rendering must reflect actual terminal response format, not hardcoded business wording or punctuation-based inferred structure.
+  - Plain one-line `Summary:` source must render as one readable block.
+  - Explicit source newlines / line-start labels / numbering may render as multiple blocks.
+- root source:
+  - `terminalSummaryLine()` only extracted the first `Summary:` line, so multi-line summary source could be lost before rendering.
+  - `splitFinalSummaryInlineStructure()` / `inlineStructureIndexes()` split inside a single line, which could invent layout from punctuation and content shape.
+- fix:
+  - `terminalSummaryBlock()` now extracts the complete `Summary` block until `Evidence`, `Learned`, or `Completion reason`.
+  - Removed inline structure splitting helpers; `finalSummaryBlocks()` now splits only by actual source newlines and parses each line independently.
+  - Asset smoke now requires `terminalSummaryBlock` / `normalizeFinalSummaryLine` and rejects the old inline split helpers.
+  - Function map, test design, goal plan, CACHE, and local skill now lock source-format preservation instead of long-text forced splitting.
+- verification:
+  - local: `node --check apps/freehand-server/assets/webui.js`; `cargo test -p freehand-server -- --nocapture` -> 13 passed; `cargo fmt --check`; `git diff --check`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `node --check scripts/webui_verify_online.mjs`.
+  - S profile: `scripts/install-launchd.sh restartS`; `curl -4fsS http://127.0.0.1:4042/health` -> `ok`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`; served JS/CSS hashes matched workspace.
+  - online browser proof: `artifacts/webui-online/summary-format-1783430851153/summary.json`; screenshots `02-plain-terminal.png` and `03-structured-terminal.png`.
+  - online checks: plain ADP summary had one source line and DOM rendered one item; structured ADP summary had three source lines and DOM rendered three matching items; no visible Evidence/Learned/Completion reason; no page/console errors.
+
+# 2026-07-07 Android APK install after Summary fix
+
+- action:
+  - Ran `scripts/install-global.sh`; release build/regression/install completed and produced `dist/android/freehand-android-release-unsigned.apk`.
+  - Restarted release daemon with `scripts/install-launchd.sh restart`.
+  - Verified release 4041 through Tailscale: `http://100.66.1.82:4041/health` returned `ok`, ADP smoke passed, and served `webui.js` / `webui.css` hashes matched workspace.
+  - Installed release APK to device `100.104.163.65:5555` through `FREEHAND_ANDROID_APK=dist/android/freehand-android-release-unsigned.apk apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`.
+- evidence:
+  - APK hash: `fe036c5505f0345c5a9d1726af1476ccb273f1e716ef9044ae40f305c6eb8b20`.
+  - Install log: `artifacts/android-device/20260707T134429Z-100.104.163.65_5555-97306/install.txt` shows `Success`.
+  - Device package state: `pm path com.freehand.android` returns installed package path; `dumpsys package` reports `versionCode=1`, `versionName=0.1.0`, `lastUpdateTime=2026-07-07 21:44:32`.
+- blocker:
+  - True Android UI verification is blocked by `device_locked_or_dreaming`; artifact `artifacts/android-device/20260707T134429Z-100.104.163.65_5555-97306/summary.json`.
+  - This run proves APK install, not foreground WebView acceptance.

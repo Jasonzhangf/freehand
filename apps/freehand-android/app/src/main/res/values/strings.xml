@@ -6,6 +6,9 @@
     <string name="drawer_title">连接设置</string>
     <string name="section_connection">Daemon 连接</string>
     <string name="action_save_connection">保存连接</string>
+    <string name="section_updates">APK 更新</string>
+    <string name="action_check_update">检查并下载更新</string>
+    <string name="update_status_idle">从当前 daemon 检查 Android 更新包。</string>
     <string name="bottom_chat">Chat</string>
     <string name="bottom_agents">Agents</string>
     <string name="bottom_settings">Settings</string>

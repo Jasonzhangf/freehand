@@ -213,15 +213,6 @@ class TimelineProjectorTest {
         assertEquals("error", projector.snapshot()["connection"])
     }
 
-    // ── fallbackTurnsJson ───────────────────────────────────────────────
-
-    @Test
-    fun `fallbackTurnsJson returns turns array`() {
-        val json = projector.fallbackTurnsJson()
-        assertTrue(json.contains("turns"))
-    }
-
-
     // ── multi-turn accumulation + allTurnsProjectionJson ───────────────
 
     @Test
@@ -243,8 +234,7 @@ class TimelineProjectorTest {
         assertEquals(2, (snap["turns"] as List<*>).size)
 
         val allJson = projector.allTurnsProjectionJson()
-        assertNotNull(allJson)
-        assertTrue(allJson!!.contains("t1"))
+        assertTrue(allJson.contains("t1"))
         assertTrue(allJson.contains("t2"))
         assertTrue(allJson.contains("hello"))
         assertTrue(allJson.contains("second message"))
@@ -254,8 +244,10 @@ class TimelineProjectorTest {
     }
 
     @Test
-    fun `allTurnsProjectionJson returns null when no turns received`() {
-        assertNull(projector.allTurnsProjectionJson())
+    fun `allTurnsProjectionJson returns empty all_turns when no turns received`() {
+        val wrapped = JsonParser.parseString(projector.allTurnsProjectionJson()).asJsonObject
+        assertTrue(wrapped.has("all_turns"))
+        assertEquals(0, wrapped.getAsJsonArray("all_turns").size())
     }
 
     @Test
@@ -270,7 +262,8 @@ class TimelineProjectorTest {
 
         projector.clearAccumulatedTurns()
 
-        assertNull(projector.allTurnsProjectionJson())
+        val wrapped = JsonParser.parseString(projector.allTurnsProjectionJson()).asJsonObject
+        assertEquals(0, wrapped.getAsJsonArray("all_turns").size())
         assertEquals("open", projector.snapshot()["connection"])
         assertEquals("master", projector.snapshot()["agent_id"])
         assertEquals("Master", projector.snapshot()["agent_name"])
@@ -288,8 +281,7 @@ class TimelineProjectorTest {
         projector.apply(sseEvent("terminal", "{\"turn_id\":\"t1\",\"status\":\"done\",\"summary\":\"finished\"}"))
 
         val allJson = projector.allTurnsProjectionJson()
-        assertNotNull(allJson)
-        assertTrue(allJson!!.contains("\"terminal_status\":\"done\""))
+        assertTrue(allJson.contains("\"terminal_status\":\"done\""))
     }
 
     @Test
@@ -303,8 +295,7 @@ class TimelineProjectorTest {
         projector.apply(sseEvent("error", "{\"turn_id\":\"t1\",\"message\":\"provider timeout\"}"))
 
         val allJson = projector.allTurnsProjectionJson()
-        assertNotNull(allJson)
-        assertTrue(allJson!!.contains("provider timeout"))
+        assertTrue(allJson.contains("provider timeout"))
     }
 
     @Test
@@ -330,8 +321,7 @@ class TimelineProjectorTest {
         assertEquals(2, (snap["turns"] as List<*>).size)
 
         val allJson = projector.allTurnsProjectionJson()
-        assertNotNull(allJson)
-        assertTrue(allJson!!.contains("t-adp-1"))
+        assertTrue(allJson.contains("t-adp-1"))
         assertTrue(allJson.contains("t-adp-2"))
     }
 

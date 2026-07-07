@@ -17,6 +17,7 @@ data class HostConfig(
     val commandUrl: String get() = "$baseUrl$commandPath"
     val latestTurnUrl: String get() = "$baseUrl$queryPath"
     val latestTurnSseUrl: String get() = "$baseUrl$subscribePath"
+    val updateManifestUrl: String get() = "$baseUrl/android/update.json"
     fun debugSnapshotUrl(turnId: String): String = "$baseUrl/ui/query/debug/$turnId"
     fun debugSnapshotSseUrl(turnId: String): String = "$baseUrl/ui/subscribe/debug/$turnId"
 
