@@ -375,7 +375,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.cli-runtime-smoke`
 
 - owner: `apps/freehand-cli`
-- allowed_paths: `apps/freehand-cli/**`, `crates/freehand-testkit/**`, `crates/freehand-reason/**`, `crates/freehand-config/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/app.cli-runtime-smoke.json`, `docs/wiki/app.cli-runtime-smoke.md`
+- allowed_paths: `apps/freehand-cli/**`, `crates/freehand-testkit/**`, `crates/freehand-reason/**`, `crates/freehand-config/**`, `scripts/verify-provider-retry-online.sh`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/app.cli-runtime-smoke.json`, `docs/wiki/app.cli-runtime-smoke.md`
 - forbidden_paths: `crates/freehand-provider-*/**` except consumed semantic outputs only
 - required_checks:
   - `cargo test -p freehand-cli`
@@ -394,6 +394,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - app boundary config -> harness-backed reason E2E smoke
   - no-UI ADP smoke against local daemon/server `/adp`
   - no-UI ADP success/failure turn samples against daemon/server `/adp`
+  - no-UI provider retry fixture proof against S-profile daemon `/adp`
   - no-UI ADP task list/history query against daemon `/adp`
 - test_design_doc: `docs/testing/app.cli-runtime-smoke.md`
 - function_map_doc: `docs/function-maps/app.cli-runtime-smoke.md`

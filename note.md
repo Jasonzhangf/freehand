@@ -2490,3 +2490,58 @@ Current real root cause split:
   - `freehand-cliS adp-turn-sample --sample schema-mismatch` -> success, session `cli-adp-sample-schema-mismatch-1783481424586054000`, turn `runtime-turn-175-r2`, `rounds=2`, `schema_retries=1`.
 - not closed:
   - `freehand-cliS adp-turn-sample --sample provider-retry` still fails correctly. The live model produced prose claiming provider retries, but ADP/session truth had no provider-domain retry evidence. This needs a controllable provider fixture/error-injection path; prompt-only sampling is insufficient and must not be accepted as proof.
+
+# 2026-07-08 provider retry online fixture proof
+
+- scope:
+  - Continued `docs/goals/single-agent-closeout-before-multi-agent-plan.md` under single-agent closeout.
+  - Stayed in `app.cli-runtime-smoke`; no multi-agent worker/subagent/topology work.
+- implementation:
+  - Added `scripts/verify-provider-retry-online.sh`.
+  - The script starts a local Anthropic-compatible HTTP 500 fixture on `127.0.0.1:18081`, temporarily adds `FREEHAND_PROVIDER_RETRY_FIXTURE_KEY` to `~/.freehand/daemonS.env`, updates S-profile provider config through ADP, restarts `com.freehand.daemonS`, runs `freehand-cliS adp-turn-sample --sample provider-retry`, queries provider-domain error-center rows, queries session truth, and restores original config/env through a trap.
+  - The fixture is stopped only through its explicit PID; no broad process kill.
+  - Updated `app.cli-runtime-smoke` feature map, function map, test design, mainline-call JSON, generated wiki, and goal plan to include this online proof path.
+- online proof:
+  - `scripts/verify-provider-retry-online.sh` passed.
+  - Evidence: `provider_retry_online_ok session=cli-adp-sample-provider-retry-1783482215008491000 mock_attempts=5`.
+  - Sample output included `runtime-turn-178`, `provider_retries=1`, and terminal provider failure `command_dispatch_port_failure`.
+  - Error-center query returned five provider rows: four `retry_same_step` rows plus one `fail_turn`, all carrying concrete code `anthropic_http_status_500`.
+  - Session truth reported `cli-adp-sample-provider-retry-1783482215008491000:1:failed`.
+  - Post-run config restoration verified by `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp`: `base_url_host=api.minimaxi.com default_model=MiniMax-M3 auth_source=inline`.
+- local validation:
+  - `bash -n scripts/verify-provider-retry-online.sh`.
+  - `scripts/verify-provider-retry-online.sh`.
+  - `cargo test -p freehand-cli -- --nocapture` -> 17 passed.
+  - `cargo test -p freehand-runtime live_bridge_retries_recoverable_provider_errors_then_succeeds -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-runtime live_bridge_fails_after_five_provider_retries_with_error_code -- --nocapture` -> 1 passed.
+  - `cargo run -p xtask -- mainlines generate`.
+  - `cargo run -p xtask -- mainlines check`.
+  - `cargo run -p xtask -- gates check`.
+  - `cargo fmt --check`.
+  - `git diff --check`.
+- durable rule:
+  - Provider retry closure must reject model prose and require provider-domain truth: fixture/upstream attempt count plus error-center rows and session terminal state.
+
+# 2026-07-08 WebUI online verifier fixture repair
+
+- trigger:
+  - `make verify-webui-online` failed at `settingsValidUpdateRestartRequired=false`.
+  - The same run had success/failure multi-round UI, mobile layout, and ADP session truth passing, but Settings valid-save failed because the verifier submitted env var `FREEHAND_WEBUI_VERIFY_CREDENTIAL` while S daemon env did not contain it.
+- root source:
+  - `scripts/webui_verify_online.mjs` owned the Settings valid-save test input but did not own the required daemon credential env precondition.
+  - Server-side rejection was correct: `dispatch port failure: provider minimax environment variable FREEHAND_WEBUI_VERIFY_CREDENTIAL is not set`.
+- implementation:
+  - `scripts/webui_verify_online.mjs` now backs up `~/.freehand/config.toml` and `~/.freehand/daemonS.env`, injects a verifier-only credential env, restarts only `com.freehand.daemonS`, runs the real browser proof, then restores config/env and restarts S in `finally`.
+  - Updated `foundation.workspace` function map, mainline-call JSON, generated wiki, and test design; updated `app.webui-smoke` test design to lock the verifier-owned Settings fixture.
+- validation:
+  - `node --check scripts/webui_verify_online.mjs`.
+  - `cargo run -p xtask -- mainlines generate`.
+  - `make verify-webui-online` passed.
+  - Evidence: `artifacts/webui-online/20260708-verify-4042-1783483076297/summary.json`.
+  - Session: `webui-session-20260708035801-6cee1118`; ADP truth `turn_ids=runtime-turn-181,runtime-turn-182,runtime-turn-182-r2`, `turns=3`, `status=success`.
+  - All checks true, including `settingsValidUpdateRestartRequired`, `settingsUpdateNoSecretLeak`, `first/second submit composer cleared`, refresh preservation, `terminal2NoLive`, mobile drawer/gesture/layout checks, and clean new session.
+  - Post-run config restored: `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` returned `base_url_host=api.minimaxi.com default_model=MiniMax-M3 auth_source=inline`.
+  - Post-run env restored: `grep FREEHAND_WEBUI_VERIFY_CREDENTIAL ~/.freehand/daemonS.env` returned no matches.
+  - `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `git diff --check`.
+- durable rule:
+  - Online WebUI verifier must own its test fixture preconditions and restore daemon config/env afterward. A missing verifier env is a verifier setup failure, not a product Settings fallback.

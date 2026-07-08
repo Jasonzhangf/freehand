@@ -276,9 +276,9 @@
       "step": "20",
       "symbol_path": "run_verify_webui_online",
       "file_path": "scripts/verify-webui-online.sh",
-      "responsibility": "run fixed-port S-profile real browser WebUI plus ADP alpha proof",
+      "responsibility": "run fixed-port S-profile real browser WebUI plus ADP alpha proof, including temporary verifier credential env injection and config/env restoration",
       "input_semantic": "running S-profile daemon on 127.0.0.1:4042",
-      "output_semantic": "screenshots, summary JSON, ADP session alignment",
+      "output_semantic": "screenshots, summary JSON, ADP session alignment, restored S-profile config/env",
       "caller": "operator / make verify-webui-online",
       "callee": "curl, scripts/webui_verify_online.mjs, Chrome CDP, WebUI, freehand-cliS adp-session-query",
       "binding_status": "bound"

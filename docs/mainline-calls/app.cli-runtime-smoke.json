@@ -13,6 +13,7 @@
     "provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting",
     "for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe, query, and query-as-command frames",
     "for ADP turn samples, CLI connects to the same daemon `/adp`, creates an isolated sample session, subscribes to latest-turn updates, submits a success sample prompt, a tool-result-failure recovery prompt, a schema-mismatch polishing prompt, or a provider-retry prompt, verifies the matching terminal projection, then queries the sample session transcript to prove round/tool/schema/provider evidence",
+    "for provider-retry online proof, scripts/verify-provider-retry-online.sh temporarily points S-profile provider config at a local Anthropic-compatible 500 fixture, runs the provider-retry ADP sample, verifies five upstream /v1/messages attempts plus error-center provider rows, then restores runtime config and S env",
     "for same-session continuation sample, CLI submits two prompts into one isolated session and verifies the second terminal answer uses a unique token from prior effective history",
     "for task lifecycle sample, CLI sends protocol-owned task mutation commands (`CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`) through ADP, then verifies task owner truth through ADP task list/history queries",
     "for ADP session manage, CLI connects to the same daemon `/adp` and sends protocol-owned create, rename, archive, restore, delete-as-archive, or rollback command frames for no-UI session lifecycle diagnosis",
@@ -26,6 +27,7 @@
     "CLI output remains a terminal-facing projection, not debug ledger raw payload",
     "ADP smoke prints the observed subscription_accepted, subscription_event, query_result, and explicit failure frame sequence for no-UI diagnosis",
     "ADP turn samples print the observed command outcome plus the matching latest-turn projection and transcript evidence; the failure sample proves a failed tool result can continue to a successful terminal turn with rounds>=2, one or more unique tool executions, and one or more unique failed tool results instead of becoming an ADP/system failure; the schema-mismatch sample proves schema polishing was visible before terminal success; the provider-retry sample proves provider-domain retry/error evidence instead of schema/tool failure",
+    "provider-retry online verifier prints the sample output, error-center projection, provider attempt count, and session id after proving config restoration is wired through the S-profile daemon lifecycle",
     "same-session continuation sample prints both turn ids, transcript count, and token recovery evidence",
     "task lifecycle sample prints task id, closed status, and required history event types",
     "ADP session manage prints command receipt status for session CRUD and rollback commands without creating a second source of session truth",
@@ -177,6 +179,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "09a",
+      "symbol_path": "run_verify_provider_retry_online",
+      "file_path": "scripts/verify-provider-retry-online.sh",
+      "responsibility": "run a local provider-error fixture, temporarily update S-profile provider config, execute provider-retry ADP sample, verify error-center retry truth, and restore config/env",
+      "input_semantic": "S-profile daemon on 127.0.0.1:4042",
+      "output_semantic": "terminal-facing provider retry proof with five mock attempts and provider error-center rows",
+      "caller": "operator/agent verifier",
+      "callee": "daemon /adp plus local mock provider",
+      "binding_status": "bound"
+    },
+    {
       "step": "09b",
       "symbol_path": "run_session_continue_sample / run_session_continue_sample_async",
       "file_path": "apps/freehand-cli/src/main.rs",
@@ -281,6 +294,7 @@
     "CLI reason E2E smoke path is implemented",
     "CLI ADP no-UI smoke path is implemented",
     "CLI ADP success/failure/schema-mismatch/provider-retry turn sample path is implemented; the failure sample requires isolated-session terminal success plus transcript evidence for rounds>=2, unique failed tool-result activity, and no system/provider terminal failure; schema-mismatch requires schema-polishing evidence; provider-retry requires provider-domain retry/error evidence",
+    "provider retry online proof is repeatable through scripts/verify-provider-retry-online.sh, which rejects model prose by requiring five fixture provider attempts plus error.center provider rows",
     "CLI same-session continuation sample is implemented and verifies second-turn token recovery from prior effective history",
     "CLI task lifecycle sample is implemented and verifies closed task plus create/review/approve/close history evidence after protocol-owned task mutation commands",
     "CLI ADP task list/history query path is implemented for no-UI task truth diagnosis",

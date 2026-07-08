@@ -14,28 +14,36 @@ const successPrompt =
 const failurePrompt =
   'Online failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.';
 const configUpdateEnvName = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_ENV || 'FREEHAND_WEBUI_VERIFY_CREDENTIAL';
+const configUpdateEnvValue = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_VALUE || 'webui-verify-provider-key';
 const configUpdateProviderId = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_PROVIDER || 'minimax';
 const configUpdateBaseUrl =
   process.env.FREEHAND_WEBUI_CONFIG_UPDATE_BASE_URL || 'https://api.minimaxi.com/anthropic';
 const configUpdateModel = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_MODEL || 'MiniMax-M3';
 const configUpdateType = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_TYPE || 'anthropic';
 const configUpdateProtocol = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_PROTOCOL || 'messages';
+const runtimeHome = process.env.FREEHAND_RUNTIME_HOME || path.join(process.env.HOME, '.freehand');
+const sEnvPath = process.env.FREEHAND_WEBUI_DAEMONS_ENV || path.join(runtimeHome, 'daemonS.env');
+const configPath = process.env.FREEHAND_WEBUI_CONFIG_PATH || path.join(runtimeHome, 'config.toml');
 
 const runId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-verify-${profileName}-${Date.now()}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
 
 await fs.mkdir(artifactDir, { recursive: true });
 
-const cleanupResult = await removeExistingSessions();
-if (cleanupResult.failed.length > 0) {
-  await fs.writeFile(path.join(artifactDir, 'session-cleanup-failed.json'), JSON.stringify(cleanupResult, null, 2));
-  throw new Error(`failed to remove existing sessions before /new: ${cleanupResult.failed.map((entry) => entry.sessionId).join(', ')}`);
-}
-
 const chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-webui-verify-'));
 let chrome;
+let cleanupResult;
+let runtimeFixture;
 
 try {
+  runtimeFixture = await prepareRuntimeFixture();
+
+  cleanupResult = await removeExistingSessions();
+  if (cleanupResult.failed.length > 0) {
+    await fs.writeFile(path.join(artifactDir, 'session-cleanup-failed.json'), JSON.stringify(cleanupResult, null, 2));
+    throw new Error(`failed to remove existing sessions before /new: ${cleanupResult.failed.map((entry) => entry.sessionId).join(', ')}`);
+  }
+
   chrome = spawn(
     chromePath,
     [
@@ -333,6 +341,49 @@ try {
     chrome.kill('SIGTERM');
     await onceExit(chrome, 5_000).catch(() => null);
   }
+  if (runtimeFixture) {
+    await restoreRuntimeFixture(runtimeFixture).catch(async (error) => {
+      await fs.writeFile(
+        path.join(artifactDir, 'runtime-fixture-restore-failed.json'),
+        JSON.stringify({ message: error.message, stack: error.stack }, null, 2),
+      );
+      throw error;
+    });
+  }
+}
+
+async function prepareRuntimeFixture() {
+  await fs.mkdir(path.join(runtimeHome, 'tmp'), { recursive: true });
+  const backupDir = await fs.mkdtemp(path.join(runtimeHome, 'tmp', 'webui-online-config-'));
+  const configBackup = path.join(backupDir, 'config.toml');
+  const envBackup = path.join(backupDir, 'daemonS.env');
+  await fs.copyFile(configPath, configBackup);
+  await fs.copyFile(sEnvPath, envBackup);
+
+  const envText = await fs.readFile(sEnvPath, 'utf8');
+  const envPattern = new RegExp(`^${escapeRegExp(configUpdateEnvName)}=`, 'm');
+  if (!envPattern.test(envText)) {
+    const nextEnv = `${envText.replace(/\s*$/, '\n')}${configUpdateEnvName}="${configUpdateEnvValue}"\n`;
+    await fs.writeFile(sEnvPath, nextEnv);
+  }
+  const restart = await runCommand(['scripts/install-launchd.sh', 'restartS']);
+  if (restart.code !== 0) {
+    throw new Error(`failed to restart S profile after WebUI verifier env injection: ${restart.stderr || restart.stdout}`);
+  }
+  return { backupDir, configBackup, envBackup };
+}
+
+async function restoreRuntimeFixture(fixture) {
+  await fs.copyFile(fixture.configBackup, configPath);
+  await fs.copyFile(fixture.envBackup, sEnvPath);
+  const restart = await runCommand(['scripts/install-launchd.sh', 'restartS']);
+  if (restart.code !== 0) {
+    throw new Error(`failed to restart S profile after WebUI verifier restore: ${restart.stderr || restart.stdout}`);
+  }
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function submitPrompt(cdp, text) {

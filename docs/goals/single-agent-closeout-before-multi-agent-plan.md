@@ -218,6 +218,7 @@ freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample success
 freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample failure
 freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample schema-mismatch
 freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample provider-retry
+scripts/verify-provider-retry-online.sh
 freehand-cliS session-continue-sample --url ws://127.0.0.1:4042/adp
 freehand-cliS task-lifecycle-sample --url ws://127.0.0.1:4042/adp
 ```

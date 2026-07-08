@@ -131,6 +131,7 @@
   - WebUI mobile session drawer right-swipe gesture and agent -> sessions hierarchy are landed and covered by asset smoke plus `scripts/webui_verify_online.mjs`
   - WebUI session rail now supports `/new` as the New dialog for global conversation or cwd-bound task creation, compact session summaries, and selected-session draft creation without inventing a separate navigation path
   - WebUI settings shell is landed as a provider/model config drawer, not a config/status drawer; it consumes owner-backed `QueryConfigStatus`, provider/model edits route through `UpdateProviderConfig`, and unsupported agent/session/workspace/skills/files/tasks/diagnostics controls remain absent until owner-backed write contracts exist
+  - WebUI online verifier owns its Settings valid-save fixture: it backs up S-profile config/env, injects a verifier-only credential env before the browser run, and restores config/env afterward so Settings proof does not depend on stale local launchd environment
   - WebUI New dialog task path selection and composer cwd input are landed; new task requires an explicit selected or typed cwd and creates a cwd-bound session through ADP `CreateSession`, while new conversation can submit without cwd and rely on runtime default cwd
   - WebUI root shell intentionally does not expose persistent success/failure buttons, while WebUI JS still carries paired diagnostic prompts for slash commands and shortcuts
   - WebUI terminal display defaults to summary-only; evidence, learned notes, and completion reason require debug details to be enabled

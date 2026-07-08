@@ -13,6 +13,7 @@
   - CLI ADP smoke verifies subscribe accepted, subscription event, query result, and query-as-command explicit failure
   - CLI runs no-UI ADP success/failure/schema-mismatch/provider-retry turn samples against a daemon `/adp` WebSocket URL
   - CLI ADP turn samples use an isolated sample session, verify command outcome plus matching terminal projection, then query the sample session transcript; the failure sample must show `Success` terminal status plus transcript evidence for at least two rounds and at least one unique failed tool activity; the schema-mismatch sample must show at least one schema-polishing retry; the provider-retry sample must show provider retry/error evidence instead of being treated as schema or tool failure
+  - provider retry online verifier temporarily redirects S-profile provider config to a local 500 fixture, requires five real upstream attempts, queries provider-domain error-center rows, and restores config/env before exit
   - CLI runs no-UI same-session continuation sample by submitting two turns into one isolated session and verifying the second terminal answer uses a unique token from the first turn's effective history
   - CLI runs no-UI task lifecycle sample by sending protocol-owned task create/review/approve/close commands and verifying task list/history truth reaches `Closed`
   - CLI ADP session manage sends create/rename/archive/restore/delete-as-archive/rollback command frames and reports command receipts without owning session truth
@@ -30,6 +31,7 @@
   - CLI ADP failure turn sample mock WebSocket smoke with isolated-session transcript evidence and unique tool-call counting
   - CLI ADP schema-mismatch turn sample mock WebSocket smoke with schema retry evidence
   - CLI ADP provider-retry turn sample mock WebSocket smoke with provider retry evidence and explicit terminal provider failure
+  - provider retry online script smoke with real S-profile daemon, local fixture provider, ADP sample output, ADP error-center query, session truth check, and config restoration
   - CLI ADP same-session continuation sample mock WebSocket smoke with two turns in one session and second-turn token evidence
   - CLI ADP task lifecycle sample mock WebSocket smoke with closed task list projection and create/review/approve/close history evidence, and with no `SubmitUserInput` prompt dependency
   - CLI ADP session manage argument/result summary smoke
@@ -42,6 +44,7 @@
   - provider usage and recovery policy remain wired through the shared harness path
   - no-UI ADP smoke can diagnose status/control failures without WebUI or Android
   - no-UI ADP turn samples can populate and verify WebUI-visible success, failed-tool-result recovery, schema-polishing, and provider-retry projections without relying on manual DOM inspection; the failure sample rejects one-round or system-failure outcomes, the schema sample rejects no-retry success, and the provider sample rejects schema/tool failures mislabeled as provider retry
+  - no-UI provider retry fixture proof validates provider retry/backoff truth without accepting model-generated retry prose
   - no-UI same-session continuation sample verifies session history inclusion without WebUI DOM inspection
   - no-UI task lifecycle sample verifies task owner truth through ADP task list/history without WebUI DOM inspection; CLI only sends protocol-owned task mutation commands and does not write task storage directly
   - no-UI ADP session manage can verify daemon session CRUD and rollback receipt paths without WebUI DOM inspection
@@ -54,6 +57,7 @@
   - scripted provider semantic outputs in CLI tests
   - local ADP WebSocket mock in CLI tests
   - local ADP success/failure/schema-mismatch/provider-retry sample WebSocket mock in CLI tests
+  - S-profile provider retry fixture verifier `scripts/verify-provider-retry-online.sh`
   - local same-session continuation WebSocket mock in CLI tests
   - local task lifecycle WebSocket mock in CLI tests
   - local `freehand-server webui-serve-smoke` for manual/agent positive ADP smoke
@@ -65,6 +69,7 @@
   - CLI smoke baseline is implemented in integration tests
   - CLI ADP smoke baseline is implemented in integration tests and verified against a real local `/adp` server
   - CLI ADP success/failure/schema-mismatch/provider-retry sample baseline is implemented in integration tests; failure means recovered failed tool result with `rounds>=2` transcript evidence, schema-mismatch means visible schema-polishing retry evidence, and provider-retry means provider-domain retry/error evidence instead of schema/tool failure
+  - provider retry online verifier is implemented and requires five local fixture provider attempts plus provider-domain error-center rows
   - CLI ADP same-session continuation sample is implemented in integration tests and verifies token recovery from prior effective history
   - CLI ADP task lifecycle sample is implemented in integration tests and verifies closed task/history evidence after protocol-owned task mutation commands
   - CLI ADP session manage command is implemented for live daemon session CRUD and rollback checks
