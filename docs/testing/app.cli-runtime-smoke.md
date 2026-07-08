@@ -16,6 +16,7 @@
   - provider retry online verifier temporarily redirects S-profile provider config to a local 500 fixture, requires five real upstream attempts, queries provider-domain error-center rows, and restores config/env before exit
   - CLI runs no-UI same-session continuation sample by submitting two turns into one isolated session and verifying the second terminal answer uses a unique token from the first turn's effective history
   - CLI runs no-UI task lifecycle sample by sending protocol-owned task create/review/approve/close commands and verifying task list/history truth reaches `Closed`
+  - CLI runs no-UI Phase 1 foundation sample by driving TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id verification through ADP
   - CLI ADP session manage sends create/rename/archive/restore/delete-as-archive/rollback command frames and reports command receipts without owning session truth
   - CLI ADP task query sends task list/history query frames and reports task projection summaries without WebUI
   - CLI ADP task subscribe sends task list subscribe frames and reports the first task projection event without WebUI
@@ -34,6 +35,7 @@
   - provider retry online script smoke with real S-profile daemon, local fixture provider, ADP sample output, ADP error-center query, session truth check, and config restoration
   - CLI ADP same-session continuation sample mock WebSocket smoke with two turns in one session and second-turn token evidence
   - CLI ADP task lifecycle sample mock WebSocket smoke with closed task list projection and create/review/approve/close history evidence, and with no `SubmitUserInput` prompt dependency
+  - CLI ADP Phase 1 foundation sample mock WebSocket smoke with blocked/review/stale board evidence, agent lifecycle query evidence, recovering history event evidence, and explicit verify mode
   - CLI ADP session manage argument/result summary smoke
   - CLI ADP task query argument/result summary smoke
   - CLI ADP task subscribe argument/result summary smoke
@@ -47,6 +49,7 @@
   - no-UI provider retry fixture proof validates provider retry/backoff truth without accepting model-generated retry prose
   - no-UI same-session continuation sample verifies session history inclusion without WebUI DOM inspection
   - no-UI task lifecycle sample verifies task owner truth through ADP task list/history without WebUI DOM inspection; CLI only sends protocol-owned task mutation commands and does not write task storage directly
+  - no-UI Phase 1 foundation sample verifies TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id proof without model prose or UI DOM inspection
   - no-UI ADP session manage can verify daemon session CRUD and rollback receipt paths without WebUI DOM inspection
   - no-UI ADP task query can verify daemon task list/history visibility without WebUI DOM inspection
   - no-UI ADP task subscribe can verify daemon task list subscription visibility without WebUI DOM inspection
@@ -60,6 +63,7 @@
   - S-profile provider retry fixture verifier `scripts/verify-provider-retry-online.sh`
   - local same-session continuation WebSocket mock in CLI tests
   - local task lifecycle WebSocket mock in CLI tests
+  - local Phase 1 foundation WebSocket mock in CLI tests
   - local `freehand-server webui-serve-smoke` for manual/agent positive ADP smoke
   - `~/.freehand/state/config`
   - `~/.freehand/state/turns`
@@ -72,6 +76,7 @@
   - provider retry online verifier is implemented and requires five local fixture provider attempts plus provider-domain error-center rows
   - CLI ADP same-session continuation sample is implemented in integration tests and verifies token recovery from prior effective history
   - CLI ADP task lifecycle sample is implemented in integration tests and verifies closed task/history evidence after protocol-owned task mutation commands
+  - CLI ADP Phase 1 foundation sample is implemented in integration tests and verifies TaskBoard/AgentBoard/ExecutionFact/SchedulerTick evidence through protocol-owned ADP frames
   - CLI ADP session manage command is implemented for live daemon session CRUD and rollback checks
   - CLI ADP task query command is implemented for live daemon task list/history checks
   - CLI ADP task subscribe command is implemented for live daemon task list subscription checks

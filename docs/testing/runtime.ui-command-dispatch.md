@@ -9,7 +9,9 @@
   - submit commands may carry an optional selected session id and selected cwd and must create or continue that cwd-bound session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
   - runtime-backed read-only task queries route to task owner APIs and return UI-safe projections without becoming task truth writers
+  - runtime-backed Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries route to owner APIs and return UI-safe projections without becoming task or lifecycle truth writers
   - runtime-backed task mutation commands route to task owner APIs for create/review/approve/close and publish task list projections after accepted mutations
+  - runtime-backed Phase 1 execution facts and scheduler ticks route to `task.orchestration`; recovering must not terminalize a task, and scheduler ticks must emit facts/recommendations without making task failure decisions
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries route from selected live config to UI-safe projection without becoming config truth writers
   - runtime-backed provider/model update commands route to `config.core` persistence, then expose pending restart-required projection without hot-reloading active runtime config
@@ -59,6 +61,8 @@
   - checkpoint rewind dispatch coverage
   - checkpoint rewind missing-manifest target-not-found coverage
   - task list/history runtime query coverage
+  - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle runtime query coverage
+  - Phase 1 ApplyExecutionFact and RunSchedulerTick runtime dispatch coverage, including recovering, blocked, review-ready, stale, and scheduler non-decision behavior
   - missing task history query target-not-found coverage
   - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
   - config status runtime query coverage, including base URL host projection, auth source projection, and no API key/pair token leakage
@@ -135,6 +139,8 @@
   - node-backed direct-message dispatch is covered
   - explicit unsupported resume dispatch is covered
   - runtime task query bridge is covered by `runtime_query_reads_task_truth_from_task_runtime`
+  - runtime Phase 1 TaskBoard/AgentBoard/Lifecycle query bridge is covered by `runtime_query_reads_phase1_task_and_agent_boards`
+  - runtime Phase 1 ExecutionFact/SchedulerTick dispatch bridge is covered by `runtime_dispatch_execution_fact_and_scheduler_tick_update_task_truth`
   - runtime task mutation command bridge is covered through CLI ADP lifecycle smoke and must remain a thin route to `task.orchestration`
   - daemon ADP task query bridge is covered by `daemon_adp_queries_runtime_task_truth`
   - runtime error-center query bridge is covered by `runtime_query_reads_error_center_metadata_without_raw_text`

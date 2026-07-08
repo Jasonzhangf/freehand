@@ -6,8 +6,10 @@ use freehand_testkit::{
     ReasonRuntimeSmokeScenario, run_reason_persistence_smoke, run_reason_runtime_smoke,
 };
 use freehand_ui_protocol::{
-    UiAdpRequest, UiAdpResponse, UiClientKind, UiCommand, UiModelRequestKind,
-    UiProviderConfigUpdate, UiTaskCreateCommand, UiTaskReviewCommand,
+    UiAdpRequest, UiAdpResponse, UiAgentBoardProjection, UiAgentLifecycleProjection, UiClientKind,
+    UiCommand, UiExecutionFactCommand, UiExecutionFactKind, UiModelRequestKind,
+    UiProviderConfigUpdate, UiQueryResult, UiSchedulerTickCommand, UiTaskBoardProjection,
+    UiTaskCreateCommand, UiTaskReviewCommand,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
@@ -51,6 +53,9 @@ fn run() -> Result<String, String> {
     if flag == "task-lifecycle-sample" {
         return run_task_lifecycle_sample(args.collect());
     }
+    if flag == "phase1-foundation-sample" {
+        return run_phase1_foundation_sample(args.collect());
+    }
     if flag == "adp-session-query" {
         return run_adp_session_query(args.collect());
     }
@@ -74,7 +79,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
                 .to_owned(),
         );
     }
@@ -210,6 +215,62 @@ fn run_task_lifecycle_sample(args: Vec<String>) -> Result<String, String> {
         .build()
         .map_err(|err| err.to_string())?;
     runtime.block_on(run_task_lifecycle_sample_async(url))
+}
+
+fn run_phase1_foundation_sample(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]"
+            .to_owned();
+    let mut url = None::<String>;
+    let mut verify_task = None::<String>;
+    let mut review_task = None::<String>;
+    let mut execution = None::<String>;
+    let mut agent = None::<String>;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--url" if index + 1 < args.len() => {
+                url = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--verify-task" if index + 1 < args.len() => {
+                verify_task = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--review-task" if index + 1 < args.len() => {
+                review_task = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--execution" if index + 1 < args.len() => {
+                execution = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--agent" if index + 1 < args.len() => {
+                agent = Some(args[index + 1].clone());
+                index += 2;
+            }
+            _ => return Err(usage),
+        }
+    }
+    let url = url.ok_or_else(|| usage.clone())?;
+    let verify = match (verify_task, review_task, execution, agent) {
+        (None, None, None, None) => None,
+        (Some(task_id), Some(review_task_id), Some(execution_id), Some(agent_id)) => {
+            Some(Phase1VerifyIds {
+                blocked_task_id: task_id,
+                review_task_id,
+                execution_id,
+                agent_id,
+            })
+        }
+        _ => return Err(usage),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_phase1_foundation_sample_async(url, verify))
 }
 
 fn run_adp_session_query(args: Vec<String>) -> Result<String, String> {
@@ -1452,6 +1513,320 @@ async fn run_task_lifecycle_sample_async(url: String) -> Result<String, String> 
     ))
 }
 
+#[derive(Debug, Clone)]
+struct Phase1VerifyIds {
+    blocked_task_id: String,
+    review_task_id: String,
+    execution_id: String,
+    agent_id: String,
+}
+
+async fn run_phase1_foundation_sample_async(
+    url: String,
+    verify: Option<Phase1VerifyIds>,
+) -> Result<String, String> {
+    if let Some(ids) = verify {
+        return run_phase1_foundation_verify_async(url, ids).await;
+    }
+
+    let session_id = SessionId::new(format!("cli-phase1-foundation-{}", live_id_stamp()?));
+    let token = format!("FHPHASE1{}", live_id_stamp()?);
+    let review_task_id = format!("task-cli-phase1-review-{token}");
+    let blocked_task_id = format!("task-cli-phase1-blocked-{token}");
+    let execution_id = format!("exec-cli-phase1-{token}");
+    let turn_id = TurnId::new(format!("turn-cli-phase1-{token}"));
+    let mut seen = Vec::new();
+
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-phase1-create-review",
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some(review_task_id.clone()),
+                    title: format!("Phase1 review {token}"),
+                    content: format!("Phase1 review-ready task {token}"),
+                    goal: "prove review_ready execution fact".to_owned(),
+                    deliverables: vec!["review-ready fact".to_owned()],
+                    acceptance: vec!["TaskBoard review queue contains the task".to_owned()],
+                    priority: 80,
+                    target_cwd: None,
+                    session_id: Some(session_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                },
+            },
+        )
+        .await?,
+    );
+
+    let review_board = query_task_board(&url, "cli-phase1-board-after-review-create").await?;
+    let agent_id = task_agent_from_board(&review_board, &review_task_id)?;
+
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-phase1-review-ready",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: format!("{execution_id}-review"),
+                    task_id: review_task_id.clone(),
+                    agent_id: freehand_contracts::AgentId::new(agent_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::ReviewReady {
+                        summary: format!("review ready {token}"),
+                        deliverables: vec!["review-ready deliverable".to_owned()],
+                        evidence: vec![format!("token {token}")],
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-phase1-create-blocked",
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some(blocked_task_id.clone()),
+                    title: format!("Phase1 blocked {token}"),
+                    content: format!("Phase1 blocked/recovering task {token}"),
+                    goal: "prove running/recovering/blocked execution facts".to_owned(),
+                    deliverables: vec!["blocked fact".to_owned()],
+                    acceptance: vec![
+                        "TaskBoard blocked and stale views contain the task".to_owned(),
+                    ],
+                    priority: 70,
+                    target_cwd: None,
+                    session_id: Some(session_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                },
+            },
+        )
+        .await?,
+    );
+
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-phase1-running",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: blocked_task_id.clone(),
+                    agent_id: freehand_contracts::AgentId::new(agent_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Running {
+                        phase: "phase1_running".to_owned(),
+                        summary: format!("running {token}"),
+                        evidence: vec![format!("execution {execution_id}")],
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-phase1-recovering",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: blocked_task_id.clone(),
+                    agent_id: freehand_contracts::AgentId::new(agent_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Recovering {
+                        summary: format!("recovering {token}"),
+                        evidence: vec!["paired execution error returned to model".to_owned()],
+                        retry_count: 1,
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-phase1-scheduler",
+            UiCommand::RunSchedulerTick {
+                tick: UiSchedulerTickCommand {
+                    stale_after_seconds: 1,
+                    soft_timeout_seconds: 1,
+                    hard_timeout_seconds: 30,
+                },
+            },
+        )
+        .await?,
+    );
+
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-phase1-blocked",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: blocked_task_id.clone(),
+                    agent_id: freehand_contracts::AgentId::new(agent_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Blocked {
+                        reason: format!("blocked {token}"),
+                        evidence: vec!["master-visible blocker".to_owned()],
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+
+    let evidence = verify_phase1_foundation_truth(
+        &url,
+        &Phase1VerifyIds {
+            blocked_task_id: blocked_task_id.clone(),
+            review_task_id: review_task_id.clone(),
+            execution_id: execution_id.clone(),
+            agent_id: agent_id.clone(),
+        },
+    )
+    .await?;
+
+    Ok(format!(
+        "phase1_foundation_sample_ok url={} session={} blocked_task={} review_task={} execution={} agent={} blocked={} review_ready={} stale={} recovering_event={} lifecycle_state={} seen={}",
+        url,
+        session_id.as_str(),
+        blocked_task_id,
+        review_task_id,
+        execution_id,
+        agent_id,
+        evidence.blocked_count,
+        evidence.review_ready_count,
+        evidence.stale_count,
+        evidence.recovering_event_seen,
+        evidence.lifecycle_state,
+        seen.join(",")
+    ))
+}
+
+async fn run_phase1_foundation_verify_async(
+    url: String,
+    ids: Phase1VerifyIds,
+) -> Result<String, String> {
+    let evidence = verify_phase1_foundation_truth(&url, &ids).await?;
+    Ok(format!(
+        "phase1_foundation_verify_ok url={} blocked_task={} review_task={} execution={} agent={} blocked={} review_ready={} stale={} recovering_event={} lifecycle_state={}",
+        url,
+        ids.blocked_task_id,
+        ids.review_task_id,
+        ids.execution_id,
+        ids.agent_id,
+        evidence.blocked_count,
+        evidence.review_ready_count,
+        evidence.stale_count,
+        evidence.recovering_event_seen,
+        evidence.lifecycle_state
+    ))
+}
+
+#[derive(Debug, Clone)]
+struct Phase1FoundationEvidence {
+    blocked_count: usize,
+    review_ready_count: usize,
+    stale_count: usize,
+    recovering_event_seen: bool,
+    lifecycle_state: String,
+}
+
+async fn verify_phase1_foundation_truth(
+    url: &str,
+    ids: &Phase1VerifyIds,
+) -> Result<Phase1FoundationEvidence, String> {
+    let board = query_task_board(url, "cli-phase1-verify-board").await?;
+    let blocked_count = board
+        .blocked
+        .iter()
+        .filter(|task| task.task_id == ids.blocked_task_id)
+        .count();
+    let review_ready_count = board
+        .review_ready
+        .iter()
+        .filter(|task| task.task_id == ids.review_task_id)
+        .count();
+    let stale_count = board
+        .stale
+        .iter()
+        .filter(|task| task.task_id == ids.blocked_task_id)
+        .count();
+    if blocked_count == 0 {
+        return Err(format!(
+            "phase1 foundation blocked task missing task={} blocked_count={}",
+            ids.blocked_task_id,
+            board.blocked.len()
+        ));
+    }
+    if review_ready_count == 0 {
+        return Err(format!(
+            "phase1 foundation review task missing task={} review_ready_count={}",
+            ids.review_task_id,
+            board.review_ready.len()
+        ));
+    }
+    if stale_count == 0 {
+        return Err(format!(
+            "phase1 foundation stale fact missing task={} stale_count={}",
+            ids.blocked_task_id,
+            board.stale.len()
+        ));
+    }
+    let agent_board = query_agent_board(url, "cli-phase1-verify-agent-board").await?;
+    if !agent_board
+        .agents
+        .iter()
+        .any(|agent| agent.agent_id.as_str() == ids.agent_id)
+    {
+        return Err(format!(
+            "phase1 foundation agent missing agent={} board_count={}",
+            ids.agent_id,
+            agent_board.agents.len()
+        ));
+    }
+    let lifecycle =
+        query_agent_lifecycle(url, "cli-phase1-verify-agent-lifecycle", &ids.agent_id).await?;
+    let history = query_task_history(url, &ids.blocked_task_id).await?;
+    let recovering_event_seen = history.events.iter().any(|event| {
+        event.event_type == "TaskExecutionRecovering"
+            && event
+                .payload
+                .get("execution_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(ids.execution_id.as_str())
+    });
+    if !recovering_event_seen {
+        return Err(format!(
+            "phase1 foundation recovering event missing task={} execution={} events={}",
+            ids.blocked_task_id,
+            ids.execution_id,
+            history
+                .events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+    Ok(Phase1FoundationEvidence {
+        blocked_count,
+        review_ready_count,
+        stale_count,
+        recovering_event_seen,
+        lifecycle_state: lifecycle.state,
+    })
+}
+
 async fn send_adp_command_receipt(
     url: &str,
     request_id: &str,
@@ -1623,6 +1998,119 @@ async fn query_task_history(
             _ => {}
         }
     }
+}
+
+async fn query_task_board(url: &str, request_id: &str) -> Result<UiTaskBoardProjection, String> {
+    let result = query_adp_once(
+        url,
+        request_id,
+        UiCommand::QueryTaskBoard {
+            status: None,
+            agent_id: None,
+            include_terminal: false,
+        },
+        "task board",
+    )
+    .await?;
+    let UiQueryResult::TaskBoard(board) = result else {
+        return Err("ADP task board query returned non-task-board result".to_owned());
+    };
+    Ok(board)
+}
+
+async fn query_agent_board(url: &str, request_id: &str) -> Result<UiAgentBoardProjection, String> {
+    let result = query_adp_once(url, request_id, UiCommand::QueryAgentBoard, "agent board").await?;
+    let UiQueryResult::AgentBoard(board) = result else {
+        return Err("ADP agent board query returned non-agent-board result".to_owned());
+    };
+    Ok(board)
+}
+
+async fn query_agent_lifecycle(
+    url: &str,
+    request_id: &str,
+    agent_id: &str,
+) -> Result<UiAgentLifecycleProjection, String> {
+    let result = query_adp_once(
+        url,
+        request_id,
+        UiCommand::QueryAgentLifecycle {
+            agent_id: freehand_contracts::AgentId::new(agent_id.to_owned()),
+        },
+        "agent lifecycle",
+    )
+    .await?;
+    let UiQueryResult::AgentLifecycle(lifecycle) = result else {
+        return Err("ADP agent lifecycle query returned non-agent-lifecycle result".to_owned());
+    };
+    Ok(lifecycle)
+}
+
+async fn query_adp_once(
+    url: &str,
+    request_id: &str,
+    query: UiCommand,
+    label: &str,
+) -> Result<UiQueryResult, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
+        .await
+        .map_err(|_| format!("ADP {label} connect timeout: {url}"))?
+        .map_err(|err| format!("ADP {label} connect failed: {err}"))?;
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Query {
+            request_id: request_id.to_owned(),
+            query,
+        },
+    )
+    .await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let _ = socket.close(None).await;
+            return Err(format!("ADP {label} query timeout"));
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| format!("ADP {label} query timeout"))??;
+        match response {
+            UiAdpResponse::QueryResult {
+                request_id: response_id,
+                result,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Ok(result);
+            }
+            UiAdpResponse::Failure {
+                request_id: response_id,
+                failure,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Err(format!(
+                    "ADP {label} query failure {}: {}",
+                    failure.code, failure.message
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn task_agent_from_board(board: &UiTaskBoardProjection, task_id: &str) -> Result<String, String> {
+    board
+        .tasks
+        .iter()
+        .find(|task| task.task_id == task_id)
+        .and_then(|task| task.assignee_agent_id.as_ref())
+        .map(|agent_id| agent_id.as_str().to_owned())
+        .ok_or_else(|| {
+            format!(
+                "task board missing assigned agent task={} task_count={}",
+                task_id,
+                board.tasks.len()
+            )
+        })
 }
 
 async fn submit_adp_sample_prompt(

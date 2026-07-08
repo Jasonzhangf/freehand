@@ -15,7 +15,9 @@
     "query and subscribe stay separate",
     "ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes",
     "task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied",
+    "Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes while runtime/task owners supply truth",
     "task mutation commands (`CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to task.orchestration through runtime; protocol does not write task truth",
+    "Phase 1 ApplyExecutionFact and RunSchedulerTick are protocol-owned mutation intents routed to task.orchestration through runtime; protocol does not update task state or make scheduler decisions",
     "error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied",
     "provider/model update is a protocol-owned mutation command shape that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to config.core",
     "subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams",
@@ -49,6 +51,7 @@
     "cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn",
     "session list and transcript projections expose cwd bound by runtime/session truth",
     "task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
+    "Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
     "session list and transcript projections expose owner-supplied session title, archived state, cwd, and effective transcript projections after rollback",
     "rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth",
     "error-center query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
@@ -70,6 +73,7 @@
     "empty session ids and empty session titles are rejected at the protocol boundary for session management commands, including rollback",
     "empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse",
     "task mutation commands reject empty task id/title/content/goal/review summary before runtime dispatch instead of silently creating partial task truth",
+    "Phase 1 execution fact commands reject empty ids and malformed facts before runtime dispatch; scheduler tick commands reject invalid threshold shape before runtime dispatch",
     "empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse",
     "task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching",
     "provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO"
@@ -554,6 +558,28 @@
       "caller": "WebUI/CLI ADP command transport",
       "callee": "runtime.ui-command-dispatch",
       "binding_status": "bound"
+    },
+    {
+      "step": "26",
+      "symbol_path": "UiCommand::QueryTaskBoard / UiCommand::QueryAgentBoard / UiCommand::QueryAgentLifecycle",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "define Phase 1 board and lifecycle query DTOs without owning task/lifecycle truth",
+      "input_semantic": "board or lifecycle query filters",
+      "output_semantic": "runtime-backed UI-safe board/lifecycle projections",
+      "caller": "ADP query transport",
+      "callee": "runtime query port",
+      "binding_status": "bound"
+    },
+    {
+      "step": "27",
+      "symbol_path": "UiCommand::ApplyExecutionFact / UiCommand::RunSchedulerTick",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "define Phase 1 execution fact and scheduler tick mutation DTOs routed to task.orchestration",
+      "input_semantic": "execution fact or scheduler tick command",
+      "output_semantic": "validated mutation intent routed to task.orchestration",
+      "caller": "ADP command transport",
+      "callee": "runtime.ui-command-dispatch",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -574,6 +600,8 @@
     "CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn",
     "ADP request and response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients",
     "task list/history query command DTOs and runtime query-port shape are landed",
+    "Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query DTOs are landed and route only through runtime-backed query ports",
+    "Phase 1 ApplyExecutionFact and RunSchedulerTick command DTOs are landed and route only through runtime-backed task.orchestration dispatch",
     "error-center query/subscribe command DTOs and UI-safe event projection are landed",
     "provider/model update command DTO is landed, owner-routed to config.core, and serializes without credential/API-key values",
     "task mutation command DTOs are landed, owner-routed to task.orchestration, and rejected at the protocol boundary when required task or review fields are empty"

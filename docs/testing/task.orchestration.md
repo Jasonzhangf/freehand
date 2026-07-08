@@ -18,9 +18,9 @@
   - query returns persisted task truth
   - list_tasks returns task snapshots for queue and UI projection queries
   - agent registry exposes self agent
-  - pending Phase 1: TaskBoard query projects owner-backed board truth
-  - pending Phase 1: ExecutionFact sync admits typed worker execution facts into Task Center
-  - pending Phase 1: SchedulerTick emits elapsed/stale/timeout facts without business decisions
+  - Phase 1 TaskBoard query projects owner-backed board truth
+  - Phase 1 ExecutionFact sync admits typed worker execution facts into Task Center
+  - Phase 1 SchedulerTick emits elapsed/stale/timeout facts without business decisions
 
 ## White-Box Coverage
 
@@ -44,13 +44,24 @@
 - list_tasks filters by status and assignee
 - cancel releases the assignee and prevents later resume
 - close_agent rejects busy agents
-- pending: TaskBoard query returns blocked/review/stale filtered views and agent/task binding summaries
-- pending: ExecutionFact recovering keeps task non-terminal
-- pending: ExecutionFact blocked creates a master-visible event
-- pending: ExecutionFact review_ready enters review queue
-- pending: SchedulerTick soft timeout does not fail a task
-- pending: SchedulerTick stale requires no heartbeat/progress past threshold
-- pending: SchedulerTick hard timeout requires master decision and does not automatically fail the task
+- TaskBoard query returns blocked/review/stale filtered views and agent/task binding summaries
+- implemented owner test: `task_board_projects_owner_truth_with_filtered_views`
+- ExecutionFact recovering keeps task non-terminal:
+  `execution_fact_recovering_keeps_running_and_writes_event`
+- ExecutionFact blocked creates a master-visible event:
+  `execution_fact_blocked_and_review_ready_update_board_truth`
+- ExecutionFact review_ready enters review queue:
+  `execution_fact_blocked_and_review_ready_update_board_truth`
+- malformed ExecutionFact writes no Task Center truth:
+  `execution_fact_validation_failure_writes_no_truth`
+- SchedulerTick soft timeout does not fail a task:
+  `scheduler_tick_soft_timeout_does_not_fail_task`
+- SchedulerTick stale requires no heartbeat/progress past threshold:
+  `scheduler_tick_recent_progress_is_not_stale`
+- SchedulerTick hard timeout requires master decision and does not automatically fail the task:
+  `scheduler_tick_emits_stale_and_timeout_facts_without_decisions`
+- SchedulerTick facts are durable/replayable:
+  `scheduler_tick_facts_recover_after_boot`
 
 ## Module Black-Box Coverage
 
@@ -66,9 +77,9 @@
 - runtime task tool history returns task ledger timeline JSON
 - runtime task tool list_tasks returns filtered task snapshots
 - tool registry exposes `task` as one implemented built-in tool schema
-- pending: runtime TaskBoard query returns Task Center board truth without UI-local state
-- pending: runtime ExecutionFact sync returns event-backed Task Center updates
-- pending: runtime SchedulerTick query/sample emits durable facts only
+- pending: runtime/ADP TaskBoard query returns Task Center board truth without UI-local state
+- pending: runtime/ADP ExecutionFact sync returns event-backed Task Center updates
+- pending: runtime/ADP SchedulerTick query/sample emits durable facts only
 
 ## Project Black-Box Impact
 
@@ -101,4 +112,9 @@ cargo run -p xtask -- gates check
 - no real worker execution
 - no queue runner
 - no UI task timeline
-- TaskBoard/ExecutionFact/SchedulerTick implementation is pending after D1 owner-map closeout
+- TaskBoard owner-internal skeleton is implemented in `crates/freehand-task`
+- runtime/ADP TaskBoard surface is pending D6
+- ExecutionFact owner-internal sync is implemented in `crates/freehand-task`
+- runtime/ADP ExecutionFact surface is pending D6
+- SchedulerTick owner-internal facts are implemented in `crates/freehand-task`
+- runtime/ADP SchedulerTick sample is pending D6

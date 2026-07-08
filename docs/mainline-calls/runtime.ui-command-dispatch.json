@@ -17,6 +17,8 @@
     "runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics",
     "runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs",
     "protocol-owned task mutation commands route through runtime into `TaskRuntime::create_task`, `TaskRuntime::submit_review`, `TaskRuntime::approve_review`, and `TaskRuntime::close_task`; runtime publishes updated task list projection after each accepted mutation",
+    "Phase 1 board and lifecycle queries route `QueryTaskBoard`, `QueryAgentBoard`, and `QueryAgentLifecycle` through runtime into `TaskRuntime::query_task_board`, `TaskRuntime::query_agent_board`, and `TaskRuntime::query_agent_lifecycle`",
+    "Phase 1 execution fact and scheduler tick commands route through runtime into `TaskRuntime::apply_execution_fact` and `TaskRuntime::run_scheduler_tick`; runtime stays a thin bridge and does not make scheduler business decisions",
     "runtime read-only error-center queries enter through `UiRuntimeQueryPort` and read watermarked metadata rows through the runtime metadata projection owner",
     "provider/model update commands enter through a protocol dispatch envelope, route to config.core::update_provider_config_in_path, and must not duplicate config validation or persistence logic in runtime",
     "live submit registers an active turn cancel token before provider execution and releases the runtime mutex before running provider IO",
@@ -42,6 +44,8 @@
     "session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and protocol projection is refreshed",
     "session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections",
     "runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events",
+    "runtime Phase 1 TaskBoard and AgentBoard queries return UI-safe board projections sourced from task.orchestration and agent.lifecycle",
+    "runtime Phase 1 execution fact and scheduler tick dispatch receipts return only after task.orchestration accepts owner truth and task-list projection publication succeeds",
     "runtime-backed task mutation commands return receipts only after task.orchestration accepts the mutation and task list projection publication succeeds",
     "runtime error-center queries return UI-safe projections built from watermarked metadata rows and omit raw error/request/provider text",
     "runtime task list subscription updates reuse the same UI-safe projection helper as task list queries",
@@ -65,6 +69,7 @@
     "invalid error-center query filters or metadata read failures return explicit dispatch failures",
     "task list publication failures after task mutation are explicit live bridge failures",
     "task mutation dispatch requires a live runtime home, maps missing tasks to target-not-found, and must not create task truth outside task.orchestration",
+    "invalid task board filters, missing agent lifecycle ids, invalid execution facts, and invalid scheduler thresholds map to explicit dispatch failures from the owner APIs",
     "provider/model update without a live runtime home or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake hot reload"
   ],
   "shared_functions": [
@@ -178,6 +183,18 @@
         "runtime_dispatch_updates_provider_config_without_hot_reloading_active_model"
       ],
       "why_shared": "keeps config-to-UI projection in runtime owner while app transports stay protocol-only"
+    },
+    {
+      "symbol": "project_task_board_for_ui / project_agent_board_for_ui / project_agent_lifecycle_for_ui",
+      "owner": "crates/freehand-runtime/src/lib.rs",
+      "purpose": "convert Phase 1 task and agent lifecycle owner projections into UI-safe DTOs",
+      "allowed_callers": [
+        "RuntimeCommandDispatcher::query_runtime"
+      ],
+      "related_tests": [
+        "runtime_query_reads_phase1_task_and_agent_boards"
+      ],
+      "why_shared": "keeps board projection in the runtime bridge while Task Center and Agent Lifecycle remain owner truth"
     }
   ],
   "call_table": [
@@ -378,6 +395,28 @@
       "caller": "RuntimeCommandDispatcher::dispatch_update_provider_config",
       "callee": "config.core persistence",
       "binding_status": "bound"
+    },
+    {
+      "step": "18",
+      "symbol_path": "project_task_board_for_ui / project_agent_board_for_ui / project_agent_lifecycle_for_ui",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "project Phase 1 TaskBoard, AgentBoard, and AgentLifecycle owner truth into protocol DTOs",
+      "input_semantic": "task/agent owner projections",
+      "output_semantic": "UI-safe board/lifecycle query results",
+      "caller": "RuntimeCommandDispatcher::query_runtime",
+      "callee": "ui.protocol DTOs",
+      "binding_status": "bound"
+    },
+    {
+      "step": "19",
+      "symbol_path": "RuntimeCommandDispatcher::dispatch_apply_execution_fact / dispatch_run_scheduler_tick",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "route Phase 1 execution facts and scheduler ticks into task.orchestration without making business decisions",
+      "input_semantic": "execution fact or scheduler tick dispatch envelope",
+      "output_semantic": "dispatch receipt or owner failure",
+      "caller": "RuntimeCommandDispatcher::dispatch",
+      "callee": "TaskRuntime::apply_execution_fact / TaskRuntime::run_scheduler_tick",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -403,6 +442,8 @@
     "runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and terminal persistence",
     "missing CancelTurn, empty CancelLatestActiveTurn, and wrong-node direct-message dispatch paths now stay explicit target-not-found failures",
     "runtime task query bridge routes list/history through task.orchestration and is covered by runtime and daemon ADP tests",
+    "runtime Phase 1 TaskBoard and AgentBoard query bridge routes through task.orchestration and agent.lifecycle and is covered by runtime tests",
+    "runtime Phase 1 ExecutionFact and SchedulerTick dispatch bridge routes through task.orchestration and is covered by runtime tests",
     "runtime task mutation command bridge is bound as a thin route from protocol commands to task.orchestration create/review/approve/close APIs, with ui_task_actor kept separate from model/tool task_actor(turn)",
     "runtime error-center query bridge routes metadata rows through a UI-safe projection and is covered by runtime and daemon ADP tests",
     "runtime provider/model update dispatch is bound as a thin mutation route into config.core; successful saves project restart-required pending status and active runtime config remains unchanged until restart"

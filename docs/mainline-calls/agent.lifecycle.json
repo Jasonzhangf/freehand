@@ -27,7 +27,7 @@
   ],
   "shared_functions": [
     {
-      "symbol": "AgentLifecycleReducer",
+      "symbol": "TaskRuntime::apply_agent_lifecycle_event",
       "owner": "crates/freehand-task/src/lib.rs",
       "purpose": "reduce typed runtime/provider/tool/error/task events into per-agent lifecycle state",
       "allowed_callers": [
@@ -36,10 +36,7 @@
         "tests"
       ],
       "related_tests": [
-        "model_thinking reducer test",
-        "tool_running reducer test",
-        "recovering reducer test",
-        "blocked reducer test"
+        "agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked"
       ],
       "why_shared": "keeps lifecycle semantics single-sourced instead of duplicated in UI/runtime/node code"
     },
@@ -53,8 +50,7 @@
         "tests"
       ],
       "related_tests": [
-        "AgentBoard query test",
-        "restart same-id proof"
+        "agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked"
       ],
       "why_shared": "keeps what each agent is doing as owner truth, not app-local inference"
     }
@@ -62,14 +58,14 @@
   "call_table": [
     {
       "step": "01",
-      "symbol_path": "AgentLifecycleReducer",
+      "symbol_path": "TaskRuntime::apply_agent_lifecycle_event",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "reduce typed lifecycle events into per-agent state",
       "input_semantic": "typed lifecycle event",
       "output_semantic": "updated lifecycle state",
       "caller": "runtime/task owner",
       "callee": "lifecycle owner",
-      "binding_status": "pending"
+      "binding_status": "bound"
     },
     {
       "step": "02",
@@ -80,7 +76,7 @@
       "output_semantic": "serializable lifecycle snapshot",
       "caller": "lifecycle owner",
       "callee": "query/projection surfaces",
-      "binding_status": "pending"
+      "binding_status": "bound"
     },
     {
       "step": "03",
@@ -91,7 +87,7 @@
       "output_semantic": "AgentBoard projection",
       "caller": "lifecycle owner",
       "callee": "runtime query dispatch",
-      "binding_status": "pending"
+      "binding_status": "bound"
     },
     {
       "step": "04",
@@ -102,7 +98,7 @@
       "output_semantic": "lifecycle snapshot or explicit not-found",
       "caller": "runtime query dispatch",
       "callee": "lifecycle owner",
-      "binding_status": "pending"
+      "binding_status": "bound"
     },
     {
       "step": "05",
@@ -113,13 +109,13 @@
       "output_semantic": "AgentBoard projection",
       "caller": "runtime query dispatch",
       "callee": "lifecycle owner",
-      "binding_status": "pending"
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
-    "`agent.lifecycle` is a Phase 1 owner-map entry before implementation",
+    "`agent.lifecycle` has the first owner-internal lifecycle skeleton in `crates/freehand-task`",
     "no model-facing `agent` tool is implemented or allowed by default",
     "Agent Lifecycle remains an intrinsic agent state/projection",
-    "first implementation must add symbols and tests before claiming D3 complete"
+    "D3 still requires ADP/CLI query and restart proof before Phase 1 closeout"
   ]
 }

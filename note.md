@@ -2716,3 +2716,35 @@ Current real root cause split:
   - `git diff --check`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
+
+# 2026-07-08 multi-task phase1 implementation closeout
+
+- Scope:
+  - Continued goal `/Users/fanzhang/.codex/attachments/63db509b-a35f-4511-88ab-ff396ba0eff7/pasted-text-1.txt`.
+  - Implemented the D2-D6 headless foundation over existing D1 owner decisions.
+- Implementation summary:
+  - `task.orchestration`: TaskBoard query, ExecutionFact sync, SchedulerTick durable fact path.
+  - `agent.lifecycle`: AgentLifecycleSnapshot, AgentBoard projection, lifecycle reducer state.
+  - `ui.protocol`: Phase 1 query/command DTOs for task board, agent board, agent lifecycle, execution facts, and scheduler ticks.
+  - `runtime.ui-command-dispatch`: runtime-backed query/dispatch handlers and projection helpers.
+  - `app.cli-runtime-smoke`: `phase1-foundation-sample` create and verify modes.
+- Local validation:
+  - `cargo test -p freehand-tools -- --nocapture` -> 29 passed.
+  - `cargo test -p freehand-cli -- --nocapture` -> 18 passed.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 47 passed.
+  - `cargo test -p freehand-task -- --nocapture` -> 28 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 80 passed.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `git diff --check` -> ok.
+- S-profile online proof:
+  - `scripts/install-launchd.sh restartS` refreshed debug daemon copy and restarted `com.freehand.daemonS`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok` with subscription/query/kind-mismatch evidence.
+  - `freehand-cliS phase1-foundation-sample --url ws://127.0.0.1:4042/adp` -> `phase1_foundation_sample_ok`.
+  - Created ids: `blocked_task=task-cli-phase1-blocked-FHPHASE11783500244602888000`, `review_task=task-cli-phase1-review-FHPHASE11783500244602888000`, `execution=exec-cli-phase1-FHPHASE11783500244602888000`, `agent=master`.
+  - Counts/state: `blocked=1`, `review_ready=1`, `stale=1`, `recovering_event=true`, `lifecycle_state=blocked`.
+  - After another `scripts/install-launchd.sh restartS`, verify mode against the same ids returned `phase1_foundation_verify_ok` with the same counts/state.
+- Durable rule:
+  - Phase 1 restart proof requires same-id verify after restart; a fresh post-restart sample is not recovery evidence.

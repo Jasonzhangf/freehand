@@ -61,21 +61,26 @@ use freehand_reason::{
     SessionHistory, TurnRecord, TurnStartInput,
 };
 use freehand_task::{
-    AgentCreateRequest, AgentMutationRequest, TaskActor, TaskAppendRequest, TaskAssignRequest,
-    TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskError,
+    AgentCreateRequest, AgentLifecycleActivity, AgentLifecycleSnapshot, AgentLifecycleState,
+    AgentMutationRequest, AgentSnapshot, AgentStatus, ExecutionFact, ExecutionFactKind,
+    SchedulerTickRequest, TaskActor, TaskAppendRequest, TaskAssignRequest, TaskBoardProjection,
+    TaskBoardQuery, TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskError,
     TaskExecutionRecordRequest, TaskHeartbeatRequest, TaskId, TaskLedgerEvent, TaskListQuery,
     TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime,
     TaskSnapshot, TaskStatus, TaskWatermark,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
-    TurnProjectionInput, UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
-    UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
-    UiCompletionSchemaRetryWaiting, UiConfigStatusProjection, UiErrorCenterEventListProjection,
-    UiErrorCenterEventProjection, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
-    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSessionMetadataProjection,
-    UiTaskCreateCommand, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
-    UiTaskListProjection, UiTaskReviewCommand, UiTaskSnapshotProjection, UiTurnProjection,
+    TurnProjectionInput, UiAgentBoardProjection, UiAgentLifecycleActivityProjection,
+    UiAgentLifecycleProjection, UiAgentSnapshotProjection, UiCheckpointSummary, UiClientKind,
+    UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort, UiCommandDispatchPortError,
+    UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting, UiConfigStatusProjection,
+    UiErrorCenterEventListProjection, UiErrorCenterEventProjection, UiExecutionFactCommand,
+    UiExecutionFactKind, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
+    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
+    UiSessionMetadataProjection, UiTaskBoardProjection, UiTaskCreateCommand,
+    UiTaskHistoryProjection, UiTaskLedgerEventProjection, UiTaskListProjection,
+    UiTaskReviewCommand, UiTaskSnapshotProjection, UiTurnProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
 };
@@ -2358,6 +2363,66 @@ impl RuntimeCommandDispatcher {
                     tasks,
                 ))))
             }
+            UiCommand::QueryTaskBoard {
+                status,
+                agent_id,
+                include_terminal,
+            } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let task_runtime =
+                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
+                        .map_err(map_task_query_error)?;
+                let status_filter = status
+                    .as_deref()
+                    .map(parse_task_status)
+                    .transpose()
+                    .map_err(UiCommandDispatchPortError::DispatchFailed)?;
+                let board = task_runtime
+                    .query_task_board(TaskBoardQuery {
+                        status: status_filter,
+                        assignee: agent_id.clone(),
+                        include_terminal: *include_terminal,
+                    })
+                    .map_err(map_task_query_error)?;
+                Ok(Some(UiQueryResult::TaskBoard(project_task_board_for_ui(
+                    state.config.reason_agent_id.clone(),
+                    status.clone(),
+                    agent_id.clone(),
+                    *include_terminal,
+                    board,
+                ))))
+            }
+            UiCommand::QueryAgentBoard => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let task_runtime =
+                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
+                        .map_err(map_task_query_error)?;
+                let board = task_runtime
+                    .query_agent_board()
+                    .map_err(map_task_query_error)?;
+                Ok(Some(UiQueryResult::AgentBoard(project_agent_board_for_ui(
+                    state.config.reason_agent_id.clone(),
+                    board.agents,
+                ))))
+            }
+            UiCommand::QueryAgentLifecycle { agent_id } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let task_runtime =
+                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
+                        .map_err(map_task_query_error)?;
+                let lifecycle = task_runtime
+                    .query_agent_lifecycle(agent_id)
+                    .map_err(map_task_query_error)?;
+                Ok(Some(UiQueryResult::AgentLifecycle(
+                    project_agent_lifecycle_for_ui(lifecycle),
+                )))
+            }
             UiCommand::QueryTaskHistory { task_id } => {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
@@ -3291,6 +3356,12 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             UiCommand::CloseTask { task_id } => {
                 self.dispatch_close_task(&mut state, envelope, task_id)
             }
+            UiCommand::ApplyExecutionFact { fact } => {
+                self.dispatch_apply_execution_fact(&mut state, envelope, fact)
+            }
+            UiCommand::RunSchedulerTick { tick } => {
+                self.dispatch_run_scheduler_tick(&mut state, envelope, tick)
+            }
             UiCommand::ResumeTurn { turn_id } => self.dispatch_resume_turn(envelope, turn_id),
             UiCommand::SendDirectMessageToSlave { node_id, text } => {
                 self.dispatch_direct_message(&mut state, envelope, node_id, text)
@@ -3419,6 +3490,60 @@ impl RuntimeCommandDispatcher {
             target_feature_id: envelope.target_feature_id,
             target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_closed:{}", outcome.task.task_id.as_str()),
+        })
+    }
+
+    fn dispatch_apply_execution_fact(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        fact: UiExecutionFactCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, source_agent_id) = task_runtime_target(state)?;
+        let runtime = TaskRuntime::boot(&runtime_home, source_agent_id.clone())
+            .map_err(map_task_query_error)?;
+        let task_id = fact.task_id.clone();
+        runtime
+            .apply_execution_fact(ui_execution_fact_to_task_fact(fact))
+            .map_err(map_task_query_error)?;
+        self.publish_task_list_from_runtime(&runtime_home, &source_agent_id)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!("execution_fact_applied:{task_id}"),
+        })
+    }
+
+    fn dispatch_run_scheduler_tick(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        tick: UiSchedulerTickCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, agent_id) = task_runtime_target(state)?;
+        let runtime =
+            TaskRuntime::boot(&runtime_home, agent_id.clone()).map_err(map_task_query_error)?;
+        let outcome = runtime
+            .run_scheduler_tick(SchedulerTickRequest {
+                now: now_unix_seconds(),
+                stale_after_seconds: tick.stale_after_seconds,
+                soft_timeout_seconds: tick.soft_timeout_seconds,
+                hard_timeout_seconds: tick.hard_timeout_seconds,
+                actor: ui_task_actor(&agent_id, None, None),
+                watermark: ui_task_watermark("run_scheduler_tick"),
+            })
+            .map_err(map_task_query_error)?;
+        self.publish_task_list_from_runtime(&runtime_home, &agent_id)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!(
+                "scheduler_tick_recorded:facts={} events={}",
+                outcome.facts.len(),
+                outcome.events.len()
+            ),
         })
     }
 
@@ -3624,6 +3749,161 @@ fn task_list_projection_from_runtime(
     ))
 }
 
+fn project_task_board_for_ui(
+    source_agent_id: AgentId,
+    status_filter: Option<String>,
+    agent_filter: Option<AgentId>,
+    include_terminal: bool,
+    board: TaskBoardProjection,
+) -> UiTaskBoardProjection {
+    UiTaskBoardProjection {
+        source_agent_id,
+        status_filter,
+        agent_filter,
+        include_terminal,
+        tasks: board
+            .tasks
+            .into_iter()
+            .map(project_task_snapshot_for_ui)
+            .collect(),
+        agents: board
+            .agents
+            .into_iter()
+            .map(project_agent_snapshot_for_ui)
+            .collect(),
+        blocked: board
+            .blocked
+            .into_iter()
+            .map(project_task_snapshot_for_ui)
+            .collect(),
+        review_ready: board
+            .review_ready
+            .into_iter()
+            .map(project_task_snapshot_for_ui)
+            .collect(),
+        stale: board
+            .stale
+            .into_iter()
+            .map(project_task_snapshot_for_ui)
+            .collect(),
+    }
+}
+
+fn project_agent_snapshot_for_ui(agent: AgentSnapshot) -> UiAgentSnapshotProjection {
+    UiAgentSnapshotProjection {
+        agent_id: agent.agent_id,
+        status: agent_status_label(&agent.status).to_owned(),
+        current_task_id: agent
+            .current_task_id
+            .map(|task_id| task_id.as_str().to_owned()),
+        current_cwd: agent.current_cwd,
+        running_tasks: agent.running_tasks,
+        queued_tasks: agent.queued_tasks,
+        last_seen_at: agent.last_seen_at,
+    }
+}
+
+fn project_agent_board_for_ui(
+    source_agent_id: AgentId,
+    agents: Vec<AgentLifecycleSnapshot>,
+) -> UiAgentBoardProjection {
+    UiAgentBoardProjection {
+        source_agent_id,
+        agents: agents
+            .into_iter()
+            .map(project_agent_lifecycle_for_ui)
+            .collect(),
+    }
+}
+
+fn project_agent_lifecycle_for_ui(lifecycle: AgentLifecycleSnapshot) -> UiAgentLifecycleProjection {
+    UiAgentLifecycleProjection {
+        agent_id: lifecycle.agent_id,
+        role: lifecycle.role,
+        alive: lifecycle.alive,
+        state: agent_lifecycle_state_label(&lifecycle.state).to_owned(),
+        current_task_id: lifecycle
+            .current_task_id
+            .map(|task_id| task_id.as_str().to_owned()),
+        current_execution_id: lifecycle.current_execution_id,
+        current_turn_id: lifecycle.current_turn_id,
+        current_activity: lifecycle
+            .current_activity
+            .map(project_agent_lifecycle_activity_for_ui),
+        last_activity: lifecycle
+            .last_activity
+            .map(project_agent_lifecycle_activity_for_ui),
+        model_request_count: lifecycle.stats.model_request_count,
+        model_retry_count: lifecycle.stats.model_retry_count,
+        tool_call_count: lifecycle.stats.tool_call_count,
+        tool_failure_count: lifecycle.stats.tool_failure_count,
+        schema_polish_count: lifecycle.stats.schema_polish_count,
+        provider_error_count: lifecycle.stats.provider_error_count,
+        blocked_count: lifecycle.stats.blocked_count,
+        current_model: lifecycle.stats.current_model,
+        last_seen_at: lifecycle.last_seen_at,
+        elapsed_ms: lifecycle.elapsed_ms,
+    }
+}
+
+fn project_agent_lifecycle_activity_for_ui(
+    activity: AgentLifecycleActivity,
+) -> UiAgentLifecycleActivityProjection {
+    UiAgentLifecycleActivityProjection {
+        kind: activity.kind,
+        semantic_summary: activity.semantic_summary,
+        target: activity.target,
+        elapsed_ms: activity.elapsed_ms,
+        tool_name: activity.tool_name,
+        model: activity.model,
+        retry_count: activity.retry_count,
+        visibility: activity.visibility,
+    }
+}
+
+fn ui_execution_fact_to_task_fact(fact: UiExecutionFactCommand) -> ExecutionFact {
+    ExecutionFact {
+        execution_id: fact.execution_id,
+        task_id: TaskId::new(fact.task_id),
+        agent_id: fact.agent_id,
+        turn_id: fact.turn_id,
+        occurred_at: now_unix_seconds(),
+        kind: match fact.kind {
+            UiExecutionFactKind::Running {
+                phase,
+                summary,
+                evidence,
+            } => ExecutionFactKind::Running {
+                phase,
+                summary,
+                evidence,
+            },
+            UiExecutionFactKind::Recovering {
+                summary,
+                evidence,
+                retry_count,
+            } => ExecutionFactKind::Recovering {
+                summary,
+                evidence,
+                retry_count,
+            },
+            UiExecutionFactKind::Blocked { reason, evidence } => {
+                ExecutionFactKind::Blocked { reason, evidence }
+            }
+            UiExecutionFactKind::ReviewReady {
+                summary,
+                deliverables,
+                evidence,
+            } => ExecutionFactKind::ReviewReady {
+                summary,
+                deliverables,
+                evidence,
+            },
+        },
+        watermark: ui_task_watermark("apply_execution_fact"),
+    }
+}
+
 fn project_task_snapshot_for_ui(task: TaskSnapshot) -> UiTaskSnapshotProjection {
     UiTaskSnapshotProjection {
         task_id: task.task_id.as_str().to_owned(),
@@ -3786,6 +4066,32 @@ fn task_status_label(status: &TaskStatus) -> &'static str {
         TaskStatus::Failed => "failed",
         TaskStatus::Cancelled => "cancelled",
         TaskStatus::Closed => "closed",
+    }
+}
+
+fn agent_status_label(status: &AgentStatus) -> &'static str {
+    match status {
+        AgentStatus::Available => "available",
+        AgentStatus::Busy => "busy",
+        AgentStatus::Paused => "paused",
+        AgentStatus::Offline => "offline",
+        AgentStatus::Closing => "closing",
+        AgentStatus::Closed => "closed",
+        AgentStatus::Failed => "failed",
+    }
+}
+
+fn agent_lifecycle_state_label(state: &AgentLifecycleState) -> &'static str {
+    match state {
+        AgentLifecycleState::Idle => "idle",
+        AgentLifecycleState::Assigned => "assigned",
+        AgentLifecycleState::ModelThinking => "model_thinking",
+        AgentLifecycleState::ToolRunning => "tool_running",
+        AgentLifecycleState::Recovering => "recovering",
+        AgentLifecycleState::Blocked => "blocked",
+        AgentLifecycleState::WaitingReview => "waiting_review",
+        AgentLifecycleState::Failed => "failed",
+        AgentLifecycleState::Offline => "offline",
     }
 }
 
@@ -10636,6 +10942,352 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             err,
             UiCommandDispatchPortError::TargetNotFound("missing-runtime-task".to_owned())
         );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_query_reads_phase1_task_and_agent_boards() {
+        let runtime_home = temp_runtime_home();
+        let task_runtime = TaskRuntime::boot(&runtime_home, AgentId::new("agent-live"))
+            .expect("task runtime boot");
+        task_runtime
+            .create_task(TaskCreateRequest {
+                task_id: Some(TaskId::new("runtime-phase1-board-task")),
+                title: "Runtime phase1 board task".to_owned(),
+                content: "TaskBoard and AgentBoard query bridge content".to_owned(),
+                goal: "Expose phase1 board truth".to_owned(),
+                deliverables: vec!["task board".to_owned()],
+                acceptance: vec!["agent board".to_owned()],
+                priority: 91,
+                target_cwd: Some("/tmp".to_owned()),
+                dispatch: TaskDispatchRequest::SelfAgent,
+                parent: TaskParentRef {
+                    session_id: None,
+                    turn_id: None,
+                    trace_id: None,
+                },
+                actor: TaskActor {
+                    agent_id: AgentId::new("agent-live"),
+                    source: "runtime_phase1_board_test".to_owned(),
+                    session_id: None,
+                    turn_id: None,
+                    trace_id: None,
+                },
+                watermark: TaskWatermark {
+                    metadata_id: None,
+                    hook: Some("runtime_phase1_board_test".to_owned()),
+                    action_tool_call_id: None,
+                },
+            })
+            .expect("create task");
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime");
+
+        let task_board = runtime
+            .query_runtime(&UiCommand::QueryTaskBoard {
+                status: None,
+                agent_id: None,
+                include_terminal: false,
+            })
+            .expect("task board query")
+            .expect("runtime-backed task board");
+        match task_board {
+            UiQueryResult::TaskBoard(board) => {
+                assert_eq!(board.source_agent_id.as_str(), "agent-live");
+                assert_eq!(board.tasks.len(), 1);
+                assert_eq!(board.tasks[0].task_id, "runtime-phase1-board-task");
+                assert_eq!(board.tasks[0].status, "assigned");
+                assert_eq!(board.agents.len(), 1);
+                assert_eq!(board.agents[0].agent_id.as_str(), "agent-live");
+                assert_eq!(
+                    board.agents[0].current_task_id.as_deref(),
+                    Some("runtime-phase1-board-task")
+                );
+            }
+            other => panic!("unexpected task board result: {other:?}"),
+        }
+
+        let agent_board = runtime
+            .query_runtime(&UiCommand::QueryAgentBoard)
+            .expect("agent board query")
+            .expect("runtime-backed agent board");
+        match agent_board {
+            UiQueryResult::AgentBoard(board) => {
+                assert_eq!(board.source_agent_id.as_str(), "agent-live");
+                assert_eq!(board.agents.len(), 1);
+                assert_eq!(board.agents[0].agent_id.as_str(), "agent-live");
+                assert_eq!(board.agents[0].state, "assigned");
+                assert_eq!(
+                    board.agents[0].current_task_id.as_deref(),
+                    Some("runtime-phase1-board-task")
+                );
+            }
+            other => panic!("unexpected agent board result: {other:?}"),
+        }
+
+        let lifecycle = runtime
+            .query_runtime(&UiCommand::QueryAgentLifecycle {
+                agent_id: AgentId::new("agent-live"),
+            })
+            .expect("agent lifecycle query")
+            .expect("runtime-backed agent lifecycle");
+        match lifecycle {
+            UiQueryResult::AgentLifecycle(lifecycle) => {
+                assert_eq!(lifecycle.agent_id.as_str(), "agent-live");
+                assert_eq!(lifecycle.state, "assigned");
+                assert_eq!(
+                    lifecycle.current_task_id.as_deref(),
+                    Some("runtime-phase1-board-task")
+                );
+            }
+            other => panic!("unexpected lifecycle result: {other:?}"),
+        }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_dispatch_execution_fact_and_scheduler_tick_update_task_truth() {
+        let runtime_home = temp_runtime_home();
+        let owner_id = AgentId::new("agent-live");
+        let worker_id = AgentId::new("runtime-phase1-worker");
+        let task_runtime =
+            TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("task runtime boot");
+        task_runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: worker_id.clone(),
+                capabilities: vec!["phase1".to_owned()],
+                actor: TaskActor {
+                    agent_id: owner_id.clone(),
+                    source: "runtime_phase1_fact_test".to_owned(),
+                    session_id: None,
+                    turn_id: None,
+                    trace_id: None,
+                },
+                watermark: TaskWatermark {
+                    metadata_id: None,
+                    hook: Some("runtime_phase1_fact_test".to_owned()),
+                    action_tool_call_id: None,
+                },
+            })
+            .expect("create worker agent");
+        for (task_id, title) in [
+            ("runtime-phase1-review-task", "Runtime phase1 review task"),
+            ("runtime-phase1-blocked-task", "Runtime phase1 blocked task"),
+        ] {
+            task_runtime
+                .create_task(TaskCreateRequest {
+                    task_id: Some(TaskId::new(task_id)),
+                    title: title.to_owned(),
+                    content: format!("{title} content"),
+                    goal: "prove phase1 execution fact dispatch".to_owned(),
+                    deliverables: vec!["execution fact".to_owned()],
+                    acceptance: vec!["TaskBoard projection updates".to_owned()],
+                    priority: 80,
+                    target_cwd: None,
+                    dispatch: TaskDispatchRequest::None,
+                    parent: TaskParentRef {
+                        session_id: Some(SessionId::new("runtime-phase1-fact-session")),
+                        turn_id: Some(TurnId::new("runtime-phase1-fact-turn")),
+                        trace_id: None,
+                    },
+                    actor: TaskActor {
+                        agent_id: owner_id.clone(),
+                        source: "runtime_phase1_fact_test".to_owned(),
+                        session_id: None,
+                        turn_id: None,
+                        trace_id: None,
+                    },
+                    watermark: TaskWatermark {
+                        metadata_id: None,
+                        hook: Some("runtime_phase1_fact_test".to_owned()),
+                        action_tool_call_id: None,
+                    },
+                })
+                .expect("create waiting task");
+            task_runtime
+                .assign_task(TaskAssignRequest {
+                    task_id: TaskId::new(task_id),
+                    agent_id: worker_id.clone(),
+                    actor: TaskActor {
+                        agent_id: owner_id.clone(),
+                        source: "runtime_phase1_fact_test".to_owned(),
+                        session_id: None,
+                        turn_id: None,
+                        trace_id: None,
+                    },
+                    watermark: TaskWatermark {
+                        metadata_id: None,
+                        hook: Some("runtime_phase1_fact_test".to_owned()),
+                        action_tool_call_id: None,
+                    },
+                })
+                .expect("assign waiting task");
+        }
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime");
+        let turn_id = TurnId::new("runtime-phase1-fact-turn");
+        let agent_id = worker_id;
+
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::ApplyExecutionFact {
+                    fact: UiExecutionFactCommand {
+                        execution_id: "runtime-phase1-exec-blocked".to_owned(),
+                        task_id: "runtime-phase1-blocked-task".to_owned(),
+                        agent_id: agent_id.clone(),
+                        turn_id: Some(turn_id.clone()),
+                        kind: UiExecutionFactKind::Running {
+                            phase: "implementation".to_owned(),
+                            summary: "worker started".to_owned(),
+                            evidence: vec!["running evidence".to_owned()],
+                        },
+                    },
+                })
+                .expect("running fact envelope"),
+            )
+            .expect("running fact dispatch");
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::ApplyExecutionFact {
+                    fact: UiExecutionFactCommand {
+                        execution_id: "runtime-phase1-exec-blocked".to_owned(),
+                        task_id: "runtime-phase1-blocked-task".to_owned(),
+                        agent_id: agent_id.clone(),
+                        turn_id: Some(turn_id.clone()),
+                        kind: UiExecutionFactKind::Recovering {
+                            summary: "worker retrying".to_owned(),
+                            evidence: vec!["recovering evidence".to_owned()],
+                            retry_count: 1,
+                        },
+                    },
+                })
+                .expect("recovering fact envelope"),
+            )
+            .expect("recovering fact dispatch");
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::ApplyExecutionFact {
+                    fact: UiExecutionFactCommand {
+                        execution_id: "runtime-phase1-exec-review".to_owned(),
+                        task_id: "runtime-phase1-review-task".to_owned(),
+                        agent_id: agent_id.clone(),
+                        turn_id: Some(turn_id.clone()),
+                        kind: UiExecutionFactKind::ReviewReady {
+                            summary: "ready for review".to_owned(),
+                            deliverables: vec!["review deliverable".to_owned()],
+                            evidence: vec!["review evidence".to_owned()],
+                        },
+                    },
+                })
+                .expect("review fact envelope"),
+            )
+            .expect("review fact dispatch");
+
+        thread::sleep(Duration::from_secs(2));
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::RunSchedulerTick {
+                    tick: UiSchedulerTickCommand {
+                        stale_after_seconds: 1,
+                        soft_timeout_seconds: 1,
+                        hard_timeout_seconds: 30,
+                    },
+                })
+                .expect("scheduler tick envelope"),
+            )
+            .expect("scheduler tick dispatch");
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::ApplyExecutionFact {
+                    fact: UiExecutionFactCommand {
+                        execution_id: "runtime-phase1-exec-blocked".to_owned(),
+                        task_id: "runtime-phase1-blocked-task".to_owned(),
+                        agent_id,
+                        turn_id: Some(turn_id),
+                        kind: UiExecutionFactKind::Blocked {
+                            reason: "waiting on dependency".to_owned(),
+                            evidence: vec!["blocked evidence".to_owned()],
+                        },
+                    },
+                })
+                .expect("blocked fact envelope"),
+            )
+            .expect("blocked fact dispatch");
+
+        let board = runtime
+            .query_runtime(&UiCommand::QueryTaskBoard {
+                status: None,
+                agent_id: None,
+                include_terminal: false,
+            })
+            .expect("final board query")
+            .expect("final board result");
+        match board {
+            UiQueryResult::TaskBoard(board) => {
+                assert!(
+                    board
+                        .blocked
+                        .iter()
+                        .any(|task| task.task_id == "runtime-phase1-blocked-task"),
+                    "blocked view must include execution-blocked task: {:?}",
+                    board.blocked
+                );
+                assert!(
+                    board
+                        .review_ready
+                        .iter()
+                        .any(|task| task.task_id == "runtime-phase1-review-task"),
+                    "review view must include review-ready task: {:?}",
+                    board.review_ready
+                );
+                assert!(
+                    board
+                        .stale
+                        .iter()
+                        .any(|task| task.task_id == "runtime-phase1-blocked-task"),
+                    "stale view must include scheduler-observed task: {:?}",
+                    board.stale
+                );
+            }
+            other => panic!("unexpected final board result: {other:?}"),
+        }
+
+        let history = runtime
+            .query_runtime(&UiCommand::QueryTaskHistory {
+                task_id: "runtime-phase1-blocked-task".to_owned(),
+            })
+            .expect("history query")
+            .expect("history result");
+        match history {
+            UiQueryResult::TaskHistory(history) => {
+                let event_types = history
+                    .events
+                    .iter()
+                    .map(|event| event.event_type.as_str())
+                    .collect::<Vec<_>>();
+                assert!(event_types.contains(&"TaskExecutionRecorded"));
+                assert!(event_types.contains(&"TaskExecutionRecovering"));
+                assert!(event_types.contains(&"TaskSchedulerTick"));
+                assert!(event_types.contains(&"TaskBlocked"));
+            }
+            other => panic!("unexpected history result: {other:?}"),
+        }
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }

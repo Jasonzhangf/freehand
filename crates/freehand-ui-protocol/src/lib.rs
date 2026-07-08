@@ -121,6 +121,18 @@ pub enum UiCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<AgentId>,
     },
+    QueryTaskBoard {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<AgentId>,
+        #[serde(default)]
+        include_terminal: bool,
+    },
+    QueryAgentBoard,
+    QueryAgentLifecycle {
+        agent_id: AgentId,
+    },
     QueryTaskHistory {
         task_id: String,
     },
@@ -147,6 +159,12 @@ pub enum UiCommand {
     },
     CloseTask {
         task_id: String,
+    },
+    ApplyExecutionFact {
+        fact: UiExecutionFactCommand,
+    },
+    RunSchedulerTick {
+        tick: UiSchedulerTickCommand,
     },
     QueryNodeStatus {
         node_id: String,
@@ -422,6 +440,71 @@ pub struct UiTaskListProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskBoardProjection {
+    pub source_agent_id: AgentId,
+    pub status_filter: Option<String>,
+    pub agent_filter: Option<AgentId>,
+    pub include_terminal: bool,
+    pub tasks: Vec<UiTaskSnapshotProjection>,
+    pub agents: Vec<UiAgentSnapshotProjection>,
+    pub blocked: Vec<UiTaskSnapshotProjection>,
+    pub review_ready: Vec<UiTaskSnapshotProjection>,
+    pub stale: Vec<UiTaskSnapshotProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAgentSnapshotProjection {
+    pub agent_id: AgentId,
+    pub status: String,
+    pub current_task_id: Option<String>,
+    pub current_cwd: Option<String>,
+    pub running_tasks: u32,
+    pub queued_tasks: u32,
+    pub last_seen_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAgentLifecycleProjection {
+    pub agent_id: AgentId,
+    pub role: String,
+    pub alive: bool,
+    pub state: String,
+    pub current_task_id: Option<String>,
+    pub current_execution_id: Option<String>,
+    pub current_turn_id: Option<TurnId>,
+    pub current_activity: Option<UiAgentLifecycleActivityProjection>,
+    pub last_activity: Option<UiAgentLifecycleActivityProjection>,
+    pub model_request_count: u64,
+    pub model_retry_count: u64,
+    pub tool_call_count: u64,
+    pub tool_failure_count: u64,
+    pub schema_polish_count: u64,
+    pub provider_error_count: u64,
+    pub blocked_count: u64,
+    pub current_model: Option<String>,
+    pub last_seen_at: u64,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAgentLifecycleActivityProjection {
+    pub kind: String,
+    pub semantic_summary: String,
+    pub target: Option<String>,
+    pub elapsed_ms: u64,
+    pub tool_name: Option<String>,
+    pub model: Option<String>,
+    pub retry_count: Option<u32>,
+    pub visibility: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAgentBoardProjection {
+    pub source_agent_id: AgentId,
+    pub agents: Vec<UiAgentLifecycleProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiTaskLedgerEventProjection {
     pub seq: u64,
     pub event_id: String,
@@ -525,6 +608,47 @@ pub struct UiTaskReviewCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UiExecutionFactKind {
+    Running {
+        phase: String,
+        summary: String,
+        evidence: Vec<String>,
+    },
+    Recovering {
+        summary: String,
+        evidence: Vec<String>,
+        retry_count: u32,
+    },
+    Blocked {
+        reason: String,
+        evidence: Vec<String>,
+    },
+    ReviewReady {
+        summary: String,
+        deliverables: Vec<String>,
+        evidence: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiExecutionFactCommand {
+    pub execution_id: String,
+    pub task_id: String,
+    pub agent_id: AgentId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<TurnId>,
+    pub kind: UiExecutionFactKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSchedulerTickCommand {
+    pub stale_after_seconds: u64,
+    pub soft_timeout_seconds: u64,
+    pub hard_timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiProjection {
     Turn(UiTurnProjection),
     NodeStatus(NodeStatusSnapshot),
@@ -568,6 +692,9 @@ pub enum UiQueryResult {
     Debug(Option<DebugStateSnapshot>),
     Checkpoints(UiCheckpointSnapshot),
     TaskList(UiTaskListProjection),
+    TaskBoard(UiTaskBoardProjection),
+    AgentBoard(UiAgentBoardProjection),
+    AgentLifecycle(UiAgentLifecycleProjection),
     TaskHistory(UiTaskHistoryProjection),
     ErrorCenterEvents(UiErrorCenterEventListProjection),
     ConfigStatus(UiConfigStatusProjection),
@@ -1251,6 +1378,9 @@ impl UiProtocolState {
                 )))
             }
             UiCommand::QueryTaskList { .. }
+            | UiCommand::QueryTaskBoard { .. }
+            | UiCommand::QueryAgentBoard
+            | UiCommand::QueryAgentLifecycle { .. }
             | UiCommand::QueryTaskHistory { .. }
             | UiCommand::QueryConfigStatus
             | UiCommand::QueryErrorCenterEvents { .. } => Err(UiProtocolError::StreamKindMismatch),
@@ -2046,6 +2176,9 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QuerySessionTurns { .. } => "query_session_turns",
         UiCommand::QueryConfigStatus => "query_config_status",
         UiCommand::QueryTaskList { .. } => "query_task_list",
+        UiCommand::QueryTaskBoard { .. } => "query_task_board",
+        UiCommand::QueryAgentBoard => "query_agent_board",
+        UiCommand::QueryAgentLifecycle { .. } => "query_agent_lifecycle",
         UiCommand::QueryTaskHistory { .. } => "query_task_history",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
@@ -2053,6 +2186,8 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::SubmitTaskReview { .. } => "submit_task_review",
         UiCommand::ApproveTaskReview { .. } => "approve_task_review",
         UiCommand::CloseTask { .. } => "close_task",
+        UiCommand::ApplyExecutionFact { .. } => "apply_execution_fact",
+        UiCommand::RunSchedulerTick { .. } => "run_scheduler_tick",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",
@@ -2080,6 +2215,8 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::SubmitTaskReview { .. }
             | UiCommand::ApproveTaskReview { .. }
             | UiCommand::CloseTask { .. }
+            | UiCommand::ApplyExecutionFact { .. }
+            | UiCommand::RunSchedulerTick { .. }
             | UiCommand::SendDirectMessageToSlave { .. }
             | UiCommand::RewindCheckpoint { .. }
             | UiCommand::CancelTurn { .. }
@@ -2109,7 +2246,9 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         UiCommand::CreateTask { .. }
         | UiCommand::SubmitTaskReview { .. }
         | UiCommand::ApproveTaskReview { .. }
-        | UiCommand::CloseTask { .. } => ("task.orchestration", "crates/freehand-task"),
+        | UiCommand::CloseTask { .. }
+        | UiCommand::ApplyExecutionFact { .. }
+        | UiCommand::RunSchedulerTick { .. } => ("task.orchestration", "crates/freehand-task"),
         UiCommand::SendDirectMessageToSlave { .. } => ("node.master-slave", "crates/freehand-node"),
         _ => ("ui.protocol", "crates/freehand-ui-protocol"),
     }

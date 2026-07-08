@@ -14,6 +14,9 @@
   - `run_session_continue_sample_async`
   - `run_task_lifecycle_sample`
   - `run_task_lifecycle_sample_async`
+  - `run_phase1_foundation_sample`
+  - `run_phase1_foundation_sample_async`
+  - `run_phase1_foundation_verify_async`
   - `run_adp_session_manage`
   - `run_adp_session_manage_async`
   - `run_adp_task_query`
@@ -34,6 +37,7 @@
 - for provider-retry online proof, `scripts/verify-provider-retry-online.sh` temporarily points S-profile provider config at a local Anthropic-compatible 500 fixture, runs the provider-retry ADP sample, verifies five upstream `/v1/messages` attempts plus error-center provider rows, then restores runtime config and S env
 - for same-session continuation sample, CLI submits two prompts into one isolated session and verifies the second terminal answer uses a unique token from prior effective history
 - for task lifecycle sample, CLI sends protocol-owned task mutation commands (`CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`) through ADP, then verifies task owner truth through ADP task list/history queries
+- for Phase 1 foundation sample, CLI drives protocol-owned TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and same-id verification commands/queries through ADP without UI or model prose
 - for ADP session manage, CLI connects to the same daemon `/adp` and sends protocol-owned create, rename, archive, restore, delete-as-archive, or rollback command frames for no-UI session lifecycle diagnosis
 - for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis
 - for ADP task subscribe, CLI connects to the same daemon `/adp` and sends protocol-owned task list subscription frames for no-UI task push diagnosis
@@ -49,6 +53,7 @@
 - provider-retry online verifier prints the sample output, error-center projection, provider attempt count, and session id after proving config restoration is wired through the S-profile daemon lifecycle
 - same-session continuation sample prints both turn ids, transcript count, and token recovery evidence
 - task lifecycle sample prints task id, closed status, and required history event types
+- Phase 1 foundation sample prints blocked task id, review task id, execution id, agent id, blocked/review/stale counts, lifecycle query evidence, and recovering-event evidence
 - ADP session manage prints command receipt status for session CRUD and rollback commands without creating a second source of session truth
 - ADP task query prints task list count/task ids or task history event counts from protocol-owned query results
 - ADP task subscribe prints accepted state plus task list count/task ids from the initial protocol-owned subscription event
@@ -63,6 +68,7 @@
 - ADP turn sample timeout, wrong terminal status, missing isolated-session transcript evidence, missing failed tool activity for the failure sample, missing schema retry evidence for the schema-mismatch sample, missing provider retry evidence for the provider-retry sample, or wrong error domain returns explicit terminal errors
 - same-session continuation timeout, missing transcript, missing second turn, or missing token evidence returns explicit terminal errors
 - task lifecycle timeout, missing task, non-closed status, or missing create/review/approve/close history event returns explicit terminal errors
+- Phase 1 foundation sample timeout, missing TaskBoard/AgentBoard/Lifecycle evidence, missing blocked/review/stale projection, missing recovering history event, or same-id restart mismatch returns explicit terminal errors
 - ADP session manage failures print explicit ADP failure code/message instead of treating session mutation errors as empty success
 - rewrite recovery block is reported as explicit blocked outcome, not disguised as success
 - ADP query-as-command must return `ingress_command_kind_mismatch`, proving command/query separation without mutation
@@ -108,6 +114,7 @@
 | 14 | `run_adp_error_query` | `apps/freehand-cli/src/main.rs` | parse ADP error-center query URL and session/trace/turn/domain filters | `--url ws://.../adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]` | selected error-center query command | CLI dispatcher | ADP error query runner | bound |
 | 15 | `run_adp_error_query_async` | `apps/freehand-cli/src/main.rs` | send error-center query over ADP and summarize the returned metadata projection | ADP WebSocket URL + error-center query command | terminal-facing error-center summary or explicit ADP failure | ADP error query runner | daemon `/adp` | bound |
 | 16 | `run_adp_session_manage` / `run_adp_session_manage_async` | `apps/freehand-cli/src/main.rs` | send protocol-owned session CRUD or rollback command over ADP and summarize the command receipt | `--url ws://.../adp --action create\|rename\|archive\|restore\|delete\|rollback --session <id> [--title <title>] [--cwd <path>]` | terminal-facing session manage receipt or explicit ADP failure | CLI dispatcher | daemon `/adp` | bound |
+| 17 | `run_phase1_foundation_sample` / `run_phase1_foundation_sample_async` / `run_phase1_foundation_verify_async` | `apps/freehand-cli/src/main.rs` | drive Phase 1 TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify ids | terminal-facing Phase 1 foundation evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -128,6 +135,7 @@
 - CLI ADP task list/history query path is implemented for no-UI task truth diagnosis
 - CLI ADP task list subscribe path is implemented for no-UI task push diagnosis
 - CLI ADP error-center query path is implemented for no-UI metadata truth diagnosis
+- CLI Phase 1 foundation sample is implemented for no-UI TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id proof
 - harness-backed app E2E smoke now exists before production CLI/server runtime loop
 - remaining gap: production non-smoke command loop is still pending
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes

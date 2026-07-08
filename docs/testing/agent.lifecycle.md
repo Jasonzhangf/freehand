@@ -18,6 +18,7 @@
 - current activity, last activity, elapsed time, task/execution/turn binding, and model/tool/error counters
 - raw assistant prose is not accepted as lifecycle input
 - unknown agent id returns explicit not-found
+- implemented owner test: `agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked`
 
 ## Module Black-Box Coverage
 
@@ -45,6 +46,7 @@ cargo run -p xtask -- gates check
 
 ## Known Gaps
 
-- implementation is pending after D1 owner/map closeout
-- persistence and restart same-id proof are pending until AgentBoard query exists
+- D3 owner-internal skeleton is implemented in `crates/freehand-task`
+- ADP/CLI lifecycle query surface is pending D6
+- restart same-id proof is pending D6
 - no standalone model-facing `agent` tool is planned for Phase 1

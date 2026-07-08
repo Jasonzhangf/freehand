@@ -31,6 +31,8 @@
 - provider/model update commands enter through a protocol dispatch envelope, route to `config.core::update_provider_config_in_path`, and must not duplicate config validation or persistence logic in runtime
 - successful task tool mutations publish a runtime-owned task list projection into `UiProtocolState` so ADP task list subscribers observe lifecycle changes without UI polling
 - protocol-owned task mutation commands route through runtime into `TaskRuntime::create_task`, `TaskRuntime::submit_review`, `TaskRuntime::approve_review`, and `TaskRuntime::close_task`; runtime publishes updated task list projection after each accepted mutation
+- Phase 1 board/lifecycle queries route `QueryTaskBoard`, `QueryAgentBoard`, and `QueryAgentLifecycle` through runtime into `TaskRuntime::query_task_board`, `TaskRuntime::query_agent_board`, and `TaskRuntime::query_agent_lifecycle`
+- Phase 1 execution/timer commands route `ApplyExecutionFact` and `RunSchedulerTick` through runtime into `TaskRuntime::apply_execution_fact` and `TaskRuntime::run_scheduler_tick`; runtime remains a thin bridge and does not make scheduler business decisions
 
 ## Response Mainline
 
@@ -59,6 +61,8 @@
 - session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections
 - runtime-backed task list and task history queries return UI-safe task projections sourced from `task.orchestration` snapshot and ledger APIs
 - runtime-backed task mutation commands return receipts only after `task.orchestration` accepts the mutation and task list projection publication succeeds
+- runtime-backed TaskBoard and AgentBoard queries return UI-safe board projections sourced from `task.orchestration` and `agent.lifecycle`
+- execution fact and scheduler tick dispatch receipts return only after `task.orchestration` accepts owner truth and task-list publication succeeds
 - runtime-backed error-center queries return UI-safe projections sourced from `metadata.core` ledger rows written by `error.center`
 - runtime-backed config status queries return UI-safe projections sourced from `config.core` selected agent truth and include auth source type only
 - successful provider/model updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and leave the active runtime/live provider config unchanged until daemon restart
@@ -85,6 +89,7 @@
 - provider/model update without a live runtime home or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake hot reload
 - task list publication failures after task mutation are explicit dispatch failures and must not be silently swallowed as a successful task tool result
 - task mutation dispatch requires a live runtime home, maps missing tasks to target-not-found, and must not create task truth outside `task.orchestration`
+- invalid task board filters, missing agent lifecycle ids, invalid execution facts, and invalid scheduler thresholds map to explicit dispatch failures from the owner APIs
 
 ## Shared Multi-Reference Functions
 
@@ -112,6 +117,12 @@
   - allowed callers: `RuntimeCommandDispatcher::query_runtime`, `RuntimeCommandDispatcher::dispatch_update_provider_config`
   - related tests: `runtime_query_projects_config_status_without_secrets`, `runtime_dispatch_updates_provider_config_without_hot_reloading_active_model`
   - why shared: keeps config-to-UI projection in runtime owner while app transports stay protocol-only
+- `project_task_board_for_ui` / `project_agent_board_for_ui` / `project_agent_lifecycle_for_ui`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: convert Phase 1 task and agent lifecycle owner projections into UI-safe DTOs
+  - allowed callers: `RuntimeCommandDispatcher::query_runtime`
+  - related tests: `runtime_query_reads_phase1_task_and_agent_boards`
+  - why shared: keeps board projection in the runtime bridge while Task Center and Agent Lifecycle remain owner truth
 
 ## Function Call Table
 
@@ -137,6 +148,8 @@
 | 16 | `project_error_center_event_for_ui` | `crates/freehand-runtime/src/lib.rs` | convert one watermarked error-center metadata row into ADP DTO fields | metadata envelope | `UiErrorCenterEventProjection` or skipped row | runtime query bridge | ui.protocol DTO | bound |
 | 17 | `RuntimeCommandDispatcher::dispatch_update_provider_config` | `crates/freehand-runtime/src/lib.rs` | route provider/model update dispatch into the config owner and store pending restart-required UI projection without hot-reloading active runtime | `UiProviderConfigUpdate` dispatch envelope | dispatch receipt or explicit dispatch failure | `RuntimeCommandDispatcher::dispatch` | `update_provider_config_in_path` | bound |
 | 18 | `update_provider_config_in_path` | `crates/freehand-config/src/lib.rs` | validate and atomically persist provider/model update through canonical config owner | runtime config path + provider update | selected agent config projection from saved TOML | `RuntimeCommandDispatcher::dispatch_update_provider_config` | config.core persistence | bound |
+| 19 | `project_task_board_for_ui` / `project_agent_board_for_ui` / `project_agent_lifecycle_for_ui` | `crates/freehand-runtime/src/lib.rs` | project Phase 1 TaskBoard, AgentBoard, and AgentLifecycle owner truth into protocol DTOs | task/agent owner projections | UI-safe board/lifecycle query results | `RuntimeCommandDispatcher::query_runtime` | ui.protocol DTOs | bound |
+| 20 | `RuntimeCommandDispatcher::dispatch_apply_execution_fact` / `dispatch_run_scheduler_tick` | `crates/freehand-runtime/src/lib.rs` | route Phase 1 execution facts and scheduler ticks into task.orchestration without making business decisions | execution fact or scheduler tick dispatch envelope | dispatch receipt or owner failure | `RuntimeCommandDispatcher::dispatch` | `TaskRuntime::apply_execution_fact` / `TaskRuntime::run_scheduler_tick` | bound |
 
 ## Sync Status Against Code
 
@@ -165,6 +178,8 @@
 - runtime session-management dispatch is bound as a thin route to `reason.persistence`
 - runtime rollback dispatch is bound as a thin route to `reason.persistence::rollback_latest_session_turn` plus UI effective transcript replacement
 - runtime task query dispatch is bound as a thin read-only route to `task.orchestration`
+- runtime Phase 1 TaskBoard and AgentBoard query dispatch is bound as a thin read-only route to `task.orchestration` and `agent.lifecycle`
+- runtime Phase 1 execution fact and scheduler tick dispatch is bound as a thin mutation route into `task.orchestration`; scheduler ticks emit facts/recommendations only
 - runtime error-center query dispatch is bound as a thin read-only route to `metadata.core` rows written by `error.center`
 - runtime config status query dispatch is bound as a thin read-only route from selected `config.core` truth to `UiConfigStatusProjection`
 - runtime provider/model update dispatch is bound as a thin mutation route into `config.core`; successful saves project restart-required pending status and active runtime config remains unchanged until restart

@@ -48,7 +48,9 @@
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - task list and task history queries are protocol-owned ADP/query command shapes, but the protocol only defines UI-safe DTOs and query-port routing; persisted task truth remains owned by `task.orchestration`
+- Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes; protocol defines UI-safe DTOs while runtime/task owners supply truth
 - task mutation commands (`CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to `task.orchestration` through runtime; protocol does not write task truth
+- Phase 1 `ApplyExecutionFact` and `RunSchedulerTick` are protocol-owned mutation intents routed to `task.orchestration`; protocol does not update task state or make scheduler decisions
 - task list subscriptions are protocol-owned ADP/subscribe command shapes; task list projection contents must be supplied by runtime/task owners and remain read-only UI DTOs
 - error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
 - config status query is a protocol-owned ADP/query command shape, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
@@ -74,6 +76,7 @@
 - session list projections expose owner-supplied session `title` and `archived` metadata so WebUI, Android, CLI, and headless ADP clients share one CRUD truth
 - rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth
 - task list and task history query results expose UI-safe task snapshot and ledger-event projections supplied by runtime owner code through `UiRuntimeQueryPort`
+- Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results expose UI-safe board/lifecycle projections supplied by runtime owner code through `UiRuntimeQueryPort`
 - task list subscription events expose the same UI-safe task list projection as query results so task panels can refresh from push without polling or app-local task state
 - error-center event query results expose UI-safe watermarked metadata fields plus raw hash only; raw provider/tool/request/user/assistant text is not part of the protocol DTO
 - config status query results expose UI-safe active agent/provider/model fields plus auth source type only; API keys, pair tokens, provider raw payloads, and full credential-bearing URLs are not part of the DTO
@@ -109,6 +112,7 @@
 - provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO
 - task history remains query-only; task list subscribe accepts only list filters and must reject history/query misuse on the subscribe route
 - task mutation commands reject empty task id/title/content/goal/review summary before runtime dispatch instead of silently creating partial task truth
+- Phase 1 execution fact commands reject empty ids and malformed facts before runtime dispatch; scheduler tick commands reject invalid threshold shape before runtime dispatch
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
 - source identity fields remain explicit across success and error paths
 - cancelled terminal projection stays explicit and is not collapsed into failed or completed UI status
@@ -160,9 +164,9 @@
   - why shared: keeps checkpoint UI projection single-sourced without letting UI parse runtime manifests
 - `UiRuntimeQueryPort::query_runtime`
   - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: let app transports ask runtime owners for read-only query projections such as config status, task list/history, and error-center events before falling back to protocol-state queries
+  - purpose: let app transports ask runtime owners for read-only query projections such as config status, task list/history, Phase 1 boards/lifecycle, and error-center events before falling back to protocol-state queries
   - allowed callers: WebUI/daemon ADP query transport
-  - related tests: daemon ADP task query smoke, daemon ADP error-center query smoke
+  - related tests: daemon ADP task query smoke, daemon ADP error-center query smoke, Phase 1 foundation CLI smoke
   - why shared: keeps app transports protocol-bound while allowing runtime-owned read models without importing runtime into `freehand-server`
 - `project_tool_call_display` / `project_tool_result_display`
   - owner: `crates/freehand-blocks/src/tool_display.rs`
@@ -206,6 +210,8 @@
 | 20b | `UiProviderConfigUpdate` / `UiCommand::UpdateProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider/model update command DTO without credential values and route it to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 21 | `UiCommand::QueryErrorCenterEvents` / `UiQueryResult::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center query/result DTOs | session/trace/turn/domain filters | UI-safe error-center projection | ADP query transport | runtime query port | bound |
 | 22 | `UiCommand::SubscribeErrorCenterEvents` / `UiProjection::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define error-center subscription command and projection event shape | error-center subscription filters | UI-safe error-center subscription event | ADP subscribe transport | protocol selector matcher | bound |
+| 23 | `UiCommand::QueryTaskBoard` / `UiCommand::QueryAgentBoard` / `UiCommand::QueryAgentLifecycle` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 board and lifecycle query DTOs without owning task/lifecycle truth | board or lifecycle query filters | runtime-backed UI-safe board/lifecycle projections | ADP query transport | runtime query port | bound |
+| 24 | `UiCommand::ApplyExecutionFact` / `UiCommand::RunSchedulerTick` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 execution fact and scheduler tick mutation DTOs routed to task.orchestration | execution fact or scheduler tick command | validated mutation intent routed to task.orchestration | ADP command transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Code
 
@@ -227,6 +233,8 @@
 - session CRUD protocol routing is bound for create, rename, archive, restore, and delete-as-archive commands through `runtime.ui-command-dispatch` into `reason.persistence`
 - rollback latest session turn protocol routing is bound through `RollbackLatestSessionTurn` into `reason.persistence`, and `UiProtocolState::replace_session_turn_projections` lets runtime refresh effective transcript projection without UI-local deletion
 - task list/history query DTOs and runtime query-port routing are protocol-bound; `UiProtocolState::query` rejects them so runtime owner code must supply task truth
+- Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query DTOs are protocol-bound and route only through runtime-backed query ports
+- Phase 1 ApplyExecutionFact and RunSchedulerTick command DTOs are protocol-bound and route only through runtime-backed task.orchestration dispatch
 - task list subscription projection is protocol-bound; runtime owner code publishes task list projection events into `UiProtocolState`
 - error-center query/subscription DTOs and runtime query-port routing are protocol-bound; runtime owner code supplies metadata-backed read projections
 - config status query/result DTO is protocol-bound; runtime owner code supplies selected config projection and protocol state rejects local handling

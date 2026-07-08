@@ -114,6 +114,217 @@ pub struct AgentSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentLifecycleState {
+    Idle,
+    Assigned,
+    ModelThinking,
+    ToolRunning,
+    Recovering,
+    Blocked,
+    WaitingReview,
+    Failed,
+    Offline,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentLifecycleActivity {
+    pub kind: String,
+    pub semantic_summary: String,
+    pub target: Option<String>,
+    pub started_at: u64,
+    pub elapsed_ms: u64,
+    pub tool_name: Option<String>,
+    pub model: Option<String>,
+    pub retry_count: Option<u32>,
+    pub visibility: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentLifecycleStats {
+    pub turn_count: u64,
+    pub model_request_count: u64,
+    pub model_retry_count: u64,
+    pub tool_call_count: u64,
+    pub tool_failure_count: u64,
+    pub schema_polish_count: u64,
+    pub provider_error_count: u64,
+    pub blocked_count: u64,
+    pub current_model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentLifecycleSnapshot {
+    pub schema_version: u32,
+    pub agent_id: AgentId,
+    pub role: String,
+    pub alive: bool,
+    pub state: AgentLifecycleState,
+    pub state_entered_at: u64,
+    pub elapsed_ms: u64,
+    pub current_task_id: Option<TaskId>,
+    pub current_execution_id: Option<String>,
+    pub current_turn_id: Option<TurnId>,
+    pub current_activity: Option<AgentLifecycleActivity>,
+    pub last_activity: Option<AgentLifecycleActivity>,
+    pub stats: AgentLifecycleStats,
+    pub last_seen_at: u64,
+    pub next_check_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentBoardProjection {
+    pub schema_version: u32,
+    pub generated_at: u64,
+    pub agents: Vec<AgentLifecycleSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentLifecycleEvent {
+    ModelThinking {
+        agent_id: AgentId,
+        task_id: Option<TaskId>,
+        turn_id: Option<TurnId>,
+        model: String,
+    },
+    ToolRunning {
+        agent_id: AgentId,
+        task_id: Option<TaskId>,
+        turn_id: Option<TurnId>,
+        tool_name: String,
+        target: Option<String>,
+    },
+    Recovering {
+        agent_id: AgentId,
+        task_id: Option<TaskId>,
+        turn_id: Option<TurnId>,
+        summary: String,
+    },
+    Blocked {
+        agent_id: AgentId,
+        task_id: Option<TaskId>,
+        turn_id: Option<TurnId>,
+        reason: String,
+    },
+}
+
+impl AgentLifecycleEvent {
+    pub fn agent_id(&self) -> &AgentId {
+        match self {
+            Self::ModelThinking { agent_id, .. }
+            | Self::ToolRunning { agent_id, .. }
+            | Self::Recovering { agent_id, .. }
+            | Self::Blocked { agent_id, .. } => agent_id,
+        }
+    }
+
+    pub fn task_id(&self) -> Option<&TaskId> {
+        match self {
+            Self::ModelThinking { task_id, .. }
+            | Self::ToolRunning { task_id, .. }
+            | Self::Recovering { task_id, .. }
+            | Self::Blocked { task_id, .. } => task_id.as_ref(),
+        }
+    }
+
+    pub fn turn_id(&self) -> Option<&TurnId> {
+        match self {
+            Self::ModelThinking { turn_id, .. }
+            | Self::ToolRunning { turn_id, .. }
+            | Self::Recovering { turn_id, .. }
+            | Self::Blocked { turn_id, .. } => turn_id.as_ref(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TaskBoardQuery {
+    pub status: Option<TaskStatus>,
+    pub assignee: Option<AgentId>,
+    pub include_terminal: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskBoardProjection {
+    pub schema_version: u32,
+    pub generated_at: u64,
+    pub tasks: Vec<TaskSnapshot>,
+    pub agents: Vec<AgentSnapshot>,
+    pub blocked: Vec<TaskSnapshot>,
+    pub review_ready: Vec<TaskSnapshot>,
+    pub stale: Vec<TaskSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExecutionFactKind {
+    Running {
+        phase: String,
+        summary: String,
+        evidence: Vec<String>,
+    },
+    Recovering {
+        summary: String,
+        evidence: Vec<String>,
+        retry_count: u32,
+    },
+    Blocked {
+        reason: String,
+        evidence: Vec<String>,
+    },
+    ReviewReady {
+        summary: String,
+        deliverables: Vec<String>,
+        evidence: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionFact {
+    pub execution_id: String,
+    pub task_id: TaskId,
+    pub agent_id: AgentId,
+    pub turn_id: Option<TurnId>,
+    pub occurred_at: u64,
+    pub kind: ExecutionFactKind,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SchedulerFactKind {
+    Stale { idle_seconds: u64 },
+    SoftTimeout { elapsed_seconds: u64 },
+    HardTimeout { elapsed_seconds: u64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SchedulerFact {
+    pub task_id: TaskId,
+    pub agent_id: Option<AgentId>,
+    pub observed_at: u64,
+    pub fact: SchedulerFactKind,
+    pub recommendation: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SchedulerTickRequest {
+    pub now: u64,
+    pub stale_after_seconds: u64,
+    pub soft_timeout_seconds: u64,
+    pub hard_timeout_seconds: u64,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SchedulerTickOutcome {
+    pub facts: Vec<SchedulerFact>,
+    pub events: Vec<TaskLedgerEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskLease {
     pub schema_version: u32,
     pub task_id: TaskId,
@@ -339,7 +550,9 @@ pub struct TaskRuntime {
 struct TaskRuntimeState {
     tasks: BTreeMap<TaskId, TaskSnapshot>,
     agents: BTreeMap<AgentId, AgentSnapshot>,
+    lifecycle: BTreeMap<AgentId, AgentLifecycleSnapshot>,
     leases: BTreeMap<TaskId, TaskLease>,
+    scheduler_facts: BTreeMap<TaskId, Vec<SchedulerFact>>,
 }
 
 impl TaskRuntime {
@@ -351,14 +564,23 @@ impl TaskRuntime {
         let mut state = TaskRuntimeState::default();
         let self_agent = store.load_or_create_self_agent(&owner_agent_id)?;
         for agent in store.load_agent_snapshots()? {
+            state.lifecycle.insert(
+                agent.agent_id.clone(),
+                lifecycle_from_agent_snapshot(&agent, now_unix_seconds()),
+            );
             state.agents.insert(agent.agent_id.clone(), agent);
         }
+        state.lifecycle.insert(
+            self_agent.agent_id.clone(),
+            lifecycle_from_agent_snapshot(&self_agent, now_unix_seconds()),
+        );
         state.agents.insert(owner_agent_id, self_agent);
         for task in store.load_task_snapshots()? {
             state.tasks.insert(task.task_id.clone(), task);
         }
         state.leases = store.load_leases()?;
         reconcile_running_leases(&store, &mut state, now_unix_seconds())?;
+        state.scheduler_facts = store.load_scheduler_facts(state.tasks.keys())?;
         Ok(Self {
             store,
             state: Mutex::new(state),
@@ -518,6 +740,76 @@ impl TaskRuntime {
                 .then_with(|| left.task_id.cmp(&right.task_id))
         });
         Ok(tasks)
+    }
+
+    pub fn query_task_board(
+        &self,
+        query: TaskBoardQuery,
+    ) -> Result<TaskBoardProjection, TaskError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        let mut tasks = state
+            .tasks
+            .values()
+            .filter(|task| {
+                query
+                    .status
+                    .as_ref()
+                    .map(|status| &task.status == status)
+                    .unwrap_or(true)
+            })
+            .filter(|task| {
+                query
+                    .assignee
+                    .as_ref()
+                    .map(|agent_id| {
+                        task.assignee
+                            .as_ref()
+                            .map(|assignee| &assignee.agent_id == agent_id)
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(true)
+            })
+            .filter(|task| query.include_terminal || !is_terminal_status(&task.status))
+            .cloned()
+            .collect::<Vec<_>>();
+        sort_task_snapshots(&mut tasks);
+        let blocked = tasks
+            .iter()
+            .filter(|task| matches!(task.status, TaskStatus::Blocked))
+            .cloned()
+            .collect();
+        let review_ready = tasks
+            .iter()
+            .filter(|task| matches!(task.status, TaskStatus::ReviewSubmitted))
+            .cloned()
+            .collect();
+        let stale = tasks
+            .iter()
+            .filter(|task| {
+                state
+                    .scheduler_facts
+                    .get(&task.task_id)
+                    .map(|facts| {
+                        facts
+                            .iter()
+                            .any(|fact| matches!(fact.fact, SchedulerFactKind::Stale { .. }))
+                    })
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        Ok(TaskBoardProjection {
+            schema_version: 1,
+            generated_at: now_unix_seconds(),
+            tasks,
+            agents: state.agents.values().cloned().collect(),
+            blocked,
+            review_ready,
+            stale,
+        })
     }
 
     pub fn task_history(&self, task_id: &TaskId) -> Result<Vec<TaskLedgerEvent>, TaskError> {
@@ -745,6 +1037,149 @@ impl TaskRuntime {
         )
     }
 
+    pub fn apply_execution_fact(
+        &self,
+        fact: ExecutionFact,
+    ) -> Result<TaskMutationOutcome, TaskError> {
+        validate_execution_fact(&fact)?;
+        self.ensure_execution_binding(&fact)?;
+        let actor = TaskActor {
+            agent_id: fact.agent_id.clone(),
+            source: "task.orchestration.execution_fact".to_owned(),
+            session_id: None,
+            turn_id: fact.turn_id.clone(),
+            trace_id: None,
+        };
+        match fact.kind {
+            ExecutionFactKind::Running {
+                phase,
+                summary,
+                evidence,
+            } => {
+                self.ensure_running_from_execution_fact(&fact.task_id, &actor, &fact.watermark)?;
+                self.mutate_task(
+                    &fact.task_id,
+                    "TaskExecutionRecorded",
+                    None,
+                    &actor,
+                    &fact.watermark,
+                    json!({
+                        "execution_id": fact.execution_id,
+                        "agent_id": fact.agent_id.as_str(),
+                        "turn_id": fact.turn_id.as_ref().map(TurnId::as_str),
+                        "occurred_at": fact.occurred_at,
+                        "phase": phase,
+                        "summary": summary,
+                        "evidence": evidence
+                    }),
+                )
+            }
+            ExecutionFactKind::Recovering {
+                summary,
+                evidence,
+                retry_count,
+            } => {
+                self.ensure_running_from_execution_fact(&fact.task_id, &actor, &fact.watermark)?;
+                self.mutate_task(
+                    &fact.task_id,
+                    "TaskExecutionRecovering",
+                    None,
+                    &actor,
+                    &fact.watermark,
+                    json!({
+                        "execution_id": fact.execution_id,
+                        "agent_id": fact.agent_id.as_str(),
+                        "turn_id": fact.turn_id.as_ref().map(TurnId::as_str),
+                        "occurred_at": fact.occurred_at,
+                        "summary": summary,
+                        "evidence": evidence,
+                        "retry_count": retry_count
+                    }),
+                )
+            }
+            ExecutionFactKind::Blocked { reason, evidence } => self.mutate_task(
+                &fact.task_id,
+                "TaskBlocked",
+                Some(TaskStatus::Blocked),
+                &actor,
+                &fact.watermark,
+                json!({
+                    "execution_id": fact.execution_id,
+                    "agent_id": fact.agent_id.as_str(),
+                    "turn_id": fact.turn_id.as_ref().map(TurnId::as_str),
+                    "occurred_at": fact.occurred_at,
+                    "reason": reason,
+                    "evidence": evidence
+                }),
+            ),
+            ExecutionFactKind::ReviewReady {
+                summary,
+                deliverables,
+                evidence,
+            } => {
+                self.ensure_running_from_execution_fact(&fact.task_id, &actor, &fact.watermark)?;
+                self.mutate_task(
+                    &fact.task_id,
+                    "TaskReviewSubmitted",
+                    Some(TaskStatus::ReviewSubmitted),
+                    &actor,
+                    &fact.watermark,
+                    json!({
+                        "execution_id": fact.execution_id,
+                        "agent_id": fact.agent_id.as_str(),
+                        "turn_id": fact.turn_id.as_ref().map(TurnId::as_str),
+                        "occurred_at": fact.occurred_at,
+                        "summary": summary,
+                        "deliverables": deliverables,
+                        "evidence": evidence
+                    }),
+                )
+            }
+        }
+    }
+
+    pub fn run_scheduler_tick(
+        &self,
+        request: SchedulerTickRequest,
+    ) -> Result<SchedulerTickOutcome, TaskError> {
+        validate_scheduler_tick_request(&request)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        let candidates = state
+            .tasks
+            .values()
+            .filter(|task| !is_terminal_status(&task.status))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut facts = Vec::new();
+        let mut events = Vec::new();
+        for task in candidates {
+            let task_facts = scheduler_facts_for_task(&task, &state.leases, &request);
+            for fact in task_facts {
+                let event = build_event(
+                    &task,
+                    Some(task.status.clone()),
+                    task.status.clone(),
+                    "TaskSchedulerTick",
+                    &request.actor,
+                    &request.watermark,
+                    json!({"scheduler_fact": fact}),
+                );
+                self.store.append_event_and_snapshot(&task, &event)?;
+                state
+                    .scheduler_facts
+                    .entry(task.task_id.clone())
+                    .or_default()
+                    .push(fact.clone());
+                events.push(event);
+                facts.push(fact);
+            }
+        }
+        Ok(SchedulerTickOutcome { facts, events })
+    }
+
     pub fn cancel_task(
         &self,
         request: TaskMutationRequest,
@@ -919,6 +1354,76 @@ impl TaskRuntime {
             .get(agent_id)
             .cloned()
             .ok_or_else(|| TaskError::AgentNotFound(agent_id.as_str().to_owned()))
+    }
+
+    pub fn apply_agent_lifecycle_event(
+        &self,
+        event: AgentLifecycleEvent,
+    ) -> Result<AgentLifecycleSnapshot, TaskError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        let agent_id = event.agent_id().clone();
+        let agent = state
+            .agents
+            .get(&agent_id)
+            .ok_or_else(|| TaskError::AgentNotFound(agent_id.as_str().to_owned()))?;
+        let now = now_unix_seconds();
+        let mut snapshot = state
+            .lifecycle
+            .get(&agent_id)
+            .cloned()
+            .unwrap_or_else(|| lifecycle_from_agent_snapshot(agent, now));
+        let previous = snapshot.current_activity.clone();
+        let (next_state, activity, model, stats_update) = lifecycle_event_projection(&event, now);
+        snapshot.state = next_state;
+        snapshot.state_entered_at = now;
+        snapshot.elapsed_ms = 0;
+        snapshot.current_task_id = event
+            .task_id()
+            .cloned()
+            .or_else(|| agent.current_task_id.clone());
+        snapshot.current_turn_id = event.turn_id().cloned();
+        snapshot.current_activity = Some(activity);
+        snapshot.last_activity = previous;
+        snapshot.last_seen_at = now;
+        if let Some(model) = model {
+            snapshot.stats.current_model = Some(model);
+        }
+        stats_update(&mut snapshot.stats);
+        state.lifecycle.insert(agent_id, snapshot.clone());
+        Ok(snapshot)
+    }
+
+    pub fn query_agent_lifecycle(
+        &self,
+        agent_id: &AgentId,
+    ) -> Result<AgentLifecycleSnapshot, TaskError> {
+        self.state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?
+            .lifecycle
+            .get(agent_id)
+            .cloned()
+            .ok_or_else(|| TaskError::AgentNotFound(agent_id.as_str().to_owned()))
+    }
+
+    pub fn query_agent_board(&self) -> Result<AgentBoardProjection, TaskError> {
+        let mut agents = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?
+            .lifecycle
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        agents.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
+        Ok(AgentBoardProjection {
+            schema_version: 1,
+            generated_at: now_unix_seconds(),
+            agents,
+        })
     }
 
     pub fn snapshot(&self) -> Result<TaskRuntimeSnapshot, TaskError> {
@@ -1097,6 +1602,75 @@ impl TaskRuntime {
         state.tasks.insert(task_id.clone(), task.clone());
         Ok(TaskMutationOutcome { task, event })
     }
+
+    fn ensure_execution_binding(&self, fact: &ExecutionFact) -> Result<(), TaskError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        state
+            .agents
+            .get(&fact.agent_id)
+            .ok_or_else(|| TaskError::AgentNotFound(fact.agent_id.as_str().to_owned()))?;
+        let task = state
+            .tasks
+            .get(&fact.task_id)
+            .ok_or_else(|| TaskError::TaskNotFound(fact.task_id.as_str().to_owned()))?;
+        if task
+            .assignee
+            .as_ref()
+            .map(|assignee| assignee.agent_id == fact.agent_id)
+            .unwrap_or(false)
+        {
+            Ok(())
+        } else {
+            Err(TaskError::AgentUnavailable(
+                fact.agent_id.as_str().to_owned(),
+            ))
+        }
+    }
+
+    fn ensure_running_from_execution_fact(
+        &self,
+        task_id: &TaskId,
+        actor: &TaskActor,
+        watermark: &TaskWatermark,
+    ) -> Result<(), TaskError> {
+        let status = self.query_task(task_id)?.status;
+        if matches!(status, TaskStatus::Running) {
+            return Ok(());
+        }
+        if matches!(
+            status,
+            TaskStatus::Assigned
+                | TaskStatus::Interrupted
+                | TaskStatus::Paused
+                | TaskStatus::Blocked
+                | TaskStatus::Rejected
+        ) {
+            self.mutate_task(
+                task_id,
+                "TaskResumed",
+                Some(TaskStatus::Running),
+                actor,
+                watermark,
+                json!({"source": "execution_fact"}),
+            )?;
+            self.acquire_or_refresh_lease(
+                task_id,
+                &actor.agent_id,
+                actor,
+                watermark,
+                DEFAULT_TASK_LEASE_TTL_SECONDS,
+            )?;
+            Ok(())
+        } else {
+            Err(TaskError::InvalidTransition {
+                from: status,
+                event_type: "TaskExecutionRecorded",
+            })
+        }
+    }
 }
 
 const DEFAULT_TASK_LEASE_TTL_SECONDS: u64 = 300;
@@ -1177,6 +1751,31 @@ impl TaskStore {
         }
         events.sort_by_key(|event: &TaskLedgerEvent| event.seq);
         Ok(events)
+    }
+
+    fn load_scheduler_facts<'a>(
+        &self,
+        task_ids: impl Iterator<Item = &'a TaskId>,
+    ) -> Result<BTreeMap<TaskId, Vec<SchedulerFact>>, TaskError> {
+        let mut facts = BTreeMap::<TaskId, Vec<SchedulerFact>>::new();
+        for task_id in task_ids {
+            let path = self.task_ledger_path(task_id);
+            if !path.is_file() {
+                continue;
+            }
+            for event in self.load_task_ledger(task_id)? {
+                if event.event_type != "TaskSchedulerTick" {
+                    continue;
+                }
+                let Some(value) = event.payload.get("scheduler_fact") else {
+                    continue;
+                };
+                let fact: SchedulerFact =
+                    serde_json::from_value(value.clone()).map_err(json_err)?;
+                facts.entry(task_id.clone()).or_default().push(fact);
+            }
+        }
+        Ok(facts)
     }
 
     fn load_agent_snapshots(&self) -> Result<Vec<AgentSnapshot>, TaskError> {
@@ -1447,6 +2046,183 @@ fn release_agent_task(agent: &mut AgentSnapshot, task_status: &TaskStatus) {
     }
 }
 
+fn lifecycle_from_agent_snapshot(agent: &AgentSnapshot, now: u64) -> AgentLifecycleSnapshot {
+    let state = match agent.status {
+        AgentStatus::Available => AgentLifecycleState::Idle,
+        AgentStatus::Busy => {
+            if agent.running_tasks > 0 {
+                AgentLifecycleState::Assigned
+            } else {
+                AgentLifecycleState::Assigned
+            }
+        }
+        AgentStatus::Paused => AgentLifecycleState::Blocked,
+        AgentStatus::Offline | AgentStatus::Closed => AgentLifecycleState::Offline,
+        AgentStatus::Closing => AgentLifecycleState::Offline,
+        AgentStatus::Failed => AgentLifecycleState::Failed,
+    };
+    AgentLifecycleSnapshot {
+        schema_version: 1,
+        agent_id: agent.agent_id.clone(),
+        role: "worker".to_owned(),
+        alive: !matches!(agent.status, AgentStatus::Closed | AgentStatus::Offline),
+        state,
+        state_entered_at: agent.last_seen_at,
+        elapsed_ms: now.saturating_sub(agent.last_seen_at).saturating_mul(1000),
+        current_task_id: agent.current_task_id.clone(),
+        current_execution_id: agent
+            .current_task_id
+            .as_ref()
+            .map(|task_id| format!("execution-{}-{}", agent.agent_id.as_str(), task_id.as_str())),
+        current_turn_id: None,
+        current_activity: Some(AgentLifecycleActivity {
+            kind: if agent.current_task_id.is_some() {
+                "assigned".to_owned()
+            } else {
+                "idle".to_owned()
+            },
+            semantic_summary: if let Some(task_id) = agent.current_task_id.as_ref() {
+                format!("assigned to {}", task_id.as_str())
+            } else {
+                "idle".to_owned()
+            },
+            target: agent
+                .current_task_id
+                .as_ref()
+                .map(|task_id| task_id.as_str().to_owned()),
+            started_at: agent.last_seen_at,
+            elapsed_ms: now.saturating_sub(agent.last_seen_at).saturating_mul(1000),
+            tool_name: None,
+            model: None,
+            retry_count: None,
+            visibility: "compact".to_owned(),
+        }),
+        last_activity: None,
+        stats: AgentLifecycleStats {
+            turn_count: 0,
+            model_request_count: 0,
+            model_retry_count: 0,
+            tool_call_count: 0,
+            tool_failure_count: 0,
+            schema_polish_count: 0,
+            provider_error_count: 0,
+            blocked_count: 0,
+            current_model: None,
+        },
+        last_seen_at: agent.last_seen_at,
+        next_check_at: None,
+    }
+}
+
+type StatsUpdate = fn(&mut AgentLifecycleStats);
+
+fn lifecycle_event_projection(
+    event: &AgentLifecycleEvent,
+    now: u64,
+) -> (
+    AgentLifecycleState,
+    AgentLifecycleActivity,
+    Option<String>,
+    StatsUpdate,
+) {
+    match event {
+        AgentLifecycleEvent::ModelThinking { model, .. } => (
+            AgentLifecycleState::ModelThinking,
+            AgentLifecycleActivity {
+                kind: "model_thinking".to_owned(),
+                semantic_summary: "waiting for model response".to_owned(),
+                target: None,
+                started_at: now,
+                elapsed_ms: 0,
+                tool_name: None,
+                model: Some(model.clone()),
+                retry_count: None,
+                visibility: "compact".to_owned(),
+            },
+            Some(model.clone()),
+            |stats| {
+                stats.model_request_count = stats.model_request_count.saturating_add(1);
+            },
+        ),
+        AgentLifecycleEvent::ToolRunning {
+            tool_name, target, ..
+        } => (
+            AgentLifecycleState::ToolRunning,
+            AgentLifecycleActivity {
+                kind: "tool_running".to_owned(),
+                semantic_summary: target
+                    .as_ref()
+                    .map(|target| format!("running {tool_name} on {target}"))
+                    .unwrap_or_else(|| format!("running {tool_name}")),
+                target: target.clone(),
+                started_at: now,
+                elapsed_ms: 0,
+                tool_name: Some(tool_name.clone()),
+                model: None,
+                retry_count: None,
+                visibility: "compact".to_owned(),
+            },
+            None,
+            |stats| {
+                stats.tool_call_count = stats.tool_call_count.saturating_add(1);
+            },
+        ),
+        AgentLifecycleEvent::Recovering { summary, .. } => (
+            AgentLifecycleState::Recovering,
+            AgentLifecycleActivity {
+                kind: "recovering".to_owned(),
+                semantic_summary: summary.clone(),
+                target: None,
+                started_at: now,
+                elapsed_ms: 0,
+                tool_name: None,
+                model: None,
+                retry_count: None,
+                visibility: "compact".to_owned(),
+            },
+            None,
+            |stats| {
+                stats.tool_failure_count = stats.tool_failure_count.saturating_add(1);
+            },
+        ),
+        AgentLifecycleEvent::Blocked { reason, .. } => (
+            AgentLifecycleState::Blocked,
+            AgentLifecycleActivity {
+                kind: "blocked".to_owned(),
+                semantic_summary: reason.clone(),
+                target: None,
+                started_at: now,
+                elapsed_ms: 0,
+                tool_name: None,
+                model: None,
+                retry_count: None,
+                visibility: "compact".to_owned(),
+            },
+            None,
+            |stats| {
+                stats.blocked_count = stats.blocked_count.saturating_add(1);
+            },
+        ),
+    }
+}
+
+fn is_terminal_status(status: &TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Closed | TaskStatus::Cancelled | TaskStatus::Failed | TaskStatus::Approved
+    )
+}
+
+fn sort_task_snapshots(tasks: &mut [TaskSnapshot]) {
+    tasks.sort_by(|left, right| {
+        right
+            .priority
+            .cmp(&left.priority)
+            .then_with(|| left.created_at.cmp(&right.created_at))
+            .then_with(|| left.task_id.cmp(&right.task_id))
+    });
+}
+
 fn validate_create_request(request: &TaskCreateRequest) -> Result<(), TaskError> {
     require_text(&request.title, "title")?;
     require_text(&request.content, "content")?;
@@ -1460,6 +2236,100 @@ fn validate_create_request(request: &TaskCreateRequest) -> Result<(), TaskError>
     Ok(())
 }
 
+fn validate_execution_fact(fact: &ExecutionFact) -> Result<(), TaskError> {
+    require_text(&fact.execution_id, "execution_id")?;
+    match &fact.kind {
+        ExecutionFactKind::Running {
+            phase,
+            summary,
+            evidence,
+        } => {
+            require_text(phase, "phase")?;
+            require_text(summary, "summary")?;
+            require_non_empty(evidence, "evidence")
+        }
+        ExecutionFactKind::Recovering {
+            summary,
+            evidence,
+            retry_count: _,
+        } => {
+            require_text(summary, "summary")?;
+            require_non_empty(evidence, "evidence")
+        }
+        ExecutionFactKind::Blocked { reason, evidence } => {
+            require_text(reason, "reason")?;
+            require_non_empty(evidence, "evidence")
+        }
+        ExecutionFactKind::ReviewReady {
+            summary,
+            deliverables,
+            evidence,
+        } => {
+            require_text(summary, "summary")?;
+            require_non_empty(deliverables, "deliverables")?;
+            require_non_empty(evidence, "evidence")
+        }
+    }
+}
+
+fn validate_scheduler_tick_request(request: &SchedulerTickRequest) -> Result<(), TaskError> {
+    if request.stale_after_seconds == 0 {
+        return Err(TaskError::MissingField("stale_after_seconds"));
+    }
+    if request.soft_timeout_seconds == 0 {
+        return Err(TaskError::MissingField("soft_timeout_seconds"));
+    }
+    if request.hard_timeout_seconds == 0 {
+        return Err(TaskError::MissingField("hard_timeout_seconds"));
+    }
+    Ok(())
+}
+
+fn scheduler_facts_for_task(
+    task: &TaskSnapshot,
+    leases: &BTreeMap<TaskId, TaskLease>,
+    request: &SchedulerTickRequest,
+) -> Vec<SchedulerFact> {
+    let mut facts = Vec::new();
+    let agent_id = task
+        .assignee
+        .as_ref()
+        .map(|assignee| assignee.agent_id.clone());
+    let last_progress = task
+        .last_progress_at
+        .or_else(|| leases.get(&task.task_id).map(|lease| lease.heartbeat_at))
+        .unwrap_or(task.updated_at);
+    let idle_seconds = request.now.saturating_sub(last_progress);
+    if idle_seconds >= request.stale_after_seconds {
+        facts.push(SchedulerFact {
+            task_id: task.task_id.clone(),
+            agent_id: agent_id.clone(),
+            observed_at: request.now,
+            fact: SchedulerFactKind::Stale { idle_seconds },
+            recommendation: "query_agent_status".to_owned(),
+        });
+    }
+    let elapsed_seconds = request.now.saturating_sub(task.created_at);
+    if elapsed_seconds >= request.hard_timeout_seconds {
+        facts.push(SchedulerFact {
+            task_id: task.task_id.clone(),
+            agent_id: agent_id.clone(),
+            observed_at: request.now,
+            fact: SchedulerFactKind::HardTimeout { elapsed_seconds },
+            recommendation: "ask_master_for_decision".to_owned(),
+        });
+    } else if elapsed_seconds >= request.soft_timeout_seconds {
+        facts.push(SchedulerFact {
+            task_id: task.task_id.clone(),
+            agent_id,
+            observed_at: request.now,
+            fact: SchedulerFactKind::SoftTimeout { elapsed_seconds },
+            recommendation: "prioritize_status_check".to_owned(),
+        });
+    }
+    facts
+}
+
 fn validate_transition(
     from: &TaskStatus,
     to: &TaskStatus,
@@ -1468,6 +2338,15 @@ fn validate_transition(
     let valid = match event_type {
         "TaskProgressed" => !matches!(from, TaskStatus::Closed | TaskStatus::Cancelled),
         "TaskExecutionRecorded" => matches!(from, TaskStatus::Running),
+        "TaskExecutionRecovering" => matches!(from, TaskStatus::Running),
+        "TaskBlocked" => matches!(
+            from,
+            TaskStatus::Assigned
+                | TaskStatus::Running
+                | TaskStatus::Paused
+                | TaskStatus::Rejected
+                | TaskStatus::Interrupted
+        ),
         "TaskPaused" => matches!(
             from,
             TaskStatus::Assigned | TaskStatus::Running | TaskStatus::Rejected
@@ -1509,7 +2388,7 @@ fn validate_transition(
         })
     }?;
     let status_matches = match event_type {
-        "TaskProgressed" => from == to,
+        "TaskProgressed" | "TaskExecutionRecovering" => from == to,
         "TaskReviewRejected" => matches!(to, TaskStatus::Rejected),
         _ => true,
     };
@@ -1525,6 +2404,14 @@ fn validate_transition(
 
 fn require_text(value: &str, field: &'static str) -> Result<(), TaskError> {
     if value.trim().is_empty() {
+        Err(TaskError::MissingField(field))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_non_empty<T>(value: &[T], field: &'static str) -> Result<(), TaskError> {
+    if value.is_empty() {
         Err(TaskError::MissingField(field))
     } else {
         Ok(())
@@ -2268,6 +3155,445 @@ mod tests {
             vec!["task-list-high", "task-list-low"]
         );
         assert!(tasks.iter().all(|task| task.status == TaskStatus::Assigned));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_board_projects_owner_truth_with_filtered_views() {
+        let runtime_home = temp_runtime_home("task-board-projection");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let actor = sample_actor(agent_id.clone());
+        let watermark = sample_watermark();
+        let running = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create running seed")
+            .task;
+        runtime
+            .resume_task(TaskMutationRequest {
+                task_id: running.task_id.clone(),
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect("resume running");
+
+        let mut waiting_request = sample_create_request(agent_id.clone());
+        waiting_request.task_id = Some(TaskId::new("waiting-board-task"));
+        waiting_request.priority = 99;
+        waiting_request.dispatch = TaskDispatchRequest::None;
+        runtime
+            .create_task(waiting_request)
+            .expect("create waiting task");
+
+        runtime
+            .submit_review(TaskReviewSubmission {
+                task_id: running.task_id.clone(),
+                summary: "ready".to_owned(),
+                deliverables: vec!["artifact".to_owned()],
+                evidence: vec!["test".to_owned()],
+                actor,
+                watermark,
+            })
+            .expect("submit review");
+
+        let board = runtime
+            .query_task_board(TaskBoardQuery {
+                status: None,
+                assignee: None,
+                include_terminal: false,
+            })
+            .expect("task board");
+
+        assert_eq!(board.tasks.len(), 2);
+        assert_eq!(board.review_ready.len(), 1);
+        assert_eq!(board.review_ready[0].task_id, running.task_id);
+        assert!(board.blocked.is_empty());
+        assert!(board.agents.iter().any(|agent| agent.agent_id == agent_id));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn execution_fact_recovering_keeps_running_and_writes_event() {
+        let runtime_home = temp_runtime_home("execution-fact-recovering");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let task = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create")
+            .task;
+
+        let recovering = runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-1".to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: agent_id.clone(),
+                turn_id: Some(TurnId::new("turn-1")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Recovering {
+                    summary: "repairing tool schema".to_owned(),
+                    evidence: vec!["paired failed tool result".to_owned()],
+                    retry_count: 1,
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("recovering fact");
+
+        assert_eq!(recovering.task.status, TaskStatus::Running);
+        assert_eq!(recovering.event.event_type, "TaskExecutionRecovering");
+        assert_eq!(
+            recovering
+                .event
+                .payload
+                .get("retry_count")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        let history = runtime.task_history(&task.task_id).expect("history");
+        assert!(
+            history
+                .iter()
+                .any(|event| event.event_type == "TaskExecutionRecovering")
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn execution_fact_blocked_and_review_ready_update_board_truth() {
+        let runtime_home = temp_runtime_home("execution-fact-board");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let review_task = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create review task")
+            .task;
+
+        let review_ready = runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-review".to_owned(),
+                task_id: review_task.task_id.clone(),
+                agent_id: agent_id.clone(),
+                turn_id: None,
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::ReviewReady {
+                    summary: "ready for master review".to_owned(),
+                    deliverables: vec!["patch".to_owned()],
+                    evidence: vec!["cargo test".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("review fact");
+        assert_eq!(review_ready.task.status, TaskStatus::ReviewSubmitted);
+
+        let mut blocked_request = sample_create_request(agent_id.clone());
+        blocked_request.task_id = Some(TaskId::new("execution-fact-blocked"));
+        let blocked_task = runtime
+            .create_task(blocked_request)
+            .expect("create blocked task")
+            .task;
+        let blocked = runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-blocked".to_owned(),
+                task_id: blocked_task.task_id.clone(),
+                agent_id: agent_id.clone(),
+                turn_id: None,
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "permission denied".to_owned(),
+                    evidence: vec!["os error 1".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("blocked fact");
+        assert_eq!(blocked.task.status, TaskStatus::Blocked);
+
+        let board = runtime
+            .query_task_board(TaskBoardQuery {
+                include_terminal: false,
+                ..TaskBoardQuery::default()
+            })
+            .expect("board");
+        assert_eq!(board.blocked.len(), 1);
+        assert_eq!(board.blocked[0].task_id, blocked_task.task_id);
+        assert_eq!(board.review_ready.len(), 1);
+        assert_eq!(board.review_ready[0].task_id, review_task.task_id);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn execution_fact_validation_failure_writes_no_truth() {
+        let runtime_home = temp_runtime_home("execution-fact-validation");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let task = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create")
+            .task;
+        let before = runtime.query_task(&task.task_id).expect("before");
+
+        let err = runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-invalid".to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id,
+                turn_id: None,
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Running {
+                    phase: "debug".to_owned(),
+                    summary: String::new(),
+                    evidence: vec!["missing summary".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect_err("invalid fact");
+
+        assert_eq!(err, TaskError::MissingField("summary"));
+        let after = runtime.query_task(&task.task_id).expect("after");
+        assert_eq!(after.last_event_seq, before.last_event_seq);
+        assert_eq!(after.status, before.status);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn scheduler_tick_emits_stale_and_timeout_facts_without_decisions() {
+        let runtime_home = temp_runtime_home("scheduler-tick-facts");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let task = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create")
+            .task;
+        let running = runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("resume");
+
+        let tick = runtime
+            .run_scheduler_tick(SchedulerTickRequest {
+                now: running.task.created_at.saturating_add(1_000),
+                stale_after_seconds: 1,
+                soft_timeout_seconds: 10,
+                hard_timeout_seconds: 100,
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("tick");
+
+        assert_eq!(tick.facts.len(), 2);
+        assert!(
+            tick.facts
+                .iter()
+                .any(|fact| matches!(fact.fact, SchedulerFactKind::Stale { .. }))
+        );
+        assert!(
+            tick.facts
+                .iter()
+                .any(|fact| matches!(fact.fact, SchedulerFactKind::HardTimeout { .. }))
+        );
+        assert!(
+            tick.facts
+                .iter()
+                .any(|fact| fact.recommendation == "ask_master_for_decision")
+        );
+        let after = runtime.query_task(&task.task_id).expect("after tick");
+        assert_eq!(after.status, TaskStatus::Running);
+        let history = runtime.task_history(&task.task_id).expect("history");
+        assert_eq!(
+            history
+                .iter()
+                .filter(|event| event.event_type == "TaskSchedulerTick")
+                .count(),
+            2
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn scheduler_tick_soft_timeout_does_not_fail_task() {
+        let runtime_home = temp_runtime_home("scheduler-soft-timeout");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let task = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create")
+            .task;
+        runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("resume");
+
+        let tick = runtime
+            .run_scheduler_tick(SchedulerTickRequest {
+                now: task.created_at.saturating_add(20),
+                stale_after_seconds: 1_000,
+                soft_timeout_seconds: 10,
+                hard_timeout_seconds: 100,
+                actor: sample_actor(agent_id),
+                watermark: sample_watermark(),
+            })
+            .expect("tick");
+
+        assert_eq!(tick.facts.len(), 1);
+        assert!(matches!(
+            tick.facts[0].fact,
+            SchedulerFactKind::SoftTimeout { .. }
+        ));
+        assert_eq!(
+            runtime.query_task(&task.task_id).expect("after").status,
+            TaskStatus::Running
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn scheduler_tick_recent_progress_is_not_stale() {
+        let runtime_home = temp_runtime_home("scheduler-not-stale");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let task = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create")
+            .task;
+        let progressed = runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("resume");
+        runtime
+            .record_execution(TaskExecutionRecordRequest {
+                task_id: task.task_id.clone(),
+                phase: "work".to_owned(),
+                summary: "made progress".to_owned(),
+                evidence: vec!["progress event".to_owned()],
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("progress");
+
+        let tick = runtime
+            .run_scheduler_tick(SchedulerTickRequest {
+                now: progressed.task.updated_at,
+                stale_after_seconds: 60,
+                soft_timeout_seconds: 1_000,
+                hard_timeout_seconds: 2_000,
+                actor: sample_actor(agent_id),
+                watermark: sample_watermark(),
+            })
+            .expect("tick");
+
+        assert!(tick.facts.is_empty());
+        assert_eq!(
+            runtime.query_task(&task.task_id).expect("after").status,
+            TaskStatus::Running
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn scheduler_tick_facts_recover_after_boot() {
+        let runtime_home = temp_runtime_home("scheduler-recover");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let task = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create")
+            .task;
+        runtime
+            .run_scheduler_tick(SchedulerTickRequest {
+                now: task.created_at.saturating_add(500),
+                stale_after_seconds: 1,
+                soft_timeout_seconds: 10,
+                hard_timeout_seconds: 1_000,
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("tick");
+
+        let recovered = TaskRuntime::boot(&runtime_home, agent_id).expect("recover");
+        let board = recovered
+            .query_task_board(TaskBoardQuery {
+                include_terminal: false,
+                ..TaskBoardQuery::default()
+            })
+            .expect("board");
+
+        assert_eq!(board.stale.len(), 1);
+        assert_eq!(board.stale[0].task_id, task.task_id);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked() {
+        let runtime_home = temp_runtime_home("agent-lifecycle-reducer");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let created = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create task")
+            .task;
+
+        let thinking = runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ModelThinking {
+                agent_id: agent_id.clone(),
+                task_id: Some(created.task_id.clone()),
+                turn_id: Some(TurnId::new("turn-1")),
+                model: "MiniMax-M3".to_owned(),
+            })
+            .expect("model thinking");
+        assert_eq!(thinking.state, AgentLifecycleState::ModelThinking);
+        assert_eq!(thinking.stats.model_request_count, 1);
+        assert_eq!(thinking.current_task_id, Some(created.task_id.clone()));
+
+        let tool = runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ToolRunning {
+                agent_id: agent_id.clone(),
+                task_id: Some(created.task_id.clone()),
+                turn_id: Some(TurnId::new("turn-1")),
+                tool_name: "read_file".to_owned(),
+                target: Some("README.md".to_owned()),
+            })
+            .expect("tool running");
+        assert_eq!(tool.state, AgentLifecycleState::ToolRunning);
+        assert_eq!(tool.stats.tool_call_count, 1);
+        assert_eq!(
+            tool.last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("model_thinking")
+        );
+
+        let recovering = runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::Recovering {
+                agent_id: agent_id.clone(),
+                task_id: Some(created.task_id.clone()),
+                turn_id: Some(TurnId::new("turn-1")),
+                summary: "repairing failed read".to_owned(),
+            })
+            .expect("recovering");
+        assert_eq!(recovering.state, AgentLifecycleState::Recovering);
+        assert_eq!(recovering.stats.tool_failure_count, 1);
+
+        let blocked = runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::Blocked {
+                agent_id: agent_id.clone(),
+                task_id: Some(created.task_id),
+                turn_id: Some(TurnId::new("turn-1")),
+                reason: "missing permission".to_owned(),
+            })
+            .expect("blocked");
+        assert_eq!(blocked.state, AgentLifecycleState::Blocked);
+        assert_eq!(blocked.stats.blocked_count, 1);
+
+        let board = runtime.query_agent_board().expect("agent board");
+        assert_eq!(board.agents.len(), 1);
+        assert_eq!(board.agents[0].state, AgentLifecycleState::Blocked);
         let _ = fs::remove_dir_all(runtime_home);
     }
 

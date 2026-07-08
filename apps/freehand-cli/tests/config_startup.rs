@@ -11,13 +11,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_contracts::{AgentId, SessionId, TerminalStatus, TurnId};
 use freehand_ui_protocol::{
-    SubscriptionSelector, UiAdpFailure, UiAdpRequest, UiAdpResponse, UiClientKind, UiCommand,
+    SubscriptionSelector, UiAdpFailure, UiAdpRequest, UiAdpResponse, UiAgentBoardProjection,
+    UiAgentLifecycleProjection, UiAgentSnapshotProjection, UiClientKind, UiCommand,
     UiCommandDispatchReceipt, UiModelRequestActivity, UiModelRequestKind, UiModelRequestStatus,
     UiProjection, UiQueryResult, UiSessionListProjection, UiSessionSummary,
     UiSessionTranscriptProjection, UiSource, UiStreamKind, UiSubscriptionEvent,
-    UiTaskHistoryProjection, UiTaskLedgerEventProjection, UiTaskListProjection,
-    UiTaskSnapshotProjection, UiToolActivity, UiToolActivityStatus, UiTurnProjection,
-    build_command_dispatch_envelope,
+    UiTaskBoardProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
+    UiTaskListProjection, UiTaskSnapshotProjection, UiToolActivity, UiToolActivityStatus,
+    UiTurnProjection, build_command_dispatch_envelope,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
@@ -852,7 +853,267 @@ fn spawn_adp_task_lifecycle_mock_server() -> (String, thread::JoinHandle<()>) {
     (url, handle)
 }
 
+fn spawn_adp_phase1_foundation_mock_server() -> (String, thread::JoinHandle<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind adp phase1 mock");
+    let url = format!("ws://{}/adp", listener.local_addr().expect("addr"));
+    let blocked_task_id = Arc::new(Mutex::new("task-cli-phase1-blocked".to_owned()));
+    let review_task_id = Arc::new(Mutex::new("task-cli-phase1-review".to_owned()));
+    let execution_id = Arc::new(Mutex::new("exec-cli-phase1".to_owned()));
+    let stale_seen = Arc::new(Mutex::new(false));
+    listener
+        .set_nonblocking(true)
+        .expect("set adp phase1 mock nonblocking");
+    let handle = thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("tokio runtime");
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+            for _ in 0..12 {
+                let (stream, _) = listener.accept().await.expect("accept adp");
+                let mut socket = tokio_tungstenite::accept_async(stream)
+                    .await
+                    .expect("accept websocket");
+                while let Some(message) = socket.next().await {
+                    let text = match message {
+                        Ok(Message::Text(text)) => text,
+                        Ok(Message::Close(_)) => break,
+                        Ok(_) => continue,
+                        Err(_) => break,
+                    };
+                    let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
+                    match request {
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::CreateTask { task },
+                        } => {
+                            let task_id = task.task_id.expect("phase1 task id");
+                            if task_id.contains("review") {
+                                *review_task_id.lock().expect("review task lock") = task_id;
+                            } else {
+                                *blocked_task_id.lock().expect("blocked task lock") = task_id;
+                            }
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "create_task",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "task_created",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::ApplyExecutionFact { fact },
+                        } => {
+                            *execution_id.lock().expect("execution id lock") = fact.execution_id;
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "apply_execution_fact",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "execution_fact_applied",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::RunSchedulerTick { .. },
+                        } => {
+                            *stale_seen.lock().expect("stale lock") = true;
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "run_scheduler_tick",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "scheduler_tick_recorded:facts=2 events=2",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryTaskBoard { .. },
+                        } => {
+                            let blocked =
+                                blocked_task_id.lock().expect("blocked task lock").clone();
+                            let review = review_task_id.lock().expect("review task lock").clone();
+                            let stale = *stale_seen.lock().expect("stale lock");
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::TaskBoard(phase1_task_board(
+                                        &blocked, &review, stale,
+                                    )),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryAgentBoard,
+                        } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::AgentBoard(UiAgentBoardProjection {
+                                        source_agent_id: AgentId::new("cli-agent"),
+                                        agents: vec![phase1_agent_lifecycle("idle")],
+                                    }),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryAgentLifecycle { .. },
+                        } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::AgentLifecycle(phase1_agent_lifecycle(
+                                        "idle",
+                                    )),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryTaskHistory { task_id },
+                        } => {
+                            let execution = execution_id.lock().expect("execution id lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::TaskHistory(UiTaskHistoryProjection {
+                                        source_agent_id: AgentId::new("cli-agent"),
+                                        task_id,
+                                        events: vec![
+                                            task_event(1, "TaskCreated"),
+                                            task_event(2, "TaskResumed"),
+                                            task_event_with_payload(
+                                                3,
+                                                "TaskExecutionRecovering",
+                                                serde_json::json!({
+                                                    "execution_id": execution,
+                                                }),
+                                            ),
+                                            task_event(4, "TaskBlocked"),
+                                        ],
+                                    }),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query { request_id, .. }
+                        | UiAdpRequest::Command { request_id, .. }
+                        | UiAdpRequest::Subscribe { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::Failure {
+                                    request_id,
+                                    failure: UiAdpFailure {
+                                        code: "unexpected_phase1_frame".to_owned(),
+                                        message: "unexpected phase1 frame".to_owned(),
+                                        retryable: false,
+                                    },
+                                },
+                            )
+                            .await;
+                        }
+                    }
+                }
+            }
+        });
+    });
+    (url, handle)
+}
+
+fn phase1_task_board(
+    blocked_task_id: &str,
+    review_task_id: &str,
+    stale: bool,
+) -> UiTaskBoardProjection {
+    let blocked = phase1_task(blocked_task_id, "blocked");
+    let review = phase1_task(review_task_id, "review_submitted");
+    UiTaskBoardProjection {
+        source_agent_id: AgentId::new("cli-agent"),
+        status_filter: None,
+        agent_filter: None,
+        include_terminal: false,
+        tasks: vec![blocked.clone(), review.clone()],
+        agents: vec![UiAgentSnapshotProjection {
+            agent_id: AgentId::new("cli-agent"),
+            status: "available".to_owned(),
+            current_task_id: None,
+            current_cwd: Some("/tmp/cli-session".to_owned()),
+            running_tasks: 0,
+            queued_tasks: 0,
+            last_seen_at: 1,
+        }],
+        blocked: vec![blocked.clone()],
+        review_ready: vec![review],
+        stale: if stale { vec![blocked] } else { Vec::new() },
+    }
+}
+
+fn phase1_task(task_id: &str, status: &str) -> UiTaskSnapshotProjection {
+    UiTaskSnapshotProjection {
+        task_id: task_id.to_owned(),
+        status: status.to_owned(),
+        title: format!("Phase1 {task_id}"),
+        goal: "phase1 foundation proof".to_owned(),
+        priority: 50,
+        target_cwd: Some("/tmp/cli-session".to_owned()),
+        assignee_agent_id: Some(AgentId::new("cli-agent")),
+        updated_at: 1,
+        last_progress_at: Some(1),
+        last_event_seq: 4,
+    }
+}
+
+fn phase1_agent_lifecycle(state: &str) -> UiAgentLifecycleProjection {
+    UiAgentLifecycleProjection {
+        agent_id: AgentId::new("cli-agent"),
+        role: "worker".to_owned(),
+        alive: true,
+        state: state.to_owned(),
+        current_task_id: None,
+        current_execution_id: None,
+        current_turn_id: None,
+        current_activity: None,
+        last_activity: None,
+        model_request_count: 1,
+        model_retry_count: 0,
+        tool_call_count: 0,
+        tool_failure_count: 1,
+        schema_polish_count: 0,
+        provider_error_count: 0,
+        blocked_count: 1,
+        current_model: None,
+        last_seen_at: 1,
+        elapsed_ms: 0,
+    }
+}
+
 fn task_event(seq: u64, event_type: &str) -> UiTaskLedgerEventProjection {
+    task_event_with_payload(seq, event_type, serde_json::json!({}))
+}
+
+fn task_event_with_payload(
+    seq: u64,
+    event_type: &str,
+    payload: serde_json::Value,
+) -> UiTaskLedgerEventProjection {
     UiTaskLedgerEventProjection {
         seq,
         event_id: format!("event-{seq}"),
@@ -861,7 +1122,7 @@ fn task_event(seq: u64, event_type: &str) -> UiTaskLedgerEventProjection {
         to_status: event_type.to_owned(),
         timestamp: seq,
         actor_agent_id: AgentId::new("cli-agent"),
-        payload: serde_json::json!({}),
+        payload,
     }
 }
 
@@ -1314,6 +1575,36 @@ fn cli_runs_task_lifecycle_sample_against_mock_websocket() {
     assert!(stdout.contains("TaskCreated,TaskReviewSubmitted,TaskReviewApproved,TaskClosed"));
 
     handle.join().expect("adp task lifecycle mock join");
+}
+
+#[test]
+fn cli_runs_phase1_foundation_sample_against_mock_websocket() {
+    let (url, handle) = spawn_adp_phase1_foundation_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("phase1-foundation-sample")
+        .arg("--url")
+        .arg(&url)
+        .output()
+        .expect("run phase1 foundation sample");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("phase1_foundation_sample_ok"));
+    assert!(stdout.contains("blocked_task=task-cli-phase1-blocked-FHPHASE1"));
+    assert!(stdout.contains("review_task=task-cli-phase1-review-FHPHASE1"));
+    assert!(stdout.contains("execution=exec-cli-phase1-FHPHASE1"));
+    assert!(stdout.contains("agent=cli-agent"));
+    assert!(stdout.contains("blocked=1"));
+    assert!(stdout.contains("review_ready=1"));
+    assert!(stdout.contains("stale=1"));
+    assert!(stdout.contains("recovering_event=true"));
+
+    handle.join().expect("adp phase1 foundation mock join");
 }
 
 #[test]
