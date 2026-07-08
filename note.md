@@ -2545,3 +2545,23 @@ Current real root cause split:
   - `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `git diff --check`.
 - durable rule:
   - Online WebUI verifier must own its test fixture preconditions and restore daemon config/env afterward. A missing verifier env is a verifier setup failure, not a product Settings fallback.
+
+# 2026-07-08 repaired-failure prompt context economy
+
+- scope:
+  - Continued `docs/goals/single-agent-closeout-before-multi-agent-plan.md`.
+  - Stayed in single-agent scope and `provider.reason-live-bridge` / `reason.context-planner` ownership; no worker pool, subagent, scheduling, or topology code.
+- root source:
+  - Restored same-session context is rebuilt in `crates/freehand-runtime/src/lib.rs` through `rebuild_session_history_from_effective_turns` -> `effective_turn_context_segments`.
+  - Before this slice, all effective persisted rounds could become `SessionMemory` segments, so a repaired logical turn like `runtime-turn-7` + `runtime-turn-7-r2` could carry the superseded failed attempt into future prompt context.
+- implementation:
+  - `effective_turn_context_segments` now groups restored turns by logical runtime ordinal and admits only the latest round for each logical turn into rebuilt future prompt context.
+  - Raw failed attempts are not deleted; they remain in persisted turn files, reason ledger, UI transcript/projection, error/debug truth, and audit surfaces.
+  - Added regression `effective_context_uses_last_repaired_round_without_raw_failed_attempt`.
+  - Updated `provider.reason-live-bridge` and `reason.context-planner` function maps, test designs, mainline-call JSON, generated wiki docs, and local skill guidance.
+- validation:
+  - `cargo test -p freehand-runtime effective_context_uses_last_repaired_round_without_raw_failed_attempt -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 78 passed.
+  - `cargo fmt --check`.
+- durable rule:
+  - Repaired failures are prompt-history pruning only: future default prompt context should prefer the repaired/latest round, while raw failure evidence remains durable in ledgers/UI/debug/error truth.

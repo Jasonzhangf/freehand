@@ -8,6 +8,7 @@
   - subagent search returns one final conclusion admitted as parent context
   - metadata and request payload stay hard-isolated
   - explicit rewrite events are the only path that changes rewrite version and rewrite mode in planner diagnostics
+  - restored same-session context supplied by runtime restore has already excluded superseded repaired-failure rounds from default prompt context
 - white-box plan:
   - segment classification tests
   - segment ordering tests
@@ -24,6 +25,7 @@
   - planner emits cache diagnostics without changing request content
 - project black-box impact:
   - reason-to-provider request build keeps stable cache head across ordinary turns
+  - repaired failed attempts are not re-admitted into future default prompt context after runtime restore has selected the latest repaired round
   - subagent search enriches parent turn by final report only
   - compaction/rollback remain the only context rewrite gates
 - fixtures / replay inputs / runtime evidence paths:
@@ -38,4 +40,5 @@
   - planner baseline implemented in `freehand-blocks`
   - session-history rewrite-mode/version wiring is landed
   - runtime tool-schema fingerprint wiring is landed through reason turn input and the runtime live bridge
+  - repaired-failure context economy is locked at the runtime restore boundary before segments enter planner admission
   - migrated mainline-call source and generated wiki are kept in sync with this test design

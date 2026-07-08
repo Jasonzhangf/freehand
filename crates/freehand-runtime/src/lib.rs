@@ -5538,7 +5538,33 @@ fn rebuild_session_history_from_effective_turns(
 }
 
 fn effective_turn_context_segments(turns: &[TurnRecord]) -> Vec<ContextSegment> {
-    turns.iter().filter_map(turn_context_segment).collect()
+    let mut latest_by_logical_turn: BTreeMap<String, &TurnRecord> = BTreeMap::new();
+    for turn in turns {
+        let (ordinal, round, raw_turn_id) = runtime_turn_position(&turn.request.turn_id);
+        let logical_key = if ordinal == 0 {
+            raw_turn_id
+        } else {
+            ordinal.to_string()
+        };
+        let replace = latest_by_logical_turn
+            .get(&logical_key)
+            .map(|existing| {
+                let (_, existing_round, _) = runtime_turn_position(&existing.request.turn_id);
+                round >= existing_round
+            })
+            .unwrap_or(true);
+        if replace {
+            latest_by_logical_turn.insert(logical_key, turn);
+        }
+    }
+    let mut latest_turns = latest_by_logical_turn
+        .into_values()
+        .collect::<Vec<&TurnRecord>>();
+    latest_turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
+    latest_turns
+        .into_iter()
+        .filter_map(turn_context_segment)
+        .collect()
 }
 
 fn turn_context_segment(turn: &TurnRecord) -> Option<ContextSegment> {
@@ -5884,6 +5910,91 @@ mod tests {
         assert!(raw_second.contains("second history prompt"));
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn effective_context_uses_last_repaired_round_without_raw_failed_attempt() {
+        let session_id = SessionId::new("runtime-session-repair-context");
+        let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("history");
+        let failed_round = closed_turn_for_context(
+            &mut history,
+            &session_id,
+            "runtime-turn-7",
+            "trace-7",
+            "repair this task",
+            TerminalStatus::Failed,
+            "failed attempt details that should stay out of future prompt",
+        );
+        let repaired_round = closed_turn_for_context(
+            &mut history,
+            &session_id,
+            "runtime-turn-7-r2",
+            "trace-7-r2",
+            "repair this task",
+            TerminalStatus::Success,
+            "repaired success summary",
+        );
+        let unrelated_turn = closed_turn_for_context(
+            &mut history,
+            &session_id,
+            "runtime-turn-8",
+            "trace-8",
+            "next independent task",
+            TerminalStatus::Success,
+            "next task summary",
+        );
+
+        let segments =
+            effective_turn_context_segments(&[failed_round, repaired_round, unrelated_turn]);
+        let rendered = freehand_blocks::render_context_segments_as_text(&segments);
+
+        assert_eq!(segments.len(), 2);
+        assert!(rendered.contains("Historical turn 7 (round 2):"));
+        assert!(rendered.contains("Assistant: repaired success summary"));
+        assert!(rendered.contains("Historical turn 8 (round 1):"));
+        assert!(
+            !rendered.contains("failed attempt details that should stay out of future prompt"),
+            "superseded failed repair attempt leaked into future context: {rendered}"
+        );
+    }
+
+    fn closed_turn_for_context(
+        history: &mut SessionHistory,
+        session_id: &SessionId,
+        turn_id: &str,
+        trace_id: &str,
+        prompt: &str,
+        status: TerminalStatus,
+        summary: &str,
+    ) -> TurnRecord {
+        let turn_id = TurnId::new(turn_id);
+        let trace_id = TraceId::new(trace_id);
+        let mut turn = ReasonTurnEngine::new()
+            .start_turn(
+                history,
+                TurnStartInput {
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                    trace_id: trace_id.clone(),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-live"),
+                    user_text: prompt.to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model-a".to_owned(),
+                },
+            )
+            .expect("turn");
+        turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: session_id.clone(),
+            turn_id,
+            trace_id,
+            feature_id: FeatureId::new("provider.reason-live-bridge"),
+            agent_id: AgentId::new("agent-live"),
+            status,
+            summary: summary.to_owned(),
+        });
+        turn
     }
 
     #[test]

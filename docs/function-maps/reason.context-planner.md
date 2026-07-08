@@ -11,6 +11,7 @@
 
 - `freehand-reason` reads session truth and current turn inputs
 - `reason.session-history` provides stable base context plus session-owned `rewrite_mode` and `rewrite_version`
+- upstream restore/context rebuild callers may pre-prune superseded repaired-failure rounds before passing session-memory segments to the planner; raw failure truth remains outside request content in ledgers/UI projections
 - it asks the planner owner path to classify context into stable and volatile segments
 - the planner admits additional context only through typed segment rules
 - preferred context expansion path is subagent search final report -> `SubagentConclusion`
@@ -85,4 +86,5 @@
 - current baseline emits cache diagnostics separated from request content for both ordinary turns and explicit rewrite ledger events
 - rewrite-mode and rewrite-version are now sourced from persistent `SessionHistory` truth instead of turn-local constants
 - runtime live bridge now wires deterministic tool-schema fingerprint truth from `tool.registry` into planner diagnostics without moving tool schema semantics into reason owners
+- runtime live bridge now rebuilds restored same-session context with repaired logical-turn economy before the planner sees session-memory segments, keeping only the latest repaired round in future prompt context
 - migrated mainline-call source now lives at `docs/mainline-calls/reason.context-planner.json` and generated wiki lives at `docs/wiki/reason.context-planner.md`

@@ -9,7 +9,8 @@
   - WebUI online verifier fixture repair is implemented: `scripts/webui_verify_online.mjs` backs up S config/env, injects verifier-only `FREEHAND_WEBUI_VERIFY_CREDENTIAL`, runs Settings valid-save proof, restores config/env, and restarts S afterward.
   - WebUI online proof now passed: `artifacts/webui-online/20260708-verify-4042-1783483076297/summary.json`, session `webui-session-20260708035801-6cee1118`, ADP `turn_ids=runtime-turn-181,runtime-turn-182,runtime-turn-182-r2`, all checks true including Settings restart-required, no secret leak, submit clearing, refresh preservation, terminal no-live, mobile layout/drawers/gesture, and clean new session.
   - Post WebUI proof restoration: config query returned `base_url_host=api.minimaxi.com default_model=MiniMax-M3 auth_source=inline`; `~/.freehand/daemonS.env` has no `FREEHAND_WEBUI_VERIFY_CREDENTIAL` entry.
-  - Still not closed for the whole goal: need restart recovery audit, context-economy repaired-failure rule audit, and full baseline gate before marking single-agent closeout complete.
+  - Repaired-failure context economy is now implemented in `provider.reason-live-bridge`: restored same-session future prompt context groups `runtime-turn-N` / `runtime-turn-N-rM` by logical ordinal and admits only the latest repaired round, while raw failed attempts remain in persisted/UI/debug truth. Regression `effective_context_uses_last_repaired_round_without_raw_failed_attempt` passed; `cargo test -p freehand-runtime -- --nocapture` -> 78 passed; `cargo fmt --check` passed.
+  - Still not closed for the whole goal: need restart recovery audit and full baseline gate before marking single-agent closeout complete.
 
 - Current verified WebUI phone no-left-edge closeout:
   - `app.webui-smoke` mobile phone/tall/tablet portrait cards no longer render left borders or inset-left shadows for assistant/tool/final state; mobile state uses green/red/blue color-block backgrounds and compact status text.
