@@ -2670,3 +2670,25 @@ Current real root cause split:
   - `resume`
   - `cancel`
 - `worker_control` must not include task creation/assignment/review/close, hidden prompt-history mutation, raw transcript rewrite, or workspace/session truth mutation.
+
+# 2026-07-08 multi-task foundation phase1 loop target
+
+- Added `docs/goals/multi-task-foundation-phase1-loop.md` as the first executable target for the multi-task foundation implementation loop.
+- Phase 1 objective:
+  - Task Center board truth
+  - Agent Lifecycle truth
+  - Execution binding/facts
+  - Scheduler tick/timer facts
+  - headless ADP/CLI query samples
+- First loop excludes WebUI dashboard, Android UI, worker autoscaling, cross-machine workers, multiple independent BigTasks, cross-session master context switching, standalone model-facing `agent` lifecycle tool, and general code-tool surface redesign.
+- Completion standard requires D1-D6:
+  - owner/maps closeout
+  - TaskBoard skeleton
+  - AgentLifecycle skeleton
+  - ExecutionFact sync
+  - scheduler tick skeleton
+  - headless proof plus restart same-id proof
+- Validation for this planning step:
+  - `git diff --check`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
