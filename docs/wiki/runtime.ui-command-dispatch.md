@@ -19,7 +19,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - session management commands route through runtime into `reason.persistence` session metadata and rollback APIs; runtime refreshes `UiProtocolState` from persistence-owned metadata/effective transcript projections after mutation
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 - runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs
-- protocol-owned task mutation commands route through runtime into `TaskRuntime::create_task`, `TaskRuntime::submit_review`, `TaskRuntime::approve_review`, and `TaskRuntime::close_task`; runtime publishes updated task list projection after each accepted mutation
+- protocol-owned task mutation commands route through runtime into `TaskRuntime::create_task`, `TaskRuntime::create_agent`, `TaskRuntime::assign_task`, `TaskRuntime::claim_next_task`, `TaskRuntime::submit_review`, `TaskRuntime::reject_review`, `TaskRuntime::approve_review`, and `TaskRuntime::close_task`; runtime publishes updated task list projection after each accepted mutation
 - Phase 1 board and lifecycle queries route `QueryTaskBoard`, `QueryAgentBoard`, and `QueryAgentLifecycle` through runtime into `TaskRuntime::query_task_board`, `TaskRuntime::query_agent_board`, and `TaskRuntime::query_agent_lifecycle`
 - Phase 1 execution fact and scheduler tick commands route through runtime into `TaskRuntime::apply_execution_fact` and `TaskRuntime::run_scheduler_tick`; runtime stays a thin bridge and does not make scheduler business decisions
 - runtime read-only error-center queries enter through `UiRuntimeQueryPort` and read watermarked metadata rows through the runtime metadata projection owner
@@ -28,6 +28,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - CancelLatestActiveTurn resolves to the newest active live turn before falling back to latest persisted runtime turn
 - submit commands may carry selected cwd; runtime canonicalizes and binds cwd to the selected session
 - successful task tool mutations publish task list projection events through runtime-owned UI protocol state
+- Phase 2A master/worker sample commands route as thin ADP dispatch into Task Center owner truth; runtime does not decide business next actions
 
 ## Response Mainline
 
@@ -51,6 +52,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime Phase 1 TaskBoard and AgentBoard queries return UI-safe board projections sourced from task.orchestration and agent.lifecycle
 - runtime Phase 1 execution fact and scheduler tick dispatch receipts return only after task.orchestration accepts owner truth and task-list projection publication succeeds
 - runtime-backed task mutation commands return receipts only after task.orchestration accepts the mutation and task list projection publication succeeds
+- runtime-backed worker claim receipts include the claimed task id and execution id; no-task is explicit and not a success mutation
 - runtime error-center queries return UI-safe projections built from watermarked metadata rows and omit raw error/request/provider text
 - runtime task list subscription updates reuse the same UI-safe projection helper as task list queries
 - successful provider/model updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and leave active runtime/live provider config unchanged until daemon restart
@@ -103,11 +105,11 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
   - allowed callers: RuntimeCommandDispatcher::query_runtime
   - related tests: runtime_query_reads_task_truth_from_task_runtime, daemon_adp_queries_runtime_task_truth
   - why shared: keeps ledger ordering in task.orchestration instead of duplicating it in runtime or UI
-- `TaskRuntime::create_task / TaskRuntime::submit_review / TaskRuntime::approve_review / TaskRuntime::close_task`
+- `TaskRuntime::create_task / TaskRuntime::create_agent / TaskRuntime::assign_task / TaskRuntime::claim_next_task / TaskRuntime::submit_review / TaskRuntime::reject_review / TaskRuntime::approve_review / TaskRuntime::close_task`
   - owner: `crates/freehand-task/src/lib.rs`
-  - purpose: perform task lifecycle mutations for runtime-backed UI task commands
-  - allowed callers: RuntimeCommandDispatcher::dispatch_create_task, RuntimeCommandDispatcher::dispatch_submit_task_review, RuntimeCommandDispatcher::dispatch_approve_task_review, RuntimeCommandDispatcher::dispatch_close_task
-  - related tests: CLI ADP task lifecycle sample mock WebSocket smoke, S-profile task-lifecycle-sample
+  - purpose: perform task lifecycle and Phase 2A worker loop mutations for runtime-backed UI task commands
+  - allowed callers: RuntimeCommandDispatcher::dispatch_create_task, RuntimeCommandDispatcher::dispatch_create_task_agent, RuntimeCommandDispatcher::dispatch_assign_task, RuntimeCommandDispatcher::dispatch_claim_next_task, RuntimeCommandDispatcher::dispatch_submit_task_review, RuntimeCommandDispatcher::dispatch_reject_task_review, RuntimeCommandDispatcher::dispatch_approve_task_review, RuntimeCommandDispatcher::dispatch_close_task
+  - related tests: CLI ADP task lifecycle sample mock WebSocket smoke, S-profile task-lifecycle-sample, runtime_dispatches_phase2a_master_worker_loop_into_task_truth
   - why shared: keeps task lifecycle mutation in task.orchestration while runtime remains a thin dispatch bridge
 - `task_list_projection_from_runtime`
   - owner: `crates/freehand-runtime/src/lib.rs`
@@ -133,6 +135,12 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
   - allowed callers: RuntimeCommandDispatcher::query_runtime
   - related tests: runtime_query_reads_phase1_task_and_agent_boards
   - why shared: keeps board projection in the runtime bridge while Task Center and Agent Lifecycle remain owner truth
+- `task_dispatch_from_ui`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: convert protocol-owned create-task dispatch mode into task.orchestration dispatch request
+  - allowed callers: RuntimeCommandDispatcher::dispatch_create_task
+  - related tests: runtime_dispatches_phase2a_master_worker_loop_into_task_truth, cli_runs_master_worker_foundation_sample_against_mock_websocket
+  - why shared: keeps UI dispatch-mode DTO conversion in runtime bridge while Task Center owns resulting task truth
 
 ## Function Call Table
 
@@ -158,6 +166,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 | 17 | `update_provider_config_in_path` | `crates/freehand-config/src/lib.rs` | validate and atomically persist provider/model update through canonical config owner | runtime config path plus provider update | selected agent config projection from saved TOML | RuntimeCommandDispatcher::dispatch_update_provider_config | config.core persistence | bound |
 | 18 | `project_task_board_for_ui / project_agent_board_for_ui / project_agent_lifecycle_for_ui` | `crates/freehand-runtime/src/lib.rs` | project Phase 1 TaskBoard, AgentBoard, and AgentLifecycle owner truth into protocol DTOs | task/agent owner projections | UI-safe board/lifecycle query results | RuntimeCommandDispatcher::query_runtime | ui.protocol DTOs | bound |
 | 19 | `RuntimeCommandDispatcher::dispatch_apply_execution_fact / dispatch_run_scheduler_tick` | `crates/freehand-runtime/src/lib.rs` | route Phase 1 execution facts and scheduler ticks into task.orchestration without making business decisions | execution fact or scheduler tick dispatch envelope | dispatch receipt or owner failure | RuntimeCommandDispatcher::dispatch | TaskRuntime::apply_execution_fact / TaskRuntime::run_scheduler_tick | bound |
+| 20 | `RuntimeCommandDispatcher::dispatch_create_task_agent / dispatch_assign_task / dispatch_claim_next_task / dispatch_reject_task_review` | `crates/freehand-runtime/src/lib.rs` | route Phase 2A worker registry, assignment, claim, and review rejection commands into task.orchestration | protocol task mutation command | dispatch receipt plus task list projection | RuntimeCommandDispatcher::dispatch | TaskRuntime task owner APIs | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -185,6 +194,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime task query bridge routes list/history through task.orchestration and is covered by runtime and daemon ADP tests
 - runtime Phase 1 TaskBoard and AgentBoard query bridge routes through task.orchestration and agent.lifecycle and is covered by runtime tests
 - runtime Phase 1 ExecutionFact and SchedulerTick dispatch bridge routes through task.orchestration and is covered by runtime tests
-- runtime task mutation command bridge is bound as a thin route from protocol commands to task.orchestration create/review/approve/close APIs, with ui_task_actor kept separate from model/tool task_actor(turn)
+- runtime task mutation command bridge is bound as a thin route from protocol commands to task.orchestration create/create_agent/assign/claim/review/reject/approve/close APIs, with ui_task_actor kept separate from model/tool task_actor(turn)
+- runtime Phase 2A master-worker command bridge is covered by runtime_dispatches_phase2a_master_worker_loop_into_task_truth and master-worker-foundation-sample
 - runtime error-center query bridge routes metadata rows through a UI-safe projection and is covered by runtime and daemon ADP tests
 - runtime provider/model update dispatch is bound as a thin mutation route into config.core; successful saves project restart-required pending status and active runtime config remains unchanged until restart

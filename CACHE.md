@@ -1,5 +1,15 @@
 # CACHE
 
+- Current multi-task Phase 2A master-worker closeout:
+  - Marker: `phase2a-master-worker-closeout-1783515402294813000`.
+  - Phase 2A no-UI loop is implemented through owner truth: `ui.protocol` command DTO/validation, `runtime.ui-command-dispatch` thin dispatch, `task.orchestration` mutation truth, and `agent.lifecycle` typed projection.
+  - Implemented headless loop: create worker, create waiting task, assign, claim-next with execution id, progress, blocked, recovering, review ready, reject, retry progress, second review, approve, close, and restart same-id verify.
+  - Local proof: `cargo fmt --check`; `cargo test -p freehand-task -- --nocapture` -> 30 passed; `cargo test -p freehand-runtime -- --nocapture` -> 81 passed; `cargo test -p freehand-ui-protocol -- --nocapture` -> 49 passed; `cargo test -p freehand-cli -- --nocapture` -> 20 passed; sequential `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `git diff --check`.
+  - Online S-profile proof on `127.0.0.1:4042`: health `ok`; `freehand-cliS adp-smoke` passed; `freehand-cliS master-worker-foundation-sample` returned `master_worker_foundation_sample_ok` for `task-cli-master-worker-FHPHASE2A1783516065760449000`, execution `exec-cli-master-worker-FHPHASE2A1783516065760449000`, worker `worker-cli-master-worker-FHPHASE2A1783516065760449000`, `status=closed`, `blocked_seen=true`, `review_ready_seen=true`, `lifecycle_state=closed`.
+  - Restart same-id proof: after `scripts/install-launchd.sh restartS`, `freehand-cliS master-worker-foundation-sample --verify-task task-cli-master-worker-FHPHASE2A1783516065760449000 --execution exec-cli-master-worker-FHPHASE2A1783516065760449000 --agent worker-cli-master-worker-FHPHASE2A1783516065760449000` returned `master_worker_foundation_verify_ok` with the same closed history and lifecycle state.
+  - MemoryPalace proof: safe source-only corpus `/Volumes/extension/code/memory/freehand-phase2a-mempalace-corpus-safe-1783516065760449000` had zero sensitive-marker hits, `mempalace mine ... --wing freehand --agent codex` processed 24 files, and marker search returned `phase2a-master-worker-closeout.md` rank 1.
+  - Out of scope remains Phase 2B master poll/EventInbox, Phase 2C worker_control, Phase 2D UI projection, multi BigTask, cross-machine worker, WebUI, and Android dashboard.
+
 - Current single-agent headless closeout slice:
   - Deterministic ADP task lifecycle is implemented through protocol-owned `CreateTask` / `SubmitTaskReview` / `ApproveTaskReview` / `CloseTask`; CLI `task-lifecycle-sample` no longer waits on a model prompt.
   - Provider retry online proof is now implemented as `scripts/verify-provider-retry-online.sh`: it temporarily points S-profile provider config at a local Anthropic-compatible HTTP 500 fixture, requires exactly five upstream `/v1/messages` attempts, queries provider-domain error-center truth, verifies failed session truth, and restores `~/.freehand/config.toml` plus `~/.freehand/daemonS.env`.

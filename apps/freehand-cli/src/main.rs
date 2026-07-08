@@ -1,6 +1,6 @@
 use freehand_blocks::strip_completion_submission_block;
 use freehand_config::{AgentMode, default_config_path, load_default_config};
-use freehand_contracts::{SemanticEventKind, SessionId, TerminalStatus, TraceId, TurnId};
+use freehand_contracts::{AgentId, SemanticEventKind, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_runtime::{LiveReasonRestoreStatus, LiveReasonTurnRequest, run_live_reason_turn};
 use freehand_testkit::{
     ReasonRuntimeSmokeScenario, run_reason_persistence_smoke, run_reason_runtime_smoke,
@@ -8,8 +8,9 @@ use freehand_testkit::{
 use freehand_ui_protocol::{
     UiAdpRequest, UiAdpResponse, UiAgentBoardProjection, UiAgentLifecycleProjection, UiClientKind,
     UiCommand, UiExecutionFactCommand, UiExecutionFactKind, UiModelRequestKind,
-    UiProviderConfigUpdate, UiQueryResult, UiSchedulerTickCommand, UiTaskBoardProjection,
-    UiTaskCreateCommand, UiTaskReviewCommand,
+    UiProviderConfigUpdate, UiQueryResult, UiSchedulerTickCommand, UiTaskAgentCreateCommand,
+    UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand,
+    UiTaskDispatchCommand, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
@@ -56,6 +57,9 @@ fn run() -> Result<String, String> {
     if flag == "phase1-foundation-sample" {
         return run_phase1_foundation_sample(args.collect());
     }
+    if flag == "master-worker-foundation-sample" {
+        return run_master_worker_foundation_sample(args.collect());
+    }
     if flag == "adp-session-query" {
         return run_adp_session_query(args.collect());
     }
@@ -79,7 +83,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
                 .to_owned(),
         );
     }
@@ -271,6 +275,54 @@ fn run_phase1_foundation_sample(args: Vec<String>) -> Result<String, String> {
         .build()
         .map_err(|err| err.to_string())?;
     runtime.block_on(run_phase1_foundation_sample_async(url, verify))
+}
+
+fn run_master_worker_foundation_sample(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]"
+            .to_owned();
+    let mut url = None::<String>;
+    let mut task_id = None::<String>;
+    let mut execution = None::<String>;
+    let mut agent = None::<String>;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--url" if index + 1 < args.len() => {
+                url = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--verify-task" if index + 1 < args.len() => {
+                task_id = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--execution" if index + 1 < args.len() => {
+                execution = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--agent" if index + 1 < args.len() => {
+                agent = Some(args[index + 1].clone());
+                index += 2;
+            }
+            _ => return Err(usage),
+        }
+    }
+    let url = url.ok_or_else(|| usage.clone())?;
+    let verify = match (task_id, execution, agent) {
+        (None, None, None) => None,
+        (Some(task_id), Some(execution_id), Some(agent_id)) => Some(MasterWorkerVerifyIds {
+            task_id,
+            execution_id,
+            agent_id,
+        }),
+        _ => return Err(usage),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_master_worker_foundation_sample_async(url, verify))
 }
 
 fn run_adp_session_query(args: Vec<String>) -> Result<String, String> {
@@ -1425,6 +1477,7 @@ async fn run_task_lifecycle_sample_async(url: String) -> Result<String, String> 
                     target_cwd: None,
                     session_id: Some(session_id.clone()),
                     turn_id: None,
+                    dispatch: None,
                 },
             },
         )
@@ -1553,6 +1606,7 @@ async fn run_phase1_foundation_sample_async(
                     target_cwd: None,
                     session_id: Some(session_id.clone()),
                     turn_id: Some(turn_id.clone()),
+                    dispatch: None,
                 },
             },
         )
@@ -1601,6 +1655,7 @@ async fn run_phase1_foundation_sample_async(
                     target_cwd: None,
                     session_id: Some(session_id.clone()),
                     turn_id: Some(turn_id.clone()),
+                    dispatch: None,
                 },
             },
         )
@@ -1730,6 +1785,438 @@ async fn run_phase1_foundation_verify_async(
         evidence.recovering_event_seen,
         evidence.lifecycle_state
     ))
+}
+
+#[derive(Debug, Clone)]
+struct MasterWorkerVerifyIds {
+    task_id: String,
+    execution_id: String,
+    agent_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct MasterWorkerFoundationEvidence {
+    final_status: String,
+    blocked_seen: bool,
+    review_ready_seen: bool,
+    history_events: Vec<String>,
+    lifecycle_state: String,
+}
+
+async fn run_master_worker_foundation_sample_async(
+    url: String,
+    verify: Option<MasterWorkerVerifyIds>,
+) -> Result<String, String> {
+    if let Some(ids) = verify {
+        let evidence = verify_master_worker_foundation_truth(&url, &ids).await?;
+        return Ok(format!(
+            "master_worker_foundation_verify_ok url={} task={} execution={} agent={} status={} blocked_seen={} review_ready_seen={} lifecycle_state={} events={}",
+            url,
+            ids.task_id,
+            ids.execution_id,
+            ids.agent_id,
+            evidence.final_status,
+            evidence.blocked_seen,
+            evidence.review_ready_seen,
+            evidence.lifecycle_state,
+            evidence.history_events.join(",")
+        ));
+    }
+
+    let session_id = SessionId::new(format!("cli-master-worker-{}", live_id_stamp()?));
+    let token = format!("FHPHASE2A{}", live_id_stamp()?);
+    let task_id = format!("task-cli-master-worker-{token}");
+    let execution_id = format!("exec-cli-master-worker-{token}");
+    let worker_id = format!("worker-cli-master-worker-{token}");
+    let turn_id = TurnId::new(format!("turn-cli-master-worker-{token}"));
+    let worker_agent = AgentId::new(worker_id.clone());
+    let mut seen = Vec::new();
+
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-create-agent",
+            UiCommand::CreateTaskAgent {
+                agent: UiTaskAgentCreateCommand {
+                    agent_id: worker_agent.clone(),
+                    capabilities: vec!["code_edit".to_owned(), "test_run".to_owned()],
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-create-task",
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some(task_id.clone()),
+                    title: format!("Master worker {token}"),
+                    content: format!("Phase2A master worker task {token}"),
+                    goal: "prove headless master worker execution loop".to_owned(),
+                    deliverables: vec!["worker execution loop".to_owned()],
+                    acceptance: vec!["task closes only after approved review".to_owned()],
+                    priority: 90,
+                    target_cwd: None,
+                    session_id: Some(session_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                    dispatch: Some(UiTaskDispatchCommand::None),
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-assign",
+            UiCommand::AssignTask {
+                assignment: UiTaskAssignCommand {
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-claim",
+            UiCommand::ClaimNextTask {
+                claim: UiTaskClaimCommand {
+                    agent_id: worker_agent.clone(),
+                    execution_id: execution_id.clone(),
+                    ttl_seconds: Some(300),
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-progress",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Running {
+                        phase: "phase2a_progress".to_owned(),
+                        summary: format!("worker progress {token}"),
+                        evidence: vec![format!("execution {execution_id}")],
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-blocked",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Blocked {
+                        reason: format!("blocked {token}"),
+                        evidence: vec!["master visible blocker".to_owned()],
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+    let blocked_board = query_task_board(&url, "cli-master-worker-blocked-board").await?;
+    if !blocked_board
+        .blocked
+        .iter()
+        .any(|task| task.task_id == task_id)
+    {
+        return Err(format!(
+            "master worker sample blocked board missing task={} blocked_count={}",
+            task_id,
+            blocked_board.blocked.len()
+        ));
+    }
+    seen.push("query_blocked_board:blocked=1".to_owned());
+
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-recovering",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Recovering {
+                        summary: format!("recovering {token}"),
+                        evidence: vec!["master unblock guidance".to_owned()],
+                        retry_count: 1,
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-review-1",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::ReviewReady {
+                        summary: format!("first review {token}"),
+                        deliverables: vec!["first deliverable".to_owned()],
+                        evidence: vec!["first review evidence".to_owned()],
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-reject",
+            UiCommand::RejectTaskReview {
+                rejection: UiTaskReviewRejectionCommand {
+                    task_id: task_id.clone(),
+                    reject_reason: format!("needs retry {token}"),
+                    next_requirements: vec!["retry with corrected evidence".to_owned()],
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-retry-progress",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Running {
+                        phase: "phase2a_retry".to_owned(),
+                        summary: format!("retry progress {token}"),
+                        evidence: vec!["retry execution evidence".to_owned()],
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-review-2",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::ReviewReady {
+                        summary: format!("second review {token}"),
+                        deliverables: vec!["accepted deliverable".to_owned()],
+                        evidence: vec!["accepted review evidence".to_owned()],
+                    },
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-approve",
+            UiCommand::ApproveTaskReview {
+                task_id: task_id.clone(),
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-worker-close",
+            UiCommand::CloseTask {
+                task_id: task_id.clone(),
+            },
+        )
+        .await?,
+    );
+
+    let ids = MasterWorkerVerifyIds {
+        task_id: task_id.clone(),
+        execution_id: execution_id.clone(),
+        agent_id: worker_id.clone(),
+    };
+    let evidence = verify_master_worker_foundation_truth(&url, &ids).await?;
+    Ok(format!(
+        "master_worker_foundation_sample_ok url={} session={} task={} execution={} agent={} status={} blocked_seen={} review_ready_seen={} lifecycle_state={} events={} seen={}",
+        url,
+        session_id.as_str(),
+        task_id,
+        execution_id,
+        worker_id,
+        evidence.final_status,
+        evidence.blocked_seen,
+        evidence.review_ready_seen,
+        evidence.lifecycle_state,
+        evidence.history_events.join(","),
+        seen.join(",")
+    ))
+}
+
+async fn verify_master_worker_foundation_truth(
+    url: &str,
+    ids: &MasterWorkerVerifyIds,
+) -> Result<MasterWorkerFoundationEvidence, String> {
+    let board = query_task_board_including_terminal(url, "cli-master-worker-verify-board").await?;
+    let Some(task) = board.tasks.iter().find(|task| task.task_id == ids.task_id) else {
+        return Err(format!(
+            "master worker task missing from terminal board task={} count={}",
+            ids.task_id,
+            board.tasks.len()
+        ));
+    };
+    if !task.status.eq_ignore_ascii_case("closed") {
+        return Err(format!(
+            "master worker task not closed task={} status={}",
+            ids.task_id, task.status
+        ));
+    }
+    if task.assignee_agent_id.as_ref().map(AgentId::as_str) != Some(ids.agent_id.as_str()) {
+        return Err(format!(
+            "master worker task assignee mismatch task={} expected_agent={} actual={}",
+            ids.task_id,
+            ids.agent_id,
+            task.assignee_agent_id
+                .as_ref()
+                .map(AgentId::as_str)
+                .unwrap_or("none")
+        ));
+    }
+    if task.active_execution_id.as_deref() != Some(ids.execution_id.as_str()) {
+        return Err(format!(
+            "master worker task execution mismatch task={} expected_execution={} actual={}",
+            ids.task_id,
+            ids.execution_id,
+            task.active_execution_id.as_deref().unwrap_or("none")
+        ));
+    }
+
+    let agent_board = query_agent_board(url, "cli-master-worker-verify-agent-board").await?;
+    if !agent_board
+        .agents
+        .iter()
+        .any(|agent| agent.agent_id.as_str() == ids.agent_id)
+    {
+        return Err(format!(
+            "master worker agent missing agent={} board_count={}",
+            ids.agent_id,
+            agent_board.agents.len()
+        ));
+    }
+    let lifecycle = query_agent_lifecycle(
+        url,
+        "cli-master-worker-verify-agent-lifecycle",
+        &ids.agent_id,
+    )
+    .await?;
+    let history = query_task_history(url, &ids.task_id).await?;
+    let event_types = history
+        .events
+        .iter()
+        .map(|event| event.event_type.clone())
+        .collect::<Vec<_>>();
+    assert_ordered_events(
+        &event_types,
+        &[
+            "TaskCreated",
+            "TaskAssigned",
+            "TaskResumed",
+            "TaskExecutionRecorded",
+            "TaskBlocked",
+            "TaskExecutionRecovering",
+            "TaskReviewSubmitted",
+            "TaskReviewRejected",
+            "TaskExecutionRecorded",
+            "TaskReviewSubmitted",
+            "TaskReviewApproved",
+            "TaskClosed",
+        ],
+    )
+    .map_err(|message| {
+        format!(
+            "master worker history sequence invalid task={} execution={} {message}",
+            ids.task_id, ids.execution_id
+        )
+    })?;
+    let execution_events = history
+        .events
+        .iter()
+        .filter(|event| {
+            event
+                .payload
+                .get("execution_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(ids.execution_id.as_str())
+        })
+        .count();
+    if execution_events < 5 {
+        return Err(format!(
+            "master worker execution evidence too weak task={} execution={} matching_events={}",
+            ids.task_id, ids.execution_id, execution_events
+        ));
+    }
+    let blocked_seen = event_types.iter().any(|event| event == "TaskBlocked");
+    let review_ready_seen = event_types
+        .iter()
+        .filter(|event| event.as_str() == "TaskReviewSubmitted")
+        .count()
+        >= 2;
+    Ok(MasterWorkerFoundationEvidence {
+        final_status: task.status.clone(),
+        blocked_seen,
+        review_ready_seen,
+        history_events: event_types,
+        lifecycle_state: lifecycle.state,
+    })
+}
+
+fn assert_ordered_events(actual: &[String], required: &[&str]) -> Result<(), String> {
+    let mut cursor = 0_usize;
+    for required_event in required {
+        let Some(offset) = actual[cursor..]
+            .iter()
+            .position(|event| event == required_event)
+        else {
+            return Err(format!(
+                "missing required_event={} actual={}",
+                required_event,
+                actual.join(",")
+            ));
+        };
+        cursor += offset + 1;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -2001,13 +2488,28 @@ async fn query_task_history(
 }
 
 async fn query_task_board(url: &str, request_id: &str) -> Result<UiTaskBoardProjection, String> {
+    query_task_board_with_terminal(url, request_id, false).await
+}
+
+async fn query_task_board_including_terminal(
+    url: &str,
+    request_id: &str,
+) -> Result<UiTaskBoardProjection, String> {
+    query_task_board_with_terminal(url, request_id, true).await
+}
+
+async fn query_task_board_with_terminal(
+    url: &str,
+    request_id: &str,
+    include_terminal: bool,
+) -> Result<UiTaskBoardProjection, String> {
     let result = query_adp_once(
         url,
         request_id,
         UiCommand::QueryTaskBoard {
             status: None,
             agent_id: None,
-            include_terminal: false,
+            include_terminal,
         },
         "task board",
     )

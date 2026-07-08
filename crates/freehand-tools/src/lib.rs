@@ -476,6 +476,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                 "properties": {
                     "op": {"type": "string", "enum": ["create", "query", "list_tasks", "history", "append", "pause", "resume", "heartbeat", "assign", "claim_next", "record_execution", "cancel", "submit_review", "approve", "reject", "close", "list_agents", "query_agent", "create_agent", "close_agent"]},
                     "task_id": {"type": "string"},
+                    "execution_id": {"type": "string"},
                     "status": {"type": "string"},
                     "ttl_seconds": {"type": "integer", "minimum": 1},
                     "note": {"type": "string"},

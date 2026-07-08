@@ -288,3 +288,13 @@ Phase 2A is complete only when:
 - restart verify queries the same ids
 - no UI-local state or model prose is used as proof
 - docs/function-map/test-design/mainline/wiki/MEMORY/note are synchronized
+
+## Phase 2A Closeout Status
+
+Phase 2A is implemented and verified for the current no-UI scope. Current
+S-profile proof closed task
+`task-cli-master-worker-FHPHASE2A1783515402294813000` with execution
+`exec-cli-master-worker-FHPHASE2A1783515402294813000` and worker
+`worker-cli-master-worker-FHPHASE2A1783515402294813000`; after `restartS`,
+verify mode queried the same ids and returned closed task history plus closed
+agent lifecycle truth.

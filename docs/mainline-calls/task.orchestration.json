@@ -9,13 +9,13 @@
   "request_mainline": [
     "runtime receives a provider tool call named `task`",
     "runtime routes `task` tool calls to `execute_task_tool` instead of generic file/tool execution",
-    "`TaskRuntime::boot` loads task snapshots, task leases, and self-agent snapshot into memory",
+    "`TaskRuntime::boot` loads task snapshots, task leases, self-agent snapshot, and persisted agent lifecycle snapshots into memory",
     "`TaskRuntime::boot` interrupts running tasks whose lease is missing, mismatched, inactive, or expired",
     "`TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance",
     "create action writes append-only ledger events and atomic snapshots",
     "dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`",
     "`TaskRuntime::assign_task` binds waiting, created, or interrupted tasks to an available agent",
-    "`TaskRuntime::claim_next_task` lets an agent claim its highest-priority assigned task into lease-backed Running state",
+    "`TaskRuntime::claim_next_task` lets an agent claim its highest-priority assigned task into lease-backed Running state with a durable execution_id",
     "`TaskRuntime::record_execution` writes worker progress for running tasks into task ledger truth",
     "`TaskRuntime::cancel_task` moves non-terminal tasks to Cancelled and releases assignee state",
     "`TaskRuntime::create_agent` and `TaskRuntime::close_agent` manage persisted worker agent snapshots",
@@ -24,7 +24,9 @@
     "`TaskRuntime::heartbeat_task` refreshes the lease for the assigned running agent",
     "Phase 1 TaskBoard query reads task snapshots, agent registry state, blocked items, review queue, and current skeleton stale projection",
     "Phase 1 ExecutionFact sync admits typed running/recovering/blocked/review_ready facts into Task Center truth without parsing raw prose",
-    "Phase 1 SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without making business decisions"
+    "Phase 1 SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without making business decisions",
+    "Phase 2A worker loop keeps execution_id attached to claim/start, progress, blocked, recovering, review, reject, retry, approve, and close evidence",
+    "Phase 2A close requires approved review; blocked or rejected tasks cannot be closed as a shortcut around review acceptance"
   ],
   "response_mainline": [
     "`TaskRuntime::query_task` returns persisted task snapshot truth",
@@ -33,13 +35,14 @@
     "`TaskRuntime::list_agents` returns current in-memory agent registry projection",
     "`TaskRuntime::query_agent` returns one agent snapshot",
     "append, pause, resume, heartbeat, assign, cancel, submit_review, approve, reject, and close return event-backed mutation results",
-    "claim_next returns either the claimed running task or an explicit no-task result",
+    "claim_next returns either the claimed running task plus execution_id or an explicit no-task result",
     "record_execution returns an event-backed worker progress mutation summary",
     "create_agent and close_agent return persisted agent snapshot summaries",
     "task tool result returns semantic task ids, status, event names, sequence numbers, or JSON snapshots",
     "Phase 1 TaskBoard query returns board-level task, blocker, review, stale, and agent binding summaries",
     "Phase 1 ExecutionFact sync returns event-backed Task Center updates while preserving recovering as non-terminal",
-    "Phase 1 SchedulerTick returns durable/replayable fact events and recommendations only"
+    "Phase 1 SchedulerTick returns durable/replayable fact events and recommendations only",
+    "review rejection remains non-terminal task lifecycle truth; a later execution fact may resume the rejected task into running retry and submit review again"
   ],
   "error_mainline": [
     "missing task fields return explicit task errors",
@@ -49,19 +52,22 @@
     "heartbeat for non-running or unassigned tasks returns invalid-transition and writes no lease",
     "assigning to unavailable agents and closing busy agents return explicit errors without mutating task or agent truth",
     "claiming with an empty agent queue returns no-task without mutating truth",
+    "claiming with an empty execution id returns explicit missing-field and writes no truth",
+    "closing before approved review returns explicit invalid-transition and writes no close event",
     "recording execution for a non-running task returns invalid-transition and writes no event",
     "history for unknown task returns explicit task-not-found",
     "persistence failures return explicit task persistence errors",
     "task failures become failed tool results and can be sent back to the model",
     "malformed ExecutionFact returns explicit validation error and writes no Task Center truth",
     "SchedulerTick persistence failure returns explicit task runtime error and does not pretend stale/timeout facts were admitted",
-    "pending Phase 1: recovering facts never become task failure"
+    "recovering facts never become task failure",
+    "Phase 2A schema/tool/execution mismatch is not task failure; only invalid owner transition or provider/system failure should fail command dispatch"
   ],
   "shared_functions": [
     {
       "symbol": "TaskRuntime::boot",
       "owner": "crates/freehand-task/src/lib.rs",
-      "purpose": "rebuild memory state from persisted task and agent snapshots",
+      "purpose": "rebuild memory state from persisted task, agent, and lifecycle snapshots",
       "allowed_callers": [
         "runtime task tool bridge",
         "future daemon bootstrap"
@@ -116,14 +122,15 @@
     {
       "symbol": "TaskRuntime::claim_next_task",
       "owner": "crates/freehand-task/src/lib.rs",
-      "purpose": "claim the highest-priority assigned task for an agent and enter lease-backed Running state",
+      "purpose": "claim the highest-priority assigned task for an agent and enter lease-backed Running state with a durable execution id",
       "allowed_callers": [
         "runtime task tool bridge"
       ],
       "related_tests": [
         "claim_next_runs_highest_priority_assigned_task_with_lease",
         "claim_next_empty_queue_returns_none_without_mutation",
-        "task_tool_claim_next_runs_highest_priority_task"
+        "task_tool_claim_next_runs_highest_priority_task",
+        "phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id"
       ],
       "why_shared": "keeps queued task selection and running lease transition in task owner"
     },
@@ -180,7 +187,8 @@
       "related_tests": [
         "execution_fact_recovering_keeps_running_and_writes_event",
         "execution_fact_blocked_and_review_ready_update_board_truth",
-        "execution_fact_validation_failure_writes_no_truth"
+        "execution_fact_validation_failure_writes_no_truth",
+        "phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id"
       ],
       "why_shared": "keeps worker execution state changes in Task Center rather than scattered runtime/UI logic"
     },
@@ -200,6 +208,31 @@
         "scheduler_tick_facts_recover_after_boot"
       ],
       "why_shared": "keeps framework time sensing in one owner-backed task runtime"
+    },
+    {
+      "symbol": "TaskStore::write_agent_lifecycle_snapshot",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "persist latest typed lifecycle projection for restart same-id query",
+      "allowed_callers": [
+        "task event projection",
+        "lifecycle reducer"
+      ],
+      "related_tests": [
+        "phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id"
+      ],
+      "why_shared": "keeps lifecycle truth durable without coupling it to releasable worker resource state"
+    },
+    {
+      "symbol": "TaskStore::load_agent_lifecycle_snapshots",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "reload persisted lifecycle projections during task runtime boot",
+      "allowed_callers": [
+        "TaskRuntime::boot"
+      ],
+      "related_tests": [
+        "phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id"
+      ],
+      "why_shared": "keeps restart lifecycle recovery in the lifecycle owner storage path"
     }
   ],
   "call_table": [
@@ -229,7 +262,7 @@
       "step": "03",
       "symbol_path": "TaskRuntime::boot",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "load task and agent snapshots into memory",
+      "responsibility": "load task, agent, and lifecycle snapshots into memory",
       "input_semantic": "runtime home and owner agent",
       "output_semantic": "ready task runtime",
       "caller": "runtime task bridge",
@@ -347,7 +380,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "14",
+      "step": "17a",
       "symbol_path": "TaskRuntime::claim_next_task",
       "file_path": "crates/freehand-task/src/lib.rs",
       "responsibility": "claim the highest-priority assigned task for an agent and enter lease-backed running state",
@@ -433,6 +466,28 @@
       "caller": "runtime scheduler / CLI sample",
       "callee": "task owner",
       "binding_status": "bound"
+    },
+    {
+      "step": "21",
+      "symbol_path": "TaskRuntime::claim_next_task / TaskRuntime::apply_execution_fact / TaskRuntime::reject_review / TaskRuntime::approve_review / TaskRuntime::close_task",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "execute Phase 2A worker lifecycle from assigned queue through review rejection, retry, approval, and close",
+      "input_semantic": "worker claim/execution/review commands",
+      "output_semantic": "ordered task snapshot and ledger truth with stable execution id",
+      "caller": "runtime ADP command dispatch / CLI sample",
+      "callee": "task owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "22",
+      "symbol_path": "TaskStore::write_agent_lifecycle_snapshot / TaskStore::load_agent_lifecycle_snapshots",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "persist and restore typed agent lifecycle projection separately from releasable agent resource state",
+      "input_semantic": "agent lifecycle snapshot",
+      "output_semantic": "restart-queryable lifecycle truth",
+      "caller": "task event projection / boot",
+      "callee": "lifecycle owner storage",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -445,6 +500,7 @@
     "Phase 1 TaskBoard owner-internal skeleton is implemented",
     "Phase 1 ExecutionFact owner-internal sync is implemented",
     "Phase 1 SchedulerTick owner-internal facts are implemented",
-    "real worker execution, UI task projection, and multi-agent dispatch are pending"
+    "Phase 2A real worker execution loop is implemented through headless ADP/CLI",
+    "UI task projection and multi-agent dispatch remain pending later phases"
   ]
 }

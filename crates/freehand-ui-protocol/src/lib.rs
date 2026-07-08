@@ -151,8 +151,20 @@ pub enum UiCommand {
     CreateTask {
         task: UiTaskCreateCommand,
     },
+    CreateTaskAgent {
+        agent: UiTaskAgentCreateCommand,
+    },
+    AssignTask {
+        assignment: UiTaskAssignCommand,
+    },
+    ClaimNextTask {
+        claim: UiTaskClaimCommand,
+    },
     SubmitTaskReview {
         review: UiTaskReviewCommand,
+    },
+    RejectTaskReview {
+        rejection: UiTaskReviewRejectionCommand,
     },
     ApproveTaskReview {
         task_id: String,
@@ -426,6 +438,8 @@ pub struct UiTaskSnapshotProjection {
     pub priority: i64,
     pub target_cwd: Option<String>,
     pub assignee_agent_id: Option<AgentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_execution_id: Option<String>,
     pub updated_at: u64,
     pub last_progress_at: Option<u64>,
     pub last_event_seq: u64,
@@ -595,6 +609,16 @@ pub struct UiTaskCreateCommand {
     pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<UiTaskDispatchCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum UiTaskDispatchCommand {
+    None,
+    SelfAgent,
+    Agent { agent_id: AgentId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -605,6 +629,35 @@ pub struct UiTaskReviewCommand {
     pub deliverables: Vec<String>,
     #[serde(default)]
     pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskAgentCreateCommand {
+    pub agent_id: AgentId,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskAssignCommand {
+    pub task_id: String,
+    pub agent_id: AgentId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskClaimCommand {
+    pub agent_id: AgentId,
+    pub execution_id: String,
+    #[serde(default)]
+    pub ttl_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskReviewRejectionCommand {
+    pub task_id: String,
+    pub reject_reason: String,
+    #[serde(default)]
+    pub next_requirements: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -890,6 +943,14 @@ pub enum UiProtocolError {
     EmptyTaskGoal,
     #[error("task review requires non-empty summary")]
     EmptyTaskReviewSummary,
+    #[error("task review rejection requires non-empty reason")]
+    EmptyTaskReviewRejection,
+    #[error("task claim requires non-empty execution id")]
+    EmptyTaskExecutionId,
+    #[error("task agent command requires non-empty agent id")]
+    EmptyTaskAgentId,
+    #[error("task agent command requires at least one capability")]
+    EmptyTaskCapabilities,
     #[error("config update requires non-empty agent name")]
     EmptyConfigAgentName,
     #[error("config update requires non-empty provider id")]
@@ -1531,6 +1592,33 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::SubmitTaskReview { review } if review.summary.trim().is_empty() => {
             Err(UiProtocolError::EmptyTaskReviewSummary)
         }
+        UiCommand::CreateTaskAgent { agent } if agent.agent_id.as_str().trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskAgentId)
+        }
+        UiCommand::CreateTaskAgent { agent } if agent.capabilities.is_empty() => {
+            Err(UiProtocolError::EmptyTaskCapabilities)
+        }
+        UiCommand::AssignTask { assignment } if assignment.task_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskId)
+        }
+        UiCommand::AssignTask { assignment } if assignment.agent_id.as_str().trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskAgentId)
+        }
+        UiCommand::ClaimNextTask { claim } if claim.agent_id.as_str().trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskAgentId)
+        }
+        UiCommand::ClaimNextTask { claim } if claim.execution_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskExecutionId)
+        }
+        UiCommand::RejectTaskReview { rejection } if rejection.task_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskId)
+        }
+        UiCommand::RejectTaskReview { rejection } if rejection.reject_reason.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskReviewRejection)
+        }
+        UiCommand::RejectTaskReview { rejection } if rejection.next_requirements.is_empty() => {
+            Err(UiProtocolError::EmptyTaskReviewRejection)
+        }
         UiCommand::ApproveTaskReview { task_id } | UiCommand::CloseTask { task_id }
             if task_id.trim().is_empty() =>
         {
@@ -1595,6 +1683,10 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptyTaskContent => "empty_task_content",
         UiProtocolError::EmptyTaskGoal => "empty_task_goal",
         UiProtocolError::EmptyTaskReviewSummary => "empty_task_review_summary",
+        UiProtocolError::EmptyTaskReviewRejection => "empty_task_review_rejection",
+        UiProtocolError::EmptyTaskExecutionId => "empty_task_execution_id",
+        UiProtocolError::EmptyTaskAgentId => "empty_task_agent_id",
+        UiProtocolError::EmptyTaskCapabilities => "empty_task_capabilities",
         UiProtocolError::EmptyConfigAgentName => "empty_config_agent_name",
         UiProtocolError::EmptyProviderId => "empty_provider_id",
         UiProtocolError::EmptyProviderType => "empty_provider_type",
@@ -2183,7 +2275,11 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
         UiCommand::CreateTask { .. } => "create_task",
+        UiCommand::CreateTaskAgent { .. } => "create_task_agent",
+        UiCommand::AssignTask { .. } => "assign_task",
+        UiCommand::ClaimNextTask { .. } => "claim_next_task",
         UiCommand::SubmitTaskReview { .. } => "submit_task_review",
+        UiCommand::RejectTaskReview { .. } => "reject_task_review",
         UiCommand::ApproveTaskReview { .. } => "approve_task_review",
         UiCommand::CloseTask { .. } => "close_task",
         UiCommand::ApplyExecutionFact { .. } => "apply_execution_fact",
@@ -2212,7 +2308,11 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::SubmitUserInput { .. }
             | UiCommand::UpdateProviderConfig { .. }
             | UiCommand::CreateTask { .. }
+            | UiCommand::CreateTaskAgent { .. }
+            | UiCommand::AssignTask { .. }
+            | UiCommand::ClaimNextTask { .. }
             | UiCommand::SubmitTaskReview { .. }
+            | UiCommand::RejectTaskReview { .. }
             | UiCommand::ApproveTaskReview { .. }
             | UiCommand::CloseTask { .. }
             | UiCommand::ApplyExecutionFact { .. }
@@ -2244,7 +2344,11 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         }
         UiCommand::UpdateProviderConfig { .. } => ("config.core", "crates/freehand-config"),
         UiCommand::CreateTask { .. }
+        | UiCommand::CreateTaskAgent { .. }
+        | UiCommand::AssignTask { .. }
+        | UiCommand::ClaimNextTask { .. }
         | UiCommand::SubmitTaskReview { .. }
+        | UiCommand::RejectTaskReview { .. }
         | UiCommand::ApproveTaskReview { .. }
         | UiCommand::CloseTask { .. }
         | UiCommand::ApplyExecutionFact { .. }
@@ -2541,6 +2645,95 @@ mod tests {
         .expect_err("blank task cwd must be rejected");
         assert_eq!(err, UiProtocolError::EmptySessionCwd);
         assert_eq!(protocol_rejection(err).code, "empty_session_cwd");
+    }
+
+    #[test]
+    fn phase2a_task_commands_validate_and_route_to_task_orchestration() {
+        let commands = vec![
+            UiCommand::CreateTaskAgent {
+                agent: UiTaskAgentCreateCommand {
+                    agent_id: AgentId::new("worker-phase2a"),
+                    capabilities: vec!["code_edit".to_owned()],
+                },
+            },
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some("task-phase2a".to_owned()),
+                    title: "Phase2A".to_owned(),
+                    content: "Phase2A content".to_owned(),
+                    goal: "prove worker loop".to_owned(),
+                    deliverables: vec!["loop".to_owned()],
+                    acceptance: vec!["closed".to_owned()],
+                    priority: 90,
+                    target_cwd: None,
+                    session_id: Some(SessionId::new("session-phase2a")),
+                    turn_id: Some(TurnId::new("turn-phase2a")),
+                    dispatch: Some(UiTaskDispatchCommand::None),
+                },
+            },
+            UiCommand::AssignTask {
+                assignment: UiTaskAssignCommand {
+                    task_id: "task-phase2a".to_owned(),
+                    agent_id: AgentId::new("worker-phase2a"),
+                },
+            },
+            UiCommand::ClaimNextTask {
+                claim: UiTaskClaimCommand {
+                    agent_id: AgentId::new("worker-phase2a"),
+                    execution_id: "exec-phase2a".to_owned(),
+                    ttl_seconds: Some(300),
+                },
+            },
+            UiCommand::RejectTaskReview {
+                rejection: UiTaskReviewRejectionCommand {
+                    task_id: "task-phase2a".to_owned(),
+                    reject_reason: "missing evidence".to_owned(),
+                    next_requirements: vec!["add evidence".to_owned()],
+                },
+            },
+        ];
+        for command in commands {
+            validate_command(&command).expect("valid phase2a task command");
+            let envelope =
+                build_command_dispatch_envelope(&command).expect("task command envelope");
+            assert_eq!(envelope.target_feature_id, "task.orchestration");
+            assert_eq!(envelope.target_owner_module, "crates/freehand-task");
+        }
+    }
+
+    #[test]
+    fn phase2a_task_commands_reject_missing_worker_execution_and_review_fields() {
+        let err = validate_command(&UiCommand::CreateTaskAgent {
+            agent: UiTaskAgentCreateCommand {
+                agent_id: AgentId::new("worker-empty-capabilities"),
+                capabilities: Vec::new(),
+            },
+        })
+        .expect_err("worker capabilities required");
+        assert_eq!(err, UiProtocolError::EmptyTaskCapabilities);
+        assert_eq!(protocol_rejection(err).code, "empty_task_capabilities");
+
+        let err = validate_command(&UiCommand::ClaimNextTask {
+            claim: UiTaskClaimCommand {
+                agent_id: AgentId::new("worker-phase2a"),
+                execution_id: " ".to_owned(),
+                ttl_seconds: Some(300),
+            },
+        })
+        .expect_err("execution id required");
+        assert_eq!(err, UiProtocolError::EmptyTaskExecutionId);
+        assert_eq!(protocol_rejection(err).code, "empty_task_execution_id");
+
+        let err = validate_command(&UiCommand::RejectTaskReview {
+            rejection: UiTaskReviewRejectionCommand {
+                task_id: "task-phase2a".to_owned(),
+                reject_reason: " ".to_owned(),
+                next_requirements: vec!["retry".to_owned()],
+            },
+        })
+        .expect_err("reject reason required");
+        assert_eq!(err, UiProtocolError::EmptyTaskReviewRejection);
+        assert_eq!(protocol_rejection(err).code, "empty_task_review_rejection");
     }
 
     #[test]

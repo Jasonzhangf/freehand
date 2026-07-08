@@ -91,6 +91,8 @@ pub struct TaskSnapshot {
     pub priority: i64,
     pub target_cwd: Option<String>,
     pub assignee: Option<TaskAssignee>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_execution_id: Option<String>,
     pub review: TaskReviewState,
     pub parent: TaskParentRef,
     pub created_at: u64,
@@ -106,6 +108,8 @@ pub struct AgentSnapshot {
     pub agent_id: AgentId,
     pub status: AgentStatus,
     pub current_task_id: Option<TaskId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_execution_id: Option<String>,
     pub current_cwd: Option<String>,
     pub capabilities: Vec<String>,
     pub last_seen_at: u64,
@@ -118,11 +122,16 @@ pub struct AgentSnapshot {
 pub enum AgentLifecycleState {
     Idle,
     Assigned,
+    Running,
+    Progressing,
     ModelThinking,
     ToolRunning,
     Recovering,
     Blocked,
     WaitingReview,
+    Retrying,
+    Approved,
+    Closed,
     Failed,
     Offline,
 }
@@ -445,6 +454,7 @@ pub struct AgentMutationRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskClaimRequest {
     pub agent_id: AgentId,
+    pub execution_id: String,
     pub ttl_seconds: u64,
     pub actor: TaskActor,
     pub watermark: TaskWatermark,
@@ -501,6 +511,8 @@ pub struct AgentMutationOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskClaimOutcome {
     pub task: Option<TaskSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub event: Option<TaskLedgerEvent>,
 }
 
@@ -570,10 +582,20 @@ impl TaskRuntime {
             );
             state.agents.insert(agent.agent_id.clone(), agent);
         }
+        for lifecycle in store.load_agent_lifecycle_snapshots()? {
+            state
+                .lifecycle
+                .insert(lifecycle.agent_id.clone(), lifecycle);
+        }
         state.lifecycle.insert(
             self_agent.agent_id.clone(),
             lifecycle_from_agent_snapshot(&self_agent, now_unix_seconds()),
         );
+        if let Some(lifecycle) = store.load_agent_lifecycle_snapshot(&self_agent.agent_id)? {
+            state
+                .lifecycle
+                .insert(self_agent.agent_id.clone(), lifecycle);
+        }
         state.agents.insert(owner_agent_id, self_agent);
         for task in store.load_task_snapshots()? {
             state.tasks.insert(task.task_id.clone(), task);
@@ -613,6 +635,7 @@ impl TaskRuntime {
             priority: request.priority,
             target_cwd: request.target_cwd,
             assignee: None,
+            active_execution_id: None,
             review: TaskReviewState {
                 status: "none".to_owned(),
                 submitted_at: None,
@@ -665,6 +688,7 @@ impl TaskRuntime {
                 if let Some(agent) = state.agents.get_mut(&agent_id) {
                     agent.status = AgentStatus::Busy;
                     agent.current_task_id = Some(task.task_id.clone());
+                    agent.current_execution_id = None;
                     agent.current_cwd = task.target_cwd.clone();
                     agent.running_tasks = 0;
                     agent.queued_tasks = agent.queued_tasks.saturating_add(1);
@@ -946,6 +970,7 @@ impl TaskRuntime {
         self.store.append_event_and_snapshot(&task, &event)?;
         agent.status = AgentStatus::Busy;
         agent.current_task_id = Some(task.task_id.clone());
+        agent.current_execution_id = None;
         agent.current_cwd = task.target_cwd.clone();
         agent.running_tasks = 0;
         agent.queued_tasks = agent.queued_tasks.saturating_add(1);
@@ -990,16 +1015,22 @@ impl TaskRuntime {
         let Some(task_id) = task_id else {
             return Ok(TaskClaimOutcome {
                 task: None,
+                execution_id: None,
                 event: None,
             });
         };
+        require_text(&request.execution_id, "execution_id")?;
+        let execution_id = request.execution_id.clone();
         let resumed = self.mutate_task(
             &task_id,
             "TaskResumed",
             Some(TaskStatus::Running),
             &request.actor,
             &request.watermark,
-            json!({"claim_agent_id": request.agent_id.as_str()}),
+            json!({
+                "claim_agent_id": request.agent_id.as_str(),
+                "execution_id": execution_id
+            }),
         )?;
         let heartbeat = self.acquire_or_refresh_lease(
             &task_id,
@@ -1010,6 +1041,7 @@ impl TaskRuntime {
         )?;
         Ok(TaskClaimOutcome {
             task: Some(heartbeat.task),
+            execution_id: Some(request.execution_id),
             event: Some(resumed.event),
         })
     }
@@ -1292,6 +1324,7 @@ impl TaskRuntime {
             agent_id: request.agent_id.clone(),
             status: AgentStatus::Available,
             current_task_id: None,
+            current_execution_id: None,
             current_cwd: None,
             capabilities: request.capabilities,
             last_seen_at: now,
@@ -1299,6 +1332,9 @@ impl TaskRuntime {
             queued_tasks: 0,
         };
         self.store.write_agent_snapshot(&agent)?;
+        let lifecycle = lifecycle_from_agent_snapshot(&agent, now);
+        self.store.write_agent_lifecycle_snapshot(&lifecycle)?;
+        state.lifecycle.insert(agent.agent_id.clone(), lifecycle);
         state.agents.insert(agent.agent_id.clone(), agent.clone());
         Ok(AgentMutationOutcome { agent })
     }
@@ -1392,6 +1428,7 @@ impl TaskRuntime {
             snapshot.stats.current_model = Some(model);
         }
         stats_update(&mut snapshot.stats);
+        self.store.write_agent_lifecycle_snapshot(&snapshot)?;
         state.lifecycle.insert(agent_id, snapshot.clone());
         Ok(snapshot)
     }
@@ -1485,10 +1522,16 @@ impl TaskRuntime {
                 })
                 .unwrap_or_default();
         }
+        if let Some(execution_id) = payload.get("execution_id").and_then(Value::as_str)
+            && !execution_id.trim().is_empty()
+        {
+            task.active_execution_id = Some(execution_id.to_owned());
+        }
         task.status = target.clone();
         if matches!(event_type, "TaskProgressed" | "TaskExecutionRecorded") {
             task.last_progress_at = Some(now_unix_seconds());
         }
+        let payload_for_lifecycle = payload.clone();
         let event = build_event(
             &task,
             Some(from),
@@ -1520,6 +1563,12 @@ impl TaskRuntime {
             release_agent_task(agent, &task.status);
             agent.last_seen_at = now_unix_seconds();
             self.store.write_agent_snapshot(agent)?;
+        }
+        project_task_event_to_lifecycle(&mut state, &task, event_type, &payload_for_lifecycle);
+        if let Some(assignee) = task.assignee.as_ref()
+            && let Some(snapshot) = state.lifecycle.get(&assignee.agent_id)
+        {
+            self.store.write_agent_lifecycle_snapshot(snapshot)?;
         }
         state.tasks.insert(task.task_id.clone(), task.clone());
         Ok(TaskMutationOutcome { task, event })
@@ -1592,6 +1641,7 @@ impl TaskRuntime {
         if let Some(agent) = state.agents.get_mut(agent_id) {
             agent.status = AgentStatus::Busy;
             agent.current_task_id = Some(task_id.clone());
+            agent.current_execution_id = task.active_execution_id.clone();
             agent.current_cwd = task.target_cwd.clone();
             agent.running_tasks = 1;
             agent.queued_tasks = agent.queued_tasks.saturating_sub(1);
@@ -1703,6 +1753,7 @@ impl TaskStore {
             agent_id: owner_agent_id.clone(),
             status: AgentStatus::Available,
             current_task_id: None,
+            current_execution_id: None,
             current_cwd: None,
             capabilities: vec![
                 "code_edit".to_owned(),
@@ -1795,6 +1846,35 @@ impl TaskStore {
         Ok(agents)
     }
 
+    fn load_agent_lifecycle_snapshots(&self) -> Result<Vec<AgentLifecycleSnapshot>, TaskError> {
+        let dir = self.agent_lifecycle_state_dir();
+        if !dir.is_dir() {
+            return Ok(Vec::new());
+        }
+        let mut snapshots = Vec::new();
+        for entry in fs::read_dir(&dir).map_err(io_err)? {
+            let path = entry.map_err(io_err)?.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("json")
+                && path.file_name().and_then(|name| name.to_str()) != Some("index.json")
+            {
+                snapshots.push(read_json(&path)?);
+            }
+        }
+        Ok(snapshots)
+    }
+
+    fn load_agent_lifecycle_snapshot(
+        &self,
+        agent_id: &AgentId,
+    ) -> Result<Option<AgentLifecycleSnapshot>, TaskError> {
+        let path = self.agent_lifecycle_snapshot_path(agent_id);
+        if path.is_file() {
+            Ok(Some(read_json(&path)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn append_event_and_snapshot(
         &self,
         snapshot: &TaskSnapshot,
@@ -1825,6 +1905,34 @@ impl TaskStore {
     fn write_agent_snapshot(&self, snapshot: &AgentSnapshot) -> Result<(), TaskError> {
         write_json_atomic(&self.agent_snapshot_path(&snapshot.agent_id), snapshot)?;
         self.write_agent_index()
+    }
+
+    fn write_agent_lifecycle_snapshot(
+        &self,
+        snapshot: &AgentLifecycleSnapshot,
+    ) -> Result<(), TaskError> {
+        write_json_atomic(
+            &self.agent_lifecycle_snapshot_path(&snapshot.agent_id),
+            snapshot,
+        )?;
+        self.write_agent_lifecycle_index()
+    }
+
+    fn write_agent_lifecycle_index(&self) -> Result<(), TaskError> {
+        let dir = self.agent_lifecycle_state_dir();
+        let mut agents = Vec::<AgentId>::new();
+        if dir.is_dir() {
+            for entry in fs::read_dir(&dir).map_err(io_err)? {
+                let path = entry.map_err(io_err)?.path();
+                if path.extension().and_then(|ext| ext.to_str()) == Some("json")
+                    && path.file_name().and_then(|name| name.to_str()) != Some("index.json")
+                {
+                    let snapshot: AgentLifecycleSnapshot = read_json(&path)?;
+                    agents.push(snapshot.agent_id);
+                }
+            }
+        }
+        write_json_atomic(&dir.join("index.json"), &agents)
     }
 
     fn write_agent_index(&self) -> Result<(), TaskError> {
@@ -1891,6 +1999,13 @@ impl TaskStore {
         self.runtime_home.join("state").join("agents")
     }
 
+    fn agent_lifecycle_state_dir(&self) -> PathBuf {
+        self.runtime_home
+            .join("state")
+            .join("agent-lifecycle")
+            .join(self.owner_agent_id.as_str())
+    }
+
     fn task_runtime_state_dir(&self) -> PathBuf {
         self.runtime_home
             .join("state")
@@ -1914,6 +2029,11 @@ impl TaskStore {
 
     fn agent_snapshot_path(&self, agent_id: &AgentId) -> PathBuf {
         self.agent_state_dir()
+            .join(format!("{}.json", agent_id.as_str()))
+    }
+
+    fn agent_lifecycle_snapshot_path(&self, agent_id: &AgentId) -> PathBuf {
+        self.agent_lifecycle_state_dir()
             .join(format!("{}.json", agent_id.as_str()))
     }
 }
@@ -2022,6 +2142,7 @@ fn reconcile_running_leases(
 
 fn release_agent_task(agent: &mut AgentSnapshot, task_status: &TaskStatus) {
     agent.current_task_id = None;
+    agent.current_execution_id = None;
     agent.current_cwd = None;
     match task_status {
         TaskStatus::Paused | TaskStatus::Blocked => {
@@ -2046,12 +2167,148 @@ fn release_agent_task(agent: &mut AgentSnapshot, task_status: &TaskStatus) {
     }
 }
 
+fn project_task_event_to_lifecycle(
+    state: &mut TaskRuntimeState,
+    task: &TaskSnapshot,
+    event_type: &str,
+    payload: &Value,
+) {
+    let Some(assignee) = task.assignee.as_ref() else {
+        return;
+    };
+    let Some(agent) = state.agents.get(&assignee.agent_id) else {
+        return;
+    };
+    let now = now_unix_seconds();
+    let mut snapshot = state
+        .lifecycle
+        .get(&assignee.agent_id)
+        .cloned()
+        .unwrap_or_else(|| lifecycle_from_agent_snapshot(agent, now));
+    let previous = snapshot.current_activity.clone();
+    let execution_id = task.active_execution_id.clone().or_else(|| {
+        payload
+            .get("execution_id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    });
+    let (state_kind, activity_kind, summary, retry_count) = match event_type {
+        "TaskResumed" if matches!(task.status, TaskStatus::Rejected) => (
+            AgentLifecycleState::Retrying,
+            "retrying",
+            "retrying rejected task".to_owned(),
+            None,
+        ),
+        "TaskResumed" => (
+            AgentLifecycleState::Running,
+            "running",
+            "claimed task execution".to_owned(),
+            None,
+        ),
+        "TaskExecutionRecorded" => (
+            AgentLifecycleState::Progressing,
+            "progressing",
+            payload
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("recorded execution progress")
+                .to_owned(),
+            None,
+        ),
+        "TaskExecutionRecovering" => (
+            AgentLifecycleState::Recovering,
+            "recovering",
+            payload
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("recovering task execution")
+                .to_owned(),
+            payload
+                .get("retry_count")
+                .and_then(Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok()),
+        ),
+        "TaskBlocked" => (
+            AgentLifecycleState::Blocked,
+            "blocked",
+            payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("blocked")
+                .to_owned(),
+            None,
+        ),
+        "TaskReviewSubmitted" => (
+            AgentLifecycleState::WaitingReview,
+            "review_ready",
+            payload
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("submitted for review")
+                .to_owned(),
+            None,
+        ),
+        "TaskReviewRejected" => (
+            AgentLifecycleState::Retrying,
+            "retrying",
+            payload
+                .get("reject_reason")
+                .and_then(Value::as_str)
+                .unwrap_or("review rejected")
+                .to_owned(),
+            None,
+        ),
+        "TaskReviewApproved" => (
+            AgentLifecycleState::Approved,
+            "approved",
+            "review approved".to_owned(),
+            None,
+        ),
+        "TaskClosed" => (
+            AgentLifecycleState::Closed,
+            "closed",
+            "task closed".to_owned(),
+            None,
+        ),
+        _ => return,
+    };
+    snapshot.state = state_kind;
+    snapshot.state_entered_at = now;
+    snapshot.elapsed_ms = 0;
+    snapshot.current_task_id = Some(task.task_id.clone());
+    snapshot.current_execution_id = execution_id;
+    snapshot.current_turn_id = payload
+        .get("turn_id")
+        .and_then(Value::as_str)
+        .map(TurnId::new);
+    snapshot.last_activity = previous;
+    snapshot.current_activity = Some(AgentLifecycleActivity {
+        kind: activity_kind.to_owned(),
+        semantic_summary: summary,
+        target: Some(task.task_id.as_str().to_owned()),
+        started_at: now,
+        elapsed_ms: 0,
+        tool_name: None,
+        model: None,
+        retry_count,
+        visibility: "compact".to_owned(),
+    });
+    snapshot.last_seen_at = now;
+    if event_type == "TaskExecutionRecovering" {
+        snapshot.stats.tool_failure_count = snapshot.stats.tool_failure_count.saturating_add(1);
+    }
+    if event_type == "TaskBlocked" {
+        snapshot.stats.blocked_count = snapshot.stats.blocked_count.saturating_add(1);
+    }
+    state.lifecycle.insert(assignee.agent_id.clone(), snapshot);
+}
+
 fn lifecycle_from_agent_snapshot(agent: &AgentSnapshot, now: u64) -> AgentLifecycleSnapshot {
     let state = match agent.status {
         AgentStatus::Available => AgentLifecycleState::Idle,
         AgentStatus::Busy => {
             if agent.running_tasks > 0 {
-                AgentLifecycleState::Assigned
+                AgentLifecycleState::Running
             } else {
                 AgentLifecycleState::Assigned
             }
@@ -2070,10 +2327,7 @@ fn lifecycle_from_agent_snapshot(agent: &AgentSnapshot, now: u64) -> AgentLifecy
         state_entered_at: agent.last_seen_at,
         elapsed_ms: now.saturating_sub(agent.last_seen_at).saturating_mul(1000),
         current_task_id: agent.current_task_id.clone(),
-        current_execution_id: agent
-            .current_task_id
-            .as_ref()
-            .map(|task_id| format!("execution-{}-{}", agent.agent_id.as_str(), task_id.as_str())),
+        current_execution_id: agent.current_execution_id.clone(),
         current_turn_id: None,
         current_activity: Some(AgentLifecycleActivity {
             kind: if agent.current_task_id.is_some() {
@@ -2362,15 +2616,7 @@ fn validate_transition(
         "TaskReviewSubmitted" => matches!(from, TaskStatus::Running | TaskStatus::Assigned),
         "TaskReviewApproved" => matches!(from, TaskStatus::ReviewSubmitted),
         "TaskReviewRejected" => matches!(from, TaskStatus::ReviewSubmitted),
-        "TaskClosed" => matches!(
-            from,
-            TaskStatus::Approved
-                | TaskStatus::Failed
-                | TaskStatus::Cancelled
-                | TaskStatus::Paused
-                | TaskStatus::Blocked
-                | TaskStatus::Interrupted
-        ),
+        "TaskClosed" => matches!(from, TaskStatus::Approved),
         "TaskCancelled" => !matches!(
             from,
             TaskStatus::Closed | TaskStatus::Cancelled | TaskStatus::Approved
@@ -2655,6 +2901,103 @@ mod tests {
     }
 
     #[test]
+    fn phase2a_close_requires_approved_review_for_blocked_and_rejected() {
+        let runtime_home = temp_runtime_home("phase2a-close-requires-approved");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let actor = sample_actor(agent_id.clone());
+        let watermark = sample_watermark();
+
+        let mut blocked_request = sample_create_request(agent_id.clone());
+        blocked_request.task_id = Some(TaskId::new("task-phase2a-close-blocked"));
+        let blocked_task = runtime
+            .create_task(blocked_request)
+            .expect("create blocked candidate")
+            .task;
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-phase2a-close-blocked".to_owned(),
+                task_id: blocked_task.task_id.clone(),
+                agent_id: agent_id.clone(),
+                turn_id: Some(TurnId::new("turn-phase2a-close-blocked")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "still blocked".to_owned(),
+                    evidence: vec!["blocker evidence".to_owned()],
+                },
+                watermark: watermark.clone(),
+            })
+            .expect("block task");
+        let blocked_close = runtime
+            .close_task(TaskMutationRequest {
+                task_id: blocked_task.task_id,
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect_err("blocked task cannot close");
+        assert!(matches!(
+            blocked_close,
+            TaskError::InvalidTransition {
+                from: TaskStatus::Blocked,
+                ..
+            }
+        ));
+
+        let _ = fs::remove_dir_all(runtime_home);
+
+        let runtime_home = temp_runtime_home("phase2a-close-requires-approved-rejected");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot rejected");
+        let actor = sample_actor(agent_id.clone());
+        let watermark = sample_watermark();
+        let mut rejected_request = sample_create_request(agent_id.clone());
+        rejected_request.task_id = Some(TaskId::new("task-phase2a-close-rejected"));
+        let rejected_task = runtime
+            .create_task(rejected_request)
+            .expect("create rejected candidate")
+            .task;
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-phase2a-close-rejected".to_owned(),
+                task_id: rejected_task.task_id.clone(),
+                agent_id: agent_id.clone(),
+                turn_id: Some(TurnId::new("turn-phase2a-close-rejected")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::ReviewReady {
+                    summary: "ready but not acceptable".to_owned(),
+                    deliverables: vec!["draft".to_owned()],
+                    evidence: vec!["draft evidence".to_owned()],
+                },
+                watermark: watermark.clone(),
+            })
+            .expect("submit review");
+        runtime
+            .reject_review(TaskReviewRejection {
+                task_id: rejected_task.task_id.clone(),
+                reject_reason: "needs retry".to_owned(),
+                next_requirements: vec!["retry".to_owned()],
+                actor: actor.clone(),
+                watermark: watermark.clone(),
+            })
+            .expect("reject review");
+        let rejected_close = runtime
+            .close_task(TaskMutationRequest {
+                task_id: rejected_task.task_id,
+                actor,
+                watermark,
+            })
+            .expect_err("rejected task cannot close");
+        assert!(matches!(
+            rejected_close,
+            TaskError::InvalidTransition {
+                from: TaskStatus::Rejected,
+                ..
+            }
+        ));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
     fn resume_creates_lease_and_heartbeat_extends_it() {
         let runtime_home = temp_runtime_home("task-lease-heartbeat");
         let agent_id = AgentId::new("master");
@@ -2934,6 +3277,7 @@ mod tests {
         let claimed = runtime
             .claim_next_task(TaskClaimRequest {
                 agent_id: agent_id.clone(),
+                execution_id: "exec-task-high".to_owned(),
                 ttl_seconds: 600,
                 actor: sample_actor(agent_id.clone()),
                 watermark: sample_watermark(),
@@ -2942,6 +3286,8 @@ mod tests {
         let task = claimed.task.expect("claimed task");
         assert_eq!(task.task_id, TaskId::new("task-high"));
         assert_eq!(task.status, TaskStatus::Running);
+        assert_eq!(task.active_execution_id.as_deref(), Some("exec-task-high"));
+        assert_eq!(claimed.execution_id.as_deref(), Some("exec-task-high"));
         let low_task = runtime
             .query_task(&TaskId::new("task-low"))
             .expect("low task");
@@ -2966,6 +3312,7 @@ mod tests {
         let outcome = runtime
             .claim_next_task(TaskClaimRequest {
                 agent_id: agent_id.clone(),
+                execution_id: "exec-empty".to_owned(),
                 ttl_seconds: 300,
                 actor: sample_actor(agent_id.clone()),
                 watermark: sample_watermark(),
@@ -3254,6 +3601,203 @@ mod tests {
                 .iter()
                 .any(|event| event.event_type == "TaskExecutionRecovering")
         );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id() {
+        let runtime_home = temp_runtime_home("phase2a-worker-loop");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-phase2a");
+        let execution_id = "exec-phase2a-1".to_owned();
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: worker_id.clone(),
+                capabilities: vec!["code_edit".to_owned(), "test_run".to_owned()],
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("create worker");
+        let mut request = sample_create_request(owner_id.clone());
+        request.task_id = Some(TaskId::new("task-phase2a-worker"));
+        request.dispatch = TaskDispatchRequest::None;
+        let task = runtime.create_task(request).expect("create task").task;
+        runtime
+            .assign_task(TaskAssignRequest {
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("assign worker");
+
+        let claimed = runtime
+            .claim_next_task(TaskClaimRequest {
+                agent_id: worker_id.clone(),
+                execution_id: execution_id.clone(),
+                ttl_seconds: 300,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("claim");
+        assert_eq!(claimed.execution_id.as_deref(), Some(execution_id.as_str()));
+        assert_eq!(
+            claimed
+                .task
+                .as_ref()
+                .and_then(|task| task.active_execution_id.as_deref()),
+            Some(execution_id.as_str())
+        );
+
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.clone(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-phase2a")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Running {
+                    phase: "progress".to_owned(),
+                    summary: "worker made progress".to_owned(),
+                    evidence: vec!["progress evidence".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("progress fact");
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.clone(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-phase2a")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "needs master input".to_owned(),
+                    evidence: vec!["blocker evidence".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("blocked fact");
+        assert_eq!(
+            runtime.query_task(&task.task_id).expect("blocked").status,
+            TaskStatus::Blocked
+        );
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.clone(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-phase2a")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Recovering {
+                    summary: "master provided unblock guidance".to_owned(),
+                    evidence: vec!["recovering evidence".to_owned()],
+                    retry_count: 1,
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("recovering fact");
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.clone(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-phase2a")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::ReviewReady {
+                    summary: "first submission".to_owned(),
+                    deliverables: vec!["patch".to_owned()],
+                    evidence: vec!["first evidence".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("review ready");
+        runtime
+            .reject_review(TaskReviewRejection {
+                task_id: task.task_id.clone(),
+                reject_reason: "needs retry".to_owned(),
+                next_requirements: vec!["retry with evidence".to_owned()],
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("reject");
+        assert_eq!(
+            runtime.query_task(&task.task_id).expect("rejected").status,
+            TaskStatus::Rejected
+        );
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.clone(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-phase2a-retry")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Running {
+                    phase: "retry".to_owned(),
+                    summary: "retrying rejected review".to_owned(),
+                    evidence: vec!["retry evidence".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("retry progress");
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.clone(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-phase2a-retry")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::ReviewReady {
+                    summary: "second submission".to_owned(),
+                    deliverables: vec!["accepted patch".to_owned()],
+                    evidence: vec!["second evidence".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("second review ready");
+        runtime
+            .approve_review(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("approve");
+        runtime
+            .close_task(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(owner_id),
+                watermark: sample_watermark(),
+            })
+            .expect("close");
+
+        let recovered = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("recover");
+        let recovered_task = recovered.query_task(&task.task_id).expect("task");
+        assert_eq!(recovered_task.status, TaskStatus::Closed);
+        assert_eq!(
+            recovered_task.active_execution_id.as_deref(),
+            Some(execution_id.as_str())
+        );
+        let history = recovered.task_history(&task.task_id).expect("history");
+        for required in [
+            "TaskAssigned",
+            "TaskResumed",
+            "TaskExecutionRecorded",
+            "TaskBlocked",
+            "TaskExecutionRecovering",
+            "TaskReviewSubmitted",
+            "TaskReviewRejected",
+            "TaskReviewApproved",
+            "TaskClosed",
+        ] {
+            assert!(
+                history.iter().any(|event| event.event_type == required),
+                "missing {required}"
+            );
+        }
+        assert!(history.iter().any(|event| {
+            event.payload.get("execution_id").and_then(Value::as_str) == Some(execution_id.as_str())
+        }));
         let _ = fs::remove_dir_all(runtime_home);
     }
 

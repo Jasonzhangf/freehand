@@ -30,9 +30,11 @@
 - ADP/read-only config status query requests enter through `UiRuntimeQueryPort` and project the selected live agent/provider config without exposing API keys, pair tokens, or credential-bearing URLs
 - provider/model update commands enter through a protocol dispatch envelope, route to `config.core::update_provider_config_in_path`, and must not duplicate config validation or persistence logic in runtime
 - successful task tool mutations publish a runtime-owned task list projection into `UiProtocolState` so ADP task list subscribers observe lifecycle changes without UI polling
-- protocol-owned task mutation commands route through runtime into `TaskRuntime::create_task`, `TaskRuntime::submit_review`, `TaskRuntime::approve_review`, and `TaskRuntime::close_task`; runtime publishes updated task list projection after each accepted mutation
+- protocol-owned task mutation commands route through runtime into `TaskRuntime::create_task`, `TaskRuntime::create_agent`, `TaskRuntime::assign_task`, `TaskRuntime::claim_next_task`, `TaskRuntime::submit_review`, `TaskRuntime::reject_review`, `TaskRuntime::approve_review`, and `TaskRuntime::close_task`; runtime publishes updated task list projection after each accepted mutation
 - Phase 1 board/lifecycle queries route `QueryTaskBoard`, `QueryAgentBoard`, and `QueryAgentLifecycle` through runtime into `TaskRuntime::query_task_board`, `TaskRuntime::query_agent_board`, and `TaskRuntime::query_agent_lifecycle`
 - Phase 1 execution/timer commands route `ApplyExecutionFact` and `RunSchedulerTick` through runtime into `TaskRuntime::apply_execution_fact` and `TaskRuntime::run_scheduler_tick`; runtime remains a thin bridge and does not make scheduler business decisions
+- Phase 2A master/worker sample commands route as thin ADP dispatch into Task
+  Center owner truth; runtime does not decide business next actions
 
 ## Response Mainline
 
@@ -61,6 +63,7 @@
 - session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections
 - runtime-backed task list and task history queries return UI-safe task projections sourced from `task.orchestration` snapshot and ledger APIs
 - runtime-backed task mutation commands return receipts only after `task.orchestration` accepts the mutation and task list projection publication succeeds
+- runtime-backed worker claim receipts include the claimed task id and execution id; no-task is explicit and not a success mutation
 - runtime-backed TaskBoard and AgentBoard queries return UI-safe board projections sourced from `task.orchestration` and `agent.lifecycle`
 - execution fact and scheduler tick dispatch receipts return only after `task.orchestration` accepts owner truth and task-list publication succeeds
 - runtime-backed error-center queries return UI-safe projections sourced from `metadata.core` ledger rows written by `error.center`
@@ -88,7 +91,7 @@
 - config status query without live selected config returns no runtime result rather than inventing app-local config truth
 - provider/model update without a live runtime home or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake hot reload
 - task list publication failures after task mutation are explicit dispatch failures and must not be silently swallowed as a successful task tool result
-- task mutation dispatch requires a live runtime home, maps missing tasks to target-not-found, and must not create task truth outside `task.orchestration`
+- task mutation dispatch requires a live runtime home, maps missing tasks/agents to target-not-found, and must not create task truth outside `task.orchestration`
 - invalid task board filters, missing agent lifecycle ids, invalid execution facts, and invalid scheduler thresholds map to explicit dispatch failures from the owner APIs
 
 ## Shared Multi-Reference Functions
@@ -150,6 +153,7 @@
 | 18 | `update_provider_config_in_path` | `crates/freehand-config/src/lib.rs` | validate and atomically persist provider/model update through canonical config owner | runtime config path + provider update | selected agent config projection from saved TOML | `RuntimeCommandDispatcher::dispatch_update_provider_config` | config.core persistence | bound |
 | 19 | `project_task_board_for_ui` / `project_agent_board_for_ui` / `project_agent_lifecycle_for_ui` | `crates/freehand-runtime/src/lib.rs` | project Phase 1 TaskBoard, AgentBoard, and AgentLifecycle owner truth into protocol DTOs | task/agent owner projections | UI-safe board/lifecycle query results | `RuntimeCommandDispatcher::query_runtime` | ui.protocol DTOs | bound |
 | 20 | `RuntimeCommandDispatcher::dispatch_apply_execution_fact` / `dispatch_run_scheduler_tick` | `crates/freehand-runtime/src/lib.rs` | route Phase 1 execution facts and scheduler ticks into task.orchestration without making business decisions | execution fact or scheduler tick dispatch envelope | dispatch receipt or owner failure | `RuntimeCommandDispatcher::dispatch` | `TaskRuntime::apply_execution_fact` / `TaskRuntime::run_scheduler_tick` | bound |
+| 21 | `RuntimeCommandDispatcher::dispatch_create_task_agent` / `dispatch_assign_task` / `dispatch_claim_next_task` / `dispatch_reject_task_review` | `crates/freehand-runtime/src/lib.rs` | route Phase 2A worker registry, assignment, claim, and review rejection commands into task.orchestration | protocol task mutation command | dispatch receipt plus task list projection | `RuntimeCommandDispatcher::dispatch` | `TaskRuntime` task owner APIs | bound |
 
 ## Sync Status Against Code
 
@@ -184,7 +188,7 @@
 - runtime config status query dispatch is bound as a thin read-only route from selected `config.core` truth to `UiConfigStatusProjection`
 - runtime provider/model update dispatch is bound as a thin mutation route into `config.core`; successful saves project restart-required pending status and active runtime config remains unchanged until restart
 - runtime task list projection publication is bound as a thin route from task mutation to `ui.protocol`
-- runtime task mutation dispatch is bound as a thin route from protocol commands to `task.orchestration` create/review/approve/close APIs, with `ui_task_actor` kept separate from model/tool `task_actor(turn)`
+- runtime task mutation dispatch is bound as a thin route from protocol commands to `task.orchestration` create/create_agent/assign/claim/review/reject/approve/close APIs, with `ui_task_actor` kept separate from model/tool `task_actor(turn)`
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

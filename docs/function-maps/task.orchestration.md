@@ -35,13 +35,14 @@
 
 - runtime receives a provider tool call named `task`
 - runtime routes `task` tool calls to `task.orchestration` instead of generic file/tool execution
-- `TaskRuntime::boot` loads task snapshots and self-agent snapshot into memory
+- `TaskRuntime::boot` loads task snapshots, self-agent snapshot, and persisted
+  agent lifecycle snapshots into memory
 - `TaskRuntime::boot` loads task leases and interrupts running tasks whose lease is missing or expired
 - `TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance
 - create action writes append-only ledger events and atomic snapshots
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
 - `assign_task` binds waiting/created/interrupted tasks to an available agent
-- `claim_next_task` lets an agent claim its highest-priority assigned task into `Running` with a lease
+- `claim_next_task` lets an agent claim its highest-priority assigned task into `Running` with a lease and durable `execution_id`
 - `record_execution` writes worker execution progress only for running tasks
 - `create_agent` and `close_agent` manage persisted worker agent snapshots
 - `cancel_task` moves a non-terminal task to `Cancelled` and releases assignee state
@@ -52,6 +53,11 @@
   review queue, and current skeleton stale projection
 - ExecutionFact sync admits typed running/recovering/blocked/review_ready
   facts into Task Center truth without parsing raw prose
+- Phase 2A worker loop keeps `execution_id` attached to claim/start,
+  progress, blocked, recovering, review, reject, retry, approve, and close
+  evidence so restart verification can query the same execution
+- Phase 2A close requires approved review; blocked/rejected tasks cannot be
+  closed as a shortcut around review acceptance
 - SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without
   making business decisions
 
@@ -65,13 +71,15 @@
 - task tool result returns semantic task ids, status, event counts, or JSON snapshots
 - review lifecycle actions return event-backed mutation summaries
 - heartbeat returns event-backed running-state mutation summary
-- claim_next returns either the claimed running task or an explicit no-task result
+- claim_next returns either the claimed running task plus `execution_id` or an explicit no-task result
 - record_execution returns an event-backed worker progress mutation summary
 - agent create/close returns persisted agent snapshot summaries
 - TaskBoard query returns board-level task, blocker, review, stale, and agent
   binding summaries
 - ExecutionFact sync returns event-backed Task Center updates while preserving
   recovering as non-terminal
+- review rejection remains non-terminal task lifecycle truth; a later execution
+  fact may resume the rejected task into running retry and submit review again
 - SchedulerTick returns durable/replayable fact events and recommendations only
 
 ## Error Mainline
@@ -84,6 +92,8 @@
 - heartbeat for non-running or unassigned tasks returns explicit invalid transition and writes no lease
 - assigning to unavailable agents and closing busy agents return explicit errors without mutating task/agent truth
 - claiming with an empty agent queue returns no-task without mutating truth
+- claiming with an empty execution id returns explicit missing-field and writes no truth
+- closing before approved review returns explicit invalid transition and writes no close event
 - recording execution for a non-running task returns explicit invalid transition and writes no event
 - task failures become failed tool results and can be sent back to the model
 - history for unknown task returns explicit task-not-found
@@ -91,13 +101,15 @@
   Center truth
 - SchedulerTick persistence failure returns explicit task runtime error and
   does not pretend stale/timeout facts were admitted
-- pending Phase 1: recovering facts never become task failure
+- recovering facts never become task failure
+- Phase 2A: schema/tool/execution mismatch is not task failure; only invalid
+  owner transition or provider/system failure should fail command dispatch
 
 ## Shared Multi-Reference Functions
 
 - `TaskRuntime::boot`
   - owner: `crates/freehand-task/src/lib.rs`
-  - purpose: rebuild memory state from persisted task/agent snapshots
+  - purpose: rebuild memory state from persisted task, agent, and lifecycle snapshots
   - allowed callers: runtime task tool bridge, future daemon bootstrap
   - why shared: keeps startup recovery in task owner, not UI/runtime glue
 - `TaskRuntime::query_task_board`
@@ -114,7 +126,8 @@
   - related tests:
     `execution_fact_recovering_keeps_running_and_writes_event`,
     `execution_fact_blocked_and_review_ready_update_board_truth`,
-    `execution_fact_validation_failure_writes_no_truth`
+    `execution_fact_validation_failure_writes_no_truth`,
+    `phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id`
   - why shared: keeps worker execution state changes in Task Center rather than
     scattered runtime/UI logic
 - `TaskRuntime::run_scheduler_tick`
@@ -153,6 +166,8 @@
 | 18 | `TaskRuntime::query_task_board` | `crates/freehand-task/src/lib.rs` | project TaskBoard truth for master, scheduler, UI, and headless query | task snapshots + execution facts + agent registry | TaskBoard projection | runtime query dispatch | task owner | bound |
 | 19 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | admit typed ExecutionFact state into Task Center without raw prose parsing | ExecutionFact | task snapshot + event | Agent Lifecycle sync / runtime | task owner | bound |
 | 20 | `TaskRuntime::run_scheduler_tick` | `crates/freehand-task/src/lib.rs` | compute elapsed/stale/timeout facts without business decisions | scheduler tick request + task snapshots | durable scheduler facts | runtime scheduler / CLI sample | task owner | bound |
+| 21 | `TaskRuntime::claim_next_task` / `TaskRuntime::apply_execution_fact` / `TaskRuntime::reject_review` / `TaskRuntime::approve_review` / `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | execute Phase 2A worker lifecycle from assigned queue through review rejection, retry, approval, and close | worker claim/execution/review commands | ordered task snapshot and ledger truth with stable execution id | runtime ADP command dispatch / CLI sample | task owner | bound |
+| 22 | `TaskStore::write_agent_lifecycle_snapshot` / `TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and restore typed agent lifecycle projection separately from releasable agent resource state | agent lifecycle snapshot | restart-queryable lifecycle truth | task event projection / boot | lifecycle owner storage | bound |
 
 ## Sync Status Against Code
 
@@ -161,4 +176,5 @@
 - Phase 1 TaskBoard owner-internal skeleton is implemented
 - Phase 1 ExecutionFact owner-internal sync is implemented
 - Phase 1 SchedulerTick owner-internal facts are implemented
-- real worker execution, UI task projection, and multi-agent dispatch are pending
+- Phase 2A real worker execution loop is implemented through headless ADP/CLI
+- UI task projection and multi-agent dispatch remain pending later phases

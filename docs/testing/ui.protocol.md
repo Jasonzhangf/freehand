@@ -14,7 +14,7 @@
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
   - task list/history ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies persisted task truth
   - Phase 1 TaskBoard/AgentBoard/AgentLifecycle ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies owner truth
-  - task mutation ADP command frames use protocol-owned command DTOs while runtime/task owners perform create/review/approve/close mutation and persistence
+  - task mutation ADP command frames use protocol-owned command DTOs while runtime/task owners perform create/create_agent/assign/claim/review/reject/approve/close mutation and persistence
   - Phase 1 ApplyExecutionFact/RunSchedulerTick ADP command frames use protocol-owned command DTOs while runtime/task owners perform execution-fact sync and scheduler fact emission
   - task list ADP subscribe frames use protocol-owned subscription shape and receive runtime-supplied task list projections without making protocol state the task truth owner
   - error-center ADP query/subscribe frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies metadata-backed truth
@@ -65,7 +65,8 @@
   - ADP frame serialization and failure-frame shape
   - task query command validation covers empty history id and command-ingress rejection for query-route misuse
   - Phase 1 board/lifecycle query commands cover runtime-route-only behavior and protocol-state mismatch rejection
-  - task mutation command validation covers empty task id/title/content/goal/review summary and owner-routing to `task.orchestration`
+  - task mutation command validation covers empty task id/title/content/goal/review summary, worker agent id/capabilities, claim execution id, review rejection reason/requirements, and owner-routing to `task.orchestration`
+  - Phase 2A task command validation covers `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `RejectTaskReview`, and `UiTaskDispatchCommand`
   - Phase 1 execution fact and scheduler tick command validation covers owner-routing to `task.orchestration` and malformed command rejection
   - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
   - error-center query command validation covers empty session id and command-ingress rejection for query-route misuse
@@ -94,7 +95,7 @@
   - ADP command/query/subscribe frame roundtrip smoke
   - ADP task list/history query smoke proves the protocol frame can carry task read models supplied by runtime
   - ADP Phase 1 board/lifecycle query smoke proves the protocol frame can carry board and lifecycle read models supplied by runtime
-  - ADP task mutation command smoke proves the protocol frame can carry task create/review/approve/close mutation intents without protocol-owned task storage
+  - ADP task mutation command smoke proves the protocol frame can carry task create/create_agent/assign/claim/review/reject/approve/close mutation intents without protocol-owned task storage
   - ADP Phase 1 execution fact and scheduler tick command smoke proves protocol frames can carry owner-routed foundation mutation intents without protocol-owned task storage
   - ADP task list subscription smoke proves initial task list projection and subsequent runtime-published task changes use the same subscription channel
   - ADP error-center query smoke proves the protocol frame can carry metadata read models supplied by runtime
@@ -149,7 +150,8 @@
   - task list/history query commands and DTOs are landed; runtime-backed ADP task query is regression-locked in daemon tests
   - Phase 1 TaskBoard/AgentBoard/AgentLifecycle query commands and DTOs are landed and are runtime-route-only
   - Phase 1 ApplyExecutionFact/RunSchedulerTick command DTOs are landed and route to `task.orchestration` through runtime
-  - task mutation command DTOs are landed for `CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, and `CloseTask`; protocol validation rejects empty required fields and runtime owns mutation dispatch
+  - task mutation command DTOs are landed for `CreateTask`, `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, and `CloseTask`; protocol validation rejects empty required fields and runtime owns mutation dispatch
+  - Phase 2A task command validation and owner routing are regression-locked by `phase2a_task_commands_validate_and_route_to_task_orchestration` and `phase2a_task_commands_reject_missing_worker_execution_and_review_fields`
   - task list subscription shape is landed for runtime-backed ADP task push and stays projection-only
   - error-center query/subscription commands and DTOs are landed; runtime-backed ADP error-center query is regression-locked in daemon tests
   - config status query/result DTO is landed; protocol-state rejection and secret-free serialization are regression-locked

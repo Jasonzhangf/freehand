@@ -18,13 +18,19 @@
 - runtime/provider/tool/error/task owners emit typed lifecycle events
 - lifecycle reducer accepts only typed lifecycle events
 - lifecycle reducer updates per-agent lifecycle state
+- lifecycle snapshots are persisted independently from resource AgentSnapshot so
+  worker resource release can return to available while lifecycle query still
+  reports the last typed task state for restart proof
 - Task Center execution binding supplies current task/execution/turn ids when available
+- Phase 2A task execution events project worker running, progress, blocked,
+  recovering, review_ready, retrying, approved, and closed semantics without
+  parsing raw assistant prose
 - runtime or ADP query surface requests AgentBoard or one AgentLifecycleSnapshot
 
 ## Response Mainline
 
 - AgentLifecycleSnapshot returns one agent's intrinsic state
-- AgentBoardProjection returns agent availability, current activity, elapsed time, task/execution/turn binding, and model/tool/error counters
+- AgentBoardProjection returns agent availability, current activity, elapsed time, task/execution/turn binding, review/retry/closed task states, and model/tool/error counters
 - scheduler and master prompt context consume AgentBoard summaries, not raw logs
 - UI and Android render lifecycle projections and do not infer state from raw text
 
@@ -34,6 +40,10 @@
 - unknown agent id returns explicit agent-not-found
 - malformed typed lifecycle event returns explicit validation error and does not mutate lifecycle truth
 - lifecycle query without initialized lifecycle truth returns explicit not-ready or empty-board truth, not fallback state
+- missing execution id on execution-bound lifecycle events is rejected by task owner before lifecycle projection is accepted
+- persisted lifecycle snapshot parse/write failures surface as task persistence
+  errors; query must not rebuild a false idle lifecycle when persisted typed
+  truth exists
 
 ## Shared Multi-Reference Functions
 
@@ -49,6 +59,13 @@
   - allowed callers: runtime query dispatch, scheduler tick, tests
   - related tests: `agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked`
   - why shared: keeps "what each agent is doing" as owner truth, not app-local inference
+- `TaskStore::write_agent_lifecycle_snapshot`
+  - owner: `crates/freehand-task/src/lib.rs` initially
+  - purpose: persist latest typed lifecycle projection for restart same-id query
+  - allowed callers: task event projection, lifecycle reducer
+  - related tests:
+    `phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id`
+  - why shared: keeps lifecycle truth durable without coupling it to releasable worker resource state
 
 ## Function Call Table
 
@@ -59,6 +76,8 @@
 | 03 | `AgentBoardProjection` | `crates/freehand-task/src/lib.rs` | project all agent lifecycle snapshots for master/scheduler/UI/headless query | lifecycle state map | AgentBoard projection | lifecycle owner | runtime query dispatch | bound |
 | 04 | `TaskRuntime::query_agent_lifecycle` | `crates/freehand-task/src/lib.rs` | query one agent lifecycle snapshot | agent id | lifecycle snapshot or explicit not-found | runtime query dispatch | lifecycle owner | bound |
 | 05 | `TaskRuntime::query_agent_board` | `crates/freehand-task/src/lib.rs` | query AgentBoard projection | optional filters | AgentBoard projection | runtime query dispatch | lifecycle owner | bound |
+| 06 | `TaskRuntime::apply_execution_fact` / `TaskRuntime::reject_review` / `TaskRuntime::approve_review` / `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | derive Phase 2A worker lifecycle state from typed task execution and review events | execution/review task events with execution id | AgentLifecycleSnapshot and AgentBoard truth | task.orchestration | agent.lifecycle reducer | bound |
+| 07 | `TaskStore::write_agent_lifecycle_snapshot` / `TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and reload latest lifecycle snapshot for restart same-id query | lifecycle snapshot | durable lifecycle projection | task event projection / boot | lifecycle owner storage | bound |
 
 ## Sync Status Against Code
 
@@ -66,4 +85,5 @@
   `crates/freehand-task`.
 - No model-facing `agent` tool is implemented or allowed by default.
 - Agent Lifecycle must remain an intrinsic agent state/projection.
-- D3 still requires ADP/CLI query and restart proof before Phase 1 closeout.
+- Phase 2A ADP/CLI same-id proof is implemented and live-validated on the
+  S-profile with restart same-id verification.

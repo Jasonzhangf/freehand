@@ -12,7 +12,11 @@
   - agent registry persists and recovers worker snapshots
   - waiting tasks can be assigned to an available agent
   - assigned worker queue can claim the highest-priority task into running state
+  - worker claim binds a durable execution id that survives restart and is visible on task snapshot, claim outcome, ledger payload, and UI projection
   - running workers can record execution progress into task ledger truth
+  - worker execution facts carry the same execution id through progress, blocked, recovering, review_ready, reject, retry, approve, and close evidence
+  - AgentLifecycle snapshots persist separately from releasable AgentSnapshot
+    resource state so restart verify can query the last typed lifecycle state
   - task ledger history can be queried as ordered lifecycle events
   - cancellation releases assigned agent state
   - query returns persisted task truth
@@ -29,6 +33,7 @@
 - boot registers self agent as `Available`
 - review reject/resume/submit/approve/close lifecycle persists and recovers
 - close before review approval is rejected
+- Phase 2A close rejects blocked and rejected tasks before approved review
 - resume creates a task lease and records a heartbeat event
 - heartbeat refreshes an active running lease
 - boot changes running tasks with expired leases to `Interrupted`
@@ -36,6 +41,7 @@
 - create_agent persists, recovers, and closes an idle agent
 - assign moves `WaitingAgent` to `Assigned` and marks the assignee busy with queued work
 - claim_next picks the highest-priority assigned task for an agent and creates a running lease
+- claim_next requires non-empty execution id, stores it, and recovers it after boot
 - claim_next returns no task without mutation when the agent queue is empty
 - record_execution writes progress only for `Running` tasks
 - record_execution rejects non-running tasks without advancing event sequence
@@ -62,6 +68,10 @@
   `scheduler_tick_emits_stale_and_timeout_facts_without_decisions`
 - SchedulerTick facts are durable/replayable:
   `scheduler_tick_facts_recover_after_boot`
+- Phase 2A worker lifecycle:
+  `phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id`
+- Phase 2A close guard:
+  `phase2a_close_requires_approved_review_for_blocked_and_rejected`
 
 ## Module Black-Box Coverage
 
@@ -77,15 +87,17 @@
 - runtime task tool history returns task ledger timeline JSON
 - runtime task tool list_tasks returns filtered task snapshots
 - tool registry exposes `task` as one implemented built-in tool schema
-- pending: runtime/ADP TaskBoard query returns Task Center board truth without UI-local state
-- pending: runtime/ADP ExecutionFact sync returns event-backed Task Center updates
-- pending: runtime/ADP SchedulerTick query/sample emits durable facts only
+- runtime/ADP TaskBoard query returns Task Center board truth without UI-local state
+- runtime/ADP ExecutionFact sync returns event-backed Task Center updates
+- runtime/ADP SchedulerTick query/sample emits durable facts only
+- runtime/ADP Phase 2A command path can create worker agent, assign task, claim with execution id, reject review, retry via execution fact, approve, close, and verify the same ids after restart
 
 ## Project Black-Box Impact
 
 - first slice is runtime/tool/persistence level only
 - WebUI/ADP task projection and online restart proof are required before claiming UI task management
 - Phase 1 headless ADP/CLI proof is required before claiming multi-task foundation closeout
+- Phase 2A headless ADP/CLI proof is required before claiming worker execution loop closeout; UI remains out of scope
 
 ## Required Checks
 
@@ -103,18 +115,21 @@ cargo test -p freehand-runtime task_tool_list_tasks_filters_queue_projection -- 
 cargo test -p freehand-runtime task_board_query_projects_owner_truth -- --nocapture
 cargo test -p freehand-runtime execution_fact_sync_updates_task_center -- --nocapture
 cargo test -p freehand-runtime scheduler_tick_emits_facts_without_decisions -- --nocapture
+cargo test -p freehand-task phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id -- --nocapture
+cargo test -p freehand-task phase2a_close_requires_approved_review_for_blocked_and_rejected -- --nocapture
 cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```
 
 ## Known Gaps
 
-- no real worker execution
+- Phase 2A real worker execution loop is implemented headlessly and
+  live-validated on S-profile `127.0.0.1:4042` with restart same-id proof
 - no queue runner
 - no UI task timeline
 - TaskBoard owner-internal skeleton is implemented in `crates/freehand-task`
-- runtime/ADP TaskBoard surface is pending D6
+- runtime/ADP TaskBoard surface is implemented for Phase 1/2A headless proof
 - ExecutionFact owner-internal sync is implemented in `crates/freehand-task`
-- runtime/ADP ExecutionFact surface is pending D6
+- runtime/ADP ExecutionFact surface is implemented for Phase 1/2A headless proof
 - SchedulerTick owner-internal facts are implemented in `crates/freehand-task`
-- runtime/ADP SchedulerTick sample is pending D6
+- runtime/ADP SchedulerTick sample is implemented for Phase 1 headless proof

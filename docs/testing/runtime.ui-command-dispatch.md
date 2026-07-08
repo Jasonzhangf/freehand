@@ -10,7 +10,7 @@
   - runtime dispatch routes to the declared owner module
   - runtime-backed read-only task queries route to task owner APIs and return UI-safe projections without becoming task truth writers
   - runtime-backed Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries route to owner APIs and return UI-safe projections without becoming task or lifecycle truth writers
-  - runtime-backed task mutation commands route to task owner APIs for create/review/approve/close and publish task list projections after accepted mutations
+  - runtime-backed task mutation commands route to task owner APIs for create/create_agent/assign/claim/review/reject/approve/close and publish task list projections after accepted mutations
   - runtime-backed Phase 1 execution facts and scheduler ticks route to `task.orchestration`; recovering must not terminalize a task, and scheduler ticks must emit facts/recommendations without making task failure decisions
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries route from selected live config to UI-safe projection without becoming config truth writers
@@ -69,6 +69,7 @@
   - provider/model update dispatch coverage, including valid save, invalid no-overwrite, no secret projection, and active runtime model/provider unchanged until restart
   - task list publication coverage after successful task tool mutation
   - task mutation command dispatch coverage for create/review/approve/close, including task list projection publication and missing task failures
+  - Phase 2A task mutation command dispatch coverage for create worker agent, assign task, claim next with execution id, reject review, retry via execution fact, approve, and close
 - live reason hook-to-ui-state coverage
 - live provider-request-built debug-to-model-waiting UI coverage
 - live completion-schema rejection feedback-to-client coverage, including no-schema missing tag feedback, invalid-schema missing field names, and retry index
@@ -142,6 +143,9 @@
   - runtime Phase 1 TaskBoard/AgentBoard/Lifecycle query bridge is covered by `runtime_query_reads_phase1_task_and_agent_boards`
   - runtime Phase 1 ExecutionFact/SchedulerTick dispatch bridge is covered by `runtime_dispatch_execution_fact_and_scheduler_tick_update_task_truth`
   - runtime task mutation command bridge is covered through CLI ADP lifecycle smoke and must remain a thin route to `task.orchestration`
+  - Phase 2A master-worker command bridge is covered by
+    `runtime_dispatches_phase2a_master_worker_loop_into_task_truth`
+    and `master-worker-foundation-sample`
   - daemon ADP task query bridge is covered by `daemon_adp_queries_runtime_task_truth`
   - runtime error-center query bridge is covered by `runtime_query_reads_error_center_metadata_without_raw_text`
   - runtime config status query bridge is covered by `runtime_query_projects_config_status_without_secrets`

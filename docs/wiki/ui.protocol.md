@@ -19,7 +19,8 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied
 - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes while runtime/task owners supply truth
-- task mutation commands (`CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to task.orchestration through runtime; protocol does not write task truth
+- task mutation commands (`CreateTask`, `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to task.orchestration through runtime; protocol does not write task truth
+- `UiTaskDispatchCommand` lets a task create command explicitly choose self dispatch, agent dispatch, or no immediate dispatch so Phase 2A can create a waiting task before assignment
 - Phase 1 ApplyExecutionFact and RunSchedulerTick are protocol-owned mutation intents routed to task.orchestration through runtime; protocol does not update task state or make scheduler decisions
 - error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied
 - provider/model update is a protocol-owned mutation command shape that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to config.core
@@ -77,7 +78,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently
 - empty session ids and empty session titles are rejected at the protocol boundary for session management commands, including rollback
 - empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse
-- task mutation commands reject empty task id/title/content/goal/review summary before runtime dispatch instead of silently creating partial task truth
+- task mutation commands reject empty task id/title/content/goal/review summary, empty worker agent id/capabilities, empty claim execution id, and empty review rejection fields before runtime dispatch instead of silently creating partial task truth
 - Phase 1 execution fact commands reject empty ids and malformed facts before runtime dispatch; scheduler tick commands reject invalid threshold shape before runtime dispatch
 - empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse
 - task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching
@@ -193,6 +194,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 25 | `UiCommand::CreateTask / UiCommand::SubmitTaskReview / UiCommand::ApproveTaskReview / UiCommand::CloseTask` | `crates/freehand-ui-protocol/src/lib.rs` | define task mutation command DTOs and validate required fields before runtime dispatch | task create/review/approve/close mutation intent | validated mutation intent routed to task.orchestration or protocol rejection | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 26 | `UiCommand::QueryTaskBoard / UiCommand::QueryAgentBoard / UiCommand::QueryAgentLifecycle` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 board and lifecycle query DTOs without owning task/lifecycle truth | board or lifecycle query filters | runtime-backed UI-safe board/lifecycle projections | ADP query transport | runtime query port | bound |
 | 27 | `UiCommand::ApplyExecutionFact / UiCommand::RunSchedulerTick` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 execution fact and scheduler tick mutation DTOs routed to task.orchestration | execution fact or scheduler tick command | validated mutation intent routed to task.orchestration | ADP command transport | runtime.ui-command-dispatch | bound |
+| 28 | `UiTaskAgentCreateCommand / UiTaskAssignCommand / UiTaskClaimCommand / UiTaskReviewRejectionCommand / UiTaskDispatchCommand` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs routed to task.orchestration | worker/task mutation intent | validated mutation intent routed to task.orchestration or protocol rejection | ADP command transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -217,4 +219,5 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - Phase 1 ApplyExecutionFact and RunSchedulerTick command DTOs are landed and route only through runtime-backed task.orchestration dispatch
 - error-center query/subscribe command DTOs and UI-safe event projection are landed
 - provider/model update command DTO is landed, owner-routed to config.core, and serializes without credential/API-key values
-- task mutation command DTOs are landed, owner-routed to task.orchestration, and rejected at the protocol boundary when required task or review fields are empty
+- task mutation command DTOs are landed, owner-routed to task.orchestration, and rejected at the protocol boundary when required task, worker, execution, or review fields are empty
+- Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs are landed and locked by protocol owner tests

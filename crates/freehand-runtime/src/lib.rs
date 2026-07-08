@@ -78,9 +78,10 @@ use freehand_ui_protocol::{
     UiErrorCenterEventListProjection, UiErrorCenterEventProjection, UiExecutionFactCommand,
     UiExecutionFactKind, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
     UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
-    UiSessionMetadataProjection, UiTaskBoardProjection, UiTaskCreateCommand,
+    UiSessionMetadataProjection, UiTaskAgentCreateCommand, UiTaskAssignCommand,
+    UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
     UiTaskHistoryProjection, UiTaskLedgerEventProjection, UiTaskListProjection,
-    UiTaskReviewCommand, UiTaskSnapshotProjection, UiTurnProjection,
+    UiTaskReviewCommand, UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTurnProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
 };
@@ -3347,8 +3348,20 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
                 self.dispatch_update_provider_config(&mut state, envelope, update)
             }
             UiCommand::CreateTask { task } => self.dispatch_create_task(&mut state, envelope, task),
+            UiCommand::CreateTaskAgent { agent } => {
+                self.dispatch_create_task_agent(&mut state, envelope, agent)
+            }
+            UiCommand::AssignTask { assignment } => {
+                self.dispatch_assign_task(&mut state, envelope, assignment)
+            }
+            UiCommand::ClaimNextTask { claim } => {
+                self.dispatch_claim_next_task(&mut state, envelope, claim)
+            }
             UiCommand::SubmitTaskReview { review } => {
                 self.dispatch_submit_task_review(&mut state, envelope, review)
+            }
+            UiCommand::RejectTaskReview { rejection } => {
+                self.dispatch_reject_task_review(&mut state, envelope, rejection)
             }
             UiCommand::ApproveTaskReview { task_id } => {
                 self.dispatch_approve_task_review(&mut state, envelope, task_id)
@@ -3396,7 +3409,7 @@ impl RuntimeCommandDispatcher {
                 acceptance: task.acceptance,
                 priority: task.priority,
                 target_cwd: task.target_cwd,
-                dispatch: TaskDispatchRequest::SelfAgent,
+                dispatch: task_dispatch_from_ui(task.dispatch),
                 parent: TaskParentRef {
                     session_id: task.session_id,
                     turn_id: task.turn_id,
@@ -3412,6 +3425,95 @@ impl RuntimeCommandDispatcher {
             target_feature_id: envelope.target_feature_id,
             target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_created:{}", outcome.task.task_id.as_str()),
+        })
+    }
+
+    fn dispatch_create_task_agent(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        agent: UiTaskAgentCreateCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, source_agent_id) = task_runtime_target(state)?;
+        let runtime = TaskRuntime::boot(&runtime_home, source_agent_id.clone())
+            .map_err(map_task_query_error)?;
+        let outcome = runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: agent.agent_id.clone(),
+                capabilities: agent.capabilities,
+                actor: ui_task_actor(&source_agent_id, None, None),
+                watermark: ui_task_watermark("create_task_agent"),
+            })
+            .map_err(map_task_query_error)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!("task_agent_created:{}", outcome.agent.agent_id.as_str()),
+        })
+    }
+
+    fn dispatch_assign_task(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        assignment: UiTaskAssignCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, source_agent_id) = task_runtime_target(state)?;
+        let runtime = TaskRuntime::boot(&runtime_home, source_agent_id.clone())
+            .map_err(map_task_query_error)?;
+        let outcome = runtime
+            .assign_task(TaskAssignRequest {
+                task_id: TaskId::new(assignment.task_id),
+                agent_id: assignment.agent_id,
+                actor: ui_task_actor(&source_agent_id, None, None),
+                watermark: ui_task_watermark("assign_task"),
+            })
+            .map_err(map_task_query_error)?;
+        self.publish_task_list_from_runtime(&runtime_home, &source_agent_id)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!("task_assigned:{}", outcome.task.task_id.as_str()),
+        })
+    }
+
+    fn dispatch_claim_next_task(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        claim: UiTaskClaimCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, source_agent_id) = task_runtime_target(state)?;
+        let runtime = TaskRuntime::boot(&runtime_home, source_agent_id.clone())
+            .map_err(map_task_query_error)?;
+        let outcome = runtime
+            .claim_next_task(TaskClaimRequest {
+                agent_id: claim.agent_id.clone(),
+                execution_id: claim.execution_id.clone(),
+                ttl_seconds: claim.ttl_seconds.unwrap_or(300),
+                actor: ui_task_actor(&source_agent_id, None, None),
+                watermark: ui_task_watermark("claim_next_task"),
+            })
+            .map_err(map_task_query_error)?;
+        self.publish_task_list_from_runtime(&runtime_home, &source_agent_id)?;
+        let status = outcome
+            .task
+            .as_ref()
+            .map(|task| {
+                format!(
+                    "task_claimed:{}:{}",
+                    task.task_id.as_str(),
+                    claim.execution_id
+                )
+            })
+            .unwrap_or_else(|| format!("task_claimed:none:{}", claim.agent_id.as_str()));
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: status,
         })
     }
 
@@ -3440,6 +3542,33 @@ impl RuntimeCommandDispatcher {
             target_feature_id: envelope.target_feature_id,
             target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_review_submitted:{}", outcome.task.task_id.as_str()),
+        })
+    }
+
+    fn dispatch_reject_task_review(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        rejection: UiTaskReviewRejectionCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, agent_id) = task_runtime_target(state)?;
+        let runtime =
+            TaskRuntime::boot(&runtime_home, agent_id.clone()).map_err(map_task_query_error)?;
+        let outcome = runtime
+            .reject_review(TaskReviewRejection {
+                task_id: TaskId::new(rejection.task_id),
+                reject_reason: rejection.reject_reason,
+                next_requirements: rejection.next_requirements,
+                actor: ui_task_actor(&agent_id, None, None),
+                watermark: ui_task_watermark("reject_task_review"),
+            })
+            .map_err(map_task_query_error)?;
+        self.publish_task_list_from_runtime(&runtime_home, &agent_id)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!("task_review_rejected:{}", outcome.task.task_id.as_str()),
         })
     }
 
@@ -3913,6 +4042,7 @@ fn project_task_snapshot_for_ui(task: TaskSnapshot) -> UiTaskSnapshotProjection 
         priority: task.priority,
         target_cwd: task.target_cwd,
         assignee_agent_id: task.assignee.map(|assignee| assignee.agent_id),
+        active_execution_id: task.active_execution_id,
         updated_at: task.updated_at,
         last_progress_at: task.last_progress_at,
         last_event_seq: task.last_event_seq,
@@ -4081,15 +4211,28 @@ fn agent_status_label(status: &AgentStatus) -> &'static str {
     }
 }
 
+fn task_dispatch_from_ui(dispatch: Option<UiTaskDispatchCommand>) -> TaskDispatchRequest {
+    match dispatch {
+        None | Some(UiTaskDispatchCommand::SelfAgent) => TaskDispatchRequest::SelfAgent,
+        Some(UiTaskDispatchCommand::None) => TaskDispatchRequest::None,
+        Some(UiTaskDispatchCommand::Agent { agent_id }) => TaskDispatchRequest::Agent { agent_id },
+    }
+}
+
 fn agent_lifecycle_state_label(state: &AgentLifecycleState) -> &'static str {
     match state {
         AgentLifecycleState::Idle => "idle",
         AgentLifecycleState::Assigned => "assigned",
+        AgentLifecycleState::Running => "running",
+        AgentLifecycleState::Progressing => "progressing",
         AgentLifecycleState::ModelThinking => "model_thinking",
         AgentLifecycleState::ToolRunning => "tool_running",
         AgentLifecycleState::Recovering => "recovering",
         AgentLifecycleState::Blocked => "blocked",
         AgentLifecycleState::WaitingReview => "waiting_review",
+        AgentLifecycleState::Retrying => "retrying",
+        AgentLifecycleState::Approved => "approved",
+        AgentLifecycleState::Closed => "closed",
         AgentLifecycleState::Failed => "failed",
         AgentLifecycleState::Offline => "offline",
     }
@@ -5142,6 +5285,7 @@ fn execute_task_tool(
             let outcome = task_runtime
                 .claim_next_task(TaskClaimRequest {
                     agent_id: AgentId::new(required_json_string(&args, "agent_id")?),
+                    execution_id: required_json_string(&args, "execution_id")?.to_owned(),
                     ttl_seconds: optional_json_i64(&args, "ttl_seconds")
                         .unwrap_or(300)
                         .try_into()
@@ -5152,9 +5296,10 @@ fn execute_task_tool(
                 .map_err(|err| err.to_string())?;
             if let Some(task) = outcome.task {
                 Ok(format!(
-                    "Task claimed: task_id={} status={:?}",
+                    "Task claimed: task_id={} status={:?} execution_id={}",
                     task.task_id.as_str(),
-                    task.status
+                    task.status,
+                    outcome.execution_id.unwrap_or_default()
                 ))
             } else {
                 Ok("Task claimed: none".to_owned())
@@ -8637,12 +8782,14 @@ provider = "old"
             &task_tool_call(vec![
                 ("op", json!("claim_next")),
                 ("agent_id", json!("agent-task")),
+                ("execution_id", json!("exec-task-high")),
                 ("ttl_seconds", json!(600)),
             ]),
         )
         .expect("claim next");
         assert!(claimed.contains("task_id=task-high"));
         assert!(claimed.contains("status=Running"));
+        assert!(claimed.contains("execution_id=exec-task-high"));
 
         let low = execute_task_tool(
             &runtime_home,
@@ -11289,6 +11436,236 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             other => panic!("unexpected history result: {other:?}"),
         }
 
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_dispatches_phase2a_master_worker_loop_into_task_truth() {
+        let runtime_home = temp_runtime_home();
+        let owner_id = AgentId::new("agent-live");
+        let worker_id = AgentId::new("runtime-phase2a-worker");
+        let task_id = "runtime-phase2a-task".to_owned();
+        let execution_id = "runtime-phase2a-exec".to_owned();
+        let turn_id = TurnId::new("runtime-phase2a-turn");
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime");
+
+        for command in [
+            UiCommand::CreateTaskAgent {
+                agent: UiTaskAgentCreateCommand {
+                    agent_id: worker_id.clone(),
+                    capabilities: vec!["code_edit".to_owned()],
+                },
+            },
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some(task_id.clone()),
+                    title: "Runtime phase2a task".to_owned(),
+                    content: "Runtime phase2a content".to_owned(),
+                    goal: "prove runtime master worker loop".to_owned(),
+                    deliverables: vec!["worker loop".to_owned()],
+                    acceptance: vec!["approved before close".to_owned()],
+                    priority: 90,
+                    target_cwd: None,
+                    session_id: Some(SessionId::new("runtime-phase2a-session")),
+                    turn_id: Some(turn_id.clone()),
+                    dispatch: Some(UiTaskDispatchCommand::None),
+                },
+            },
+            UiCommand::AssignTask {
+                assignment: UiTaskAssignCommand {
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                },
+            },
+            UiCommand::ClaimNextTask {
+                claim: UiTaskClaimCommand {
+                    agent_id: worker_id.clone(),
+                    execution_id: execution_id.clone(),
+                    ttl_seconds: Some(300),
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Running {
+                        phase: "progress".to_owned(),
+                        summary: "worker progress".to_owned(),
+                        evidence: vec!["progress evidence".to_owned()],
+                    },
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Blocked {
+                        reason: "needs input".to_owned(),
+                        evidence: vec!["blocked evidence".to_owned()],
+                    },
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Recovering {
+                        summary: "recovering".to_owned(),
+                        evidence: vec!["recovery evidence".to_owned()],
+                        retry_count: 1,
+                    },
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::ReviewReady {
+                        summary: "first review".to_owned(),
+                        deliverables: vec!["draft".to_owned()],
+                        evidence: vec!["draft evidence".to_owned()],
+                    },
+                },
+            },
+            UiCommand::RejectTaskReview {
+                rejection: UiTaskReviewRejectionCommand {
+                    task_id: task_id.clone(),
+                    reject_reason: "needs retry".to_owned(),
+                    next_requirements: vec!["retry".to_owned()],
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Running {
+                        phase: "retry".to_owned(),
+                        summary: "retry progress".to_owned(),
+                        evidence: vec!["retry evidence".to_owned()],
+                    },
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id),
+                    kind: UiExecutionFactKind::ReviewReady {
+                        summary: "second review".to_owned(),
+                        deliverables: vec!["accepted".to_owned()],
+                        evidence: vec!["accepted evidence".to_owned()],
+                    },
+                },
+            },
+            UiCommand::ApproveTaskReview {
+                task_id: task_id.clone(),
+            },
+            UiCommand::CloseTask {
+                task_id: task_id.clone(),
+            },
+        ] {
+            runtime
+                .dispatch(build_command_dispatch_envelope(&command).expect("phase2a envelope"))
+                .expect("phase2a dispatch");
+        }
+
+        let board = runtime
+            .query_runtime(&UiCommand::QueryTaskBoard {
+                status: None,
+                agent_id: None,
+                include_terminal: true,
+            })
+            .expect("phase2a board query")
+            .expect("phase2a board result");
+        match board {
+            UiQueryResult::TaskBoard(board) => {
+                let task = board
+                    .tasks
+                    .iter()
+                    .find(|task| task.task_id == task_id)
+                    .expect("closed task");
+                assert_eq!(task.status, "closed");
+                assert_eq!(task.assignee_agent_id.as_ref(), Some(&worker_id));
+                assert_eq!(
+                    task.active_execution_id.as_deref(),
+                    Some(execution_id.as_str())
+                );
+            }
+            other => panic!("unexpected phase2a board result: {other:?}"),
+        }
+
+        let lifecycle = runtime
+            .query_runtime(&UiCommand::QueryAgentLifecycle {
+                agent_id: worker_id.clone(),
+            })
+            .expect("phase2a lifecycle query")
+            .expect("phase2a lifecycle result");
+        match lifecycle {
+            UiQueryResult::AgentLifecycle(lifecycle) => {
+                assert_eq!(lifecycle.agent_id, worker_id);
+                assert_eq!(lifecycle.state, "closed");
+                assert_eq!(
+                    lifecycle.current_execution_id.as_deref(),
+                    Some(execution_id.as_str())
+                );
+            }
+            other => panic!("unexpected phase2a lifecycle result: {other:?}"),
+        }
+
+        let history = runtime
+            .query_runtime(&UiCommand::QueryTaskHistory {
+                task_id: task_id.clone(),
+            })
+            .expect("phase2a history query")
+            .expect("phase2a history result");
+        match history {
+            UiQueryResult::TaskHistory(history) => {
+                let event_types = history
+                    .events
+                    .iter()
+                    .map(|event| event.event_type.as_str())
+                    .collect::<Vec<_>>();
+                for required in [
+                    "TaskCreated",
+                    "TaskAssigned",
+                    "TaskResumed",
+                    "TaskExecutionRecorded",
+                    "TaskBlocked",
+                    "TaskExecutionRecovering",
+                    "TaskReviewSubmitted",
+                    "TaskReviewRejected",
+                    "TaskReviewApproved",
+                    "TaskClosed",
+                ] {
+                    assert!(
+                        event_types.contains(&required),
+                        "missing {required}: {event_types:?}"
+                    );
+                }
+            }
+            other => panic!("unexpected phase2a history result: {other:?}"),
+        }
+
+        assert_eq!(owner_id.as_str(), "agent-live");
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
 

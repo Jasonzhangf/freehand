@@ -2773,3 +2773,65 @@ Current real root cause split:
   - `git diff --check` -> ok.
   - `cargo run -p xtask -- mainlines check` -> ok.
   - `cargo run -p xtask -- gates check` -> ok.
+
+# 2026-07-08 multi-task phase2a master-worker closeout
+
+- marker:
+  - `phase2a-master-worker-closeout-1783515402294813000`
+- scope:
+  - Continued goal `/Users/fanzhang/.codex/attachments/ff7f6297-abd6-4a48-9557-2d0f35dd98ac/pasted-text-1.txt`.
+  - Closed Phase 2A no-UI master/worker task execution loop only.
+  - Did not implement WebUI/Android dashboard, worker_control, multi BigTask, or cross-machine worker.
+- implementation audit:
+  - `ui.protocol` owns Phase 2A command DTO/validation for worker creation, assignment, claim-next, review rejection, task dispatch, execution facts, and lifecycle/task queries.
+  - `runtime.ui-command-dispatch` routes commands thinly into `TaskRuntime`; it does not decide business next actions.
+  - `task.orchestration` owns create/assign/claim/progress/blocked/recovering/review/reject/retry/approve/close mutation truth.
+  - `agent.lifecycle` persists typed lifecycle projection separately from worker resource state so released workers can still have restart-queryable closed lifecycle truth.
+  - `app.cli-runtime-smoke` owns `master-worker-foundation-sample` create and verify modes.
+- local validation:
+  - `cargo fmt --check` -> passed.
+  - `cargo test -p freehand-task -- --nocapture` -> 30 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 81 passed.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 49 passed.
+  - `cargo test -p freehand-cli -- --nocapture` -> 20 passed.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `git diff --check` -> ok.
+- S-profile online proof:
+  - `scripts/install-launchd.sh restartS` refreshed the debug daemon copy and restarted `com.freehand.daemonS`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok` with subscription, query, and explicit command-kind mismatch failure evidence.
+  - `freehand-cliS master-worker-foundation-sample --url ws://127.0.0.1:4042/adp` -> `master_worker_foundation_sample_ok`.
+  - Created ids: `task=task-cli-master-worker-FHPHASE2A1783515402294813000`, `execution=exec-cli-master-worker-FHPHASE2A1783515402294813000`, `agent=worker-cli-master-worker-FHPHASE2A1783515402294813000`.
+  - Online sample result: `status=closed`, `blocked_seen=true`, `review_ready_seen=true`, `lifecycle_state=closed`.
+  - Ordered events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskExecutionRecorded,TaskBlocked,TaskResumed,TaskHeartbeat,TaskExecutionRecovering,TaskReviewSubmitted,TaskReviewRejected,TaskResumed,TaskHeartbeat,TaskExecutionRecorded,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`.
+  - After another `scripts/install-launchd.sh restartS`, verify mode against the same task/execution/agent ids returned `master_worker_foundation_verify_ok` with `status=closed`, `blocked_seen=true`, `review_ready_seen=true`, `lifecycle_state=closed`, and the same ordered events.
+- durable rule:
+  - Multi-task Phase 2A restart proof requires same task/execution/worker ids after daemon restart; a fresh post-restart sample is not recovery evidence.
+
+# 2026-07-08 phase2a final revalidation and memory indexing
+
+- reran local closeout checks:
+  - `cargo fmt --check`
+  - `cargo test -p freehand-task -- --nocapture` -> 30 passed
+  - `cargo test -p freehand-runtime -- --nocapture` -> 81 passed
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 49 passed
+  - `cargo test -p freehand-cli -- --nocapture` -> 20 passed
+  - `cargo test -p freehand-tools -- --nocapture` -> 29 passed
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+- reran S-profile online proof:
+  - `scripts/install-launchd.sh restartS`
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`
+  - `freehand-cliS master-worker-foundation-sample --url ws://127.0.0.1:4042/adp` -> `master_worker_foundation_sample_ok`
+  - latest ids: task `task-cli-master-worker-FHPHASE2A1783516065760449000`, execution `exec-cli-master-worker-FHPHASE2A1783516065760449000`, worker `worker-cli-master-worker-FHPHASE2A1783516065760449000`
+  - after `scripts/install-launchd.sh restartS`, verify mode against the same ids returned `master_worker_foundation_verify_ok`
+- MemoryPalace:
+  - built source-only safe corpus at `/Volumes/extension/code/memory/freehand-phase2a-mempalace-corpus-safe-1783516065760449000`
+  - sensitive-marker scan returned zero matches
+  - `mempalace mine ... --wing freehand --agent codex` processed 24 files
+  - marker search `phase2a-master-worker-closeout-1783515402294813000` returned `phase2a-master-worker-closeout.md` rank 1
