@@ -1,5 +1,14 @@
 # CACHE
 
+- Current multi-task Phase 2B master poll/EventInbox closeout:
+  - Marker: `phase2b-master-poll-closeout-1783528034427562000`.
+  - Phase 2B no-UI foundation is implemented through owner truth: `task.orchestration` owns EventInbox cursoring and MasterPoll cursor persistence/classification, `ui.protocol` owns DTO validation including `replay_from_start`, `runtime.ui-command-dispatch` is a thin bridge, and `app.cli-runtime-smoke` owns `master-poll-foundation-sample`.
+  - Cursor truth is now four-part and globally unique: `timestamp:task_id:seq:event_id`. Legacy three-part cursors are compatibility-only and skip all duplicate-prefix historical rows; unknown cursors still fail explicitly.
+  - Local proof: `cargo test -p freehand-task phase2b_ -- --nocapture` -> 5 passed; `cargo test -p freehand-task -- --nocapture` -> 35 passed; `cargo test -p freehand-ui-protocol -- --nocapture` -> 50 passed; `cargo test -p freehand-runtime -- --nocapture` -> 82 passed; `cargo test -p freehand-cli -- --nocapture` -> 22 passed; `cargo clippy -p freehand-task --all-targets -- -D warnings`; `cargo fmt --check`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `git diff --check`; mainline JSON `jq empty`.
+  - Online S-profile proof on `127.0.0.1:4042`: health `ok`; `freehand-cliS adp-smoke` passed; `freehand-cliS master-poll-foundation-sample` returned `master_poll_foundation_sample_ok` for task `task-cli-master-poll-FHPHASE2B1783528034427562000`, execution `exec-cli-master-poll-FHPHASE2B1783528034427562000`, worker `worker-cli-master-poll-FHPHASE2B1783528034427562000`, final `status=review_submitted`, `inbox_events=187`, `poll_events=0`, and persisted cursor `00000000001783528036:task-cli-phase1-review-FHPHASE11783500244602888000:00000000000000000006:task-cli-phase1-review-FHPHASE11783500244602888000:6`.
+  - Restart same-cursor proof: after `scripts/install-launchd.sh restartS`, verify mode against the same task/execution/worker/cursor returned `master_poll_foundation_verify_ok` with `inbox_after_cursor_events=0`, `poll_events=0`, same persisted cursor, and classifications `blocked,review_ready,stale`.
+  - Out of scope remains Phase 2C `worker_control`, Phase 2D UI projection, WebUI/Android task dashboard, multi BigTask, and cross-machine worker.
+
 - Current multi-task Phase 2A master-worker closeout:
   - Marker: `phase2a-master-worker-closeout-1783515402294813000`.
   - Phase 2A no-UI loop is implemented through owner truth: `ui.protocol` command DTO/validation, `runtime.ui-command-dispatch` thin dispatch, `task.orchestration` mutation truth, and `agent.lifecycle` typed projection.

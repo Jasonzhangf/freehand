@@ -129,6 +129,12 @@ pub enum UiCommand {
         #[serde(default)]
         include_terminal: bool,
     },
+    QueryEventInbox {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+    },
     QueryAgentBoard,
     QueryAgentLifecycle {
         agent_id: AgentId,
@@ -177,6 +183,16 @@ pub enum UiCommand {
     },
     RunSchedulerTick {
         tick: UiSchedulerTickCommand,
+    },
+    RunMasterPoll {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+        #[serde(default)]
+        include_terminal: bool,
+        #[serde(default)]
+        replay_from_start: bool,
     },
     QueryNodeStatus {
         node_id: String,
@@ -519,6 +535,60 @@ pub struct UiAgentBoardProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskEventInboxEntryProjection {
+    pub cursor: String,
+    pub event_id: String,
+    pub kind: String,
+    pub task_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<AgentId>,
+    pub created_at: u64,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskEventInboxProjection {
+    pub source_agent_id: AgentId,
+    pub generated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub events: Vec<UiTaskEventInboxEntryProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiMasterPollClassificationProjection {
+    pub kind: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<AgentId>,
+    pub recommended_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiMasterPollProjection {
+    pub source_agent_id: AgentId,
+    pub generated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persisted_cursor: Option<String>,
+    pub event_inbox: UiTaskEventInboxProjection,
+    pub task_board: UiTaskBoardProjection,
+    pub agent_board: UiAgentBoardProjection,
+    pub classifications: Vec<UiMasterPollClassificationProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiTaskLedgerEventProjection {
     pub seq: u64,
     pub event_id: String,
@@ -748,6 +818,8 @@ pub enum UiQueryResult {
     TaskBoard(UiTaskBoardProjection),
     AgentBoard(UiAgentBoardProjection),
     AgentLifecycle(UiAgentLifecycleProjection),
+    EventInbox(UiTaskEventInboxProjection),
+    MasterPoll(UiMasterPollProjection),
     TaskHistory(UiTaskHistoryProjection),
     ErrorCenterEvents(UiErrorCenterEventListProjection),
     ConfigStatus(UiConfigStatusProjection),
@@ -947,6 +1019,10 @@ pub enum UiProtocolError {
     EmptyTaskReviewRejection,
     #[error("task claim requires non-empty execution id")]
     EmptyTaskExecutionId,
+    #[error("event cursor must be non-empty when provided")]
+    EmptyEventCursor,
+    #[error("master poll replay_from_start cannot be combined with after_cursor")]
+    ConflictingMasterPollCursorMode,
     #[error("task agent command requires non-empty agent id")]
     EmptyTaskAgentId,
     #[error("task agent command requires at least one capability")]
@@ -1440,9 +1516,11 @@ impl UiProtocolState {
             }
             UiCommand::QueryTaskList { .. }
             | UiCommand::QueryTaskBoard { .. }
+            | UiCommand::QueryEventInbox { .. }
             | UiCommand::QueryAgentBoard
             | UiCommand::QueryAgentLifecycle { .. }
             | UiCommand::QueryTaskHistory { .. }
+            | UiCommand::RunMasterPoll { .. }
             | UiCommand::QueryConfigStatus
             | UiCommand::QueryErrorCenterEvents { .. } => Err(UiProtocolError::StreamKindMismatch),
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
@@ -1561,6 +1639,19 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::QueryTaskHistory { task_id } if task_id.trim().is_empty() => {
             Err(UiProtocolError::EmptyTaskId)
         }
+        UiCommand::QueryEventInbox {
+            after_cursor: Some(after_cursor),
+            ..
+        }
+        | UiCommand::RunMasterPoll {
+            after_cursor: Some(after_cursor),
+            ..
+        } if after_cursor.trim().is_empty() => Err(UiProtocolError::EmptyEventCursor),
+        UiCommand::RunMasterPoll {
+            after_cursor: Some(_),
+            replay_from_start: true,
+            ..
+        } => Err(UiProtocolError::ConflictingMasterPollCursorMode),
         UiCommand::CreateTask { task } if task.title.trim().is_empty() => {
             Err(UiProtocolError::EmptyTaskTitle)
         }
@@ -1685,6 +1776,8 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptyTaskReviewSummary => "empty_task_review_summary",
         UiProtocolError::EmptyTaskReviewRejection => "empty_task_review_rejection",
         UiProtocolError::EmptyTaskExecutionId => "empty_task_execution_id",
+        UiProtocolError::EmptyEventCursor => "empty_event_cursor",
+        UiProtocolError::ConflictingMasterPollCursorMode => "conflicting_master_poll_cursor_mode",
         UiProtocolError::EmptyTaskAgentId => "empty_task_agent_id",
         UiProtocolError::EmptyTaskCapabilities => "empty_task_capabilities",
         UiProtocolError::EmptyConfigAgentName => "empty_config_agent_name",
@@ -2269,6 +2362,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryConfigStatus => "query_config_status",
         UiCommand::QueryTaskList { .. } => "query_task_list",
         UiCommand::QueryTaskBoard { .. } => "query_task_board",
+        UiCommand::QueryEventInbox { .. } => "query_event_inbox",
         UiCommand::QueryAgentBoard => "query_agent_board",
         UiCommand::QueryAgentLifecycle { .. } => "query_agent_lifecycle",
         UiCommand::QueryTaskHistory { .. } => "query_task_history",
@@ -2284,6 +2378,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::CloseTask { .. } => "close_task",
         UiCommand::ApplyExecutionFact { .. } => "apply_execution_fact",
         UiCommand::RunSchedulerTick { .. } => "run_scheduler_tick",
+        UiCommand::RunMasterPoll { .. } => "run_master_poll",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",
@@ -2317,6 +2412,7 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::CloseTask { .. }
             | UiCommand::ApplyExecutionFact { .. }
             | UiCommand::RunSchedulerTick { .. }
+            | UiCommand::RunMasterPoll { .. }
             | UiCommand::SendDirectMessageToSlave { .. }
             | UiCommand::RewindCheckpoint { .. }
             | UiCommand::CancelTurn { .. }
@@ -2352,7 +2448,8 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         | UiCommand::ApproveTaskReview { .. }
         | UiCommand::CloseTask { .. }
         | UiCommand::ApplyExecutionFact { .. }
-        | UiCommand::RunSchedulerTick { .. } => ("task.orchestration", "crates/freehand-task"),
+        | UiCommand::RunSchedulerTick { .. }
+        | UiCommand::RunMasterPoll { .. } => ("task.orchestration", "crates/freehand-task"),
         UiCommand::SendDirectMessageToSlave { .. } => ("node.master-slave", "crates/freehand-node"),
         _ => ("ui.protocol", "crates/freehand-ui-protocol"),
     }
@@ -2734,6 +2831,148 @@ mod tests {
         .expect_err("reject reason required");
         assert_eq!(err, UiProtocolError::EmptyTaskReviewRejection);
         assert_eq!(protocol_rejection(err).code, "empty_task_review_rejection");
+    }
+
+    #[test]
+    fn phase2b_event_inbox_and_master_poll_validate_and_route_to_task_orchestration() {
+        let query = UiCommand::QueryEventInbox {
+            after_cursor: Some("cursor-1".to_owned()),
+            limit: Some(20),
+        };
+        validate_command(&query).expect("valid event inbox query");
+        assert_eq!(
+            accept_command_ingress(&query).expect_err("query cannot enter command ingress"),
+            UiProtocolError::IngressCommandKindMismatch
+        );
+        assert_eq!(
+            UiProtocolState::default()
+                .query(&query)
+                .expect_err("runtime-owned query"),
+            UiProtocolError::StreamKindMismatch
+        );
+        let query_frame = UiAdpRequest::Query {
+            request_id: "phase2b-query".to_owned(),
+            query: query.clone(),
+        };
+        let encoded = serde_json::to_string(&query_frame).expect("query frame json");
+        assert!(encoded.contains("QueryEventInbox"));
+        let decoded: UiAdpRequest = serde_json::from_str(&encoded).expect("query frame decode");
+        assert_eq!(decoded, query_frame);
+
+        let poll = UiCommand::RunMasterPoll {
+            after_cursor: Some("cursor-1".to_owned()),
+            limit: Some(50),
+            include_terminal: false,
+            replay_from_start: false,
+        };
+        validate_command(&poll).expect("valid master poll command");
+        let envelope = build_command_dispatch_envelope(&poll).expect("master poll envelope");
+        assert_eq!(envelope.ingress.command_kind, "run_master_poll");
+        assert_eq!(envelope.target_feature_id, "task.orchestration");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-task");
+        let legacy_poll_json = r#"{
+            "RunMasterPoll": {
+                "after_cursor": null,
+                "limit": null,
+                "include_terminal": true
+            }
+        }"#;
+        let legacy_poll: UiCommand =
+            serde_json::from_str(legacy_poll_json).expect("legacy poll decodes");
+        assert_eq!(
+            legacy_poll,
+            UiCommand::RunMasterPoll {
+                after_cursor: None,
+                limit: None,
+                include_terminal: true,
+                replay_from_start: false,
+            }
+        );
+
+        let err = validate_command(&UiCommand::QueryEventInbox {
+            after_cursor: Some("  ".to_owned()),
+            limit: Some(10),
+        })
+        .expect_err("empty event cursor rejected");
+        assert_eq!(err, UiProtocolError::EmptyEventCursor);
+        assert_eq!(protocol_rejection(err).code, "empty_event_cursor");
+        let err = validate_command(&UiCommand::RunMasterPoll {
+            after_cursor: Some("  ".to_owned()),
+            limit: Some(10),
+            include_terminal: false,
+            replay_from_start: false,
+        })
+        .expect_err("empty master poll cursor rejected");
+        assert_eq!(err, UiProtocolError::EmptyEventCursor);
+        let err = validate_command(&UiCommand::RunMasterPoll {
+            after_cursor: Some("cursor-1".to_owned()),
+            limit: None,
+            include_terminal: false,
+            replay_from_start: true,
+        })
+        .expect_err("conflicting master poll cursor mode rejected");
+        assert_eq!(err, UiProtocolError::ConflictingMasterPollCursorMode);
+
+        let inbox = UiTaskEventInboxProjection {
+            source_agent_id: AgentId::new("master"),
+            generated_at: 10,
+            source_cursor: Some("cursor-0".to_owned()),
+            next_cursor: Some("cursor-1".to_owned()),
+            events: vec![UiTaskEventInboxEntryProjection {
+                cursor: "cursor-1".to_owned(),
+                event_id: "event-1".to_owned(),
+                kind: "review_ready".to_owned(),
+                task_id: "task-1".to_owned(),
+                execution_id: Some("exec-1".to_owned()),
+                agent_id: Some(AgentId::new("worker-1")),
+                created_at: 10,
+                payload: serde_json::json!({"summary": "ready"}),
+            }],
+        };
+        let result = UiQueryResult::MasterPoll(UiMasterPollProjection {
+            source_agent_id: AgentId::new("master"),
+            generated_at: 10,
+            source_cursor: Some("cursor-0".to_owned()),
+            next_cursor: Some("cursor-1".to_owned()),
+            persisted_cursor: Some("cursor-1".to_owned()),
+            event_inbox: inbox,
+            task_board: UiTaskBoardProjection {
+                source_agent_id: AgentId::new("master"),
+                status_filter: None,
+                agent_filter: None,
+                include_terminal: false,
+                tasks: Vec::new(),
+                agents: Vec::new(),
+                blocked: Vec::new(),
+                review_ready: Vec::new(),
+                stale: Vec::new(),
+            },
+            agent_board: UiAgentBoardProjection {
+                source_agent_id: AgentId::new("master"),
+                agents: Vec::new(),
+            },
+            classifications: vec![UiMasterPollClassificationProjection {
+                kind: "review_ready".to_owned(),
+                summary: "task task-1 is ready for review".to_owned(),
+                task_id: Some("task-1".to_owned()),
+                execution_id: Some("exec-1".to_owned()),
+                agent_id: Some(AgentId::new("worker-1")),
+                recommended_actions: vec![
+                    "inspect_submission".to_owned(),
+                    "approve_submission".to_owned(),
+                    "reject_submission".to_owned(),
+                ],
+            }],
+        });
+        let response = UiAdpResponse::QueryResult {
+            request_id: "phase2b-poll".to_owned(),
+            result,
+        };
+        let encoded = serde_json::to_string(&response).expect("poll result json");
+        assert!(encoded.contains("MasterPoll"));
+        assert!(encoded.contains("review_ready"));
+        let decoded: UiAdpResponse = serde_json::from_str(&encoded).expect("poll result decode");
+        assert_eq!(decoded, response);
     }
 
     #[test]

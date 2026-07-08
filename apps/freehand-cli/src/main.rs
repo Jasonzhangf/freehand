@@ -7,10 +7,11 @@ use freehand_testkit::{
 };
 use freehand_ui_protocol::{
     UiAdpRequest, UiAdpResponse, UiAgentBoardProjection, UiAgentLifecycleProjection, UiClientKind,
-    UiCommand, UiExecutionFactCommand, UiExecutionFactKind, UiModelRequestKind,
-    UiProviderConfigUpdate, UiQueryResult, UiSchedulerTickCommand, UiTaskAgentCreateCommand,
-    UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand,
-    UiTaskDispatchCommand, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
+    UiCommand, UiExecutionFactCommand, UiExecutionFactKind, UiMasterPollProjection,
+    UiModelRequestKind, UiProviderConfigUpdate, UiQueryResult, UiSchedulerTickCommand,
+    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
+    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxProjection, UiTaskReviewCommand,
+    UiTaskReviewRejectionCommand,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
@@ -60,6 +61,9 @@ fn run() -> Result<String, String> {
     if flag == "master-worker-foundation-sample" {
         return run_master_worker_foundation_sample(args.collect());
     }
+    if flag == "master-poll-foundation-sample" {
+        return run_master_poll_foundation_sample(args.collect());
+    }
     if flag == "adp-session-query" {
         return run_adp_session_query(args.collect());
     }
@@ -83,7 +87,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
                 .to_owned(),
         );
     }
@@ -323,6 +327,62 @@ fn run_master_worker_foundation_sample(args: Vec<String>) -> Result<String, Stri
         .build()
         .map_err(|err| err.to_string())?;
     runtime.block_on(run_master_worker_foundation_sample_async(url, verify))
+}
+
+fn run_master_poll_foundation_sample(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]"
+            .to_owned();
+    let mut url = None::<String>;
+    let mut task_id = None::<String>;
+    let mut execution = None::<String>;
+    let mut agent = None::<String>;
+    let mut cursor = None::<String>;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--url" if index + 1 < args.len() => {
+                url = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--verify-task" if index + 1 < args.len() => {
+                task_id = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--execution" if index + 1 < args.len() => {
+                execution = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--agent" if index + 1 < args.len() => {
+                agent = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--cursor" if index + 1 < args.len() => {
+                cursor = Some(args[index + 1].clone());
+                index += 2;
+            }
+            _ => return Err(usage),
+        }
+    }
+    let url = url.ok_or_else(|| usage.clone())?;
+    let verify = match (task_id, execution, agent, cursor) {
+        (None, None, None, None) => None,
+        (Some(task_id), Some(execution_id), Some(agent_id), Some(cursor)) => {
+            Some(MasterPollVerifyIds {
+                task_id,
+                execution_id,
+                agent_id,
+                cursor,
+            })
+        }
+        _ => return Err(usage),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_master_poll_foundation_sample_async(url, verify))
 }
 
 fn run_adp_session_query(args: Vec<String>) -> Result<String, String> {
@@ -2201,6 +2261,461 @@ async fn verify_master_worker_foundation_truth(
     })
 }
 
+#[derive(Debug, Clone)]
+struct MasterPollVerifyIds {
+    task_id: String,
+    execution_id: String,
+    agent_id: String,
+    cursor: String,
+}
+
+#[derive(Debug, Clone)]
+struct MasterPollFoundationEvidence {
+    task_status: String,
+    inbox_after_cursor_events: usize,
+    poll_events: usize,
+    classifications: Vec<String>,
+    source_cursor: Option<String>,
+    persisted_cursor: String,
+}
+
+async fn run_master_poll_foundation_sample_async(
+    url: String,
+    verify: Option<MasterPollVerifyIds>,
+) -> Result<String, String> {
+    if let Some(ids) = verify {
+        let evidence = verify_master_poll_foundation_truth(&url, &ids).await?;
+        return Ok(format!(
+            "master_poll_foundation_verify_ok url={} task={} execution={} agent={} cursor={} status={} inbox_after_cursor_events={} poll_events={} source_cursor={} persisted_cursor={} classifications={}",
+            url,
+            ids.task_id,
+            ids.execution_id,
+            ids.agent_id,
+            ids.cursor,
+            evidence.task_status,
+            evidence.inbox_after_cursor_events,
+            evidence.poll_events,
+            evidence.source_cursor.as_deref().unwrap_or("none"),
+            evidence.persisted_cursor,
+            evidence.classifications.join(",")
+        ));
+    }
+
+    let session_id = SessionId::new(format!("cli-master-poll-{}", live_id_stamp()?));
+    let token = format!("FHPHASE2B{}", live_id_stamp()?);
+    let task_id = format!("task-cli-master-poll-{token}");
+    let execution_id = format!("exec-cli-master-poll-{token}");
+    let worker_id = format!("worker-cli-master-poll-{token}");
+    let turn_id = TurnId::new(format!("turn-cli-master-poll-{token}"));
+    let worker_agent = AgentId::new(worker_id.clone());
+    let mut seen = Vec::new();
+
+    for (request_id, command) in [
+        (
+            "cli-master-poll-create-agent",
+            UiCommand::CreateTaskAgent {
+                agent: UiTaskAgentCreateCommand {
+                    agent_id: worker_agent.clone(),
+                    capabilities: vec!["code_edit".to_owned(), "test_run".to_owned()],
+                },
+            },
+        ),
+        (
+            "cli-master-poll-create-task",
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some(task_id.clone()),
+                    title: format!("Master poll {token}"),
+                    content: format!("Phase2B master poll task {token}"),
+                    goal: "prove master poll consumes task truth without business mutation"
+                        .to_owned(),
+                    deliverables: vec!["event inbox".to_owned(), "master poll".to_owned()],
+                    acceptance: vec![
+                        "poll persists cursor and leaves task state unchanged".to_owned(),
+                    ],
+                    priority: 96,
+                    target_cwd: None,
+                    session_id: Some(session_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                    dispatch: Some(UiTaskDispatchCommand::None),
+                },
+            },
+        ),
+        (
+            "cli-master-poll-assign",
+            UiCommand::AssignTask {
+                assignment: UiTaskAssignCommand {
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                },
+            },
+        ),
+        (
+            "cli-master-poll-claim",
+            UiCommand::ClaimNextTask {
+                claim: UiTaskClaimCommand {
+                    agent_id: worker_agent.clone(),
+                    execution_id: execution_id.clone(),
+                    ttl_seconds: Some(300),
+                },
+            },
+        ),
+        (
+            "cli-master-poll-running",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Running {
+                        phase: "phase2b_running".to_owned(),
+                        summary: format!("worker running {token}"),
+                        evidence: vec![format!("execution {execution_id}")],
+                    },
+                },
+            },
+        ),
+    ] {
+        seen.push(send_adp_command_receipt(&url, request_id, command).await?);
+    }
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-master-poll-scheduler",
+            UiCommand::RunSchedulerTick {
+                tick: UiSchedulerTickCommand {
+                    stale_after_seconds: 1,
+                    soft_timeout_seconds: 10,
+                    hard_timeout_seconds: 30,
+                },
+            },
+        )
+        .await?,
+    );
+
+    for (request_id, command) in [
+        (
+            "cli-master-poll-blocked",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Blocked {
+                        reason: format!("blocked {token}"),
+                        evidence: vec!["master visible blocker".to_owned()],
+                    },
+                },
+            },
+        ),
+        (
+            "cli-master-poll-recovering",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Recovering {
+                        summary: format!("recovering {token}"),
+                        evidence: vec!["master unblock guidance".to_owned()],
+                        retry_count: 1,
+                    },
+                },
+            },
+        ),
+        (
+            "cli-master-poll-review",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id),
+                    kind: UiExecutionFactKind::ReviewReady {
+                        summary: format!("review ready {token}"),
+                        deliverables: vec!["poll deliverable".to_owned()],
+                        evidence: vec!["review evidence".to_owned()],
+                    },
+                },
+            },
+        ),
+    ] {
+        seen.push(send_adp_command_receipt(&url, request_id, command).await?);
+    }
+
+    let before_poll_board =
+        query_task_board_including_terminal(&url, "cli-master-poll-before-board").await?;
+    let before_status = before_poll_board
+        .tasks
+        .iter()
+        .find(|task| task.task_id == task_id)
+        .map(|task| task.status.clone())
+        .ok_or_else(|| format!("master poll task missing before poll task={task_id}"))?;
+
+    let inbox = query_event_inbox(&url, "cli-master-poll-inbox", None, None).await?;
+    let inbox_kinds = inbox
+        .events
+        .iter()
+        .map(|event| event.kind.clone())
+        .collect::<Vec<_>>();
+    require_kind(&inbox_kinds, "execution_blocked", "master poll event inbox")?;
+    require_kind(&inbox_kinds, "review_ready", "master poll event inbox")?;
+    require_kind(&inbox_kinds, "scheduler_tick", "master poll event inbox")?;
+
+    let poll = query_master_poll(&url, "cli-master-poll-query", None, None, true, true).await?;
+    let poll_cursor = poll
+        .persisted_cursor
+        .clone()
+        .or_else(|| poll.next_cursor.clone())
+        .ok_or_else(|| "master poll missing persisted cursor".to_owned())?;
+    let classification_kinds = master_poll_classification_kinds(&poll);
+    require_kind(
+        &classification_kinds,
+        "blocked",
+        "master poll classifications",
+    )?;
+    require_kind(
+        &classification_kinds,
+        "review_ready",
+        "master poll classifications",
+    )?;
+    require_kind(
+        &classification_kinds,
+        "stale",
+        "master poll classifications",
+    )?;
+    if poll.next_cursor.as_deref() != Some(poll_cursor.as_str()) {
+        return Err(format!(
+            "master poll cursor mismatch next={} persisted={}",
+            poll.next_cursor.as_deref().unwrap_or("none"),
+            poll_cursor
+        ));
+    }
+
+    let poll_receipt = send_adp_command_receipt(
+        &url,
+        "cli-master-poll-command",
+        UiCommand::RunMasterPoll {
+            after_cursor: None,
+            limit: None,
+            include_terminal: true,
+            replay_from_start: true,
+        },
+    )
+    .await?;
+    seen.push(poll_receipt);
+    let final_poll = query_master_poll(
+        &url,
+        "cli-master-poll-final-cursor",
+        None,
+        None,
+        true,
+        false,
+    )
+    .await?;
+    let cursor = final_poll
+        .persisted_cursor
+        .clone()
+        .or_else(|| final_poll.source_cursor.clone())
+        .ok_or_else(|| "master poll final cursor missing persisted cursor".to_owned())?;
+    if final_poll.source_cursor.as_deref() != Some(cursor.as_str()) {
+        return Err(format!(
+            "master poll final cursor source mismatch expected={} actual={}",
+            cursor,
+            final_poll.source_cursor.as_deref().unwrap_or("none")
+        ));
+    }
+    if !final_poll.event_inbox.events.is_empty() {
+        return Err(format!(
+            "master poll final cursor expected drained event inbox cursor={} count={}",
+            cursor,
+            final_poll.event_inbox.events.len()
+        ));
+    }
+
+    let after_poll_board =
+        query_task_board_including_terminal(&url, "cli-master-poll-after-board").await?;
+    let after_status = after_poll_board
+        .tasks
+        .iter()
+        .find(|task| task.task_id == task_id)
+        .map(|task| task.status.clone())
+        .ok_or_else(|| format!("master poll task missing after poll task={task_id}"))?;
+    if after_status != before_status {
+        return Err(format!(
+            "master poll mutated task status task={} before={} after={}",
+            task_id, before_status, after_status
+        ));
+    }
+
+    let ids = MasterPollVerifyIds {
+        task_id: task_id.clone(),
+        execution_id: execution_id.clone(),
+        agent_id: worker_id.clone(),
+        cursor: cursor.clone(),
+    };
+    let evidence = verify_master_poll_foundation_truth(&url, &ids).await?;
+    Ok(format!(
+        "master_poll_foundation_sample_ok url={} session={} task={} execution={} agent={} cursor={} status={} inbox_events={} poll_events={} source_cursor={} persisted_cursor={} classifications={} seen={}",
+        url,
+        session_id.as_str(),
+        task_id,
+        execution_id,
+        worker_id,
+        cursor,
+        evidence.task_status,
+        inbox.events.len(),
+        evidence.poll_events,
+        evidence.source_cursor.as_deref().unwrap_or("none"),
+        evidence.persisted_cursor,
+        evidence.classifications.join(","),
+        seen.join(",")
+    ))
+}
+
+async fn verify_master_poll_foundation_truth(
+    url: &str,
+    ids: &MasterPollVerifyIds,
+) -> Result<MasterPollFoundationEvidence, String> {
+    let board = query_task_board_including_terminal(url, "cli-master-poll-verify-board").await?;
+    let Some(task) = board.tasks.iter().find(|task| task.task_id == ids.task_id) else {
+        return Err(format!(
+            "master poll task missing from board task={} count={}",
+            ids.task_id,
+            board.tasks.len()
+        ));
+    };
+    if !task.status.eq_ignore_ascii_case("review_submitted") {
+        return Err(format!(
+            "master poll task expected review_submitted task={} status={}",
+            ids.task_id, task.status
+        ));
+    }
+    if task.assignee_agent_id.as_ref().map(AgentId::as_str) != Some(ids.agent_id.as_str()) {
+        return Err(format!(
+            "master poll assignee mismatch task={} expected_agent={} actual={}",
+            ids.task_id,
+            ids.agent_id,
+            task.assignee_agent_id
+                .as_ref()
+                .map(AgentId::as_str)
+                .unwrap_or("none")
+        ));
+    }
+    if task.active_execution_id.as_deref() != Some(ids.execution_id.as_str()) {
+        return Err(format!(
+            "master poll execution mismatch task={} expected_execution={} actual={}",
+            ids.task_id,
+            ids.execution_id,
+            task.active_execution_id.as_deref().unwrap_or("none")
+        ));
+    }
+
+    let history = query_task_history(url, &ids.task_id).await?;
+    let event_types = history
+        .events
+        .iter()
+        .map(|event| event.event_type.clone())
+        .collect::<Vec<_>>();
+    assert_ordered_events(
+        &event_types,
+        &[
+            "TaskCreated",
+            "TaskAssigned",
+            "TaskResumed",
+            "TaskExecutionRecorded",
+            "TaskSchedulerTick",
+            "TaskBlocked",
+            "TaskExecutionRecovering",
+            "TaskReviewSubmitted",
+        ],
+    )
+    .map_err(|message| {
+        format!(
+            "master poll history sequence invalid task={} execution={} {message}",
+            ids.task_id, ids.execution_id
+        )
+    })?;
+    let execution_events = history
+        .events
+        .iter()
+        .filter(|event| {
+            event
+                .payload
+                .get("execution_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(ids.execution_id.as_str())
+        })
+        .count();
+    if execution_events < 4 {
+        return Err(format!(
+            "master poll execution evidence too weak task={} execution={} matching_events={}",
+            ids.task_id, ids.execution_id, execution_events
+        ));
+    }
+
+    let inbox_after_cursor = query_event_inbox(
+        url,
+        "cli-master-poll-verify-inbox",
+        Some(ids.cursor.clone()),
+        None,
+    )
+    .await?;
+    if !inbox_after_cursor.events.is_empty() {
+        return Err(format!(
+            "master poll cursor replay returned new events cursor={} count={}",
+            ids.cursor,
+            inbox_after_cursor.events.len()
+        ));
+    }
+
+    let poll =
+        query_master_poll(url, "cli-master-poll-verify-poll", None, None, true, false).await?;
+    if poll.source_cursor.as_deref() != Some(ids.cursor.as_str()) {
+        return Err(format!(
+            "master poll verify source cursor mismatch expected={} actual={}",
+            ids.cursor,
+            poll.source_cursor.as_deref().unwrap_or("none")
+        ));
+    }
+    if poll.persisted_cursor.as_deref() != Some(ids.cursor.as_str()) {
+        return Err(format!(
+            "master poll verify persisted cursor mismatch expected={} actual={}",
+            ids.cursor,
+            poll.persisted_cursor.as_deref().unwrap_or("none")
+        ));
+    }
+    if !poll.event_inbox.events.is_empty() {
+        return Err(format!(
+            "master poll verify expected empty event inbox after cursor cursor={} count={}",
+            ids.cursor,
+            poll.event_inbox.events.len()
+        ));
+    }
+    let classifications = master_poll_classification_kinds(&poll);
+    require_kind(
+        &classifications,
+        "review_ready",
+        "master poll verify classifications",
+    )?;
+
+    Ok(MasterPollFoundationEvidence {
+        task_status: task.status.clone(),
+        inbox_after_cursor_events: inbox_after_cursor.events.len(),
+        poll_events: poll.event_inbox.events.len(),
+        classifications,
+        source_cursor: poll.source_cursor,
+        persisted_cursor: poll
+            .persisted_cursor
+            .ok_or_else(|| "master poll verify missing persisted cursor".to_owned())?,
+    })
+}
+
 fn assert_ordered_events(actual: &[String], required: &[&str]) -> Result<(), String> {
     let mut cursor = 0_usize;
     for required_event in required {
@@ -2520,6 +3035,54 @@ async fn query_task_board_with_terminal(
     Ok(board)
 }
 
+async fn query_event_inbox(
+    url: &str,
+    request_id: &str,
+    after_cursor: Option<String>,
+    limit: Option<usize>,
+) -> Result<UiTaskEventInboxProjection, String> {
+    let result = query_adp_once(
+        url,
+        request_id,
+        UiCommand::QueryEventInbox {
+            after_cursor,
+            limit,
+        },
+        "event inbox",
+    )
+    .await?;
+    let UiQueryResult::EventInbox(inbox) = result else {
+        return Err("ADP event inbox query returned non-event-inbox result".to_owned());
+    };
+    Ok(inbox)
+}
+
+async fn query_master_poll(
+    url: &str,
+    request_id: &str,
+    after_cursor: Option<String>,
+    limit: Option<usize>,
+    include_terminal: bool,
+    replay_from_start: bool,
+) -> Result<UiMasterPollProjection, String> {
+    let result = query_adp_once(
+        url,
+        request_id,
+        UiCommand::RunMasterPoll {
+            after_cursor,
+            limit,
+            include_terminal,
+            replay_from_start,
+        },
+        "master poll",
+    )
+    .await?;
+    let UiQueryResult::MasterPoll(poll) = result else {
+        return Err("ADP master poll query returned non-master-poll result".to_owned());
+    };
+    Ok(poll)
+}
+
 async fn query_agent_board(url: &str, request_id: &str) -> Result<UiAgentBoardProjection, String> {
     let result = query_adp_once(url, request_id, UiCommand::QueryAgentBoard, "agent board").await?;
     let UiQueryResult::AgentBoard(board) = result else {
@@ -2546,6 +3109,23 @@ async fn query_agent_lifecycle(
         return Err("ADP agent lifecycle query returned non-agent-lifecycle result".to_owned());
     };
     Ok(lifecycle)
+}
+
+fn master_poll_classification_kinds(poll: &UiMasterPollProjection) -> Vec<String> {
+    poll.classifications
+        .iter()
+        .map(|classification| classification.kind.clone())
+        .collect()
+}
+
+fn require_kind(kinds: &[String], required: &str, label: &str) -> Result<(), String> {
+    if kinds.iter().any(|kind| kind == required) {
+        return Ok(());
+    }
+    Err(format!(
+        "{label} missing kind={required} kinds={}",
+        kinds.join(",")
+    ))
 }
 
 async fn query_adp_once(

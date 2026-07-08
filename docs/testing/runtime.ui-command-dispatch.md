@@ -12,6 +12,13 @@
   - runtime-backed Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries route to owner APIs and return UI-safe projections without becoming task or lifecycle truth writers
   - runtime-backed task mutation commands route to task owner APIs for create/create_agent/assign/claim/review/reject/approve/close and publish task list projections after accepted mutations
   - runtime-backed Phase 1 execution facts and scheduler ticks route to `task.orchestration`; recovering must not terminalize a task, and scheduler ticks must emit facts/recommendations without making task failure decisions
+  - runtime-backed Phase 2B EventInbox and MasterPoll route to
+    `task.orchestration`; runtime only projects owner DTOs and does not classify
+    or apply master business actions locally
+  - Phase 2B closeout/recovery proof uses `replay_from_start=true` to ignore a
+    stale persisted cursor plus omitted `limit` to drain all pending EventInbox
+    rows; explicit finite limit remains pagination and cannot prove no events
+    remain after the persisted cursor
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries route from selected live config to UI-safe projection without becoming config truth writers
   - runtime-backed provider/model update commands route to `config.core` persistence, then expose pending restart-required projection without hot-reloading active runtime config
@@ -63,6 +70,10 @@
   - task list/history runtime query coverage
   - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle runtime query coverage
   - Phase 1 ApplyExecutionFact and RunSchedulerTick runtime dispatch coverage, including recovering, blocked, review-ready, stale, and scheduler non-decision behavior
+  - Phase 2B EventInbox query and MasterPoll dispatch coverage, including
+    persisted cursor, compact classifications, no task status mutation, and a
+    backlog larger than 100 events to prove replay plus omitted limit is a full
+    drain
   - missing task history query target-not-found coverage
   - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
   - config status runtime query coverage, including base URL host projection, auth source projection, and no API key/pair token leakage
@@ -101,6 +112,9 @@
   - daemon ADP config status query smoke over the shared runtime query port
   - daemon/WebUI provider/model update smoke over the shared ADP command/query path, including visible invalid error and restart-required success state
   - daemon ADP task list subscription smoke over the shared runtime projection channel
+  - daemon ADP EventInbox/MasterPoll smoke over the shared runtime query/command
+    path, with same-cursor proof using replay plus omitted limit rather than a
+    finite page limit
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
 - fixtures / replay inputs / runtime evidence paths:
@@ -142,6 +156,9 @@
   - runtime task query bridge is covered by `runtime_query_reads_task_truth_from_task_runtime`
   - runtime Phase 1 TaskBoard/AgentBoard/Lifecycle query bridge is covered by `runtime_query_reads_phase1_task_and_agent_boards`
   - runtime Phase 1 ExecutionFact/SchedulerTick dispatch bridge is covered by `runtime_dispatch_execution_fact_and_scheduler_tick_update_task_truth`
+  - runtime Phase 2B EventInbox/MasterPoll bridge is the next active
+    implementation target and must be covered by
+    `runtime_dispatches_phase2b_master_poll_and_event_inbox`
   - runtime task mutation command bridge is covered through CLI ADP lifecycle smoke and must remain a thin route to `task.orchestration`
   - Phase 2A master-worker command bridge is covered by
     `runtime_dispatches_phase2a_master_worker_loop_into_task_truth`

@@ -35,6 +35,13 @@
 - Phase 1 execution/timer commands route `ApplyExecutionFact` and `RunSchedulerTick` through runtime into `TaskRuntime::apply_execution_fact` and `TaskRuntime::run_scheduler_tick`; runtime remains a thin bridge and does not make scheduler business decisions
 - Phase 2A master/worker sample commands route as thin ADP dispatch into Task
   Center owner truth; runtime does not decide business next actions
+- Phase 2B EventInbox and MasterPoll query/command shapes route as thin ADP
+  dispatch into Task Center owner truth; runtime does not classify or apply
+  business actions locally
+- runtime passes Phase 2B `replay_from_start` and `limit` to the owner without
+  local cursor policy; closeout samples use replay plus omitted limit to consume
+  all pending events instead of only continuing from a stale persisted cursor or
+  the first page
 
 ## Response Mainline
 
@@ -70,6 +77,14 @@
 - runtime-backed config status queries return UI-safe projections sourced from `config.core` selected agent truth and include auth source type only
 - successful provider/model updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and leave the active runtime/live provider config unchanged until daemon restart
 - runtime-backed task list subscription updates reuse the same projection helper and source task truth from `TaskRuntime::list_tasks`
+- runtime-backed EventInbox query returns UI-safe event rows sourced from
+  `TaskRuntime::query_event_inbox`
+- runtime-backed MasterPoll command returns UI-safe poll outcome sourced from
+  `TaskRuntime::run_master_poll`, including classifications and persisted
+  cursor evidence without task status mutations
+- runtime-backed EventInbox/MasterPoll closeout proof must use
+  `replay_from_start=true` plus omitted limit; explicit finite limits are
+  pagination and cannot prove no events remain after cursor persistence
 
 ## Error Mainline
 
@@ -93,6 +108,8 @@
 - task list publication failures after task mutation are explicit dispatch failures and must not be silently swallowed as a successful task tool result
 - task mutation dispatch requires a live runtime home, maps missing tasks/agents to target-not-found, and must not create task truth outside `task.orchestration`
 - invalid task board filters, missing agent lifecycle ids, invalid execution facts, and invalid scheduler thresholds map to explicit dispatch failures from the owner APIs
+- invalid EventInbox cursor or MasterPoll cursor persistence failures map to
+  explicit dispatch failures from `task.orchestration`
 
 ## Shared Multi-Reference Functions
 
@@ -126,6 +143,15 @@
   - allowed callers: `RuntimeCommandDispatcher::query_runtime`
   - related tests: `runtime_query_reads_phase1_task_and_agent_boards`
   - why shared: keeps board projection in the runtime bridge while Task Center and Agent Lifecycle remain owner truth
+- `project_event_inbox_for_ui` / `project_master_poll_for_ui`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: convert Phase 2B EventInbox and MasterPoll owner projections into
+    UI-safe DTOs
+  - allowed callers: `RuntimeCommandDispatcher::query_runtime`,
+    `RuntimeCommandDispatcher::dispatch`
+  - related tests: `runtime_dispatches_phase2b_master_poll_and_event_inbox`
+  - why shared: keeps runtime as a DTO bridge and prevents app-local event
+    classification or cursor mutation
 
 ## Function Call Table
 
@@ -154,6 +180,8 @@
 | 19 | `project_task_board_for_ui` / `project_agent_board_for_ui` / `project_agent_lifecycle_for_ui` | `crates/freehand-runtime/src/lib.rs` | project Phase 1 TaskBoard, AgentBoard, and AgentLifecycle owner truth into protocol DTOs | task/agent owner projections | UI-safe board/lifecycle query results | `RuntimeCommandDispatcher::query_runtime` | ui.protocol DTOs | bound |
 | 20 | `RuntimeCommandDispatcher::dispatch_apply_execution_fact` / `dispatch_run_scheduler_tick` | `crates/freehand-runtime/src/lib.rs` | route Phase 1 execution facts and scheduler ticks into task.orchestration without making business decisions | execution fact or scheduler tick dispatch envelope | dispatch receipt or owner failure | `RuntimeCommandDispatcher::dispatch` | `TaskRuntime::apply_execution_fact` / `TaskRuntime::run_scheduler_tick` | bound |
 | 21 | `RuntimeCommandDispatcher::dispatch_create_task_agent` / `dispatch_assign_task` / `dispatch_claim_next_task` / `dispatch_reject_task_review` | `crates/freehand-runtime/src/lib.rs` | route Phase 2A worker registry, assignment, claim, and review rejection commands into task.orchestration | protocol task mutation command | dispatch receipt plus task list projection | `RuntimeCommandDispatcher::dispatch` | `TaskRuntime` task owner APIs | bound |
+| 22 | `project_event_inbox_for_ui` / `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | route Phase 2B EventInbox query into task.orchestration and project UI-safe event rows; omitted limit drains all matching rows | inbox query command | EventInbox query projection | runtime query dispatch | task owner | bound |
+| 23 | `RuntimeCommandDispatcher::dispatch_run_master_poll` / `project_master_poll_for_ui` | `crates/freehand-runtime/src/lib.rs` | route Phase 2B MasterPoll command into task.orchestration and project classifications without business mutations; replay_from_start plus omitted limit drains all rows before cursor persistence | master poll command | MasterPoll projection and persisted cursor receipt | runtime ADP command dispatch / CLI sample | task owner | bound |
 
 ## Sync Status Against Code
 
@@ -189,6 +217,9 @@
 - runtime provider/model update dispatch is bound as a thin mutation route into `config.core`; successful saves project restart-required pending status and active runtime config remains unchanged until restart
 - runtime task list projection publication is bound as a thin route from task mutation to `ui.protocol`
 - runtime task mutation dispatch is bound as a thin route from protocol commands to `task.orchestration` create/create_agent/assign/claim/review/reject/approve/close APIs, with `ui_task_actor` kept separate from model/tool `task_actor(turn)`
+- runtime Phase 2B EventInbox query and MasterPoll command are implemented as
+  thin routes to `task.orchestration`; online S-profile closeout is still
+  required before claiming the phase complete
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

@@ -2835,3 +2835,42 @@ Current real root cause split:
   - sensitive-marker scan returned zero matches
   - `mempalace mine ... --wing freehand --agent codex` processed 24 files
   - marker search `phase2a-master-worker-closeout-1783515402294813000` returned `phase2a-master-worker-closeout.md` rank 1
+
+# 2026-07-08 multi-task phase2b master poll/EventInbox closeout
+
+- marker:
+  - `phase2b-master-poll-closeout-1783528034427562000`
+- scope:
+  - Continued Phase 2B no-UI foundation only.
+  - Implemented EventInbox and MasterPoll owner path; did not implement WebUI/Android dashboard, worker_control, multi BigTask, or cross-machine worker.
+- implementation audit:
+  - `task.orchestration` owns EventInbox projection from task ledgers, cursor truth, legacy cursor compatibility, MasterPoll cursor persistence, and classification.
+  - Event cursor changed to four-part `timestamp:task_id:seq:event_id` so same timestamp/task/seq rows are globally distinguishable.
+  - Legacy three-part cursor mode skips all matching duplicate-prefix rows; unknown cursor still returns explicit `CursorNotFound`.
+  - `ui.protocol` owns `QueryEventInbox` and `RunMasterPoll` DTO validation, including `replay_from_start=true` conflict rejection when `after_cursor` is also supplied.
+  - `runtime.ui-command-dispatch` routes EventInbox/MasterPoll to task owner without local business decisions.
+  - `app.cli-runtime-smoke` owns `master-poll-foundation-sample` create and verify modes. Create mode uses `replay_from_start=true` plus omitted limits to drain backlog, then rereads the final owner-backed persisted cursor before printing verify arguments.
+  - A compile warning from a test-only legacy cursor helper was fixed with `#[cfg(test)]`; `cargo clippy -p freehand-task --all-targets -- -D warnings` is green.
+- local validation:
+  - `cargo test -p freehand-task phase2b_ -- --nocapture` -> 5 passed.
+  - `cargo test -p freehand-task -- --nocapture` -> 35 passed.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 50 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 82 passed.
+  - `cargo test -p freehand-cli -- --nocapture` -> 22 passed.
+  - `cargo clippy -p freehand-task --all-targets -- -D warnings` -> passed.
+  - `cargo fmt --check` -> passed.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `git diff --check` -> ok.
+  - `jq empty docs/mainline-calls/task.orchestration.json docs/mainline-calls/runtime.ui-command-dispatch.json docs/mainline-calls/app.cli-runtime-smoke.json docs/mainline-calls/ui.protocol.json` -> ok.
+- S-profile online proof:
+  - `scripts/install-launchd.sh restartS` rebuilt and restarted `com.freehand.daemonS` without warnings.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - `freehand-cliS master-poll-foundation-sample --url ws://127.0.0.1:4042/adp` -> `master_poll_foundation_sample_ok`.
+  - Created ids: task `task-cli-master-poll-FHPHASE2B1783528034427562000`, execution `exec-cli-master-poll-FHPHASE2B1783528034427562000`, worker `worker-cli-master-poll-FHPHASE2B1783528034427562000`.
+  - Online sample evidence: `status=review_submitted`, `inbox_events=187`, `poll_events=0`, persisted cursor `00000000001783528036:task-cli-phase1-review-FHPHASE11783500244602888000:00000000000000000006:task-cli-phase1-review-FHPHASE11783500244602888000:6`.
+  - After `scripts/install-launchd.sh restartS`, verify mode with the same task/execution/worker/cursor returned `master_poll_foundation_verify_ok` with `inbox_after_cursor_events=0`, `poll_events=0`, same persisted cursor, and classifications containing blocked/review_ready/stale.
+- durable rule:
+  - Phase 2B closeout must prove all three: replay-from-start full drain, final owner-backed cursor reread, and same-cursor restart verification returning zero events after cursor. Finite page limits or fresh samples after restart are not valid recovery evidence.

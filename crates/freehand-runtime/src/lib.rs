@@ -63,11 +63,13 @@ use freehand_reason::{
 use freehand_task::{
     AgentCreateRequest, AgentLifecycleActivity, AgentLifecycleSnapshot, AgentLifecycleState,
     AgentMutationRequest, AgentSnapshot, AgentStatus, ExecutionFact, ExecutionFactKind,
-    SchedulerTickRequest, TaskActor, TaskAppendRequest, TaskAssignRequest, TaskBoardProjection,
-    TaskBoardQuery, TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskError,
-    TaskExecutionRecordRequest, TaskHeartbeatRequest, TaskId, TaskLedgerEvent, TaskListQuery,
-    TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime,
-    TaskSnapshot, TaskStatus, TaskWatermark,
+    MasterPollClassification, MasterPollOutcome, MasterPollRequest, SchedulerTickRequest,
+    TaskActor, TaskAppendRequest, TaskAssignRequest, TaskBoardProjection, TaskBoardQuery,
+    TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskError, TaskEventInboxEntry,
+    TaskEventInboxProjection, TaskEventInboxQuery, TaskExecutionRecordRequest,
+    TaskHeartbeatRequest, TaskId, TaskLedgerEvent, TaskListQuery, TaskMutationRequest,
+    TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime, TaskSnapshot,
+    TaskStatus, TaskWatermark,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
@@ -76,14 +78,15 @@ use freehand_ui_protocol::{
     UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort, UiCommandDispatchPortError,
     UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting, UiConfigStatusProjection,
     UiErrorCenterEventListProjection, UiErrorCenterEventProjection, UiExecutionFactCommand,
-    UiExecutionFactKind, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
-    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
-    UiSessionMetadataProjection, UiTaskAgentCreateCommand, UiTaskAssignCommand,
-    UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
-    UiTaskHistoryProjection, UiTaskLedgerEventProjection, UiTaskListProjection,
-    UiTaskReviewCommand, UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTurnProjection,
-    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
-    turn_projection_from_events,
+    UiExecutionFactKind, UiMasterPollClassificationProjection, UiMasterPollProjection,
+    UiModelRequestKind, UiModelRequestWaiting, UiProtocolState, UiProviderConfigUpdate,
+    UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
+    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
+    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
+    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
+    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
+    UiTaskSnapshotProjection, UiTurnProjection, checkpoint_projection_from_runtime_summary,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -2442,6 +2445,54 @@ impl RuntimeCommandDispatcher {
                     ),
                 )))
             }
+            UiCommand::QueryEventInbox {
+                after_cursor,
+                limit,
+            } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let task_runtime =
+                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
+                        .map_err(map_task_query_error)?;
+                let inbox = task_runtime
+                    .query_event_inbox(TaskEventInboxQuery {
+                        after_cursor: after_cursor.clone(),
+                        limit: limit.unwrap_or(0),
+                    })
+                    .map_err(map_task_query_error)?;
+                Ok(Some(UiQueryResult::EventInbox(project_event_inbox_for_ui(
+                    state.config.reason_agent_id.clone(),
+                    inbox,
+                ))))
+            }
+            UiCommand::RunMasterPoll {
+                after_cursor,
+                limit,
+                include_terminal,
+                replay_from_start,
+            } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let task_runtime =
+                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
+                        .map_err(map_task_query_error)?;
+                let outcome = task_runtime
+                    .run_master_poll(MasterPollRequest {
+                        after_cursor: after_cursor.clone(),
+                        limit: limit.unwrap_or(0),
+                        include_terminal: *include_terminal,
+                        replay_from_start: *replay_from_start,
+                        actor: ui_task_actor(&state.config.reason_agent_id, None, None),
+                        watermark: ui_task_watermark("run_master_poll"),
+                    })
+                    .map_err(map_task_query_error)?;
+                Ok(Some(UiQueryResult::MasterPoll(project_master_poll_for_ui(
+                    state.config.reason_agent_id.clone(),
+                    outcome,
+                ))))
+            }
             UiCommand::QueryErrorCenterEvents {
                 session_id,
                 trace_id,
@@ -3375,6 +3426,7 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             UiCommand::RunSchedulerTick { tick } => {
                 self.dispatch_run_scheduler_tick(&mut state, envelope, tick)
             }
+            UiCommand::RunMasterPoll { .. } => self.dispatch_run_master_poll(&mut state, envelope),
             UiCommand::ResumeTurn { turn_id } => self.dispatch_resume_turn(envelope, turn_id),
             UiCommand::SendDirectMessageToSlave { node_id, text } => {
                 self.dispatch_direct_message(&mut state, envelope, node_id, text)
@@ -3676,6 +3728,52 @@ impl RuntimeCommandDispatcher {
         })
     }
 
+    fn dispatch_run_master_poll(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let UiCommand::RunMasterPoll {
+            after_cursor,
+            limit,
+            include_terminal,
+            replay_from_start,
+        } = envelope.command.clone()
+        else {
+            return Err(UiCommandDispatchPortError::Unsupported(
+                "command is not a master poll target".to_owned(),
+            ));
+        };
+        let (runtime_home, agent_id) = task_runtime_target(state)?;
+        let runtime =
+            TaskRuntime::boot(&runtime_home, agent_id.clone()).map_err(map_task_query_error)?;
+        let outcome = runtime
+            .run_master_poll(MasterPollRequest {
+                after_cursor,
+                limit: limit.unwrap_or(0),
+                include_terminal,
+                replay_from_start,
+                actor: ui_task_actor(&agent_id, None, None),
+                watermark: ui_task_watermark("run_master_poll"),
+            })
+            .map_err(map_task_query_error)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!(
+                "master_poll_recorded:events={} classifications={} cursor={}",
+                outcome.event_inbox.events.len(),
+                outcome.classifications.len(),
+                outcome
+                    .persisted_cursor
+                    .as_deref()
+                    .or(outcome.next_cursor.as_deref())
+                    .unwrap_or("none")
+            ),
+        })
+    }
+
     fn publish_task_list_from_runtime(
         &self,
         runtime_home: &Path,
@@ -3830,9 +3928,9 @@ fn ui_task_watermark(action: &str) -> TaskWatermark {
 
 fn map_task_query_error(err: TaskError) -> UiCommandDispatchPortError {
     match err {
-        TaskError::TaskNotFound(task_id) | TaskError::AgentNotFound(task_id) => {
-            UiCommandDispatchPortError::TargetNotFound(task_id)
-        }
+        TaskError::TaskNotFound(task_id)
+        | TaskError::AgentNotFound(task_id)
+        | TaskError::CursorNotFound(task_id) => UiCommandDispatchPortError::TargetNotFound(task_id),
         other => UiCommandDispatchPortError::DispatchFailed(other.to_string()),
     }
 }
@@ -4074,6 +4172,79 @@ fn project_task_history_for_ui(
                 payload: event.payload,
             })
             .collect(),
+    }
+}
+
+fn project_event_inbox_for_ui(
+    source_agent_id: AgentId,
+    inbox: TaskEventInboxProjection,
+) -> UiTaskEventInboxProjection {
+    UiTaskEventInboxProjection {
+        source_agent_id,
+        generated_at: inbox.generated_at,
+        source_cursor: inbox.source_cursor,
+        next_cursor: inbox.next_cursor,
+        events: inbox
+            .events
+            .into_iter()
+            .map(project_event_inbox_entry_for_ui)
+            .collect(),
+    }
+}
+
+fn project_event_inbox_entry_for_ui(entry: TaskEventInboxEntry) -> UiTaskEventInboxEntryProjection {
+    UiTaskEventInboxEntryProjection {
+        cursor: entry.cursor,
+        event_id: entry.event_id,
+        kind: entry.kind,
+        task_id: entry.task_id.as_str().to_owned(),
+        execution_id: entry.execution_id,
+        agent_id: entry.agent_id,
+        created_at: entry.created_at,
+        payload: entry.payload,
+    }
+}
+
+fn project_master_poll_for_ui(
+    source_agent_id: AgentId,
+    outcome: MasterPollOutcome,
+) -> UiMasterPollProjection {
+    let include_terminal = outcome.include_terminal;
+    UiMasterPollProjection {
+        source_agent_id: source_agent_id.clone(),
+        generated_at: outcome.generated_at,
+        source_cursor: outcome.source_cursor,
+        next_cursor: outcome.next_cursor,
+        persisted_cursor: outcome.persisted_cursor,
+        event_inbox: project_event_inbox_for_ui(source_agent_id.clone(), outcome.event_inbox),
+        task_board: project_task_board_for_ui(
+            source_agent_id.clone(),
+            None,
+            None,
+            include_terminal,
+            outcome.task_board,
+        ),
+        agent_board: project_agent_board_for_ui(source_agent_id, outcome.agent_board.agents),
+        classifications: outcome
+            .classifications
+            .into_iter()
+            .map(project_master_poll_classification_for_ui)
+            .collect(),
+    }
+}
+
+fn project_master_poll_classification_for_ui(
+    classification: MasterPollClassification,
+) -> UiMasterPollClassificationProjection {
+    UiMasterPollClassificationProjection {
+        kind: classification.kind,
+        summary: classification.summary,
+        task_id: classification
+            .task_id
+            .map(|task_id| task_id.as_str().to_owned()),
+        execution_id: classification.execution_id,
+        agent_id: classification.agent_id,
+        recommended_actions: classification.recommended_actions,
     }
 }
 
@@ -11666,6 +11837,322 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         }
 
         assert_eq!(owner_id.as_str(), "agent-live");
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_dispatches_phase2b_master_poll_and_event_inbox() {
+        let runtime_home = temp_runtime_home();
+        let worker_id = AgentId::new("runtime-phase2b-worker");
+        let task_id = "runtime-phase2b-task".to_owned();
+        let execution_id = "runtime-phase2b-exec".to_owned();
+        let turn_id = TurnId::new("runtime-phase2b-turn");
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime");
+
+        for index in 0..55 {
+            let backlog_task_id = format!("runtime-phase2b-backlog-{index:03}");
+            runtime
+                .dispatch(
+                    build_command_dispatch_envelope(&UiCommand::CreateTask {
+                        task: UiTaskCreateCommand {
+                            task_id: Some(backlog_task_id),
+                            title: format!("Runtime phase2b backlog {index:03}"),
+                            content: "Runtime phase2b backlog content".to_owned(),
+                            goal: "prove default master poll drains backlog".to_owned(),
+                            deliverables: vec!["backlog event".to_owned()],
+                            acceptance: vec!["backlog remains visible to EventInbox".to_owned()],
+                            priority: 1,
+                            target_cwd: None,
+                            session_id: Some(SessionId::new(format!(
+                                "runtime-phase2b-backlog-session-{index:03}"
+                            ))),
+                            turn_id: None,
+                            dispatch: Some(UiTaskDispatchCommand::None),
+                        },
+                    })
+                    .expect("phase2b backlog envelope"),
+                )
+                .expect("phase2b backlog dispatch");
+        }
+
+        for command in [
+            UiCommand::CreateTaskAgent {
+                agent: UiTaskAgentCreateCommand {
+                    agent_id: worker_id.clone(),
+                    capabilities: vec!["code_edit".to_owned()],
+                },
+            },
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some(task_id.clone()),
+                    title: "Runtime phase2b task".to_owned(),
+                    content: "Runtime phase2b content".to_owned(),
+                    goal: "prove runtime master poll loop".to_owned(),
+                    deliverables: vec!["event inbox".to_owned()],
+                    acceptance: vec!["master poll reads state without mutating".to_owned()],
+                    priority: 95,
+                    target_cwd: None,
+                    session_id: Some(SessionId::new("runtime-phase2b-session")),
+                    turn_id: Some(turn_id.clone()),
+                    dispatch: Some(UiTaskDispatchCommand::None),
+                },
+            },
+            UiCommand::AssignTask {
+                assignment: UiTaskAssignCommand {
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                },
+            },
+            UiCommand::ClaimNextTask {
+                claim: UiTaskClaimCommand {
+                    agent_id: worker_id.clone(),
+                    execution_id: execution_id.clone(),
+                    ttl_seconds: Some(300),
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Running {
+                        phase: "phase2b_running".to_owned(),
+                        summary: "worker running".to_owned(),
+                        evidence: vec!["running evidence".to_owned()],
+                    },
+                },
+            },
+        ] {
+            runtime
+                .dispatch(build_command_dispatch_envelope(&command).expect("phase2b envelope"))
+                .expect("phase2b dispatch");
+        }
+
+        thread::sleep(Duration::from_secs(2));
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::RunSchedulerTick {
+                    tick: UiSchedulerTickCommand {
+                        stale_after_seconds: 1,
+                        soft_timeout_seconds: 10,
+                        hard_timeout_seconds: 30,
+                    },
+                })
+                .expect("scheduler tick envelope"),
+            )
+            .expect("scheduler tick dispatch");
+        for command in [
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Blocked {
+                        reason: "needs master unblock".to_owned(),
+                        evidence: vec!["blocked evidence".to_owned()],
+                    },
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id.clone()),
+                    kind: UiExecutionFactKind::Recovering {
+                        summary: "worker recovered".to_owned(),
+                        evidence: vec!["recovery evidence".to_owned()],
+                        retry_count: 1,
+                    },
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id),
+                    kind: UiExecutionFactKind::ReviewReady {
+                        summary: "ready for master review".to_owned(),
+                        deliverables: vec!["phase2b deliverable".to_owned()],
+                        evidence: vec!["review evidence".to_owned()],
+                    },
+                },
+            },
+        ] {
+            runtime
+                .dispatch(build_command_dispatch_envelope(&command).expect("phase2b envelope"))
+                .expect("phase2b dispatch");
+        }
+
+        let before_poll = runtime
+            .query_runtime(&UiCommand::QueryTaskBoard {
+                status: None,
+                agent_id: None,
+                include_terminal: true,
+            })
+            .expect("before poll board query")
+            .expect("before poll board");
+        let before_status = match before_poll {
+            UiQueryResult::TaskBoard(board) => board
+                .tasks
+                .iter()
+                .find(|task| task.task_id == task_id)
+                .expect("task before poll")
+                .status
+                .clone(),
+            other => panic!("unexpected before poll result: {other:?}"),
+        };
+
+        let inbox = runtime
+            .query_runtime(&UiCommand::QueryEventInbox {
+                after_cursor: None,
+                limit: None,
+            })
+            .expect("event inbox query")
+            .expect("event inbox result");
+        let inbox_cursor = match inbox {
+            UiQueryResult::EventInbox(inbox) => {
+                assert!(
+                    inbox.events.len() > 100,
+                    "backlog regression must exceed old default page size"
+                );
+                let kinds = inbox
+                    .events
+                    .iter()
+                    .map(|event| event.kind.as_str())
+                    .collect::<Vec<_>>();
+                assert!(
+                    kinds.contains(&"execution_blocked"),
+                    "missing blocked event: {kinds:?}"
+                );
+                assert!(
+                    kinds.contains(&"review_ready"),
+                    "missing review event: {kinds:?}"
+                );
+                assert!(
+                    kinds.contains(&"scheduler_tick"),
+                    "missing scheduler event: {kinds:?}"
+                );
+                inbox.next_cursor.expect("event inbox cursor")
+            }
+            other => panic!("unexpected event inbox result: {other:?}"),
+        };
+
+        let poll = runtime
+            .query_runtime(&UiCommand::RunMasterPoll {
+                after_cursor: None,
+                limit: None,
+                include_terminal: true,
+                replay_from_start: true,
+            })
+            .expect("master poll query")
+            .expect("master poll result");
+        let persisted_cursor = match poll {
+            UiQueryResult::MasterPoll(poll) => {
+                assert_eq!(poll.task_board.include_terminal, true);
+                assert_eq!(poll.next_cursor.as_deref(), Some(inbox_cursor.as_str()));
+                assert_eq!(
+                    poll.persisted_cursor.as_deref(),
+                    Some(inbox_cursor.as_str())
+                );
+                let kinds = poll
+                    .classifications
+                    .iter()
+                    .map(|classification| classification.kind.as_str())
+                    .collect::<Vec<_>>();
+                assert!(kinds.contains(&"blocked"), "missing blocked: {kinds:?}");
+                assert!(
+                    kinds.contains(&"review_ready"),
+                    "missing review_ready: {kinds:?}"
+                );
+                assert!(kinds.contains(&"stale"), "missing stale: {kinds:?}");
+                poll.persisted_cursor.expect("persisted cursor")
+            }
+            other => panic!("unexpected master poll result: {other:?}"),
+        };
+
+        let after_poll = runtime
+            .query_runtime(&UiCommand::QueryTaskBoard {
+                status: None,
+                agent_id: None,
+                include_terminal: true,
+            })
+            .expect("after poll board query")
+            .expect("after poll board");
+        match after_poll {
+            UiQueryResult::TaskBoard(board) => {
+                let task = board
+                    .tasks
+                    .iter()
+                    .find(|task| task.task_id == task_id)
+                    .expect("task after poll");
+                assert_eq!(task.status, before_status);
+                assert_eq!(task.status, "review_submitted");
+                assert_eq!(
+                    task.active_execution_id.as_deref(),
+                    Some(execution_id.as_str())
+                );
+            }
+            other => panic!("unexpected after poll result: {other:?}"),
+        }
+
+        let receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::RunMasterPoll {
+                    after_cursor: None,
+                    limit: None,
+                    include_terminal: true,
+                    replay_from_start: true,
+                })
+                .expect("master poll envelope"),
+            )
+            .expect("master poll receipt");
+        assert!(receipt.dispatch_status.starts_with("master_poll_recorded:"));
+
+        let recovered = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("recovered runtime");
+        let recovered_poll = recovered
+            .query_runtime(&UiCommand::RunMasterPoll {
+                after_cursor: None,
+                limit: None,
+                include_terminal: true,
+                replay_from_start: false,
+            })
+            .expect("recovered master poll query")
+            .expect("recovered master poll");
+        match recovered_poll {
+            UiQueryResult::MasterPoll(poll) => {
+                assert_eq!(
+                    poll.source_cursor.as_deref(),
+                    Some(persisted_cursor.as_str())
+                );
+                assert_eq!(
+                    poll.persisted_cursor.as_deref(),
+                    Some(persisted_cursor.as_str())
+                );
+                assert!(poll.event_inbox.events.is_empty());
+            }
+            other => panic!("unexpected recovered master poll result: {other:?}"),
+        }
+
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
 

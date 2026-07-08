@@ -361,6 +361,80 @@ pub struct TaskLedgerEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskEventInboxQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_cursor: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskEventInboxEntry {
+    pub schema_version: u32,
+    pub cursor: String,
+    pub event_id: String,
+    pub kind: String,
+    pub task_id: TaskId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<AgentId>,
+    pub created_at: u64,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskEventInboxProjection {
+    pub schema_version: u32,
+    pub generated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub events: Vec<TaskEventInboxEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MasterPollRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_cursor: Option<String>,
+    pub limit: usize,
+    pub include_terminal: bool,
+    pub replay_from_start: bool,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MasterPollClassification {
+    pub kind: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<AgentId>,
+    pub recommended_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MasterPollOutcome {
+    pub schema_version: u32,
+    pub generated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persisted_cursor: Option<String>,
+    pub include_terminal: bool,
+    pub event_inbox: TaskEventInboxProjection,
+    pub task_board: TaskBoardProjection,
+    pub agent_board: AgentBoardProjection,
+    pub classifications: Vec<MasterPollClassification>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskActor {
     pub agent_id: AgentId,
     pub source: String,
@@ -551,6 +625,10 @@ pub enum TaskError {
     Persistence(String),
     #[error("task ledger replay failed: {0}")]
     Replay(String),
+    #[error("task event cursor `{0}` not found")]
+    CursorNotFound(String),
+    #[error("invalid task event cursor mode: {0}")]
+    InvalidCursorMode(String),
 }
 
 pub struct TaskRuntime {
@@ -833,6 +911,70 @@ impl TaskRuntime {
             blocked,
             review_ready,
             stale,
+        })
+    }
+
+    pub fn query_event_inbox(
+        &self,
+        query: TaskEventInboxQuery,
+    ) -> Result<TaskEventInboxProjection, TaskError> {
+        let source_cursor = normalize_cursor(query.after_cursor)?;
+        let events = self.master_visible_events_after(source_cursor.as_deref(), query.limit)?;
+        Ok(TaskEventInboxProjection {
+            schema_version: 1,
+            generated_at: now_unix_seconds(),
+            source_cursor,
+            next_cursor: events.last().map(|event| event.cursor.clone()),
+            events,
+        })
+    }
+
+    pub fn run_master_poll(
+        &self,
+        request: MasterPollRequest,
+    ) -> Result<MasterPollOutcome, TaskError> {
+        let explicit_cursor = normalize_cursor(request.after_cursor)?;
+        if request.replay_from_start && explicit_cursor.is_some() {
+            return Err(TaskError::InvalidCursorMode(
+                "replay_from_start cannot be combined with after_cursor".to_owned(),
+            ));
+        }
+        let source_cursor = match explicit_cursor {
+            Some(cursor) => Some(cursor),
+            None if request.replay_from_start => None,
+            None => self
+                .store
+                .load_master_event_cursor(&request.actor.agent_id)?,
+        };
+        let event_inbox = self.query_event_inbox(TaskEventInboxQuery {
+            after_cursor: source_cursor.clone(),
+            limit: request.limit,
+        })?;
+        let task_board = self.query_task_board(TaskBoardQuery {
+            status: None,
+            assignee: None,
+            include_terminal: request.include_terminal,
+        })?;
+        let agent_board = self.query_agent_board()?;
+        let classifications = master_poll_classifications(&event_inbox, &task_board, &agent_board);
+        if let Some(cursor) = event_inbox.next_cursor.as_ref() {
+            self.store
+                .write_master_event_cursor(&request.actor.agent_id, cursor)?;
+        }
+        let persisted_cursor = self
+            .store
+            .load_master_event_cursor(&request.actor.agent_id)?;
+        Ok(MasterPollOutcome {
+            schema_version: 1,
+            generated_at: now_unix_seconds(),
+            source_cursor,
+            next_cursor: event_inbox.next_cursor.clone(),
+            persisted_cursor,
+            include_terminal: request.include_terminal,
+            event_inbox,
+            task_board,
+            agent_board,
+            classifications,
         })
     }
 
@@ -1721,6 +1863,27 @@ impl TaskRuntime {
             })
         }
     }
+
+    fn master_visible_events_after(
+        &self,
+        after_cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<TaskEventInboxEntry>, TaskError> {
+        let limit = if limit == 0 { usize::MAX } else { limit };
+        let mut entries = self
+            .store
+            .load_all_task_ledger_events()?
+            .into_iter()
+            .filter_map(|event| task_event_inbox_entry(&event))
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.cursor.cmp(&right.cursor));
+        let start_index = if let Some(cursor) = after_cursor {
+            event_inbox_start_index_after_cursor(&entries, cursor)?
+        } else {
+            0
+        };
+        Ok(entries.into_iter().skip(start_index).take(limit).collect())
+    }
 }
 
 const DEFAULT_TASK_LEASE_TTL_SECONDS: u64 = 300;
@@ -1801,6 +1964,19 @@ impl TaskStore {
             events.push(serde_json::from_str(&line).map_err(json_err)?);
         }
         events.sort_by_key(|event: &TaskLedgerEvent| event.seq);
+        Ok(events)
+    }
+
+    fn load_all_task_ledger_events(&self) -> Result<Vec<TaskLedgerEvent>, TaskError> {
+        let mut events = Vec::new();
+        for task in self.load_task_snapshots()? {
+            events.extend(self.load_task_ledger(&task.task_id)?);
+        }
+        events.sort_by(|left, right| {
+            task_event_cursor(left)
+                .cmp(&task_event_cursor(right))
+                .then_with(|| left.event_id.cmp(&right.event_id))
+        });
         Ok(events)
     }
 
@@ -1981,6 +2157,30 @@ impl TaskStore {
         self.write_leases(&leases)
     }
 
+    fn load_master_event_cursor(
+        &self,
+        master_agent_id: &AgentId,
+    ) -> Result<Option<String>, TaskError> {
+        let path = self.master_event_cursor_path(master_agent_id);
+        if path.is_file() {
+            Ok(Some(read_json(&path)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn write_master_event_cursor(
+        &self,
+        master_agent_id: &AgentId,
+        cursor: &str,
+    ) -> Result<(), TaskError> {
+        require_text(cursor, "event_cursor")?;
+        write_json_atomic(
+            &self.master_event_cursor_path(master_agent_id),
+            &cursor.to_owned(),
+        )
+    }
+
     fn task_state_dir(&self) -> PathBuf {
         self.runtime_home
             .join("state")
@@ -2015,6 +2215,12 @@ impl TaskStore {
 
     fn lease_state_path(&self) -> PathBuf {
         self.task_runtime_state_dir().join("leases.json")
+    }
+
+    fn master_event_cursor_path(&self, master_agent_id: &AgentId) -> PathBuf {
+        self.task_runtime_state_dir()
+            .join("master-event-cursors")
+            .join(format!("{}.json", master_agent_id.as_str()))
     }
 
     fn task_snapshot_path(&self, task_id: &TaskId) -> PathBuf {
@@ -2165,6 +2371,317 @@ fn release_agent_task(agent: &mut AgentSnapshot, task_status: &TaskStatus) {
         }
         _ => {}
     }
+}
+
+fn normalize_cursor(cursor: Option<String>) -> Result<Option<String>, TaskError> {
+    match cursor {
+        Some(cursor) if cursor.trim().is_empty() => Err(TaskError::MissingField("event_cursor")),
+        Some(cursor) => Ok(Some(cursor)),
+        None => Ok(None),
+    }
+}
+
+fn task_event_cursor(event: &TaskLedgerEvent) -> String {
+    format!(
+        "{:020}:{}:{:020}:{}",
+        event.timestamp,
+        event.task_id.as_str(),
+        event.seq,
+        event.event_id
+    )
+}
+
+#[cfg(test)]
+fn task_event_legacy_cursor_prefix(event: &TaskLedgerEvent) -> String {
+    format!(
+        "{:020}:{}:{:020}",
+        event.timestamp,
+        event.task_id.as_str(),
+        event.seq
+    )
+}
+
+fn event_inbox_start_index_after_cursor(
+    entries: &[TaskEventInboxEntry],
+    cursor: &str,
+) -> Result<usize, TaskError> {
+    if let Some(index) = entries.iter().rposition(|event| event.cursor == cursor) {
+        return Ok(index.saturating_add(1));
+    }
+    let legacy_prefix = format!("{cursor}:");
+    if let Some(index) = entries
+        .iter()
+        .rposition(|event| event.cursor.starts_with(&legacy_prefix))
+    {
+        return Ok(index.saturating_add(1));
+    }
+    Err(TaskError::CursorNotFound(cursor.to_owned()))
+}
+
+fn task_event_inbox_entry(event: &TaskLedgerEvent) -> Option<TaskEventInboxEntry> {
+    let kind = master_visible_event_kind(&event.event_type)?;
+    Some(TaskEventInboxEntry {
+        schema_version: 1,
+        cursor: task_event_cursor(event),
+        event_id: event.event_id.clone(),
+        kind: kind.to_owned(),
+        task_id: event.task_id.clone(),
+        execution_id: event
+            .payload
+            .get("execution_id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        agent_id: event
+            .payload
+            .get("agent_id")
+            .and_then(Value::as_str)
+            .map(AgentId::new)
+            .or_else(|| {
+                event
+                    .payload
+                    .get("claim_agent_id")
+                    .and_then(Value::as_str)
+                    .map(AgentId::new)
+            }),
+        created_at: event.timestamp,
+        payload: event.payload.clone(),
+    })
+}
+
+fn master_visible_event_kind(event_type: &str) -> Option<&'static str> {
+    match event_type {
+        "TaskCreated" => Some("task_created"),
+        "TaskWaitingAgent" => Some("task_waiting_agent"),
+        "TaskAssigned" => Some("task_assigned"),
+        "TaskResumed" => Some("execution_started"),
+        "TaskHeartbeat" => Some("execution_heartbeat"),
+        "TaskExecutionRecorded" => Some("progress_reported"),
+        "TaskExecutionRecovering" => Some("execution_recovering"),
+        "TaskBlocked" => Some("execution_blocked"),
+        "TaskSchedulerTick" => Some("scheduler_tick"),
+        "TaskReviewSubmitted" => Some("review_ready"),
+        "TaskReviewRejected" => Some("review_rejected"),
+        "TaskReviewApproved" => Some("review_approved"),
+        "TaskClosed" => Some("task_closed"),
+        "TaskInterrupted" => Some("execution_interrupted"),
+        "TaskCancelled" => Some("task_cancelled"),
+        _ => None,
+    }
+}
+
+fn master_poll_classifications(
+    event_inbox: &TaskEventInboxProjection,
+    task_board: &TaskBoardProjection,
+    agent_board: &AgentBoardProjection,
+) -> Vec<MasterPollClassification> {
+    let mut classifications = Vec::new();
+    for event in &event_inbox.events {
+        match event.kind.as_str() {
+            "review_ready" => classifications.push(MasterPollClassification {
+                kind: "review_ready".to_owned(),
+                summary: format!("task {} is ready for review", event.task_id.as_str()),
+                task_id: Some(event.task_id.clone()),
+                execution_id: event.execution_id.clone(),
+                agent_id: event.agent_id.clone(),
+                recommended_actions: vec![
+                    "inspect_submission".to_owned(),
+                    "approve_submission".to_owned(),
+                    "reject_submission".to_owned(),
+                ],
+            }),
+            "execution_blocked" => classifications.push(MasterPollClassification {
+                kind: "blocked".to_owned(),
+                summary: format!("task {} is blocked", event.task_id.as_str()),
+                task_id: Some(event.task_id.clone()),
+                execution_id: event.execution_id.clone(),
+                agent_id: event.agent_id.clone(),
+                recommended_actions: vec![
+                    "inspect_blocker".to_owned(),
+                    "split_unblock_task".to_owned(),
+                    "ask_user".to_owned(),
+                ],
+            }),
+            "scheduler_tick" => {
+                if let Some(fact) = event.payload.get("scheduler_fact") {
+                    if scheduler_fact_kind_name(fact) == Some("stale") {
+                        classifications.push(MasterPollClassification {
+                            kind: "stale".to_owned(),
+                            summary: format!("task {} is stale", event.task_id.as_str()),
+                            task_id: Some(event.task_id.clone()),
+                            execution_id: event.execution_id.clone(),
+                            agent_id: event.agent_id.clone(),
+                            recommended_actions: vec![
+                                "query_agent_lifecycle".to_owned(),
+                                "wait_with_next_check".to_owned(),
+                            ],
+                        });
+                    }
+                    if scheduler_fact_kind_name(fact) == Some("soft_timeout") {
+                        classifications.push(MasterPollClassification {
+                            kind: "soft_timeout".to_owned(),
+                            summary: format!("task {} hit soft timeout", event.task_id.as_str()),
+                            task_id: Some(event.task_id.clone()),
+                            execution_id: event.execution_id.clone(),
+                            agent_id: event.agent_id.clone(),
+                            recommended_actions: vec![
+                                "query_agent_lifecycle".to_owned(),
+                                "wait_with_next_check".to_owned(),
+                            ],
+                        });
+                    }
+                    if scheduler_fact_kind_name(fact) == Some("hard_timeout") {
+                        classifications.push(MasterPollClassification {
+                            kind: "hard_timeout".to_owned(),
+                            summary: format!("task {} hit hard timeout", event.task_id.as_str()),
+                            task_id: Some(event.task_id.clone()),
+                            execution_id: event.execution_id.clone(),
+                            agent_id: event.agent_id.clone(),
+                            recommended_actions: vec![
+                                "query_agent_lifecycle".to_owned(),
+                                "cancel_or_reassign_execution".to_owned(),
+                            ],
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for task in &task_board.blocked {
+        push_unique_classification(
+            &mut classifications,
+            "blocked",
+            Some(task.task_id.clone()),
+            task.active_execution_id.clone(),
+            task.assignee
+                .as_ref()
+                .map(|assignee| assignee.agent_id.clone()),
+            format!("task {} remains blocked", task.task_id.as_str()),
+            vec![
+                "inspect_blocker".to_owned(),
+                "split_unblock_task".to_owned(),
+                "ask_user".to_owned(),
+            ],
+        );
+    }
+    for task in &task_board.review_ready {
+        push_unique_classification(
+            &mut classifications,
+            "review_ready",
+            Some(task.task_id.clone()),
+            task.active_execution_id.clone(),
+            task.assignee
+                .as_ref()
+                .map(|assignee| assignee.agent_id.clone()),
+            format!("task {} remains ready for review", task.task_id.as_str()),
+            vec![
+                "inspect_submission".to_owned(),
+                "approve_submission".to_owned(),
+                "reject_submission".to_owned(),
+            ],
+        );
+    }
+    for task in &task_board.stale {
+        push_unique_classification(
+            &mut classifications,
+            "stale",
+            Some(task.task_id.clone()),
+            task.active_execution_id.clone(),
+            task.assignee
+                .as_ref()
+                .map(|assignee| assignee.agent_id.clone()),
+            format!("task {} has stale scheduler facts", task.task_id.as_str()),
+            vec![
+                "query_agent_lifecycle".to_owned(),
+                "wait_with_next_check".to_owned(),
+            ],
+        );
+    }
+    for agent in &agent_board.agents {
+        if matches!(agent.state, AgentLifecycleState::Idle) {
+            push_unique_classification(
+                &mut classifications,
+                "idle_worker",
+                None,
+                None,
+                Some(agent.agent_id.clone()),
+                format!("agent {} is idle", agent.agent_id.as_str()),
+                vec![
+                    "dispatch_ready_task".to_owned(),
+                    "wait_with_next_check".to_owned(),
+                ],
+            );
+        }
+    }
+    if task_board
+        .tasks
+        .iter()
+        .any(|task| matches!(task.status, TaskStatus::WaitingAgent | TaskStatus::Assigned))
+    {
+        push_unique_classification(
+            &mut classifications,
+            "ready_task",
+            None,
+            None,
+            None,
+            "ready task is waiting for worker progress".to_owned(),
+            vec![
+                "dispatch_ready_task".to_owned(),
+                "wait_with_next_check".to_owned(),
+            ],
+        );
+    }
+    if !task_board.tasks.is_empty()
+        && task_board
+            .tasks
+            .iter()
+            .all(|task| matches!(task.status, TaskStatus::Closed))
+    {
+        push_unique_classification(
+            &mut classifications,
+            "all_closed",
+            None,
+            None,
+            None,
+            "all visible tasks are closed".to_owned(),
+            vec!["close_big_task".to_owned(), "report_to_user".to_owned()],
+        );
+    }
+    classifications
+}
+
+fn scheduler_fact_kind_name(fact: &Value) -> Option<&str> {
+    fact.get("fact")
+        .and_then(|value| value.get("kind"))
+        .and_then(Value::as_str)
+}
+
+fn push_unique_classification(
+    classifications: &mut Vec<MasterPollClassification>,
+    kind: &str,
+    task_id: Option<TaskId>,
+    execution_id: Option<String>,
+    agent_id: Option<AgentId>,
+    summary: String,
+    recommended_actions: Vec<String>,
+) {
+    let duplicate = classifications.iter().any(|existing| {
+        existing.kind == kind
+            && existing.task_id == task_id
+            && existing.execution_id == execution_id
+            && existing.agent_id == agent_id
+    });
+    if duplicate {
+        return;
+    }
+    classifications.push(MasterPollClassification {
+        kind: kind.to_owned(),
+        summary,
+        task_id,
+        execution_id,
+        agent_id,
+        recommended_actions,
+    });
 }
 
 fn project_task_event_to_lifecycle(
@@ -4074,6 +4591,451 @@ mod tests {
     }
 
     #[test]
+    fn phase2b_event_inbox_projects_events_and_recovers_master_cursor() {
+        let runtime_home = temp_runtime_home("phase2b-event-inbox");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-phase2b-inbox");
+        let execution_id = "exec-phase2b-inbox";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-phase2b-inbox",
+            execution_id,
+            50,
+        );
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-phase2b-inbox")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "needs master review".to_owned(),
+                    evidence: vec!["blocked evidence".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("blocked fact");
+
+        let first_page = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: None,
+                limit: 3,
+            })
+            .expect("first inbox page");
+        assert_eq!(first_page.source_cursor, None);
+        assert_eq!(first_page.events.len(), 3);
+        assert_eq!(
+            first_page
+                .events
+                .iter()
+                .map(|event| event.kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["task_created", "task_waiting_agent", "task_assigned"]
+        );
+        let page_cursor = first_page.next_cursor.clone().expect("page cursor");
+
+        let second_page = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: Some(page_cursor.clone()),
+                limit: 100,
+            })
+            .expect("second inbox page");
+        assert_eq!(second_page.source_cursor, Some(page_cursor));
+        assert!(second_page.events.iter().any(|event| {
+            event.kind == "execution_started"
+                && event.execution_id.as_deref() == Some(execution_id)
+                && event.agent_id == Some(worker_id.clone())
+        }));
+        assert!(second_page.events.iter().any(|event| {
+            event.kind == "execution_blocked"
+                && event.execution_id.as_deref() == Some(execution_id)
+                && event.agent_id == Some(worker_id.clone())
+        }));
+
+        let first_poll = runtime
+            .run_master_poll(MasterPollRequest {
+                after_cursor: None,
+                limit: 100,
+                include_terminal: false,
+                replay_from_start: false,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("master poll");
+        let persisted_cursor = first_poll
+            .persisted_cursor
+            .clone()
+            .expect("persisted cursor");
+        assert_eq!(first_poll.next_cursor, Some(persisted_cursor.clone()));
+
+        let recovered = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("recover");
+        let recovered_poll = recovered
+            .run_master_poll(MasterPollRequest {
+                after_cursor: None,
+                limit: 100,
+                include_terminal: false,
+                replay_from_start: false,
+                actor: sample_actor(owner_id),
+                watermark: sample_watermark(),
+            })
+            .expect("recovered poll");
+        assert_eq!(recovered_poll.source_cursor, Some(persisted_cursor.clone()));
+        assert_eq!(recovered_poll.persisted_cursor, Some(persisted_cursor));
+        assert!(recovered_poll.event_inbox.events.is_empty());
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn phase2b_master_poll_classifies_board_and_does_not_mutate_tasks() {
+        let runtime_home = temp_runtime_home("phase2b-master-poll");
+        let owner_id = AgentId::new("master");
+        let blocked_worker = AgentId::new("worker-phase2b-blocked");
+        let review_worker = AgentId::new("worker-phase2b-review");
+        let stale_worker = AgentId::new("worker-phase2b-stale");
+        let idle_worker = AgentId::new("worker-phase2b-idle");
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        for worker_id in [&blocked_worker, &review_worker, &stale_worker, &idle_worker] {
+            create_worker_agent(&runtime, &owner_id, worker_id);
+        }
+
+        let blocked_task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &blocked_worker,
+            "task-phase2b-blocked",
+            "exec-phase2b-blocked",
+            80,
+        );
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-phase2b-blocked".to_owned(),
+                task_id: blocked_task.task_id.clone(),
+                agent_id: blocked_worker.clone(),
+                turn_id: Some(TurnId::new("turn-phase2b-blocked")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "missing permission".to_owned(),
+                    evidence: vec!["permission error".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("blocked fact");
+
+        let review_task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &review_worker,
+            "task-phase2b-review",
+            "exec-phase2b-review",
+            70,
+        );
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-phase2b-review".to_owned(),
+                task_id: review_task.task_id.clone(),
+                agent_id: review_worker.clone(),
+                turn_id: Some(TurnId::new("turn-phase2b-review")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::ReviewReady {
+                    summary: "ready for review".to_owned(),
+                    deliverables: vec!["patch".to_owned()],
+                    evidence: vec!["cargo test".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("review fact");
+
+        let stale_task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &stale_worker,
+            "task-phase2b-stale",
+            "exec-phase2b-stale",
+            60,
+        );
+        let stale_snapshot = runtime.query_task(&stale_task.task_id).expect("stale task");
+        runtime
+            .run_scheduler_tick(SchedulerTickRequest {
+                now: stale_snapshot.created_at.saturating_add(1_000),
+                stale_after_seconds: 1,
+                soft_timeout_seconds: 10,
+                hard_timeout_seconds: 100,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("scheduler tick");
+
+        let before = runtime
+            .list_tasks(TaskListQuery {
+                status: None,
+                assignee: None,
+            })
+            .expect("before statuses")
+            .into_iter()
+            .map(|task| (task.task_id, task.status))
+            .collect::<BTreeMap<_, _>>();
+
+        let poll = runtime
+            .run_master_poll(MasterPollRequest {
+                after_cursor: None,
+                limit: 100,
+                include_terminal: false,
+                replay_from_start: false,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("master poll");
+        let kinds = poll
+            .classifications
+            .iter()
+            .map(|classification| classification.kind.as_str())
+            .collect::<Vec<_>>();
+        assert!(kinds.contains(&"blocked"));
+        assert!(kinds.contains(&"review_ready"));
+        assert!(kinds.contains(&"stale"));
+        assert!(kinds.contains(&"hard_timeout"));
+        assert!(kinds.contains(&"idle_worker"));
+        assert!(poll.classifications.iter().any(|classification| {
+            classification.kind == "review_ready"
+                && classification
+                    .recommended_actions
+                    .contains(&"inspect_submission".to_owned())
+                && classification
+                    .recommended_actions
+                    .contains(&"approve_submission".to_owned())
+                && classification
+                    .recommended_actions
+                    .contains(&"reject_submission".to_owned())
+        }));
+        assert!(poll.persisted_cursor.is_some());
+
+        let after = runtime
+            .list_tasks(TaskListQuery {
+                status: None,
+                assignee: None,
+            })
+            .expect("after statuses")
+            .into_iter()
+            .map(|task| (task.task_id, task.status))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(after, before);
+        assert_eq!(
+            runtime
+                .query_task(&blocked_task.task_id)
+                .expect("blocked after poll")
+                .status,
+            TaskStatus::Blocked
+        );
+        assert_eq!(
+            runtime
+                .query_task(&review_task.task_id)
+                .expect("review after poll")
+                .status,
+            TaskStatus::ReviewSubmitted
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn phase2b_event_inbox_rejects_unknown_cursor_without_advancing_master_cursor() {
+        let runtime_home = temp_runtime_home("phase2b-unknown-cursor");
+        let owner_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        let mut request = sample_create_request(owner_id.clone());
+        request.task_id = Some(TaskId::new("task-phase2b-cursor"));
+        runtime.create_task(request).expect("create task");
+
+        let first_poll = runtime
+            .run_master_poll(MasterPollRequest {
+                after_cursor: None,
+                limit: 1,
+                include_terminal: false,
+                replay_from_start: false,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("first poll");
+        let before_cursor = runtime
+            .store
+            .load_master_event_cursor(&owner_id)
+            .expect("load cursor before");
+        assert_eq!(before_cursor, first_poll.persisted_cursor);
+
+        let err = runtime
+            .run_master_poll(MasterPollRequest {
+                after_cursor: Some("cursor-does-not-exist".to_owned()),
+                limit: 100,
+                include_terminal: false,
+                replay_from_start: false,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect_err("unknown cursor must fail");
+
+        assert_eq!(
+            err,
+            TaskError::CursorNotFound("cursor-does-not-exist".to_owned())
+        );
+        let after_cursor = runtime
+            .store
+            .load_master_event_cursor(&owner_id)
+            .expect("load cursor after");
+        assert_eq!(after_cursor, before_cursor);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn phase2b_event_cursor_uses_event_id_tiebreak_and_legacy_cursor_skips_duplicates() {
+        let runtime_home = temp_runtime_home("phase2b-legacy-cursor-duplicates");
+        let owner_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        let mut request = sample_create_request(owner_id.clone());
+        request.task_id = Some(TaskId::new("task-phase2b-legacy-cursor"));
+        let created = runtime.create_task(request).expect("create task");
+        let mut duplicate = runtime
+            .task_history(&created.task.task_id)
+            .expect("history")
+            .last()
+            .cloned()
+            .expect("last event");
+        duplicate.event_id = format!("{}:duplicate", duplicate.event_id);
+        runtime
+            .store
+            .append_event_and_snapshot(&created.task, &duplicate)
+            .expect("append duplicate cursor prefix event");
+
+        let full = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: None,
+                limit: 0,
+            })
+            .expect("full inbox");
+        assert!(
+            full.events
+                .iter()
+                .any(|event| event.cursor.ends_with(&duplicate.event_id)),
+            "cursor must include event_id as a uniqueness tiebreak"
+        );
+        let legacy_cursor = task_event_legacy_cursor_prefix(&duplicate);
+        let after_legacy = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: Some(legacy_cursor),
+                limit: 0,
+            })
+            .expect("legacy cursor query");
+        assert!(
+            after_legacy.events.is_empty(),
+            "legacy three-part cursor must skip all matching duplicate-prefix events"
+        );
+        let latest_cursor = full
+            .events
+            .last()
+            .map(|event| event.cursor.clone())
+            .expect("latest cursor");
+        let after_latest = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: Some(latest_cursor),
+                limit: 0,
+            })
+            .expect("latest cursor query");
+        assert!(after_latest.events.is_empty());
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn phase2b_master_poll_replay_from_start_advances_stale_master_cursor() {
+        let runtime_home = temp_runtime_home("phase2b-replay-from-start");
+        let owner_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        let mut request = sample_create_request(owner_id.clone());
+        request.task_id = Some(TaskId::new("task-phase2b-replay"));
+        runtime.create_task(request).expect("create task");
+
+        let first_poll = runtime
+            .run_master_poll(MasterPollRequest {
+                after_cursor: None,
+                limit: 1,
+                include_terminal: false,
+                replay_from_start: false,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("first limited poll");
+        let stale_cursor = first_poll.persisted_cursor.clone().expect("stale cursor");
+        let after_stale_before = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: Some(stale_cursor.clone()),
+                limit: 0,
+            })
+            .expect("events after stale cursor");
+        assert!(
+            !after_stale_before.events.is_empty(),
+            "limited poll must leave backlog after stale cursor"
+        );
+
+        let replay_poll = runtime
+            .run_master_poll(MasterPollRequest {
+                after_cursor: None,
+                limit: 0,
+                include_terminal: false,
+                replay_from_start: true,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("replay poll");
+        assert_eq!(replay_poll.source_cursor, None);
+        assert!(replay_poll.event_inbox.events.len() > 1);
+        let latest_cursor = replay_poll
+            .persisted_cursor
+            .clone()
+            .expect("latest persisted cursor");
+        assert_ne!(latest_cursor, stale_cursor);
+        assert_eq!(
+            replay_poll.next_cursor.as_deref(),
+            Some(latest_cursor.as_str())
+        );
+
+        let after_latest = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: Some(latest_cursor.clone()),
+                limit: 0,
+            })
+            .expect("events after latest cursor");
+        assert!(
+            after_latest.events.is_empty(),
+            "replay poll must drain all backlog"
+        );
+
+        let err = runtime
+            .run_master_poll(MasterPollRequest {
+                after_cursor: Some(stale_cursor.clone()),
+                limit: 0,
+                include_terminal: false,
+                replay_from_start: true,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect_err("conflicting replay cursor mode must fail");
+        assert_eq!(
+            err,
+            TaskError::InvalidCursorMode(
+                "replay_from_start cannot be combined with after_cursor".to_owned()
+            )
+        );
+        let cursor_after_error = runtime
+            .store
+            .load_master_event_cursor(&owner_id)
+            .expect("load cursor after conflict");
+        assert_eq!(cursor_after_error.as_deref(), Some(latest_cursor.as_str()));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
     fn agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked() {
         let runtime_home = temp_runtime_home("agent-lifecycle-reducer");
         let agent_id = AgentId::new("master");
@@ -4178,6 +5140,54 @@ mod tests {
             hook: Some("ControlHook03AfterModelResponse".to_owned()),
             action_tool_call_id: Some("toolu_task_1".to_owned()),
         }
+    }
+
+    fn create_worker_agent(runtime: &TaskRuntime, owner_id: &AgentId, worker_id: &AgentId) {
+        runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: worker_id.clone(),
+                capabilities: vec!["code_edit".to_owned(), "test_run".to_owned()],
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("create worker");
+    }
+
+    fn create_claimed_worker_task(
+        runtime: &TaskRuntime,
+        owner_id: &AgentId,
+        worker_id: &AgentId,
+        task_id: &str,
+        execution_id: &str,
+        priority: i64,
+    ) -> TaskSnapshot {
+        let mut request = sample_create_request(owner_id.clone());
+        request.task_id = Some(TaskId::new(task_id));
+        request.priority = priority;
+        request.dispatch = TaskDispatchRequest::None;
+        let task = runtime
+            .create_task(request)
+            .expect("create worker task")
+            .task;
+        runtime
+            .assign_task(TaskAssignRequest {
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("assign worker task");
+        runtime
+            .claim_next_task(TaskClaimRequest {
+                agent_id: worker_id.clone(),
+                execution_id: execution_id.to_owned(),
+                ttl_seconds: 300,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("claim worker task")
+            .task
+            .expect("claimed worker task")
     }
 
     fn temp_runtime_home(name: &str) -> PathBuf {

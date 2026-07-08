@@ -52,6 +52,13 @@
 - task mutation commands (`CreateTask`, `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to `task.orchestration` through runtime; protocol does not write task truth
 - `UiTaskDispatchCommand` lets a task create command explicitly choose self dispatch, agent dispatch, or no immediate dispatch so Phase 2A can create a waiting task before assignment
 - Phase 1 `ApplyExecutionFact` and `RunSchedulerTick` are protocol-owned mutation intents routed to `task.orchestration`; protocol does not update task state or make scheduler decisions
+- Phase 2B `QueryEventInbox` and `RunMasterPoll` are protocol-owned
+  query/mutation-intent shapes routed to `task.orchestration`; protocol does
+  not store event cursor truth, classify board state, or apply master business
+  actions
+- `RunMasterPoll.replay_from_start` is a protocol-owned cursor-mode field;
+  protocol validates that it is not combined with `after_cursor`, while
+  `task.orchestration` owns the actual replay and cursor persistence semantics
 - task list subscriptions are protocol-owned ADP/subscribe command shapes; task list projection contents must be supplied by runtime/task owners and remain read-only UI DTOs
 - error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
 - config status query is a protocol-owned ADP/query command shape, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
@@ -78,6 +85,9 @@
 - rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth
 - task list and task history query results expose UI-safe task snapshot and ledger-event projections supplied by runtime owner code through `UiRuntimeQueryPort`
 - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results expose UI-safe board/lifecycle projections supplied by runtime owner code through `UiRuntimeQueryPort`
+- Phase 2B EventInbox and MasterPoll results expose UI-safe event rows,
+  cursor values, compact classifications, and recommended semantic action
+  labels supplied by runtime owner code through `UiRuntimeQueryPort`
 - task list subscription events expose the same UI-safe task list projection as query results so task panels can refresh from push without polling or app-local task state
 - error-center event query results expose UI-safe watermarked metadata fields plus raw hash only; raw provider/tool/request/user/assistant text is not part of the protocol DTO
 - config status query results expose UI-safe active agent/provider/model fields plus auth source type only; API keys, pair tokens, provider raw payloads, and full credential-bearing URLs are not part of the DTO
@@ -111,9 +121,13 @@
 - task list/history commands sent to command ingress are rejected as query-route misuse instead of mutating task truth
 - config status command sent to command ingress is rejected as query-route misuse instead of becoming a UI-local config read or mutation
 - provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO
+- `RunMasterPoll` rejects empty cursors and rejects `replay_from_start=true`
+  combined with `after_cursor` before dispatch
 - task history remains query-only; task list subscribe accepts only list filters and must reject history/query misuse on the subscribe route
 - task mutation commands reject empty task id/title/content/goal/review summary, empty worker agent id/capabilities, empty claim execution id, and empty review rejection fields before runtime dispatch instead of silently creating partial task truth
 - Phase 1 execution fact commands reject empty ids and malformed facts before runtime dispatch; scheduler tick commands reject invalid threshold shape before runtime dispatch
+- Phase 2B EventInbox and MasterPoll commands reject empty cursor strings before
+  runtime dispatch and must not treat unknown cursors as empty results
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
 - source identity fields remain explicit across success and error paths
 - cancelled terminal projection stays explicit and is not collapsed into failed or completed UI status
@@ -214,6 +228,8 @@
 | 23 | `UiCommand::QueryTaskBoard` / `UiCommand::QueryAgentBoard` / `UiCommand::QueryAgentLifecycle` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 board and lifecycle query DTOs without owning task/lifecycle truth | board or lifecycle query filters | runtime-backed UI-safe board/lifecycle projections | ADP query transport | runtime query port | bound |
 | 24 | `UiCommand::ApplyExecutionFact` / `UiCommand::RunSchedulerTick` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 execution fact and scheduler tick mutation DTOs routed to task.orchestration | execution fact or scheduler tick command | validated mutation intent routed to task.orchestration | ADP command transport | runtime.ui-command-dispatch | bound |
 | 25 | `UiTaskAgentCreateCommand` / `UiTaskAssignCommand` / `UiTaskClaimCommand` / `UiTaskReviewRejectionCommand` / `UiTaskDispatchCommand` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs routed to task.orchestration | worker/task mutation intent | validated mutation intent routed to task.orchestration or protocol rejection | ADP command transport | runtime.ui-command-dispatch | bound |
+| 26 | `UiCommand::QueryEventInbox` / `UiQueryResult::EventInbox` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B EventInbox query DTOs without owning task event truth or cursor truth | event inbox query cursor | runtime-backed UI-safe event inbox projection | ADP query transport | runtime.ui-command-dispatch | bound |
+| 27 | `UiCommand::RunMasterPoll` / `UiQueryResult::MasterPoll` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B MasterPoll command/result DTOs routed to task.orchestration, including replay_from_start cursor-mode validation | master poll command cursor mode | validated mutation intent routed to task.orchestration and owner-supplied poll projection | ADP command transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Code
 

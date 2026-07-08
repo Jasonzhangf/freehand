@@ -298,3 +298,47 @@ S-profile proof closed task
 `worker-cli-master-worker-FHPHASE2A1783515402294813000`; after `restartS`,
 verify mode queried the same ids and returned closed task history plus closed
 agent lifecycle truth.
+
+## Phase 2B Implementation Target
+
+Phase 2B is the next no-UI slice. It must make master behavior consume
+owner-backed TaskBoard, AgentBoard, and EventInbox truth instead of relying on
+manual sample sequencing.
+
+Deliverables:
+
+1. EventInbox projection built from Task Center ledger truth, with a stable
+   master-visible cursor and compact event kinds.
+2. Durable master processed cursor stored under Task Center runtime state and
+   recovered after restart.
+3. Master poll outcome that reads TaskBoard, AgentBoard, and EventInbox, then
+   classifies review_ready, blocked, stale, soft_timeout, hard_timeout, idle
+   worker, ready task, and all-closed states.
+4. Headless ADP/CLI sample `master-poll-foundation-sample` proving inbox,
+   classifications, cursor persistence, and restart same-id cursor recovery.
+5. No framework business action mutation. The poll output may recommend
+   semantic actions, but approve/reject/assign/close still require explicit
+   task mutation commands admitted through the owner path.
+
+Required validation:
+
+```bash
+cargo test -p freehand-task -- --nocapture
+cargo test -p freehand-runtime -- --nocapture
+cargo test -p freehand-ui-protocol -- --nocapture
+cargo test -p freehand-cli -- --nocapture
+cargo run -p xtask -- mainlines generate
+cargo run -p xtask -- mainlines check
+cargo run -p xtask -- gates check
+git diff --check
+scripts/install-launchd.sh restartS
+curl -4fsS http://127.0.0.1:4042/health
+freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp
+freehand-cliS master-poll-foundation-sample --url ws://127.0.0.1:4042/adp
+scripts/install-launchd.sh restartS
+freehand-cliS master-poll-foundation-sample --url ws://127.0.0.1:4042/adp --verify-cursor ...
+```
+
+Phase 2B remains no-UI. WebUI/Android dashboards, worker_control, multi
+BigTask, cross-machine workers, and framework-owned business decisions stay out
+of scope.

@@ -25,6 +25,16 @@
   - Phase 1 TaskBoard query projects owner-backed board truth
   - Phase 1 ExecutionFact sync admits typed worker execution facts into Task Center
   - Phase 1 SchedulerTick emits elapsed/stale/timeout facts without business decisions
+  - Phase 2B EventInbox projects master-visible ledger events after a globally
+    unique cursor
+  - Phase 2B EventInbox cursor uses event id as a tie-break and legacy
+    three-part cursors skip all matching duplicate-prefix events
+  - Phase 2B master poll reads TaskBoard, AgentBoard, EventInbox, and persisted
+    cursor, then classifies state without applying business mutations
+  - Phase 2B closeout samples must use `replay_from_start=true` to ignore a
+    stale persisted master cursor, then drain all pending EventInbox rows when
+    proving same-cursor recovery; finite limits are pagination only and cannot
+    prove that no events remain after the persisted cursor
 
 ## White-Box Coverage
 
@@ -72,6 +82,22 @@
   `phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id`
 - Phase 2A close guard:
   `phase2a_close_requires_approved_review_for_blocked_and_rejected`
+- Phase 2B EventInbox projection and cursor recovery:
+  `phase2b_event_inbox_projects_events_and_recovers_master_cursor`
+- Phase 2B master poll classification without mutation:
+  `phase2b_master_poll_classifies_board_and_does_not_mutate_tasks`
+- Phase 2B unknown cursor rejection:
+  `phase2b_event_inbox_rejects_unknown_cursor_without_advancing_master_cursor`
+- Phase 2B cursor uniqueness and legacy compatibility:
+  `phase2b_event_cursor_uses_event_id_tiebreak_and_legacy_cursor_skips_duplicates`
+- Phase 2B backlog pagination regression:
+  runtime black-box coverage must create more than 100 master-visible events
+  and use omitted limit to prove closeout drains the full backlog before
+  persisting the master cursor
+- Phase 2B replay cursor regression:
+  `phase2b_master_poll_replay_from_start_advances_stale_master_cursor` proves
+  replay mode ignores a stale cursor, advances to the latest cursor, and rejects
+  replay combined with an explicit cursor without mutating cursor truth
 
 ## Module Black-Box Coverage
 
@@ -91,6 +117,13 @@
 - runtime/ADP ExecutionFact sync returns event-backed Task Center updates
 - runtime/ADP SchedulerTick query/sample emits durable facts only
 - runtime/ADP Phase 2A command path can create worker agent, assign task, claim with execution id, reject review, retry via execution fact, approve, close, and verify the same ids after restart
+- runtime/ADP Phase 2B query path can read EventInbox after a cursor from Task Center truth
+- runtime/ADP Phase 2B command path can run master poll, return compact
+  classifications, advance the persisted cursor, and verify the same cursor
+  after restart without changing task statuses
+- runtime/ADP Phase 2B closeout path must use `replay_from_start=true` plus
+  omitted limit for full EventInbox/MasterPoll drains; explicit finite limit
+  stays a pagination request and is not valid same-cursor closeout evidence
 
 ## Project Black-Box Impact
 
@@ -98,6 +131,10 @@
 - WebUI/ADP task projection and online restart proof are required before claiming UI task management
 - Phase 1 headless ADP/CLI proof is required before claiming multi-task foundation closeout
 - Phase 2A headless ADP/CLI proof is required before claiming worker execution loop closeout; UI remains out of scope
+- Phase 2B headless ADP/CLI proof is required before claiming master poll/EventInbox closeout; UI remains out of scope and framework must not apply business decisions
+- Phase 2B headless proof must cover both stale persisted cursor recovery and a
+  backlog larger than the old page-size default so closeout cannot pass while
+  only processing the first page
 
 ## Required Checks
 
@@ -117,6 +154,10 @@ cargo test -p freehand-runtime execution_fact_sync_updates_task_center -- --noca
 cargo test -p freehand-runtime scheduler_tick_emits_facts_without_decisions -- --nocapture
 cargo test -p freehand-task phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id -- --nocapture
 cargo test -p freehand-task phase2a_close_requires_approved_review_for_blocked_and_rejected -- --nocapture
+cargo test -p freehand-task phase2b_event_inbox_projects_events_and_recovers_master_cursor -- --nocapture
+cargo test -p freehand-task phase2b_master_poll_classifies_board_and_does_not_mutate_tasks -- --nocapture
+cargo test -p freehand-task phase2b_event_inbox_rejects_unknown_cursor_without_advancing_master_cursor -- --nocapture
+cargo test -p freehand-task phase2b_master_poll_replay_from_start_advances_stale_master_cursor -- --nocapture
 cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```
@@ -125,6 +166,8 @@ cargo run -p xtask -- gates check
 
 - Phase 2A real worker execution loop is implemented headlessly and
   live-validated on S-profile `127.0.0.1:4042` with restart same-id proof
+- Phase 2B EventInbox/master poll is the next active no-UI implementation
+  target; no UI projection is claimed by this test design
 - no queue runner
 - no UI task timeline
 - TaskBoard owner-internal skeleton is implemented in `crates/freehand-task`

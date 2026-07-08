@@ -13,12 +13,14 @@ use freehand_contracts::{AgentId, SessionId, TerminalStatus, TurnId};
 use freehand_ui_protocol::{
     SubscriptionSelector, UiAdpFailure, UiAdpRequest, UiAdpResponse, UiAgentBoardProjection,
     UiAgentLifecycleProjection, UiAgentSnapshotProjection, UiClientKind, UiCommand,
-    UiCommandDispatchReceipt, UiExecutionFactKind, UiModelRequestActivity, UiModelRequestKind,
-    UiModelRequestStatus, UiProjection, UiQueryResult, UiSessionListProjection, UiSessionSummary,
+    UiCommandDispatchReceipt, UiExecutionFactKind, UiMasterPollClassificationProjection,
+    UiMasterPollProjection, UiModelRequestActivity, UiModelRequestKind, UiModelRequestStatus,
+    UiProjection, UiQueryResult, UiSessionListProjection, UiSessionSummary,
     UiSessionTranscriptProjection, UiSource, UiStreamKind, UiSubscriptionEvent,
-    UiTaskBoardProjection, UiTaskDispatchCommand, UiTaskHistoryProjection,
-    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskSnapshotProjection, UiToolActivity,
-    UiToolActivityStatus, UiTurnProjection, build_command_dispatch_envelope,
+    UiTaskBoardProjection, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
+    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
+    UiTaskListProjection, UiTaskSnapshotProjection, UiToolActivity, UiToolActivityStatus,
+    UiTurnProjection, build_command_dispatch_envelope,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
@@ -1380,6 +1382,347 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
     (url, handle)
 }
 
+fn spawn_adp_master_poll_foundation_mock_server() -> (String, thread::JoinHandle<()>) {
+    spawn_adp_master_poll_foundation_mock_server_with_connections(19, false)
+}
+
+fn spawn_adp_master_poll_foundation_verify_mock_server() -> (String, thread::JoinHandle<()>) {
+    spawn_adp_master_poll_foundation_mock_server_with_connections(4, true)
+}
+
+fn spawn_adp_master_poll_foundation_mock_server_with_connections(
+    connection_count: usize,
+    initial_poll_processed: bool,
+) -> (String, thread::JoinHandle<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind adp master-poll mock");
+    let url = format!("ws://{}/adp", listener.local_addr().expect("addr"));
+    let task_id = Arc::new(Mutex::new("task-cli-master-poll-verify".to_owned()));
+    let execution_id = Arc::new(Mutex::new("exec-cli-master-poll-verify".to_owned()));
+    let agent_id = Arc::new(Mutex::new("worker-cli-master-poll-verify".to_owned()));
+    let cursor = Arc::new(Mutex::new(
+        "00000000000000000008:task-cli-master-poll-verify:00000000000000000008:task-cli-master-poll-verify:8".to_owned(),
+    ));
+    let poll_processed = Arc::new(Mutex::new(initial_poll_processed));
+    let events = Arc::new(Mutex::new(vec![
+        "TaskCreated".to_owned(),
+        "TaskAssigned".to_owned(),
+        "TaskResumed".to_owned(),
+        "TaskExecutionRecorded".to_owned(),
+        "TaskSchedulerTick".to_owned(),
+        "TaskBlocked".to_owned(),
+        "TaskExecutionRecovering".to_owned(),
+        "TaskReviewSubmitted".to_owned(),
+    ]));
+    listener
+        .set_nonblocking(true)
+        .expect("set adp master-poll mock nonblocking");
+    let handle = thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("tokio runtime");
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+            for _ in 0..connection_count {
+                let (stream, _) = listener.accept().await.expect("accept adp");
+                let mut socket = tokio_tungstenite::accept_async(stream)
+                    .await
+                    .expect("accept websocket");
+                while let Some(message) = socket.next().await {
+                    let text = match message {
+                        Ok(Message::Text(text)) => text,
+                        Ok(Message::Close(_)) => break,
+                        Ok(_) => continue,
+                        Err(_) => break,
+                    };
+                    let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
+                    match request {
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::CreateTaskAgent { agent },
+                        } => {
+                            *agent_id.lock().expect("phase2b agent lock") =
+                                agent.agent_id.as_str().to_owned();
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "create_task_agent",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "task_agent_created",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::CreateTask { task },
+                        } => {
+                            if task.dispatch != Some(UiTaskDispatchCommand::None) {
+                                send_adp_response(
+                                    &mut socket,
+                                    UiAdpResponse::Failure {
+                                        request_id,
+                                        failure: UiAdpFailure {
+                                            code: "missing_dispatch_none".to_owned(),
+                                            message: "master-poll sample must create waiting task"
+                                                .to_owned(),
+                                            retryable: false,
+                                        },
+                                    },
+                                )
+                                .await;
+                                continue;
+                            }
+                            let task = task.task_id.expect("phase2b task id");
+                            *task_id.lock().expect("phase2b task lock") = task.clone();
+                            *cursor.lock().expect("phase2b cursor lock") =
+                                format!("00000000000000000008:{task}:00000000000000000008:{task}:8");
+                            *poll_processed.lock().expect("phase2b poll lock") = false;
+                            *events.lock().expect("phase2b events lock") =
+                                vec!["TaskCreated".to_owned()];
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "create_task",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "task_created",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::AssignTask { .. },
+                        } => {
+                            events
+                                .lock()
+                                .expect("phase2b events lock")
+                                .push("TaskAssigned".to_owned());
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "assign_task",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "task_assigned",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::ClaimNextTask { claim },
+                        } => {
+                            *execution_id.lock().expect("phase2b execution lock") =
+                                claim.execution_id;
+                            events
+                                .lock()
+                                .expect("phase2b events lock")
+                                .push("TaskResumed".to_owned());
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "claim_next_task",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "task_claimed",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::ApplyExecutionFact { fact },
+                        } => {
+                            *execution_id.lock().expect("phase2b execution lock") =
+                                fact.execution_id;
+                            let event_type = match fact.kind {
+                                UiExecutionFactKind::Running { .. } => "TaskExecutionRecorded",
+                                UiExecutionFactKind::Recovering { .. } => "TaskExecutionRecovering",
+                                UiExecutionFactKind::Blocked { .. } => "TaskBlocked",
+                                UiExecutionFactKind::ReviewReady { .. } => "TaskReviewSubmitted",
+                            };
+                            events
+                                .lock()
+                                .expect("phase2b events lock")
+                                .push(event_type.to_owned());
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "apply_execution_fact",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "execution_fact_applied",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::RunSchedulerTick { .. },
+                        } => {
+                            events
+                                .lock()
+                                .expect("phase2b events lock")
+                                .push("TaskSchedulerTick".to_owned());
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "run_scheduler_tick",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "scheduler_tick_recorded",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::RunMasterPoll { .. },
+                        } => {
+                            *poll_processed.lock().expect("phase2b poll lock") = true;
+                            let cursor = cursor.lock().expect("phase2b cursor lock").clone();
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "run_master_poll",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                &format!("master_poll_recorded:events=0 classifications=2 cursor={cursor}"),
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryTaskBoard { include_terminal, .. },
+                        } => {
+                            let task = task_id.lock().expect("phase2b task lock").clone();
+                            let execution =
+                                execution_id.lock().expect("phase2b execution lock").clone();
+                            let agent = agent_id.lock().expect("phase2b agent lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::TaskBoard(phase2b_task_board(
+                                        &task,
+                                        &execution,
+                                        &agent,
+                                        include_terminal,
+                                    )),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryTaskHistory { task_id: query_task },
+                        } => {
+                            let execution =
+                                execution_id.lock().expect("phase2b execution lock").clone();
+                            let events = events.lock().expect("phase2b events lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::TaskHistory(UiTaskHistoryProjection {
+                                        source_agent_id: AgentId::new("cli-agent"),
+                                        task_id: query_task,
+                                        events: events
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(index, event_type)| {
+                                                task_event_with_payload(
+                                                    u64::try_from(index + 1).expect("event seq"),
+                                                    event_type,
+                                                    serde_json::json!({
+                                                        "execution_id": execution,
+                                                    }),
+                                                )
+                                            })
+                                            .collect(),
+                                    }),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryEventInbox { after_cursor, .. },
+                        } => {
+                            let task = task_id.lock().expect("phase2b task lock").clone();
+                            let execution =
+                                execution_id.lock().expect("phase2b execution lock").clone();
+                            let agent = agent_id.lock().expect("phase2b agent lock").clone();
+                            let cursor = cursor.lock().expect("phase2b cursor lock").clone();
+                            let events = events.lock().expect("phase2b events lock").clone();
+                            let after_matches = after_cursor.as_deref() == Some(cursor.as_str());
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::EventInbox(phase2b_event_inbox(
+                                        &task,
+                                        &execution,
+                                        &agent,
+                                        &cursor,
+                                        if after_matches { Vec::new() } else { events },
+                                        after_cursor,
+                                    )),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::RunMasterPoll { .. },
+                        } => {
+                            let task = task_id.lock().expect("phase2b task lock").clone();
+                            let execution =
+                                execution_id.lock().expect("phase2b execution lock").clone();
+                            let agent = agent_id.lock().expect("phase2b agent lock").clone();
+                            let cursor = cursor.lock().expect("phase2b cursor lock").clone();
+                            let events = events.lock().expect("phase2b events lock").clone();
+                            let already_processed =
+                                *poll_processed.lock().expect("phase2b poll lock");
+                            *poll_processed.lock().expect("phase2b poll lock") = true;
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::MasterPoll(phase2b_master_poll(
+                                        &task,
+                                        &execution,
+                                        &agent,
+                                        &cursor,
+                                        if already_processed { Vec::new() } else { events },
+                                        already_processed,
+                                    )),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query { request_id, .. }
+                        | UiAdpRequest::Command { request_id, .. }
+                        | UiAdpRequest::Subscribe { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::Failure {
+                                    request_id,
+                                    failure: UiAdpFailure {
+                                        code: "unexpected_master_poll_frame".to_owned(),
+                                        message: "unexpected master poll frame".to_owned(),
+                                        retryable: false,
+                                    },
+                                },
+                            )
+                            .await;
+                        }
+                    }
+                }
+            }
+        });
+    });
+    (url, handle)
+}
+
 fn phase1_task_board(
     blocked_task_id: &str,
     review_task_id: &str,
@@ -1479,6 +1822,215 @@ fn phase2a_agent_lifecycle(
         current_model: None,
         last_seen_at: 1,
         elapsed_ms: 0,
+    }
+}
+
+fn phase2b_task_board(
+    task_id: &str,
+    execution_id: &str,
+    agent_id: &str,
+    include_terminal: bool,
+) -> UiTaskBoardProjection {
+    let review = phase2b_task(task_id, execution_id, agent_id, "review_submitted");
+    let blocked = phase2b_task(task_id, execution_id, agent_id, "blocked");
+    UiTaskBoardProjection {
+        source_agent_id: AgentId::new("cli-agent"),
+        status_filter: None,
+        agent_filter: None,
+        include_terminal,
+        tasks: vec![review.clone()],
+        agents: vec![UiAgentSnapshotProjection {
+            agent_id: AgentId::new(agent_id.to_owned()),
+            status: "busy".to_owned(),
+            current_task_id: Some(task_id.to_owned()),
+            current_cwd: Some("/tmp/cli-session".to_owned()),
+            running_tasks: 1,
+            queued_tasks: 0,
+            last_seen_at: 1,
+        }],
+        blocked: vec![blocked],
+        review_ready: vec![review.clone()],
+        stale: vec![review],
+    }
+}
+
+fn phase2b_task(
+    task_id: &str,
+    execution_id: &str,
+    agent_id: &str,
+    status: &str,
+) -> UiTaskSnapshotProjection {
+    UiTaskSnapshotProjection {
+        task_id: task_id.to_owned(),
+        status: status.to_owned(),
+        title: format!("Master poll {task_id}"),
+        goal: "phase2b master poll proof".to_owned(),
+        priority: 96,
+        target_cwd: Some("/tmp/cli-session".to_owned()),
+        assignee_agent_id: Some(AgentId::new(agent_id.to_owned())),
+        active_execution_id: Some(execution_id.to_owned()),
+        updated_at: 1,
+        last_progress_at: Some(1),
+        last_event_seq: 8,
+    }
+}
+
+fn phase2b_event_inbox(
+    task_id: &str,
+    execution_id: &str,
+    agent_id: &str,
+    cursor: &str,
+    events: Vec<String>,
+    source_cursor: Option<String>,
+) -> UiTaskEventInboxProjection {
+    UiTaskEventInboxProjection {
+        source_agent_id: AgentId::new("cli-agent"),
+        generated_at: 10,
+        source_cursor,
+        next_cursor: if events.is_empty() {
+            None
+        } else {
+            Some(cursor.to_owned())
+        },
+        events: events
+            .into_iter()
+            .enumerate()
+            .map(|(index, event_type)| {
+                phase2b_event_entry(
+                    task_id,
+                    execution_id,
+                    agent_id,
+                    cursor,
+                    index + 1,
+                    &event_type,
+                )
+            })
+            .collect(),
+    }
+}
+
+fn phase2b_event_entry(
+    task_id: &str,
+    execution_id: &str,
+    agent_id: &str,
+    cursor: &str,
+    index: usize,
+    event_type: &str,
+) -> UiTaskEventInboxEntryProjection {
+    let kind = phase2b_event_kind(event_type);
+    UiTaskEventInboxEntryProjection {
+        cursor: if index == 8 {
+            cursor.to_owned()
+        } else {
+            format!("{cursor}-{index}")
+        },
+        event_id: format!("phase2b-event-{index}"),
+        kind: kind.to_owned(),
+        task_id: task_id.to_owned(),
+        execution_id: Some(execution_id.to_owned()),
+        agent_id: Some(AgentId::new(agent_id.to_owned())),
+        created_at: u64::try_from(index).expect("event timestamp"),
+        payload: if event_type == "TaskSchedulerTick" {
+            serde_json::json!({
+                "scheduler_fact": {
+                    "fact": {
+                        "kind": "stale",
+                        "idle_seconds": 2
+                    }
+                },
+                "execution_id": execution_id
+            })
+        } else {
+            serde_json::json!({
+                "execution_id": execution_id
+            })
+        },
+    }
+}
+
+fn phase2b_event_kind(event_type: &str) -> &'static str {
+    match event_type {
+        "TaskCreated" => "task_created",
+        "TaskAssigned" => "task_assigned",
+        "TaskResumed" => "execution_started",
+        "TaskExecutionRecorded" => "progress_reported",
+        "TaskSchedulerTick" => "scheduler_tick",
+        "TaskBlocked" => "execution_blocked",
+        "TaskExecutionRecovering" => "execution_recovering",
+        "TaskReviewSubmitted" => "review_ready",
+        _ => "unknown",
+    }
+}
+
+fn phase2b_master_poll(
+    task_id: &str,
+    execution_id: &str,
+    agent_id: &str,
+    cursor: &str,
+    events: Vec<String>,
+    already_processed: bool,
+) -> UiMasterPollProjection {
+    UiMasterPollProjection {
+        source_agent_id: AgentId::new("cli-agent"),
+        generated_at: 11,
+        source_cursor: if already_processed {
+            Some(cursor.to_owned())
+        } else {
+            None
+        },
+        next_cursor: if events.is_empty() {
+            None
+        } else {
+            Some(cursor.to_owned())
+        },
+        persisted_cursor: Some(cursor.to_owned()),
+        event_inbox: phase2b_event_inbox(
+            task_id,
+            execution_id,
+            agent_id,
+            cursor,
+            events,
+            if already_processed {
+                Some(cursor.to_owned())
+            } else {
+                None
+            },
+        ),
+        task_board: phase2b_task_board(task_id, execution_id, agent_id, true),
+        agent_board: UiAgentBoardProjection {
+            source_agent_id: AgentId::new("cli-agent"),
+            agents: vec![phase2a_agent_lifecycle(
+                agent_id,
+                execution_id,
+                "waiting_review",
+            )],
+        },
+        classifications: vec![
+            UiMasterPollClassificationProjection {
+                kind: "blocked".to_owned(),
+                summary: format!("task {task_id} was blocked"),
+                task_id: Some(task_id.to_owned()),
+                execution_id: Some(execution_id.to_owned()),
+                agent_id: Some(AgentId::new(agent_id.to_owned())),
+                recommended_actions: vec!["inspect_blocker".to_owned()],
+            },
+            UiMasterPollClassificationProjection {
+                kind: "review_ready".to_owned(),
+                summary: format!("task {task_id} is ready for review"),
+                task_id: Some(task_id.to_owned()),
+                execution_id: Some(execution_id.to_owned()),
+                agent_id: Some(AgentId::new(agent_id.to_owned())),
+                recommended_actions: vec!["approve_submission".to_owned()],
+            },
+            UiMasterPollClassificationProjection {
+                kind: "stale".to_owned(),
+                summary: format!("task {task_id} has stale facts"),
+                task_id: Some(task_id.to_owned()),
+                execution_id: Some(execution_id.to_owned()),
+                agent_id: Some(AgentId::new(agent_id.to_owned())),
+                recommended_actions: vec!["query_agent_lifecycle".to_owned()],
+            },
+        ],
     }
 }
 
@@ -2087,6 +2639,73 @@ fn cli_runs_master_worker_foundation_verify_against_mock_websocket() {
     assert!(stdout.contains("review_ready_seen=true"));
 
     handle.join().expect("adp master worker verify mock join");
+}
+
+#[test]
+fn cli_runs_master_poll_foundation_sample_against_mock_websocket() {
+    let (url, handle) = spawn_adp_master_poll_foundation_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("master-poll-foundation-sample")
+        .arg("--url")
+        .arg(&url)
+        .output()
+        .expect("run master poll foundation sample");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("master_poll_foundation_sample_ok"));
+    assert!(stdout.contains("task=task-cli-master-poll-FHPHASE2B"));
+    assert!(stdout.contains("execution=exec-cli-master-poll-FHPHASE2B"));
+    assert!(stdout.contains("agent=worker-cli-master-poll-FHPHASE2B"));
+    assert!(stdout.contains("status=review_submitted"));
+    assert!(stdout.contains("inbox_events=8"));
+    assert!(stdout.contains("poll_events=0"));
+    assert!(stdout.contains("classifications=blocked,review_ready,stale"));
+    assert!(stdout.contains("master_poll_recorded:events=0"));
+
+    handle.join().expect("adp master poll mock join");
+}
+
+#[test]
+fn cli_runs_master_poll_foundation_verify_against_mock_websocket() {
+    let (url, handle) = spawn_adp_master_poll_foundation_verify_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("master-poll-foundation-sample")
+        .arg("--url")
+        .arg(&url)
+        .arg("--verify-task")
+        .arg("task-cli-master-poll-verify")
+        .arg("--execution")
+        .arg("exec-cli-master-poll-verify")
+        .arg("--agent")
+        .arg("worker-cli-master-poll-verify")
+        .arg("--cursor")
+        .arg("00000000000000000008:task-cli-master-poll-verify:00000000000000000008:task-cli-master-poll-verify:8")
+        .output()
+        .expect("run master poll foundation verify");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("master_poll_foundation_verify_ok"));
+    assert!(stdout.contains("task=task-cli-master-poll-verify"));
+    assert!(stdout.contains("execution=exec-cli-master-poll-verify"));
+    assert!(stdout.contains("agent=worker-cli-master-poll-verify"));
+    assert!(stdout.contains("status=review_submitted"));
+    assert!(stdout.contains("inbox_after_cursor_events=0"));
+    assert!(stdout.contains("poll_events=0"));
+    assert!(stdout.contains("classifications=blocked,review_ready,stale"));
+
+    handle.join().expect("adp master poll verify mock join");
 }
 
 #[test]

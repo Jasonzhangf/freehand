@@ -26,6 +26,8 @@
   - `TaskRuntime::list_agents`
   - `TaskRuntime::query_agent`
   - `TaskRuntime::query_task_board`
+  - `TaskRuntime::query_event_inbox`
+  - `TaskRuntime::run_master_poll`
   - `TaskRuntime::apply_execution_fact`
   - `TaskRuntime::run_scheduler_tick`
 - mainline call source: `docs/mainline-calls/task.orchestration.json`
@@ -60,6 +62,19 @@
   closed as a shortcut around review acceptance
 - SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without
   making business decisions
+- Phase 2B EventInbox projects master-visible task, execution, review, and
+  scheduler events from Task Center ledger truth with a globally unique
+  cursor shaped as timestamp, task id, sequence, and event id
+- Phase 2B EventInbox accepts legacy three-part cursors by skipping all events
+  with the matching legacy prefix, so duplicated historical cursor rows do not
+  replay as new events
+- `replay_from_start=true` makes MasterPoll ignore the persisted cursor and
+  rescan EventInbox from the beginning; omitted EventInbox/MasterPoll limit
+  means drain all matching rows, while explicit finite limits remain pagination
+  only
+- Phase 2B master poll loads TaskBoard, AgentBoard, EventInbox cursor, and
+  persisted processed cursor, then classifies states without applying business
+  mutations
 
 ## Response Mainline
 
@@ -81,6 +96,15 @@
 - review rejection remains non-terminal task lifecycle truth; a later execution
   fact may resume the rejected task into running retry and submit review again
 - SchedulerTick returns durable/replayable fact events and recommendations only
+- EventInbox query returns ordered master-visible events after the requested or
+  persisted cursor
+- MasterPoll returns EventInbox events, TaskBoard, AgentBoard, compact
+  classifications, recommended semantic action labels, and the persisted next
+  cursor
+- MasterPoll closeout advances the cursor only after the requested window is
+  read; same-cursor recovery proof must use `replay_from_start=true` plus an
+  unlimited drain so stale persisted cursors and paginated backlog cannot hide
+  unprocessed events
 
 ## Error Mainline
 
@@ -104,6 +128,14 @@
 - recovering facts never become task failure
 - Phase 2A: schema/tool/execution mismatch is not task failure; only invalid
   owner transition or provider/system failure should fail command dispatch
+- Phase 2B: unknown event cursor returns explicit replay/cursor error and does
+  not advance the persisted master cursor
+- Phase 2B: legacy three-part event cursors match only existing event prefixes;
+  unknown legacy prefixes still return explicit cursor-not-found
+- Phase 2B: `replay_from_start=true` combined with `after_cursor` returns an
+  explicit cursor-mode error and does not advance the persisted master cursor
+- Phase 2B: master poll cursor persistence failure returns explicit task
+  runtime error and must not pretend events were processed
 
 ## Shared Multi-Reference Functions
 
@@ -141,6 +173,25 @@
     `scheduler_tick_recent_progress_is_not_stale`,
     `scheduler_tick_facts_recover_after_boot`
   - why shared: keeps framework time sensing in one owner-backed task runtime
+- `TaskRuntime::query_event_inbox`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: project master-visible event inbox rows from task ledger truth
+    after a globally unique cursor, with compatibility for legacy three-part
+    cursor prefixes
+  - allowed callers: runtime query dispatch, CLI/ADP headless samples, tests
+  - related tests:
+    `phase2b_event_inbox_projects_events_and_recovers_master_cursor`
+  - why shared: keeps "what happened since last master check" in Task Center
+    truth instead of UI/runtime-local polling state
+- `TaskRuntime::run_master_poll`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: read TaskBoard, AgentBoard, EventInbox, and persisted cursor to
+    classify master-visible state without applying business decisions
+  - allowed callers: runtime query dispatch, CLI/ADP headless samples, tests
+  - related tests:
+    `phase2b_master_poll_classifies_board_and_does_not_mutate_tasks`
+  - why shared: keeps framework sensing and cursor advancement centralized
+    while leaving approve/reject/assign/close decisions to explicit task actions
 
 ## Function Call Table
 
@@ -168,6 +219,8 @@
 | 20 | `TaskRuntime::run_scheduler_tick` | `crates/freehand-task/src/lib.rs` | compute elapsed/stale/timeout facts without business decisions | scheduler tick request + task snapshots | durable scheduler facts | runtime scheduler / CLI sample | task owner | bound |
 | 21 | `TaskRuntime::claim_next_task` / `TaskRuntime::apply_execution_fact` / `TaskRuntime::reject_review` / `TaskRuntime::approve_review` / `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | execute Phase 2A worker lifecycle from assigned queue through review rejection, retry, approval, and close | worker claim/execution/review commands | ordered task snapshot and ledger truth with stable execution id | runtime ADP command dispatch / CLI sample | task owner | bound |
 | 22 | `TaskStore::write_agent_lifecycle_snapshot` / `TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and restore typed agent lifecycle projection separately from releasable agent resource state | agent lifecycle snapshot | restart-queryable lifecycle truth | task event projection / boot | lifecycle owner storage | bound |
+| 23 | `TaskRuntime::query_event_inbox` | `crates/freehand-task/src/lib.rs` | project master-visible event inbox entries from ordered task ledger events after a globally unique cursor, with legacy three-part cursor prefix compatibility | task ledgers + optional cursor | EventInbox projection and next cursor | runtime query dispatch / CLI sample | task owner | bound |
+| 24 | `TaskRuntime::run_master_poll` | `crates/freehand-task/src/lib.rs` | load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and persist processed cursor without task business mutations | master poll request + persisted cursor | master poll outcome with classifications and next cursor | runtime ADP command dispatch / CLI sample | task owner | bound |
 
 ## Sync Status Against Code
 
@@ -177,4 +230,7 @@
 - Phase 1 ExecutionFact owner-internal sync is implemented
 - Phase 1 SchedulerTick owner-internal facts are implemented
 - Phase 2A real worker execution loop is implemented through headless ADP/CLI
+- Phase 2B EventInbox and master poll owner surfaces are implemented for the
+  no-UI foundation path; online S-profile closeout is still required before
+  claiming the phase complete
 - UI task projection and multi-agent dispatch remain pending later phases

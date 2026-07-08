@@ -41,15 +41,15 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 |---|---|
 | feature_id | `task.orchestration`, `agent.lifecycle`, planned `worker_control` |
 | owner crate | `crates/freehand-task` for Task Center and Agent Lifecycle skeleton; future runtime-control owner pending |
-| gap kind | Phase 1 已有 TaskBoard、AgentBoard、ExecutionFact、SchedulerTick headless truth，但真实 master/worker task execution queue、worker claim loop、EventInbox cursor、worker_control safe-point inbox、master poll loop 尚未实现 |
-| why not violation | Phase 1 交付范围只声明 headless foundation；restart same-id proof 已验证当前 truth surface。真实 worker queue/control/poll loop 是 Phase 2 scope |
+| gap kind | Phase 1 已有 TaskBoard、AgentBoard、ExecutionFact、SchedulerTick headless truth；Phase 2A 已有 no-UI master/worker assign/claim/progress/blocked/recovering/review/reject/retry/approve/close 闭环。剩余 master EventInbox cursor、worker_control safe-point inbox、master poll loop、UI projection 尚未实现 |
+| why not violation | Phase 1/2A 交付范围均已用 headless same-id restart proof 验证；EventInbox/poll loop/control/UI 是后续 Phase 2B/2C/2D scope |
 | risk | 如果先做 UI dashboard，会变成静态投影或假状态；如果 agent 私下通信或直接改状态，会绕过 Task Center 和 Agent Lifecycle owner truth |
-| gate | 当前 gate 锁 Phase 1 owner/map/mainline 和 tool surface；尚未要求 master/worker execution sample 或 worker_control inbox |
-| current producers | `TaskRuntime::query_task_board`, `TaskRuntime::query_agent_board`, `TaskRuntime::apply_execution_fact`, `TaskRuntime::run_scheduler_tick`, CLI `phase1-foundation-sample` |
-| missing coverage | worker task queue notification, automatic/explicit worker claim loop proof, master EventInbox cursor, reject -> retry -> approve -> close master/worker sample, real lifecycle event coverage from worker execution, `worker_control(op=...)` owner map and safe-point inbox |
+| gate | 当前 gate 锁 Phase 1/2A owner/map/mainline 和 tool surface；尚未要求 master EventInbox/poll loop 或 worker_control inbox |
+| current producers | `TaskRuntime::query_task_board`, `TaskRuntime::query_agent_board`, `TaskRuntime::apply_execution_fact`, `TaskRuntime::run_scheduler_tick`, CLI `phase1-foundation-sample`, CLI `master-worker-foundation-sample` |
+| missing coverage | master EventInbox cursor, master poll loop over TaskBoard/AgentBoard/EventInbox, durable processed-event cursor, `worker_control(op=...)` owner map and safe-point inbox, UI task/agent projection |
 | design doc | `docs/design/framework-mediated-agent-operations.md`, `docs/goals/multi-task-foundation-phase2-gap-plan.md` |
 | priority | high — should happen before WebUI/Android task dashboard |
-| closure path | 1) Phase 2A worker execution loop sample 2) Phase 2B master poll loop + EventInbox cursor 3) Phase 2C worker_control safe-point channel 4) Phase 2D UI projection |
+| closure path | 1) Phase 2B master poll loop + EventInbox cursor 2) Phase 2C worker_control safe-point channel 3) Phase 2D UI projection |
 
 ## 管理规则
 
