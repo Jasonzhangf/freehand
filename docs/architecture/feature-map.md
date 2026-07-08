@@ -58,6 +58,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | passive framework control status parsing, fixed control hooks, and rhythm decisions | `control.center` | `crates/freehand-control` | `docs/function-maps/control.center.md` | `docs/testing/control.center.md` |
 | centralized framework error classification, recovery decisions, and error watermark metadata | `error.center` | `crates/freehand-control` | `docs/function-maps/error.center.md` | `docs/testing/error.center.md` |
 | task lifecycle, task persistence, task runtime recovery, and agent registry skeleton | `task.orchestration` | `crates/freehand-task` | `docs/function-maps/task.orchestration.md` | `docs/testing/task.orchestration.md` |
+| per-agent lifecycle state, AgentBoard projection, and lifecycle event reduction | `agent.lifecycle` | `crates/freehand-task` initially, split later if needed | `docs/function-maps/agent.lifecycle.md` | `docs/testing/agent.lifecycle.md` |
 | master/slave pairing, node status, delegation, slave turn publication | `node.master-slave` | `crates/freehand-node` | `docs/function-maps/node.master-slave.md` | `docs/testing/node.master-slave.md` |
 | UI commands, query/subscribe, UI projections | `ui.protocol` | `crates/freehand-ui-protocol` | `docs/function-maps/ui.protocol.md` | `docs/testing/ui.protocol.md` |
 | runtime wiring for UI command dispatch into owner modules | `runtime.ui-command-dispatch` | `crates/freehand-runtime` | `docs/function-maps/runtime.ui-command-dispatch.md` | `docs/testing/runtime.ui-command-dispatch.md` |
@@ -282,6 +283,9 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - list_tasks filters task snapshots by status and assignee
   - history returns ordered task ledger timeline
   - cancel releases agent state and blocks resume
+  - TaskBoard query returns owner-backed task board truth
+  - ExecutionFact sync updates Task Center without parsing raw prose
+  - SchedulerTick emits elapsed/stale/timeout facts without business decisions
 - required_module_black_box_tests:
   - runtime task tool create routes through task persistence
   - runtime task tool query reads persisted task truth
@@ -291,6 +295,9 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - runtime task tool claim_next covers priority queue claim
   - runtime task tool record_execution covers worker progress event writes
   - runtime task tool list_tasks covers queue projection filtering
+  - runtime TaskBoard query covers blocked/review/stale board filters
+  - runtime ExecutionFact sync covers recovering/blocked/review_ready updates
+  - runtime SchedulerTick covers stale/soft-timeout/hard-timeout fact emission
 - required_project_black_box_tests:
   - restart/reboot recovery query returns the same task truth
 - test_design_doc: `docs/testing/task.orchestration.md`
@@ -312,6 +319,9 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - task persistence path changes
   - agent registry status changes
   - agent lifecycle op changes
+  - TaskBoard query surface changes
+  - ExecutionFact contract changes
+  - SchedulerTick fact semantics changes
   - startup recovery behavior changes
 - lifecycle_checks:
   - task ledger remains append-only truth
@@ -320,6 +330,60 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - running tasks are backed by leases and expired leases recover to `Interrupted`
   - agent and cwd are not permanently bound
   - worker execution cannot close task without review/approval
+  - recovering execution facts do not terminalize tasks
+  - scheduler tick emits facts only and does not make business decisions
+
+### `agent.lifecycle`
+
+- owner: `crates/freehand-task` initially; split to a dedicated crate only after the Phase 1 boundary proves `task.orchestration` is the wrong owner
+- allowed_paths: `crates/freehand-task/**`, `crates/freehand-runtime/**`, `crates/freehand-ui-protocol/**`, `apps/freehand-cli/**`, `apps/freehand-daemon/**`, `docs/design/**`, `docs/function-maps/agent.lifecycle.md`, `docs/testing/agent.lifecycle.md`, `docs/mainline-calls/agent.lifecycle.json`, `docs/wiki/agent.lifecycle.md`, `docs/architecture/feature-map.md`, `MEMORY.md`, `note.md`
+- forbidden_paths: provider adapter wire DTO internals, UI app-local lifecycle inference, raw assistant prose parsers, task mutation outside Task Center, standalone model-facing `agent` tool
+- required_checks:
+  - `cargo test -p freehand-task`
+  - `cargo test -p freehand-runtime`
+  - `cargo test -p freehand-ui-protocol`
+  - `cargo test -p freehand-cli`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - lifecycle reducer records `model_thinking` from typed model/provider request events
+  - lifecycle reducer records `tool_running` from typed tool events
+  - lifecycle reducer records `recovering` from typed failed-tool/schema/provider retry facts
+  - lifecycle reducer records `blocked` from typed blocker facts
+  - lifecycle reducer rejects raw assistant prose as lifecycle input
+  - AgentBoard projection includes current activity, elapsed time, task/execution/turn binding, and model/tool/error counters
+- required_module_black_box_tests:
+  - runtime can query AgentBoard truth without UI-local state
+  - CLI/ADP headless sample can query lifecycle truth for the same agent id
+  - restart recovery can query the same agent lifecycle/board id after daemon restart once persistence is implemented
+- required_project_black_box_tests:
+  - S-profile `127.0.0.1:4042` headless AgentBoard/lifecycle query proof before claiming Phase 1 closeout
+- test_design_doc: `docs/testing/agent.lifecycle.md`
+- function_map_doc: `docs/function-maps/agent.lifecycle.md`
+- mainline_call_doc: `docs/mainline-calls/agent.lifecycle.json`
+- generated_wiki_doc: `docs/wiki/agent.lifecycle.md`
+- debug_artifacts:
+  - AgentLifecycleSnapshot projection
+  - AgentBoard projection
+  - lifecycle reducer event fixture
+- runtime_paths:
+  - `~/.freehand/state/agents`
+  - `~/.freehand/state/tasks`
+  - `~/.freehand/ledgers/tasks`
+  - `~/.freehand/ledgers/metadata`
+- update_triggers:
+  - lifecycle state vocabulary changes
+  - AgentLifecycleSnapshot fields change
+  - AgentBoard projection changes
+  - lifecycle reducer input events change
+  - AgentBoard ADP/CLI query surface changes
+  - worker_control safe-point state exposure changes
+- lifecycle_checks:
+  - Agent Lifecycle remains an intrinsic agent state/projection, not a default model-facing tool
+  - lifecycle reducer consumes typed events only and never parses raw assistant prose
+  - task mutation remains in Task Center
+  - UI and Android consume projection truth and do not infer lifecycle from raw tool names or logs
+  - Worker Control may read lifecycle truth but must not mutate it directly as task truth
 
 - owner: `crates/freehand-config`
 - allowed_paths: `crates/freehand-config/**`, `crates/freehand-contracts/**`, `docs/architecture/**`

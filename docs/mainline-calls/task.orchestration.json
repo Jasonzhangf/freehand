@@ -21,7 +21,10 @@
     "`TaskRuntime::create_agent` and `TaskRuntime::close_agent` manage persisted worker agent snapshots",
     "lifecycle actions use explicit task mutation requests and validate state transitions before writing truth",
     "`TaskRuntime::resume_task` enters `Running` and creates a lease-backed heartbeat record",
-    "`TaskRuntime::heartbeat_task` refreshes the lease for the assigned running agent"
+    "`TaskRuntime::heartbeat_task` refreshes the lease for the assigned running agent",
+    "pending Phase 1: TaskBoard query reads task snapshots, agent registry state, execution bindings, review queue, blocked items, and stale/timeout facts",
+    "pending Phase 1: ExecutionFact sync admits typed running/recovering/blocked/review_ready facts into Task Center truth without parsing raw prose",
+    "pending Phase 1: SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without making business decisions"
   ],
   "response_mainline": [
     "`TaskRuntime::query_task` returns persisted task snapshot truth",
@@ -33,7 +36,10 @@
     "claim_next returns either the claimed running task or an explicit no-task result",
     "record_execution returns an event-backed worker progress mutation summary",
     "create_agent and close_agent return persisted agent snapshot summaries",
-    "task tool result returns semantic task ids, status, event names, sequence numbers, or JSON snapshots"
+    "task tool result returns semantic task ids, status, event names, sequence numbers, or JSON snapshots",
+    "pending Phase 1: TaskBoard query returns board-level task, execution, blocker, review, stale, and agent binding summaries",
+    "pending Phase 1: ExecutionFact sync returns event-backed Task Center updates while preserving recovering as non-terminal",
+    "pending Phase 1: SchedulerTick returns durable/replayable fact events and recommendations only"
   ],
   "error_mainline": [
     "missing task fields return explicit task errors",
@@ -46,7 +52,10 @@
     "recording execution for a non-running task returns invalid-transition and writes no event",
     "history for unknown task returns explicit task-not-found",
     "persistence failures return explicit task persistence errors",
-    "task failures become failed tool results and can be sent back to the model"
+    "task failures become failed tool results and can be sent back to the model",
+    "pending Phase 1: malformed ExecutionFact returns explicit validation error and writes no Task Center truth",
+    "pending Phase 1: SchedulerTick persistence failure returns explicit task runtime error and does not pretend stale/timeout facts were admitted",
+    "pending Phase 1: recovering facts never become task failure"
   ],
   "shared_functions": [
     {
@@ -144,6 +153,48 @@
         "task_tool_agent_assign_cancel_close_lifecycle"
       ],
       "why_shared": "keeps agent registry mutation in task owner"
+    },
+    {
+      "symbol": "TaskRuntime::query_task_board",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "project owner-backed TaskBoard truth from task snapshots, execution bindings, blockers, review queue, stale facts, and agent registry",
+      "allowed_callers": [
+        "runtime query dispatch",
+        "CLI/ADP headless samples",
+        "tests"
+      ],
+      "related_tests": [
+        "task_board_query_projects_owner_truth"
+      ],
+      "why_shared": "keeps TaskBoard truth in Task Center instead of UI-local state"
+    },
+    {
+      "symbol": "TaskRuntime::apply_execution_fact",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "admit typed execution facts into Task Center transition/event truth",
+      "allowed_callers": [
+        "Agent Lifecycle sync",
+        "runtime task bridge",
+        "tests"
+      ],
+      "related_tests": [
+        "execution_fact_sync_updates_task_center"
+      ],
+      "why_shared": "keeps worker execution state changes in Task Center rather than scattered runtime/UI logic"
+    },
+    {
+      "symbol": "TaskRuntime::run_scheduler_tick",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "compute elapsed/stale/soft-timeout/hard-timeout facts and wake recommendations without making business decisions",
+      "allowed_callers": [
+        "runtime scheduler",
+        "CLI/ADP headless samples",
+        "tests"
+      ],
+      "related_tests": [
+        "scheduler_tick_emits_facts_without_decisions"
+      ],
+      "why_shared": "keeps framework time sensing in one owner-backed task runtime"
     }
   ],
   "call_table": [
@@ -344,6 +395,39 @@
       "caller": "runtime task bridge",
       "callee": "task owner",
       "binding_status": "bound"
+    },
+    {
+      "step": "18",
+      "symbol_path": "TaskRuntime::query_task_board",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "project TaskBoard truth for master, scheduler, UI, and headless query",
+      "input_semantic": "task snapshots plus execution facts plus agent registry",
+      "output_semantic": "TaskBoard projection",
+      "caller": "runtime query dispatch",
+      "callee": "task owner",
+      "binding_status": "pending"
+    },
+    {
+      "step": "19",
+      "symbol_path": "TaskRuntime::apply_execution_fact",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "admit typed execution facts into Task Center state without raw prose parsing",
+      "input_semantic": "ExecutionFact",
+      "output_semantic": "task snapshot plus event",
+      "caller": "Agent Lifecycle sync / runtime",
+      "callee": "task owner",
+      "binding_status": "pending"
+    },
+    {
+      "step": "20",
+      "symbol_path": "TaskRuntime::run_scheduler_tick",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "compute elapsed/stale/timeout facts without business decisions",
+      "input_semantic": "scheduler tick request plus task snapshots",
+      "output_semantic": "durable scheduler facts",
+      "caller": "runtime scheduler / CLI sample",
+      "callee": "task owner",
+      "binding_status": "pending"
     }
   ],
   "sync_status": [
@@ -353,6 +437,7 @@
     "lease-backed Running recovery is locked by positive and negative tests",
     "agent registry lifecycle is locked by positive and negative tests",
     "worker progress event recording is locked by positive and negative tests",
+    "Phase 1 pending symbols are mapped for TaskBoard, ExecutionFact sync, and SchedulerTick before implementation",
     "real worker execution, UI task projection, and multi-agent dispatch are pending"
   ]
 }

@@ -2,6 +2,7 @@
 
 Generated wiki artifacts from machine-readable mainline call source files. Do not edit by hand.
 
+- [agent.lifecycle](./agent.lifecycle.md) mainline call source `docs/mainline-calls/agent.lifecycle.json`
 - [app.android-client](./app.android-client.md) mainline call source `docs/mainline-calls/app.android-client.json`
 - [app.cli-live-turn](./app.cli-live-turn.md) mainline call source `docs/mainline-calls/app.cli-live-turn.json`
 - [app.cli-runtime-smoke](./app.cli-runtime-smoke.md) mainline call source `docs/mainline-calls/app.cli-runtime-smoke.json`

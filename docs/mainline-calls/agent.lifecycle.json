@@ -1,0 +1,125 @@
+{
+  "feature_id": "agent.lifecycle",
+  "owner_crate": "crates/freehand-task",
+  "owner_module": "crates/freehand-task/src/lib.rs",
+  "function_map_doc": "docs/function-maps/agent.lifecycle.md",
+  "test_design_doc": "docs/testing/agent.lifecycle.md",
+  "mainline_call_doc": "docs/mainline-calls/agent.lifecycle.json",
+  "generated_wiki_doc": "docs/wiki/agent.lifecycle.md",
+  "request_mainline": [
+    "runtime/provider/tool/error/task owners emit typed lifecycle events",
+    "lifecycle reducer accepts only typed lifecycle events",
+    "lifecycle reducer updates per-agent lifecycle state",
+    "Task Center execution binding supplies current task, execution, and turn ids when available",
+    "runtime or ADP query surface requests AgentBoard or one AgentLifecycleSnapshot"
+  ],
+  "response_mainline": [
+    "AgentLifecycleSnapshot returns one agent's intrinsic state",
+    "AgentBoardProjection returns agent availability, current activity, elapsed time, task/execution/turn binding, and model/tool/error counters",
+    "scheduler and master prompt context consume AgentBoard summaries, not raw logs",
+    "UI and Android render lifecycle projections and do not infer state from raw text"
+  ],
+  "error_mainline": [
+    "raw assistant prose is rejected as lifecycle input",
+    "unknown agent id returns explicit agent-not-found",
+    "malformed typed lifecycle event returns explicit validation error and does not mutate lifecycle truth",
+    "lifecycle query without initialized lifecycle truth returns explicit not-ready or empty-board truth, not fallback state"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "AgentLifecycleReducer",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "reduce typed runtime/provider/tool/error/task events into per-agent lifecycle state",
+      "allowed_callers": [
+        "runtime live bridge",
+        "task runtime",
+        "tests"
+      ],
+      "related_tests": [
+        "model_thinking reducer test",
+        "tool_running reducer test",
+        "recovering reducer test",
+        "blocked reducer test"
+      ],
+      "why_shared": "keeps lifecycle semantics single-sourced instead of duplicated in UI/runtime/node code"
+    },
+    {
+      "symbol": "AgentBoardProjection",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "expose compact lifecycle truth for master, scheduler, UI, and headless ADP/CLI queries",
+      "allowed_callers": [
+        "runtime query dispatch",
+        "scheduler tick",
+        "tests"
+      ],
+      "related_tests": [
+        "AgentBoard query test",
+        "restart same-id proof"
+      ],
+      "why_shared": "keeps what each agent is doing as owner truth, not app-local inference"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "AgentLifecycleReducer",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "reduce typed lifecycle events into per-agent state",
+      "input_semantic": "typed lifecycle event",
+      "output_semantic": "updated lifecycle state",
+      "caller": "runtime/task owner",
+      "callee": "lifecycle owner",
+      "binding_status": "pending"
+    },
+    {
+      "step": "02",
+      "symbol_path": "AgentLifecycleSnapshot",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "represent one agent's intrinsic lifecycle truth",
+      "input_semantic": "agent state",
+      "output_semantic": "serializable lifecycle snapshot",
+      "caller": "lifecycle owner",
+      "callee": "query/projection surfaces",
+      "binding_status": "pending"
+    },
+    {
+      "step": "03",
+      "symbol_path": "AgentBoardProjection",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "project all agent lifecycle snapshots for master, scheduler, UI, and headless query",
+      "input_semantic": "lifecycle state map",
+      "output_semantic": "AgentBoard projection",
+      "caller": "lifecycle owner",
+      "callee": "runtime query dispatch",
+      "binding_status": "pending"
+    },
+    {
+      "step": "04",
+      "symbol_path": "TaskRuntime::query_agent_lifecycle",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "query one agent lifecycle snapshot",
+      "input_semantic": "agent id",
+      "output_semantic": "lifecycle snapshot or explicit not-found",
+      "caller": "runtime query dispatch",
+      "callee": "lifecycle owner",
+      "binding_status": "pending"
+    },
+    {
+      "step": "05",
+      "symbol_path": "TaskRuntime::query_agent_board",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "query AgentBoard projection",
+      "input_semantic": "optional filters",
+      "output_semantic": "AgentBoard projection",
+      "caller": "runtime query dispatch",
+      "callee": "lifecycle owner",
+      "binding_status": "pending"
+    }
+  ],
+  "sync_status": [
+    "`agent.lifecycle` is a Phase 1 owner-map entry before implementation",
+    "no model-facing `agent` tool is implemented or allowed by default",
+    "Agent Lifecycle remains an intrinsic agent state/projection",
+    "first implementation must add symbols and tests before claiming D3 complete"
+  ]
+}

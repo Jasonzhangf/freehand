@@ -2692,3 +2692,27 @@ Current real root cause split:
   - `git diff --check`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
+
+# 2026-07-08 multi-task phase1 D1 owner/map closeout
+
+- Goal run started from `/Users/fanzhang/.codex/attachments/63db509b-a35f-4511-88ab-ff396ba0eff7/pasted-text-1.txt`.
+- D1 owner decision:
+  - `task.orchestration` owns TaskBoard, ExecutionFact sync, and SchedulerTick Phase 1 pending surface.
+  - new `agent.lifecycle` owns AgentLifecycleSnapshot, AgentBoardProjection, and lifecycle reducer truth.
+  - `agent.lifecycle` is initially owned in `crates/freehand-task`; split later only if implementation proves a separate crate is needed.
+- Added:
+  - `docs/function-maps/agent.lifecycle.md`
+  - `docs/testing/agent.lifecycle.md`
+  - `docs/mainline-calls/agent.lifecycle.json`
+  - generated `docs/wiki/agent.lifecycle.md`
+- Updated:
+  - `docs/architecture/feature-map.md`
+  - `docs/function-maps/task.orchestration.md`
+  - `docs/testing/task.orchestration.md`
+  - `docs/mainline-calls/task.orchestration.json`
+  - generated `docs/wiki/task.orchestration.md`
+- Validation:
+  - `cargo run -p xtask -- mainlines generate`
+  - `git diff --check`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`

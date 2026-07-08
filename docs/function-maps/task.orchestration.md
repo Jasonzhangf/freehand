@@ -25,6 +25,9 @@
   - `TaskRuntime::task_history`
   - `TaskRuntime::list_agents`
   - `TaskRuntime::query_agent`
+  - pending: `TaskRuntime::query_task_board`
+  - pending: `TaskRuntime::apply_execution_fact`
+  - pending: `TaskRuntime::run_scheduler_tick`
 - mainline call source: `docs/mainline-calls/task.orchestration.json`
 - generated wiki: `docs/wiki/task.orchestration.md`
 
@@ -45,6 +48,12 @@
 - lifecycle actions use explicit mutation request types and validate allowed transitions before writing ledger/snapshot truth
 - `resume_task` enters `Running` and creates a lease-backed heartbeat record
 - `heartbeat_task` refreshes the lease for the assigned running agent
+- pending Phase 1: TaskBoard query reads task snapshots, agent registry state,
+  execution bindings, review queue, blocked items, and stale/timeout facts
+- pending Phase 1: ExecutionFact sync admits typed running/recovering/blocked/
+  review_ready facts into Task Center truth without parsing raw prose
+- pending Phase 1: SchedulerTick computes elapsed/stale/soft-timeout/
+  hard-timeout facts without making business decisions
 
 ## Response Mainline
 
@@ -59,6 +68,12 @@
 - claim_next returns either the claimed running task or an explicit no-task result
 - record_execution returns an event-backed worker progress mutation summary
 - agent create/close returns persisted agent snapshot summaries
+- pending Phase 1: TaskBoard query returns board-level task, execution, blocker,
+  review, stale, and agent binding summaries
+- pending Phase 1: ExecutionFact sync returns event-backed Task Center updates
+  while preserving recovering as non-terminal
+- pending Phase 1: SchedulerTick returns durable/replayable fact events and
+  recommendations only
 
 ## Error Mainline
 
@@ -73,6 +88,11 @@
 - recording execution for a non-running task returns explicit invalid transition and writes no event
 - task failures become failed tool results and can be sent back to the model
 - history for unknown task returns explicit task-not-found
+- pending Phase 1: malformed ExecutionFact returns explicit validation error and
+  writes no Task Center truth
+- pending Phase 1: SchedulerTick persistence failure returns explicit task
+  runtime error and does not pretend stale/timeout facts were admitted
+- pending Phase 1: recovering facts never become task failure
 
 ## Shared Multi-Reference Functions
 
@@ -81,6 +101,24 @@
   - purpose: rebuild memory state from persisted task/agent snapshots
   - allowed callers: runtime task tool bridge, future daemon bootstrap
   - why shared: keeps startup recovery in task owner, not UI/runtime glue
+- pending: `TaskRuntime::query_task_board`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: project owner-backed TaskBoard truth from task snapshots,
+    execution bindings, blockers, review queue, stale facts, and agent registry
+  - allowed callers: runtime query dispatch, CLI/ADP headless samples, tests
+  - why shared: keeps TaskBoard truth in Task Center instead of UI-local state
+- pending: `TaskRuntime::apply_execution_fact`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: admit typed execution facts into Task Center transition/event truth
+  - allowed callers: Agent Lifecycle sync, runtime task bridge, tests
+  - why shared: keeps worker execution state changes in Task Center rather than
+    scattered runtime/UI logic
+- pending: `TaskRuntime::run_scheduler_tick`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: compute elapsed/stale/soft-timeout/hard-timeout facts and wake
+    recommendations without making business decisions
+  - allowed callers: runtime scheduler, CLI/ADP headless samples, tests
+  - why shared: keeps framework time sensing in one owner-backed task runtime
 
 ## Function Call Table
 
@@ -103,9 +141,14 @@
 | 15 | `TaskRuntime::record_execution` | `crates/freehand-task/src/lib.rs` | append semantic worker execution progress for a running task | worker execution record request | running task snapshot + progress event | runtime task bridge | task owner | bound |
 | 16 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal task and release assignee state | task mutation request | cancelled task snapshot + released agent | runtime task bridge | task owner | bound |
 | 17 | `TaskRuntime::create_agent` / `close_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents and close only idle agents | agent mutation request | agent snapshot | runtime task bridge | task owner | bound |
+| 18 | `TaskRuntime::query_task_board` | `crates/freehand-task/src/lib.rs` | project TaskBoard truth for master, scheduler, UI, and headless query | task snapshots + execution facts + agent registry | TaskBoard projection | runtime query dispatch | task owner | pending |
+| 19 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | admit typed execution facts into Task Center state without raw prose parsing | ExecutionFact | task snapshot + event | Agent Lifecycle sync / runtime | task owner | pending |
+| 20 | `TaskRuntime::run_scheduler_tick` | `crates/freehand-task/src/lib.rs` | compute elapsed/stale/timeout facts without business decisions | scheduler tick request + task snapshots | durable scheduler facts | runtime scheduler / CLI sample | task owner | pending |
 
 ## Sync Status Against Code
 
 - first implementation supports `create`, `query`, `list_agents`, and `query_agent`
 - current implementation also supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `record_execution`, `history`, `list_tasks`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`
+- Phase 1 pending symbols are mapped for TaskBoard, ExecutionFact sync, and
+  SchedulerTick before implementation
 - real worker execution, UI task projection, and multi-agent dispatch are pending
