@@ -2565,3 +2565,45 @@ Current real root cause split:
   - `cargo fmt --check`.
 - durable rule:
   - Repaired failures are prompt-history pruning only: future default prompt context should prefer the repaired/latest round, while raw failure evidence remains durable in ledgers/UI/debug/error truth.
+
+# 2026-07-08 single-agent restart recovery proof
+
+- scope:
+  - Continued `docs/goals/single-agent-closeout-before-multi-agent-plan.md`.
+  - Stayed in S-profile single-agent proof on fixed `127.0.0.1:4042`.
+- online validation:
+  - `scripts/install-launchd.sh restartS` rebuilt symlink/debug daemon binaries and restarted only `com.freehand.daemonS`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - `freehand-cliS session-continue-sample --url ws://127.0.0.1:4042/adp` -> session `cli-session-continue-1783484106591493000`, turns `runtime-turn-183,runtime-turn-183-r2,runtime-turn-184`, terminal `success`, second turn restored `restored_closed_turns=1`.
+  - `freehand-cliS task-lifecycle-sample --url ws://127.0.0.1:4042/adp` -> task `task-cli-FHTASK1783484127920815000`, status `closed`, events `TaskCreated,TaskAssigned,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`.
+  - After another `scripts/install-launchd.sh restartS`, `freehand-cliS adp-session-query --session cli-session-continue-1783484106591493000` still returned `turn_ids=runtime-turn-183,runtime-turn-183-r2,runtime-turn-184`.
+  - After the same restart, `freehand-cliS adp-task-query --history task-cli-FHTASK1783484127920815000` still returned the full 5-event closed task history.
+- durable rule:
+  - Single-agent restart recovery proof must query the same session/task ids after daemon restart; a fresh sample after restart is not recovery evidence.
+
+# 2026-07-08 single-agent closeout final baseline
+
+- completion audit evidence:
+  - Headless ADP success/failure/schema/continuation/task lifecycle samples were already current in this goal; provider retry fixture proof passed with exactly five attempts and provider-domain error-center rows.
+  - WebUI online proof remained current at `artifacts/webui-online/20260708-verify-4042-1783483076297/summary.json`, with ADP/session truth and visible UI checks all true.
+  - Restart recovery proof re-queried the same session and task ids after `restartS`.
+  - Repaired-failure prompt context economy is committed in `82fae02`, with owner regression and docs/function-map/test-design updates.
+- final local validation:
+  - `cargo build --workspace` -> passed.
+  - `cargo fmt --check` -> passed.
+  - `cargo clippy --workspace --all-targets -- -D warnings` -> passed.
+  - Direct `cargo test --workspace` repeatedly hit a tool PTY/session-return anomaly: the tool session stayed open while `ps` showed no real cargo/rustc/test child process. These attempts were explicitly interrupted and not counted as passing.
+  - Equivalent full workspace package coverage was run with `cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'` and `cargo test -p <pkg>` for all 22 packages; result `PACKAGE_TESTS_EXIT=0`.
+  - `cargo run -p xtask -- mainlines check` -> passed.
+  - `cargo run -p xtask -- gates check` -> passed.
+  - `git diff --check` -> passed.
+- acceptance audit:
+  - Session/restart truth: proven by same-session continuation and post-restart same-id session query.
+  - Same-session provider history: proven by `session-continue-sample` restored history and earlier WebUI continuation evidence.
+  - Failed-tool repair and schema polishing: proven by ADP samples and runtime tests.
+  - Provider retry/backoff terminal distinction: proven by `scripts/verify-provider-retry-online.sh`.
+  - UI observability/static historical turns/tool semantics: proven by current WebUI online verifier artifact and mapped UI tests.
+  - Minimal single-agent task lifecycle: proven by deterministic ADP task lifecycle and post-restart task history query.
+  - Prompt context economy: proven by `effective_context_uses_last_repaired_round_without_raw_failed_attempt`.
+  - Multi-agent work remains out of scope; existing dirty multi-agent design docs were not staged.
