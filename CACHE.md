@@ -1,5 +1,11 @@
 # CACHE
 
+- Current single-agent headless closeout slice:
+  - Deterministic ADP task lifecycle is implemented through protocol-owned `CreateTask` / `SubmitTaskReview` / `ApproveTaskReview` / `CloseTask`; CLI `task-lifecycle-sample` no longer waits on a model prompt.
+  - Local proof: `cargo test -p freehand-ui-protocol -- --nocapture` -> 47 passed; `cargo test -p freehand-runtime -- --nocapture` -> 77 passed; `cargo test -p freehand-cli -- --nocapture` -> 17 passed; `cargo fmt --check`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `git diff --check`.
+  - Online S-profile proof on `127.0.0.1:4042`: health `ok`; `freehand-cliS adp-smoke` passed; `task-lifecycle-sample` closed `task-cli-FHTASK1783481386960124000`; success sample passed (`runtime-turn-171`); failure sample passed (`runtime-turn-172-r3`, `rounds=3`, `failed_tools=1`, `schema_retries=1`); `session-continue-sample` passed (`runtime-turn-173,runtime-turn-174`, `restored_closed_turns=1`); schema-mismatch sample passed (`runtime-turn-175-r2`, `schema_retries=1`).
+  - Not closed: provider-retry sample still fails correctly because model prose claimed retries without provider-domain retry truth. Needs controllable provider fixture/error injection/runtime projection evidence.
+
 - Current verified WebUI phone no-left-edge closeout:
   - `app.webui-smoke` mobile phone/tall/tablet portrait cards no longer render left borders or inset-left shadows for assistant/tool/final state; mobile state uses green/red/blue color-block backgrounds and compact status text.
   - Focused mobile composer no longer reserves `min(46svh, 330px)` or expands to `44svh`; focused proof on tall phone measured `conversationRegionPaddingBottom=112px`, `composerCardRect.height=92`, `composerInputRect.height=76`, with control strip, attachment tray, and command status hidden.

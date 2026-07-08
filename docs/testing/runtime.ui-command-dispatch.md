@@ -9,6 +9,7 @@
   - submit commands may carry an optional selected session id and selected cwd and must create or continue that cwd-bound session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
   - runtime-backed read-only task queries route to task owner APIs and return UI-safe projections without becoming task truth writers
+  - runtime-backed task mutation commands route to task owner APIs for create/review/approve/close and publish task list projections after accepted mutations
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries route from selected live config to UI-safe projection without becoming config truth writers
   - runtime-backed provider/model update commands route to `config.core` persistence, then expose pending restart-required projection without hot-reloading active runtime config
@@ -63,6 +64,7 @@
   - config status runtime query coverage, including base URL host projection, auth source projection, and no API key/pair token leakage
   - provider/model update dispatch coverage, including valid save, invalid no-overwrite, no secret projection, and active runtime model/provider unchanged until restart
   - task list publication coverage after successful task tool mutation
+  - task mutation command dispatch coverage for create/review/approve/close, including task list projection publication and missing task failures
 - live reason hook-to-ui-state coverage
 - live provider-request-built debug-to-model-waiting UI coverage
 - live completion-schema rejection feedback-to-client coverage, including no-schema missing tag feedback, invalid-schema missing field names, and retry index
@@ -133,6 +135,7 @@
   - node-backed direct-message dispatch is covered
   - explicit unsupported resume dispatch is covered
   - runtime task query bridge is covered by `runtime_query_reads_task_truth_from_task_runtime`
+  - runtime task mutation command bridge is covered through CLI ADP lifecycle smoke and must remain a thin route to `task.orchestration`
   - daemon ADP task query bridge is covered by `daemon_adp_queries_runtime_task_truth`
   - runtime error-center query bridge is covered by `runtime_query_reads_error_center_metadata_without_raw_text`
   - runtime config status query bridge is covered by `runtime_query_projects_config_status_without_secrets`

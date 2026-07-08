@@ -6,7 +6,8 @@ use freehand_testkit::{
     ReasonRuntimeSmokeScenario, run_reason_persistence_smoke, run_reason_runtime_smoke,
 };
 use freehand_ui_protocol::{
-    UiAdpRequest, UiAdpResponse, UiClientKind, UiCommand, UiProviderConfigUpdate,
+    UiAdpRequest, UiAdpResponse, UiClientKind, UiCommand, UiModelRequestKind,
+    UiProviderConfigUpdate, UiTaskCreateCommand, UiTaskReviewCommand,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
@@ -44,6 +45,12 @@ fn run() -> Result<String, String> {
     if flag == "adp-turn-sample" {
         return run_adp_turn_sample(args.collect());
     }
+    if flag == "session-continue-sample" {
+        return run_session_continue_sample(args.collect());
+    }
+    if flag == "task-lifecycle-sample" {
+        return run_task_lifecycle_sample(args.collect());
+    }
     if flag == "adp-session-query" {
         return run_adp_session_query(args.collect());
     }
@@ -67,7 +74,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
                 .to_owned(),
         );
     }
@@ -106,6 +113,8 @@ fn run() -> Result<String, String> {
 enum AdpTurnSample {
     Success,
     Failure,
+    SchemaMismatch,
+    ProviderRetry,
 }
 
 impl AdpTurnSample {
@@ -113,7 +122,12 @@ impl AdpTurnSample {
         match value {
             "success" => Ok(Self::Success),
             "failure" => Ok(Self::Failure),
-            _ => Err("sample must be one of: success, failure".to_owned()),
+            "schema-mismatch" => Ok(Self::SchemaMismatch),
+            "provider-retry" => Ok(Self::ProviderRetry),
+            _ => Err(
+                "sample must be one of: success, failure, schema-mismatch, provider-retry"
+                    .to_owned(),
+            ),
         }
     }
 
@@ -121,11 +135,16 @@ impl AdpTurnSample {
         match self {
             Self::Success => "success",
             Self::Failure => "failure",
+            Self::SchemaMismatch => "schema-mismatch",
+            Self::ProviderRetry => "provider-retry",
         }
     }
 
     fn expected_status(self) -> TerminalStatus {
-        TerminalStatus::Success
+        match self {
+            Self::Success | Self::Failure | Self::SchemaMismatch => TerminalStatus::Success,
+            Self::ProviderRetry => TerminalStatus::Failed,
+        }
     }
 
     fn prompt(self) -> &'static str {
@@ -136,13 +155,19 @@ impl AdpTurnSample {
             Self::Failure => {
                 "ADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema."
             }
+            Self::SchemaMismatch => {
+                "ADP schema mismatch sample: first answer must intentionally omit the required Freehand completion schema so the client can return the schema issue to you; after that feedback, polish the response into the required schema and finish successfully."
+            }
+            Self::ProviderRetry => {
+                "ADP provider retry sample: make one short answer. This sample is valid only when the daemon/provider path emits provider-domain retry evidence; do not call tools and do not produce schema mismatch."
+            }
         }
     }
 }
 
 fn run_adp_turn_sample(args: Vec<String>) -> Result<String, String> {
     let usage =
-        "usage: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure>"
+        "usage: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>"
             .to_owned();
     if args.len() != 4 || args[0] != "--url" || args[2] != "--sample" {
         return Err(usage);
@@ -155,6 +180,36 @@ fn run_adp_turn_sample(args: Vec<String>) -> Result<String, String> {
         .build()
         .map_err(|err| err.to_string())?;
     runtime.block_on(run_adp_turn_sample_async(url, sample))
+}
+
+fn run_session_continue_sample(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp".to_owned();
+    if args.len() != 2 || args[0] != "--url" {
+        return Err(usage);
+    }
+    let url = args[1].clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_session_continue_sample_async(url))
+}
+
+fn run_task_lifecycle_sample(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp".to_owned();
+    if args.len() != 2 || args[0] != "--url" {
+        return Err(usage);
+    }
+    let url = args[1].clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_task_lifecycle_sample_async(url))
 }
 
 fn run_adp_session_query(args: Vec<String>) -> Result<String, String> {
@@ -1220,7 +1275,7 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
         ));
     }
     Ok(format!(
-        "adp_turn_sample_ok sample={} url={} session={} turn={} rounds={} tool_executions={} failed_tools={} seen={}",
+        "adp_turn_sample_ok sample={} url={} session={} turn={} rounds={} tool_executions={} failed_tools={} schema_retries={} provider_retries={} seen={}",
         sample.label(),
         url,
         session_id.as_str(),
@@ -1228,8 +1283,441 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
         evidence.rounds,
         evidence.tool_executions,
         evidence.failed_tools,
+        evidence.schema_retries,
+        evidence.provider_retries,
         seen.join(",")
     ))
+}
+
+async fn run_session_continue_sample_async(url: String) -> Result<String, String> {
+    let session_id = SessionId::new(format!("cli-session-continue-{}", live_id_stamp()?));
+    let token = format!("FHCLI{}", live_id_stamp()?);
+    let first_prompt = format!(
+        "Session continuation sample first turn: remember token {token}. Answer briefly with the required Freehand completion schema."
+    );
+    let second_prompt = "Session continuation sample second turn: reply with the exact token from the previous turn and finish with the required Freehand completion schema.".to_owned();
+
+    let first_seen =
+        submit_adp_sample_prompt(&url, &session_id, "session-continue-first", first_prompt).await?;
+    let second_seen =
+        submit_adp_sample_prompt(&url, &session_id, "session-continue-second", second_prompt)
+            .await?;
+    let transcript = query_session_transcript(
+        &url,
+        &session_id,
+        "cli-session-continue-transcript",
+        Duration::from_secs(20),
+    )
+    .await?;
+    if transcript.turns.len() < 2 {
+        return Err(format!(
+            "session continuation transcript incomplete turns={}",
+            transcript.turns.len()
+        ));
+    }
+    let Some(last_turn) = transcript.turns.last() else {
+        return Err("session continuation transcript missing last turn".to_owned());
+    };
+    let terminal_text = last_turn.terminal_text.as_deref().unwrap_or("");
+    let text = last_turn.text.join("\n");
+    if !terminal_text.contains(&token) && !text.contains(&token) {
+        return Err(format!(
+            "session continuation missing token evidence session={} token={} turns={} last_turn={} terminal={}",
+            session_id.as_str(),
+            token,
+            transcript.turns.len(),
+            last_turn.turn_id.as_str(),
+            terminal_text
+        ));
+    }
+    Ok(format!(
+        "session_continue_sample_ok url={} session={} token={} turns={} first_turn={} second_turn={} first_seen={} second_seen={}",
+        url,
+        session_id.as_str(),
+        token,
+        transcript.turns.len(),
+        transcript.turns[0].turn_id.as_str(),
+        last_turn.turn_id.as_str(),
+        first_seen.join(","),
+        second_seen.join(",")
+    ))
+}
+
+async fn run_task_lifecycle_sample_async(url: String) -> Result<String, String> {
+    let session_id = SessionId::new(format!("cli-task-lifecycle-{}", live_id_stamp()?));
+    let token = format!("FHTASK{}", live_id_stamp()?);
+    let task_id = format!("task-cli-{token}");
+    let mut seen = Vec::new();
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-task-lifecycle-create",
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some(task_id.clone()),
+                    title: format!("Lifecycle {token}"),
+                    content: format!("Headless task lifecycle sample {token}"),
+                    goal: format!("Close task {token}"),
+                    deliverables: vec!["headless task lifecycle sample".to_owned()],
+                    acceptance: vec!["accepted summary recorded".to_owned()],
+                    priority: 50,
+                    target_cwd: None,
+                    session_id: Some(session_id.clone()),
+                    turn_id: None,
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-task-lifecycle-review",
+            UiCommand::SubmitTaskReview {
+                review: UiTaskReviewCommand {
+                    task_id: task_id.clone(),
+                    summary: format!("Accepted summary for {token}"),
+                    deliverables: vec!["headless task lifecycle sample".to_owned()],
+                    evidence: vec![format!("token {token}")],
+                },
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-task-lifecycle-approve",
+            UiCommand::ApproveTaskReview {
+                task_id: task_id.clone(),
+            },
+        )
+        .await?,
+    );
+    seen.push(
+        send_adp_command_receipt(
+            &url,
+            "cli-task-lifecycle-close",
+            UiCommand::CloseTask {
+                task_id: task_id.clone(),
+            },
+        )
+        .await?,
+    );
+    let task = query_task_list_find_token(&url, &token).await?;
+    if task.task_id != task_id {
+        return Err(format!(
+            "task lifecycle sample returned wrong task expected={} actual={}",
+            task_id, task.task_id
+        ));
+    }
+    if !task.status.eq_ignore_ascii_case("closed") {
+        return Err(format!(
+            "task lifecycle sample task not closed task={} status={} token={}",
+            task.task_id, task.status, token
+        ));
+    }
+    let history = query_task_history(&url, &task.task_id).await?;
+    let event_types = history
+        .events
+        .iter()
+        .map(|event| event.event_type.as_str())
+        .collect::<Vec<_>>();
+    for required in [
+        "TaskCreated",
+        "TaskReviewSubmitted",
+        "TaskReviewApproved",
+        "TaskClosed",
+    ] {
+        if !event_types
+            .iter()
+            .any(|event_type| event_type.eq_ignore_ascii_case(required))
+        {
+            return Err(format!(
+                "task lifecycle sample missing event task={} required={} events={}",
+                task.task_id,
+                required,
+                event_types.join(",")
+            ));
+        }
+    }
+    Ok(format!(
+        "task_lifecycle_sample_ok url={} session={} task={} status={} events={} seen={}",
+        &url,
+        session_id.as_str(),
+        task.task_id,
+        task.status,
+        event_types.join(","),
+        seen.join(",")
+    ))
+}
+
+async fn send_adp_command_receipt(
+    url: &str,
+    request_id: &str,
+    command: UiCommand,
+) -> Result<String, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
+        .await
+        .map_err(|_| format!("ADP command connect timeout: {url}"))?
+        .map_err(|err| format!("ADP command connect failed: {err}"))?;
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Command {
+            request_id: request_id.to_owned(),
+            command,
+        },
+    )
+    .await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let _ = socket.close(None).await;
+            return Err(format!(
+                "ADP command receipt timeout request_id={request_id}"
+            ));
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| format!("ADP command receipt timeout request_id={request_id}"))??;
+        match response {
+            UiAdpResponse::CommandReceipt {
+                request_id: response_id,
+                receipt,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Ok(format!("{response_id}:{}", receipt.dispatch_status));
+            }
+            UiAdpResponse::Failure {
+                request_id: response_id,
+                failure,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Err(format!(
+                    "ADP command failure request_id={} code={} message={}",
+                    response_id, failure.code, failure.message
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn query_task_list_find_token(
+    url: &str,
+    token: &str,
+) -> Result<freehand_ui_protocol::UiTaskSnapshotProjection, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
+        .await
+        .map_err(|_| format!("ADP task list connect timeout: {url}"))?
+        .map_err(|err| format!("ADP task list connect failed: {err}"))?;
+    let request_id = "cli-task-lifecycle-list".to_owned();
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Query {
+            request_id: request_id.clone(),
+            query: UiCommand::QueryTaskList {
+                status: None,
+                agent_id: None,
+            },
+        },
+    )
+    .await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let _ = socket.close(None).await;
+            return Err("ADP task list timeout".to_owned());
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| "ADP task list timeout".to_owned())??;
+        match response {
+            UiAdpResponse::QueryResult {
+                request_id: response_id,
+                result,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                let freehand_ui_protocol::UiQueryResult::TaskList(list) = result else {
+                    return Err("ADP task lifecycle list returned non-task result".to_owned());
+                };
+                let task_count = list.tasks.len();
+                return list
+                    .tasks
+                    .into_iter()
+                    .find(|task| task.title.contains(token) || task.goal.contains(token))
+                    .ok_or_else(|| {
+                        format!(
+                            "task lifecycle sample task not found token={} count={}",
+                            token, task_count
+                        )
+                    });
+            }
+            UiAdpResponse::Failure {
+                request_id: response_id,
+                failure,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Err(format!(
+                    "ADP task lifecycle list failure {}: {}",
+                    failure.code, failure.message
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn query_task_history(
+    url: &str,
+    task_id: &str,
+) -> Result<freehand_ui_protocol::UiTaskHistoryProjection, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
+        .await
+        .map_err(|_| format!("ADP task history connect timeout: {url}"))?
+        .map_err(|err| format!("ADP task history connect failed: {err}"))?;
+    let request_id = "cli-task-lifecycle-history".to_owned();
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Query {
+            request_id: request_id.clone(),
+            query: UiCommand::QueryTaskHistory {
+                task_id: task_id.to_owned(),
+            },
+        },
+    )
+    .await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let _ = socket.close(None).await;
+            return Err("ADP task history timeout".to_owned());
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| "ADP task history timeout".to_owned())??;
+        match response {
+            UiAdpResponse::QueryResult {
+                request_id: response_id,
+                result,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                let freehand_ui_protocol::UiQueryResult::TaskHistory(history) = result else {
+                    return Err("ADP task lifecycle history returned non-task result".to_owned());
+                };
+                return Ok(history);
+            }
+            UiAdpResponse::Failure {
+                request_id: response_id,
+                failure,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Err(format!(
+                    "ADP task lifecycle history failure {}: {}",
+                    failure.code, failure.message
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn submit_adp_sample_prompt(
+    url: &str,
+    session_id: &SessionId,
+    label: &str,
+    text: String,
+) -> Result<Vec<String>, String> {
+    submit_adp_sample_prompt_with_timeout(url, session_id, label, text, Duration::from_secs(90))
+        .await
+}
+
+async fn submit_adp_sample_prompt_with_timeout(
+    url: &str,
+    session_id: &SessionId,
+    label: &str,
+    text: String,
+    wait_duration: Duration,
+) -> Result<Vec<String>, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
+        .await
+        .map_err(|_| format!("ADP connect timeout: {url}"))?
+        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let request_id = format!("cli-{label}-cmd");
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Command {
+            request_id: request_id.clone(),
+            command: UiCommand::SubmitUserInput {
+                text,
+                session_id: Some(session_id.clone()),
+                cwd: None,
+            },
+        },
+    )
+    .await?;
+    let deadline = tokio::time::Instant::now() + wait_duration;
+    let mut seen = Vec::new();
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let _ = socket.close(None).await;
+            return Err(format!("{label} submit timeout seen={}", seen.join(",")));
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| format!("{label} submit timeout seen={}", seen.join(",")))??;
+        match response {
+            UiAdpResponse::CommandReceipt {
+                request_id: response_id,
+                receipt,
+            } if response_id == request_id => {
+                seen.push(format!(
+                    "command_receipt:{response_id}:{}",
+                    receipt.dispatch_status
+                ));
+                let _ = socket.close(None).await;
+                return Ok(seen);
+            }
+            UiAdpResponse::Failure {
+                request_id: response_id,
+                failure,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Err(format!(
+                    "{label} submit failure {}: {}",
+                    failure.code, failure.message
+                ));
+            }
+            UiAdpResponse::CommandReceipt {
+                request_id,
+                receipt,
+            } => {
+                seen.push(format!(
+                    "command_receipt:{request_id}:{}",
+                    receipt.dispatch_status
+                ));
+            }
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                seen.push(format!("failure:{request_id}:{}", failure.code));
+            }
+            UiAdpResponse::SubscriptionAccepted { request_id, .. } => {
+                seen.push(format!("subscription_accepted:{request_id}"));
+            }
+            UiAdpResponse::SubscriptionEvent { request_id, .. } => {
+                seen.push(format!("subscription_event:{request_id}"));
+            }
+            UiAdpResponse::QueryResult { request_id, .. } => {
+                seen.push(format!("query_result:{request_id}"));
+            }
+        }
+    }
 }
 
 async fn query_adp_sample_transcript_evidence(
@@ -1238,6 +1726,22 @@ async fn query_adp_sample_transcript_evidence(
     session_id: &SessionId,
     request_id: &str,
 ) -> Result<AdpTurnSampleEvidence, String> {
+    let transcript =
+        query_session_transcript(url, session_id, request_id, Duration::from_secs(10)).await?;
+    sample_transcript_evidence(sample, session_id, &transcript).ok_or_else(|| {
+        format!(
+            "ADP {} sample transcript missing expected evidence",
+            sample.label()
+        )
+    })
+}
+
+async fn query_session_transcript(
+    url: &str,
+    session_id: &SessionId,
+    request_id: &str,
+    timeout_duration: Duration,
+) -> Result<freehand_ui_protocol::UiSessionTranscriptProjection, String> {
     let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
         .await
         .map_err(|_| format!("ADP transcript connect timeout: {url}"))?
@@ -1252,28 +1756,33 @@ async fn query_adp_sample_transcript_evidence(
         },
     )
     .await?;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let deadline = tokio::time::Instant::now() + timeout_duration;
     loop {
         let now = tokio::time::Instant::now();
         if now >= deadline {
             let _ = socket.close(None).await;
-            return Err(format!("ADP {} sample transcript timeout", sample.label()));
+            return Err("ADP session transcript timeout".to_owned());
         }
         let response = timeout(deadline - now, next_adp(&mut socket))
             .await
-            .map_err(|_| format!("ADP {} sample transcript timeout", sample.label()))??;
+            .map_err(|_| "ADP session transcript timeout".to_owned())??;
         match response {
             UiAdpResponse::QueryResult {
                 request_id: response_id,
                 result,
             } if response_id == request_id => {
                 let _ = socket.close(None).await;
-                return sample_transcript_evidence(sample, session_id, &result).ok_or_else(|| {
-                    format!(
-                        "ADP {} sample transcript missing expected evidence",
-                        sample.label()
-                    )
-                });
+                let freehand_ui_protocol::UiQueryResult::SessionTurns(transcript) = result else {
+                    return Err("ADP session transcript returned non-transcript result".to_owned());
+                };
+                if &transcript.session_id != session_id {
+                    return Err(format!(
+                        "ADP session transcript wrong session expected={} actual={}",
+                        session_id.as_str(),
+                        transcript.session_id.as_str()
+                    ));
+                }
+                return Ok(transcript);
             }
             UiAdpResponse::Failure {
                 request_id: response_id,
@@ -1281,10 +1790,8 @@ async fn query_adp_sample_transcript_evidence(
             } if response_id == request_id => {
                 let _ = socket.close(None).await;
                 return Err(format!(
-                    "ADP {} sample transcript failure {}: {}",
-                    sample.label(),
-                    failure.code,
-                    failure.message
+                    "ADP session transcript failure {}: {}",
+                    failure.code, failure.message
                 ));
             }
             _ => {}
@@ -1352,6 +1859,8 @@ struct AdpTurnSampleEvidence {
     rounds: usize,
     tool_executions: usize,
     failed_tools: usize,
+    schema_retries: usize,
+    provider_retries: usize,
 }
 
 fn sample_evidence_complete(
@@ -1366,17 +1875,16 @@ fn sample_evidence_complete(
         AdpTurnSample::Failure => {
             evidence.rounds >= 2 && evidence.tool_executions >= 1 && evidence.failed_tools >= 1
         }
+        AdpTurnSample::SchemaMismatch => evidence.rounds >= 2 && evidence.schema_retries >= 1,
+        AdpTurnSample::ProviderRetry => evidence.provider_retries >= 1,
     }
 }
 
 fn sample_transcript_evidence(
     sample: AdpTurnSample,
     session_id: &SessionId,
-    result: &freehand_ui_protocol::UiQueryResult,
+    transcript: &freehand_ui_protocol::UiSessionTranscriptProjection,
 ) -> Option<AdpTurnSampleEvidence> {
-    let freehand_ui_protocol::UiQueryResult::SessionTurns(transcript) = result else {
-        return None;
-    };
     if &transcript.session_id != session_id {
         return None;
     }
@@ -1384,7 +1892,32 @@ fn sample_transcript_evidence(
     let mut terminal_turn_id = None::<String>;
     let mut tool_executions = BTreeSet::new();
     let mut failed_tools = BTreeSet::new();
+    let mut schema_retries = 0_usize;
+    let mut provider_retries = 0_usize;
     for turn in &transcript.turns {
+        if turn
+            .model_request
+            .as_ref()
+            .is_some_and(|activity| activity.kind == UiModelRequestKind::SchemaRetry)
+            || turn
+                .model_request
+                .as_ref()
+                .and_then(|activity| activity.detail.as_deref())
+                .is_some_and(|detail| detail.contains("schema polishing"))
+            || turn
+                .errors
+                .iter()
+                .any(|error| error.contains("schema") || error.contains("polishing"))
+        {
+            schema_retries += 1;
+        }
+        if turn.errors.iter().any(|error| {
+            error.contains("provider") || error.contains("retry") || error.contains("http_status")
+        }) || turn.terminal_text.as_deref().is_some_and(|text| {
+            text.contains("provider") || text.contains("retry") || text.contains("http_status")
+        }) {
+            provider_retries += 1;
+        }
         for activity in &turn.tool_activities {
             tool_executions.insert(activity.tool_call_id.clone());
             if activity.status.as_str() == "failed" {
@@ -1396,13 +1929,15 @@ fn sample_transcript_evidence(
         {
             terminal_turn_id = Some(turn.turn_id.as_str().to_owned());
         }
-        if sample == AdpTurnSample::Failure
-            && turn
-                .turn_id
-                .as_str()
-                .rsplit_once("-r")
-                .and_then(|(_, suffix)| suffix.parse::<usize>().ok())
-                .is_some_and(|round| round >= 2)
+        if matches!(
+            sample,
+            AdpTurnSample::Failure | AdpTurnSample::SchemaMismatch
+        ) && turn
+            .turn_id
+            .as_str()
+            .rsplit_once("-r")
+            .and_then(|(_, suffix)| suffix.parse::<usize>().ok())
+            .is_some_and(|round| round >= 2)
             && turn.terminal_status.as_ref() == Some(&sample.expected_status())
         {
             terminal_turn_id = Some(turn.turn_id.as_str().to_owned());
@@ -1421,6 +1956,8 @@ fn sample_transcript_evidence(
         rounds,
         tool_executions: tool_executions.len(),
         failed_tools: failed_tools.len(),
+        schema_retries,
+        provider_retries,
     })
 }
 

@@ -18,6 +18,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied
+- task mutation commands (`CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to task.orchestration through runtime; protocol does not write task truth
 - error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied
 - provider/model update is a protocol-owned mutation command shape that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to config.core
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
@@ -73,6 +74,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently
 - empty session ids and empty session titles are rejected at the protocol boundary for session management commands, including rollback
 - empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse
+- task mutation commands reject empty task id/title/content/goal/review summary before runtime dispatch instead of silently creating partial task truth
 - empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse
 - task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching
 - provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO
@@ -184,6 +186,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 22 | `subscription_selector / subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route task list subscription selectors to task list projection events | SubscribeTaskList command plus UI projection | subscription delivery decision | ADP/SSE subscription transport | protocol selector matcher | bound |
 | 23 | `UiCommand::QueryErrorCenterEvents / UiCommand::SubscribeErrorCenterEvents / UiErrorCenterEventProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center ADP query/subscribe shapes and UI-safe event DTOs | session/trace/turn/domain filters | ErrorCenterEvents query result or subscription projection | ADP/CLI/WebUI transports | runtime query port / protocol selector matcher | bound |
 | 24 | `UiProviderConfigUpdate / UiCommand::UpdateProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider/model update command DTO without credential values and route it to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to config.core | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
+| 25 | `UiCommand::CreateTask / UiCommand::SubmitTaskReview / UiCommand::ApproveTaskReview / UiCommand::CloseTask` | `crates/freehand-ui-protocol/src/lib.rs` | define task mutation command DTOs and validate required fields before runtime dispatch | task create/review/approve/close mutation intent | validated mutation intent routed to task.orchestration or protocol rejection | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -206,3 +209,4 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - task list/history query command DTOs and runtime query-port shape are landed
 - error-center query/subscribe command DTOs and UI-safe event projection are landed
 - provider/model update command DTO is landed, owner-routed to config.core, and serializes without credential/API-key values
+- task mutation command DTOs are landed, owner-routed to task.orchestration, and rejected at the protocol boundary when required task or review fields are empty

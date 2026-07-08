@@ -2322,3 +2322,171 @@ Current real root cause split:
 - notes:
   - Browser plugin was unavailable (`agent.browsers.list()` returned `[]`); the accepted online browser evidence used the repo Chrome/CDP verifier with `FREEHAND_WEBUI_DEBUG_PORT=9237`.
   - The verifier provider-config branch was run under config/env backup and restore, then S-profile was restarted; final `adp-config-query` returned `auth_source=inline`.
+
+# 2026-07-07 workspace-owned session taxonomy
+
+- context:
+  - Jason clarified the multi-agent model before implementation.
+  - Session must not belong to a worker.
+  - Worker is a schedulable resource slot.
+  - Workspace is cwd-bound and owns the durable session truth.
+  - Execution is the worker runtime activity attached to a workspace.
+- durable doc:
+  - added `docs/design/workspace-session-execution-taxonomy.md`.
+  - linked it from `docs/design/design-doc-index.md`.
+- key rule:
+  - worker attaches to a workspace session, inherits that workspace context, runs an execution, and writes admitted results back through owner APIs.
+  - worker must not carry one workspace session into another workspace.
+
+# 2026-07-07 worker pool and passive master task creation rule
+
+- Jason clarified next multi-agent interaction rules:
+  - master startup config controls worker resource quantity.
+  - workers need a default English display-name pool of 20 names; after the pool is exhausted, generated workers use sequence names.
+  - master is a global coordinator and must not directly do work outside its allowed workspace boundary.
+  - if user asks for work in another cwd, model should choose schema/tool action to create/select workspace/task/agent.
+  - framework is passive: it provides prompt contracts, schemas, validators, built-in tools, and owner APIs; it must not sniff raw paths or assistant prose and create tasks by itself.
+- doc update:
+  - extended `docs/design/workspace-session-execution-taxonomy.md` with `Worker Resource Pool Startup` and `Master Request Handling Contract`.
+
+# 2026-07-07 task model refinement
+
+- Jason asked to refine task semantics before continuing multi-agent design.
+- design update:
+  - task is now explicitly a workspace-scoped work item, not a worker and not a session.
+  - task references `workspace_id`, `session_id`, source master session/turn, and target cwd.
+  - execution is the worker runtime activity bound to one task/workspace/session/worker.
+  - task can have multiple historical executions; default active execution policy is one active execution per assigned worker unless a later shard design changes it.
+  - child tasks inherit workspace/session by default and can target another workspace only through explicit workspace-selection fields.
+  - worker submits review; master/reviewer approves/rejects; worker does not close tasks unilaterally.
+- docs updated:
+  - `docs/design/workspace-session-execution-taxonomy.md`
+  - `docs/design/task-orchestration-design.md`
+
+# 2026-07-07 Reasonix context economy and search/decision split
+
+- Jason added two Reasonix-inspired context design points:
+  - failed tool/execution attempts are useful only until successful repair; after success, future model-visible history should prefer the successful path and prune raw failed attempts from cache-hit context.
+  - broad search should run in clean small-context workers or independent agents, then return typed conclusions to the main model for analysis/decision.
+- durable rule:
+  - pruning failed attempts is prompt-history pruning only; debug/replay/error/task ledger truth remains durable.
+  - do not prune unrepaired failures, active blockers, or failures lacking audit/debug truth.
+  - parent/master context ingests typed final conclusions, not raw worker search transcripts.
+- docs updated:
+  - `docs/design/reason-context-planner-design.md`
+  - `docs/design/reason-rewrite-policy-design.md`
+  - `docs/design/workspace-session-execution-taxonomy.md`
+
+# 2026-07-07 task dispatch flow refinement
+
+- task dispatch flow was refined as a passive model-driven lifecycle:
+  - master user turn enters conversation truth.
+  - model emits status schema for intent only.
+  - workspace selection/creation happens only through admitted action tools.
+  - task creation validates workspace/session/task contract.
+  - dispatch policy selects capabilities, model tier, parallelism, and context profile.
+  - worker claim creates execution bound to task/workspace/session/worker.
+  - broad search uses `clean_search`; worker returns typed conclusion; main model decides next step.
+  - worker submits review; master/reviewer approves/rejects/closes.
+- docs updated:
+  - `docs/design/workspace-session-execution-taxonomy.md`
+  - `docs/design/task-orchestration-design.md`
+
+# 2026-07-07 active task dispatch prompt and condition rules
+
+- Jason clarified the main design need is prompt and condition judgment, not only task/runtime mechanics.
+- Design update:
+  - `docs/design/multi-agent-dispatch-alignment.md` now defines master prompt contract, dispatch condition matrix, dispatch action schema shape, and wait/follow-up prompt contract.
+  - Active dispatch means the master model proactively calls collaboration actions such as spawn/send/wait/resume/close when conditions match.
+  - Framework remains passive: validate, persist, schedule, subscribe, and project. It must not sniff text/path and create tasks.
+  - `docs/design/task-orchestration-design.md` links to the prompt/condition contract and remains the durable task-state owner after admitted actions.
+# 2026-07-08 single-agent headless CLI sample closeout slice
+
+- scope:
+  - Continued `docs/goals/single-agent-closeout-before-multi-agent-plan.md`.
+  - Stayed in single-agent scope; no worker pool, subagent, scheduling, or topology code.
+- owner:
+  - `app.cli-runtime-smoke`.
+  - Read/updated function map, test design, and mainline-call manifest before/with code changes.
+- implementation:
+  - `adp-turn-sample` now accepts `success`, `failure`, `schema-mismatch`, and `provider-retry`.
+  - Turn sample output now reports `rounds`, `tool_executions`, `failed_tools`, `schema_retries`, and `provider_retries`.
+  - Added `session-continue-sample --url ...` to submit two prompts into one isolated session and verify the second answer contains a token from the first turn.
+  - Added shared ADP transcript query helper and submit helper in CLI.
+  - Added CLI mock WebSocket tests for schema mismatch, provider retry, and session continuation.
+  - Fixed mock WebSocket close handling so transcript-query reconnects are not blocked by a stale first connection.
+- local validation:
+  - `cargo fmt --check`
+  - `cargo test -p freehand-cli -- --nocapture` -> 16 passed
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+- online S-profile validation:
+  - `scripts/install-launchd.sh restartS` rebuilt CLI/server/daemon symlinks and restarted `com.freehand.daemonS`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - `freehand-cliS adp-turn-sample --sample success` -> success, session `cli-adp-sample-success-1783478883555866000`, `runtime-turn-162`, `rounds=1`, `tool_executions=0`.
+  - `freehand-cliS adp-turn-sample --sample failure` -> success, session `cli-adp-sample-failure-1783478895802142000`, `runtime-turn-163-r2`, `rounds=2`, `tool_executions=1`, `failed_tools=1`.
+  - `freehand-cliS session-continue-sample` -> success, session `cli-session-continue-1783478906701887000`, turns `runtime-turn-164,runtime-turn-165`, `restored_closed_turns=1`, token recovered in second terminal answer.
+- not closed:
+  - `freehand-cliS adp-turn-sample --sample schema-mismatch` returned `ADP schema-mismatch sample transcript missing expected evidence`; live model did not produce schema-polishing evidence.
+  - `freehand-cliS adp-turn-sample --sample provider-retry` returned exit 2 with a `Blocked` turn, not provider-domain retry evidence.
+  - Therefore schema/provider sample commands exist and fail transparently, but the live black-box branches need a controllable provider fixture/error-injection path before they can be marked closed.
+  - At this point `task-lifecycle-sample` was still not implemented in CLI; see follow-up entry below.
+
+# 2026-07-08 task lifecycle headless sample follow-up
+
+- implementation:
+  - Added `freehand-cli task-lifecycle-sample --url ...`.
+  - The command submits one model-driven task-tool prompt, then verifies owner truth through ADP task list/history.
+  - It requires a task whose title/goal contains a generated token, `status=closed` (case-insensitive), and history events `Created`, `ReviewSubmitted`, `ReviewApproved`, `Closed` (case-insensitive).
+  - CLI does not mutate task truth directly; task mutation remains through model/tool/runtime owner path.
+- local validation:
+  - `cargo fmt --check`
+  - `cargo test -p freehand-cli -- --nocapture` -> 17 passed
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- online S-profile validation:
+  - `scripts/install-launchd.sh restartS`
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`
+  - `freehand-cliS task-lifecycle-sample --url ws://127.0.0.1:4042/adp`
+- online result:
+  - First run created and closed `task-1783479423`, but CLI initially rejected lowercase `status=closed`; fixed CLI status/event comparison to be case-insensitive.
+  - Later runs timed out waiting for command receipt even with 240s submit wait.
+  - ADP truth after timeout: task list `task-1783479423:closed:50,task-1783479617:running:50,task-1783479801:running:50`.
+  - Session truth after timeout: `cli-task-lifecycle-1783479397041761000:13:success`, `cli-task-lifecycle-1783479586638802000:6:submitted`, `cli-task-lifecycle-1783479794714560000:20:waiting_model`.
+- not closed:
+  - `task-lifecycle-sample` command exists and is locally tested, but live online task lifecycle is not stable/closed. The current blocker is model/tool-loop controllability and long-running task lifecycle receipt, not ADP task query capability.
+
+# 2026-07-08 deterministic ADP task lifecycle command closeout
+
+- scope:
+  - Continued `docs/goals/single-agent-closeout-before-multi-agent-plan.md`.
+  - Stayed in single-agent scope; no worker pool, subagent spawn, scheduling, or master/worker topology work.
+- implementation:
+  - `ui.protocol` now has protocol-owned task mutation commands: `CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`.
+  - `runtime.ui-command-dispatch` routes those commands into `TaskRuntime::create_task`, `submit_review`, `approve_review`, and `close_task`.
+  - The new UI-task actor helper is `ui_task_actor`; existing model/tool task bridge helper `task_actor(turn)` remains separate for control/tool-originated task mutations.
+  - `freehand-cli task-lifecycle-sample --url ...` now uses deterministic ADP task mutation commands instead of a model prompt, then verifies task list/history truth.
+  - Updated function maps, test designs, mainline-call JSON, and regenerated generated wiki docs for `ui.protocol`, `runtime.ui-command-dispatch`, and `app.cli-runtime-smoke`.
+- local validation:
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 47 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 77 passed.
+  - `cargo test -p freehand-cli -- --nocapture` -> 17 passed.
+  - `cargo fmt --check`.
+  - `cargo run -p xtask -- mainlines generate`.
+  - `cargo run -p xtask -- mainlines check`.
+  - `cargo run -p xtask -- gates check`.
+  - `git diff --check`.
+- online S-profile validation:
+  - `scripts/install-launchd.sh restartS`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - `freehand-cliS task-lifecycle-sample --url ws://127.0.0.1:4042/adp` -> success, session `cli-task-lifecycle-1783481386959762000`, task `task-cli-FHTASK1783481386960124000`, status `closed`, events `TaskCreated,TaskAssigned,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`.
+  - `freehand-cliS adp-turn-sample --sample success` -> success, session `cli-adp-sample-success-1783481399488508000`, turn `runtime-turn-171`, `rounds=1`.
+  - `freehand-cliS adp-turn-sample --sample failure` -> success, session `cli-adp-sample-failure-1783481399610769000`, turn `runtime-turn-172-r3`, `rounds=3`, `failed_tools=1`, `schema_retries=1`.
+  - `freehand-cliS session-continue-sample` -> success, session `cli-session-continue-1783481400025261000`, turns `runtime-turn-173,runtime-turn-174`, `restored_closed_turns=1`.
+  - `freehand-cliS adp-turn-sample --sample schema-mismatch` -> success, session `cli-adp-sample-schema-mismatch-1783481424586054000`, turn `runtime-turn-175-r2`, `rounds=2`, `schema_retries=1`.
+- not closed:
+  - `freehand-cliS adp-turn-sample --sample provider-retry` still fails correctly. The live model produced prose claiming provider retries, but ADP/session truth had no provider-domain retry evidence. This needs a controllable provider fixture/error-injection path; prompt-only sampling is insufficient and must not be accepted as proof.

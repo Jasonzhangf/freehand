@@ -30,6 +30,7 @@
 - ADP/read-only config status query requests enter through `UiRuntimeQueryPort` and project the selected live agent/provider config without exposing API keys, pair tokens, or credential-bearing URLs
 - provider/model update commands enter through a protocol dispatch envelope, route to `config.core::update_provider_config_in_path`, and must not duplicate config validation or persistence logic in runtime
 - successful task tool mutations publish a runtime-owned task list projection into `UiProtocolState` so ADP task list subscribers observe lifecycle changes without UI polling
+- protocol-owned task mutation commands route through runtime into `TaskRuntime::create_task`, `TaskRuntime::submit_review`, `TaskRuntime::approve_review`, and `TaskRuntime::close_task`; runtime publishes updated task list projection after each accepted mutation
 
 ## Response Mainline
 
@@ -57,6 +58,7 @@
 - session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and the protocol projection has been refreshed
 - session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections
 - runtime-backed task list and task history queries return UI-safe task projections sourced from `task.orchestration` snapshot and ledger APIs
+- runtime-backed task mutation commands return receipts only after `task.orchestration` accepts the mutation and task list projection publication succeeds
 - runtime-backed error-center queries return UI-safe projections sourced from `metadata.core` ledger rows written by `error.center`
 - runtime-backed config status queries return UI-safe projections sourced from `config.core` selected agent truth and include auth source type only
 - successful provider/model updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and leave the active runtime/live provider config unchanged until daemon restart
@@ -82,6 +84,7 @@
 - config status query without live selected config returns no runtime result rather than inventing app-local config truth
 - provider/model update without a live runtime home or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake hot reload
 - task list publication failures after task mutation are explicit dispatch failures and must not be silently swallowed as a successful task tool result
+- task mutation dispatch requires a live runtime home, maps missing tasks to target-not-found, and must not create task truth outside `task.orchestration`
 
 ## Shared Multi-Reference Functions
 
@@ -166,6 +169,7 @@
 - runtime config status query dispatch is bound as a thin read-only route from selected `config.core` truth to `UiConfigStatusProjection`
 - runtime provider/model update dispatch is bound as a thin mutation route into `config.core`; successful saves project restart-required pending status and active runtime config remains unchanged until restart
 - runtime task list projection publication is bound as a thin route from task mutation to `ui.protocol`
+- runtime task mutation dispatch is bound as a thin route from protocol commands to `task.orchestration` create/review/approve/close APIs, with `ui_task_actor` kept separate from model/tool `task_actor(turn)`
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

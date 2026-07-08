@@ -48,6 +48,7 @@
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - task list and task history queries are protocol-owned ADP/query command shapes, but the protocol only defines UI-safe DTOs and query-port routing; persisted task truth remains owned by `task.orchestration`
+- task mutation commands (`CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to `task.orchestration` through runtime; protocol does not write task truth
 - task list subscriptions are protocol-owned ADP/subscribe command shapes; task list projection contents must be supplied by runtime/task owners and remain read-only UI DTOs
 - error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
 - config status query is a protocol-owned ADP/query command shape, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
@@ -107,6 +108,7 @@
 - config status command sent to command ingress is rejected as query-route misuse instead of becoming a UI-local config read or mutation
 - provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO
 - task history remains query-only; task list subscribe accepts only list filters and must reject history/query misuse on the subscribe route
+- task mutation commands reject empty task id/title/content/goal/review summary before runtime dispatch instead of silently creating partial task truth
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
 - source identity fields remain explicit across success and error paths
 - cancelled terminal projection stays explicit and is not collapsed into failed or completed UI status
@@ -229,4 +231,5 @@
 - error-center query/subscription DTOs and runtime query-port routing are protocol-bound; runtime owner code supplies metadata-backed read projections
 - config status query/result DTO is protocol-bound; runtime owner code supplies selected config projection and protocol state rejects local handling
 - provider/model update command DTO is protocol-bound, owner-routed to `config.core`, rejects invalid/empty fields, and serializes without credential/API-key values
+- task mutation command DTOs are protocol-bound, owner-routed to `task.orchestration`, and rejected at the protocol boundary when required task or review fields are empty
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

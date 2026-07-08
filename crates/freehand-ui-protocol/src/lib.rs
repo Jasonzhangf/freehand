@@ -136,6 +136,18 @@ pub enum UiCommand {
     UpdateProviderConfig {
         update: UiProviderConfigUpdate,
     },
+    CreateTask {
+        task: UiTaskCreateCommand,
+    },
+    SubmitTaskReview {
+        review: UiTaskReviewCommand,
+    },
+    ApproveTaskReview {
+        task_id: String,
+    },
+    CloseTask {
+        task_id: String,
+    },
     QueryNodeStatus {
         node_id: String,
     },
@@ -482,6 +494,37 @@ pub struct UiConfigStatusProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskCreateCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    pub title: String,
+    pub content: String,
+    pub goal: String,
+    #[serde(default)]
+    pub deliverables: Vec<String>,
+    #[serde(default)]
+    pub acceptance: Vec<String>,
+    #[serde(default)]
+    pub priority: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<TurnId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTaskReviewCommand {
+    pub task_id: String,
+    pub summary: String,
+    #[serde(default)]
+    pub deliverables: Vec<String>,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiProjection {
     Turn(UiTurnProjection),
     NodeStatus(NodeStatusSnapshot),
@@ -712,6 +755,14 @@ pub enum UiProtocolError {
     EmptyCheckpointId,
     #[error("task query requires non-empty task id")]
     EmptyTaskId,
+    #[error("task create requires non-empty title")]
+    EmptyTaskTitle,
+    #[error("task create requires non-empty content")]
+    EmptyTaskContent,
+    #[error("task create requires non-empty goal")]
+    EmptyTaskGoal,
+    #[error("task review requires non-empty summary")]
+    EmptyTaskReviewSummary,
     #[error("config update requires non-empty agent name")]
     EmptyConfigAgentName,
     #[error("config update requires non-empty provider id")]
@@ -1319,6 +1370,42 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::QueryTaskHistory { task_id } if task_id.trim().is_empty() => {
             Err(UiProtocolError::EmptyTaskId)
         }
+        UiCommand::CreateTask { task } if task.title.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskTitle)
+        }
+        UiCommand::CreateTask { task } if task.content.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskContent)
+        }
+        UiCommand::CreateTask { task } if task.goal.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskGoal)
+        }
+        UiCommand::CreateTask { task }
+            if task
+                .task_id
+                .as_ref()
+                .is_some_and(|task_id| task_id.trim().is_empty()) =>
+        {
+            Err(UiProtocolError::EmptyTaskId)
+        }
+        UiCommand::CreateTask { task }
+            if task
+                .target_cwd
+                .as_ref()
+                .is_some_and(|cwd| cwd.trim().is_empty()) =>
+        {
+            Err(UiProtocolError::EmptySessionCwd)
+        }
+        UiCommand::SubmitTaskReview { review } if review.task_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskId)
+        }
+        UiCommand::SubmitTaskReview { review } if review.summary.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskReviewSummary)
+        }
+        UiCommand::ApproveTaskReview { task_id } | UiCommand::CloseTask { task_id }
+            if task_id.trim().is_empty() =>
+        {
+            Err(UiProtocolError::EmptyTaskId)
+        }
         UiCommand::UpdateProviderConfig { update } if update.agent_name.trim().is_empty() => {
             Err(UiProtocolError::EmptyConfigAgentName)
         }
@@ -1374,6 +1461,10 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptySlaveMessage => "empty_slave_message",
         UiProtocolError::EmptyCheckpointId => "empty_checkpoint_id",
         UiProtocolError::EmptyTaskId => "empty_task_id",
+        UiProtocolError::EmptyTaskTitle => "empty_task_title",
+        UiProtocolError::EmptyTaskContent => "empty_task_content",
+        UiProtocolError::EmptyTaskGoal => "empty_task_goal",
+        UiProtocolError::EmptyTaskReviewSummary => "empty_task_review_summary",
         UiProtocolError::EmptyConfigAgentName => "empty_config_agent_name",
         UiProtocolError::EmptyProviderId => "empty_provider_id",
         UiProtocolError::EmptyProviderType => "empty_provider_type",
@@ -1958,6 +2049,10 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryTaskHistory { .. } => "query_task_history",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
+        UiCommand::CreateTask { .. } => "create_task",
+        UiCommand::SubmitTaskReview { .. } => "submit_task_review",
+        UiCommand::ApproveTaskReview { .. } => "approve_task_review",
+        UiCommand::CloseTask { .. } => "close_task",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",
@@ -1981,6 +2076,10 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::RollbackLatestSessionTurn { .. }
             | UiCommand::SubmitUserInput { .. }
             | UiCommand::UpdateProviderConfig { .. }
+            | UiCommand::CreateTask { .. }
+            | UiCommand::SubmitTaskReview { .. }
+            | UiCommand::ApproveTaskReview { .. }
+            | UiCommand::CloseTask { .. }
             | UiCommand::SendDirectMessageToSlave { .. }
             | UiCommand::RewindCheckpoint { .. }
             | UiCommand::CancelTurn { .. }
@@ -2007,6 +2106,10 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
             ("runtime.checkpoint-rewind", "crates/freehand-runtime")
         }
         UiCommand::UpdateProviderConfig { .. } => ("config.core", "crates/freehand-config"),
+        UiCommand::CreateTask { .. }
+        | UiCommand::SubmitTaskReview { .. }
+        | UiCommand::ApproveTaskReview { .. }
+        | UiCommand::CloseTask { .. } => ("task.orchestration", "crates/freehand-task"),
         UiCommand::SendDirectMessageToSlave { .. } => ("node.master-slave", "crates/freehand-node"),
         _ => ("ui.protocol", "crates/freehand-ui-protocol"),
     }

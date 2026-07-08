@@ -74,9 +74,10 @@ use freehand_ui_protocol::{
     UiCompletionSchemaRetryWaiting, UiConfigStatusProjection, UiErrorCenterEventListProjection,
     UiErrorCenterEventProjection, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
     UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSessionMetadataProjection,
-    UiTaskHistoryProjection, UiTaskLedgerEventProjection, UiTaskListProjection,
-    UiTaskSnapshotProjection, UiTurnProjection, checkpoint_projection_from_runtime_summary,
-    turn_projection_for_client, turn_projection_from_events,
+    UiTaskCreateCommand, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
+    UiTaskListProjection, UiTaskReviewCommand, UiTaskSnapshotProjection, UiTurnProjection,
+    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
+    turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -3280,6 +3281,16 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             UiCommand::UpdateProviderConfig { update } => {
                 self.dispatch_update_provider_config(&mut state, envelope, update)
             }
+            UiCommand::CreateTask { task } => self.dispatch_create_task(&mut state, envelope, task),
+            UiCommand::SubmitTaskReview { review } => {
+                self.dispatch_submit_task_review(&mut state, envelope, review)
+            }
+            UiCommand::ApproveTaskReview { task_id } => {
+                self.dispatch_approve_task_review(&mut state, envelope, task_id)
+            }
+            UiCommand::CloseTask { task_id } => {
+                self.dispatch_close_task(&mut state, envelope, task_id)
+            }
             UiCommand::ResumeTurn { turn_id } => self.dispatch_resume_turn(envelope, turn_id),
             UiCommand::SendDirectMessageToSlave { node_id, text } => {
                 self.dispatch_direct_message(&mut state, envelope, node_id, text)
@@ -3295,6 +3306,136 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
 }
 
 impl RuntimeCommandDispatcher {
+    fn dispatch_create_task(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        task: UiTaskCreateCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, agent_id) = task_runtime_target(state)?;
+        let runtime =
+            TaskRuntime::boot(&runtime_home, agent_id.clone()).map_err(map_task_query_error)?;
+        let outcome = runtime
+            .create_task(TaskCreateRequest {
+                task_id: task.task_id.map(TaskId::new),
+                title: task.title,
+                content: task.content,
+                goal: task.goal,
+                deliverables: task.deliverables,
+                acceptance: task.acceptance,
+                priority: task.priority,
+                target_cwd: task.target_cwd,
+                dispatch: TaskDispatchRequest::SelfAgent,
+                parent: TaskParentRef {
+                    session_id: task.session_id,
+                    turn_id: task.turn_id,
+                    trace_id: None,
+                },
+                actor: ui_task_actor(&agent_id, None, None),
+                watermark: ui_task_watermark("create_task"),
+            })
+            .map_err(map_task_query_error)?;
+        self.publish_task_list_from_runtime(&runtime_home, &agent_id)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!("task_created:{}", outcome.task.task_id.as_str()),
+        })
+    }
+
+    fn dispatch_submit_task_review(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        review: UiTaskReviewCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, agent_id) = task_runtime_target(state)?;
+        let runtime =
+            TaskRuntime::boot(&runtime_home, agent_id.clone()).map_err(map_task_query_error)?;
+        let outcome = runtime
+            .submit_review(TaskReviewSubmission {
+                task_id: TaskId::new(review.task_id),
+                summary: review.summary,
+                deliverables: review.deliverables,
+                evidence: review.evidence,
+                actor: ui_task_actor(&agent_id, None, None),
+                watermark: ui_task_watermark("submit_task_review"),
+            })
+            .map_err(map_task_query_error)?;
+        self.publish_task_list_from_runtime(&runtime_home, &agent_id)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!("task_review_submitted:{}", outcome.task.task_id.as_str()),
+        })
+    }
+
+    fn dispatch_approve_task_review(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        task_id: String,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, agent_id) = task_runtime_target(state)?;
+        let runtime =
+            TaskRuntime::boot(&runtime_home, agent_id.clone()).map_err(map_task_query_error)?;
+        let outcome = runtime
+            .approve_review(TaskMutationRequest {
+                task_id: TaskId::new(task_id),
+                actor: ui_task_actor(&agent_id, None, None),
+                watermark: ui_task_watermark("approve_task_review"),
+            })
+            .map_err(map_task_query_error)?;
+        self.publish_task_list_from_runtime(&runtime_home, &agent_id)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!("task_review_approved:{}", outcome.task.task_id.as_str()),
+        })
+    }
+
+    fn dispatch_close_task(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        task_id: String,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, agent_id) = task_runtime_target(state)?;
+        let runtime =
+            TaskRuntime::boot(&runtime_home, agent_id.clone()).map_err(map_task_query_error)?;
+        let outcome = runtime
+            .close_task(TaskMutationRequest {
+                task_id: TaskId::new(task_id),
+                actor: ui_task_actor(&agent_id, None, None),
+                watermark: ui_task_watermark("close_task"),
+            })
+            .map_err(map_task_query_error)?;
+        self.publish_task_list_from_runtime(&runtime_home, &agent_id)?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!("task_closed:{}", outcome.task.task_id.as_str()),
+        })
+    }
+
+    fn publish_task_list_from_runtime(
+        &self,
+        runtime_home: &Path,
+        agent_id: &AgentId,
+    ) -> Result<(), UiCommandDispatchPortError> {
+        let projection = task_list_projection_from_runtime(runtime_home, agent_id, None, None)
+            .map_err(map_task_query_error)?;
+        self.ui_state
+            .lock()
+            .expect("lock ui state")
+            .publish_task_list_projection(projection);
+        Ok(())
+    }
+
     fn dispatch_update_provider_config(
         &self,
         state: &mut RuntimeCommandDispatcherState,
@@ -3391,6 +3532,45 @@ fn map_checkpoint_dispatch_error(err: RuntimeCheckpointError) -> UiCommandDispat
             UiCommandDispatchPortError::TargetNotFound(checkpoint_id)
         }
         other => UiCommandDispatchPortError::DispatchFailed(other.to_string()),
+    }
+}
+
+fn task_runtime_target(
+    state: &RuntimeCommandDispatcherState,
+) -> Result<(PathBuf, AgentId), UiCommandDispatchPortError> {
+    let live = state.config.live.as_ref().ok_or_else(|| {
+        UiCommandDispatchPortError::Unsupported(
+            "task mutation requires a live runtime home".to_owned(),
+        )
+    })?;
+    Ok((
+        live.runtime_home.clone(),
+        state.config.reason_agent_id.clone(),
+    ))
+}
+
+fn ui_task_actor(
+    agent_id: &AgentId,
+    session_id: Option<SessionId>,
+    turn_id: Option<TurnId>,
+) -> TaskActor {
+    TaskActor {
+        agent_id: agent_id.clone(),
+        source: "ui.protocol".to_owned(),
+        session_id,
+        turn_id,
+        trace_id: Some(TraceId::new(format!(
+            "ui-task-command-{}",
+            now_unix_seconds()
+        ))),
+    }
+}
+
+fn ui_task_watermark(action: &str) -> TaskWatermark {
+    TaskWatermark {
+        metadata_id: None,
+        hook: Some(format!("ui.protocol.{action}")),
+        action_tool_call_id: None,
     }
 }
 

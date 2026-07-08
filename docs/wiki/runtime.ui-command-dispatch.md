@@ -19,6 +19,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - session management commands route through runtime into `reason.persistence` session metadata and rollback APIs; runtime refreshes `UiProtocolState` from persistence-owned metadata/effective transcript projections after mutation
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 - runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs
+- protocol-owned task mutation commands route through runtime into `TaskRuntime::create_task`, `TaskRuntime::submit_review`, `TaskRuntime::approve_review`, and `TaskRuntime::close_task`; runtime publishes updated task list projection after each accepted mutation
 - runtime read-only error-center queries enter through `UiRuntimeQueryPort` and read watermarked metadata rows through the runtime metadata projection owner
 - provider/model update commands enter through a protocol dispatch envelope, route to config.core::update_provider_config_in_path, and must not duplicate config validation or persistence logic in runtime
 - live submit registers an active turn cancel token before provider execution and releases the runtime mutex before running provider IO
@@ -45,6 +46,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and protocol projection is refreshed
 - session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections
 - runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events
+- runtime-backed task mutation commands return receipts only after task.orchestration accepts the mutation and task list projection publication succeeds
 - runtime error-center queries return UI-safe projections built from watermarked metadata rows and omit raw error/request/provider text
 - runtime task list subscription updates reuse the same UI-safe projection helper as task list queries
 - successful provider/model updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and leave active runtime/live provider config unchanged until daemon restart
@@ -67,6 +69,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - missing task history targets return explicit target-not-found and invalid task filters return dispatch failures
 - invalid error-center query filters or metadata read failures return explicit dispatch failures
 - task list publication failures after task mutation are explicit live bridge failures
+- task mutation dispatch requires a live runtime home, maps missing tasks to target-not-found, and must not create task truth outside task.orchestration
 - provider/model update without a live runtime home or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake hot reload
 
 ## Shared Multi-Reference Functions
@@ -95,6 +98,12 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
   - allowed callers: RuntimeCommandDispatcher::query_runtime
   - related tests: runtime_query_reads_task_truth_from_task_runtime, daemon_adp_queries_runtime_task_truth
   - why shared: keeps ledger ordering in task.orchestration instead of duplicating it in runtime or UI
+- `TaskRuntime::create_task / TaskRuntime::submit_review / TaskRuntime::approve_review / TaskRuntime::close_task`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: perform task lifecycle mutations for runtime-backed UI task commands
+  - allowed callers: RuntimeCommandDispatcher::dispatch_create_task, RuntimeCommandDispatcher::dispatch_submit_task_review, RuntimeCommandDispatcher::dispatch_approve_task_review, RuntimeCommandDispatcher::dispatch_close_task
+  - related tests: CLI ADP task lifecycle sample mock WebSocket smoke, S-profile task-lifecycle-sample
+  - why shared: keeps task lifecycle mutation in task.orchestration while runtime remains a thin dispatch bridge
 - `task_list_projection_from_runtime`
   - owner: `crates/freehand-runtime/src/lib.rs`
   - purpose: build UI-safe task list projection from task owner snapshots for query and push surfaces
@@ -130,6 +139,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 | 10 | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | execute runtime-backed read-only task list/history queries | UI query command | optional UI query result or dispatch failure | ADP query transport | task runtime owner | bound |
 | 11 | `project_task_list_for_ui / project_task_history_for_ui` | `crates/freehand-runtime/src/lib.rs` | project task owner snapshots and ledger events into UI-safe DTOs | task snapshots or task ledger events | task query projection | RuntimeCommandDispatcher::query_runtime | UI protocol DTO | bound |
 | 12 | `task_list_projection_from_runtime` | `crates/freehand-runtime/src/lib.rs` | build and publish task list projection from task runtime after successful task mutation | runtime home plus task filters | UI task list projection | run_live_reason_turn_with_hooks / RuntimeCommandDispatcher::query_runtime | TaskRuntime::list_tasks | bound |
+| 12a | `RuntimeCommandDispatcher::dispatch_create_task / dispatch_submit_task_review / dispatch_approve_task_review / dispatch_close_task` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned task mutation commands into task.orchestration and publish refreshed task list projections | task create/review/approve/close dispatch envelope | dispatch receipt or explicit task dispatch failure | RuntimeCommandDispatcher::dispatch | TaskRuntime lifecycle APIs | bound |
 | 13 | `query_error_center_events_for_ui / project_error_center_event_for_ui` | `crates/freehand-runtime/src/lib.rs` | read watermarked error-center metadata and project UI-safe event DTOs | QueryErrorCenterEvents filters | ErrorCenterEvents query projection | RuntimeCommandDispatcher::query_runtime | metadata.core ledger plus ui.protocol DTO | bound |
 | 14 | `RuntimeCommandDispatcher::dispatch_session_management` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned session CRUD and rollback commands into reason persistence APIs and refresh shared UI projection | session CRUD or rollback dispatch envelope | dispatch receipt or explicit target-not-found/failure | RuntimeCommandDispatcher::dispatch | ReasonPersistence session metadata/rollback owner | bound |
 | 15 | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session transcript with persistence-owned effective projections after rollback | session id plus effective turn projections | queryable transcript excluding rolled-back logical turns | RuntimeCommandDispatcher::dispatch_session_management | ui.protocol state | bound |
@@ -160,5 +170,6 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and terminal persistence
 - missing CancelTurn, empty CancelLatestActiveTurn, and wrong-node direct-message dispatch paths now stay explicit target-not-found failures
 - runtime task query bridge routes list/history through task.orchestration and is covered by runtime and daemon ADP tests
+- runtime task mutation command bridge is bound as a thin route from protocol commands to task.orchestration create/review/approve/close APIs, with ui_task_actor kept separate from model/tool task_actor(turn)
 - runtime error-center query bridge routes metadata rows through a UI-safe projection and is covered by runtime and daemon ADP tests
 - runtime provider/model update dispatch is bound as a thin mutation route into config.core; successful saves project restart-required pending status and active runtime config remains unchanged until restart

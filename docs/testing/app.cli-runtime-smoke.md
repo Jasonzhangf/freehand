@@ -11,8 +11,10 @@
   - CLI prints explicit rewrite outcome or explicit blocked recovery outcome
   - CLI runs no-UI ADP smoke against a daemon `/adp` WebSocket URL
   - CLI ADP smoke verifies subscribe accepted, subscription event, query result, and query-as-command explicit failure
-  - CLI runs no-UI ADP success/failure turn samples against a daemon `/adp` WebSocket URL
-  - CLI ADP turn samples use an isolated sample session, verify command outcome plus matching terminal projection, then query the sample session transcript; the failure sample must show `Success` terminal status plus transcript evidence for at least two rounds and at least one unique failed tool activity
+  - CLI runs no-UI ADP success/failure/schema-mismatch/provider-retry turn samples against a daemon `/adp` WebSocket URL
+  - CLI ADP turn samples use an isolated sample session, verify command outcome plus matching terminal projection, then query the sample session transcript; the failure sample must show `Success` terminal status plus transcript evidence for at least two rounds and at least one unique failed tool activity; the schema-mismatch sample must show at least one schema-polishing retry; the provider-retry sample must show provider retry/error evidence instead of being treated as schema or tool failure
+  - CLI runs no-UI same-session continuation sample by submitting two turns into one isolated session and verifying the second terminal answer uses a unique token from the first turn's effective history
+  - CLI runs no-UI task lifecycle sample by sending protocol-owned task create/review/approve/close commands and verifying task list/history truth reaches `Closed`
   - CLI ADP session manage sends create/rename/archive/restore/delete-as-archive/rollback command frames and reports command receipts without owning session truth
   - CLI ADP task query sends task list/history query frames and reports task projection summaries without WebUI
   - CLI ADP task subscribe sends task list subscribe frames and reports the first task projection event without WebUI
@@ -26,6 +28,10 @@
   - CLI ADP mock WebSocket smoke
   - CLI ADP success turn sample mock WebSocket smoke
   - CLI ADP failure turn sample mock WebSocket smoke with isolated-session transcript evidence and unique tool-call counting
+  - CLI ADP schema-mismatch turn sample mock WebSocket smoke with schema retry evidence
+  - CLI ADP provider-retry turn sample mock WebSocket smoke with provider retry evidence and explicit terminal provider failure
+  - CLI ADP same-session continuation sample mock WebSocket smoke with two turns in one session and second-turn token evidence
+  - CLI ADP task lifecycle sample mock WebSocket smoke with closed task list projection and create/review/approve/close history evidence, and with no `SubmitUserInput` prompt dependency
   - CLI ADP session manage argument/result summary smoke
   - CLI ADP task query argument/result summary smoke
   - CLI ADP task subscribe argument/result summary smoke
@@ -35,7 +41,9 @@
   - one app entrypoint can now drive config + provider selection plus reason runtime E2E smoke
   - provider usage and recovery policy remain wired through the shared harness path
   - no-UI ADP smoke can diagnose status/control failures without WebUI or Android
-  - no-UI ADP turn samples can populate and verify WebUI-visible success and failed-tool-result recovery projections without relying on manual DOM inspection, and the failure sample now rejects one-round or system-failure outcomes
+  - no-UI ADP turn samples can populate and verify WebUI-visible success, failed-tool-result recovery, schema-polishing, and provider-retry projections without relying on manual DOM inspection; the failure sample rejects one-round or system-failure outcomes, the schema sample rejects no-retry success, and the provider sample rejects schema/tool failures mislabeled as provider retry
+  - no-UI same-session continuation sample verifies session history inclusion without WebUI DOM inspection
+  - no-UI task lifecycle sample verifies task owner truth through ADP task list/history without WebUI DOM inspection; CLI only sends protocol-owned task mutation commands and does not write task storage directly
   - no-UI ADP session manage can verify daemon session CRUD and rollback receipt paths without WebUI DOM inspection
   - no-UI ADP task query can verify daemon task list/history visibility without WebUI DOM inspection
   - no-UI ADP task subscribe can verify daemon task list subscription visibility without WebUI DOM inspection
@@ -45,7 +53,9 @@
   - temp `HOME` with `~/.freehand/config.toml`
   - scripted provider semantic outputs in CLI tests
   - local ADP WebSocket mock in CLI tests
-  - local ADP success/failure sample WebSocket mock in CLI tests
+  - local ADP success/failure/schema-mismatch/provider-retry sample WebSocket mock in CLI tests
+  - local same-session continuation WebSocket mock in CLI tests
+  - local task lifecycle WebSocket mock in CLI tests
   - local `freehand-server webui-serve-smoke` for manual/agent positive ADP smoke
   - `~/.freehand/state/config`
   - `~/.freehand/state/turns`
@@ -54,7 +64,9 @@
 - sync status between design and implementation:
   - CLI smoke baseline is implemented in integration tests
   - CLI ADP smoke baseline is implemented in integration tests and verified against a real local `/adp` server
-  - CLI ADP success/failure sample baseline is implemented in integration tests; failure means recovered failed tool result with `rounds>=2` transcript evidence, not ADP/system failure
+  - CLI ADP success/failure/schema-mismatch/provider-retry sample baseline is implemented in integration tests; failure means recovered failed tool result with `rounds>=2` transcript evidence, schema-mismatch means visible schema-polishing retry evidence, and provider-retry means provider-domain retry/error evidence instead of schema/tool failure
+  - CLI ADP same-session continuation sample is implemented in integration tests and verifies token recovery from prior effective history
+  - CLI ADP task lifecycle sample is implemented in integration tests and verifies closed task/history evidence after protocol-owned task mutation commands
   - CLI ADP session manage command is implemented for live daemon session CRUD and rollback checks
   - CLI ADP task query command is implemented for live daemon task list/history checks
   - CLI ADP task subscribe command is implemented for live daemon task list subscription checks
