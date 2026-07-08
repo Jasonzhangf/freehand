@@ -23,18 +23,24 @@ Already completed:
 - task runtime skeleton with task/agent registry, assignment, claim, heartbeat,
   review, close, and recovery
 - repaired-failure prompt context economy
+- Phase 1 headless foundation: TaskBoard, AgentBoard, AgentLifecycle snapshot,
+  ExecutionFact sync, SchedulerTick facts, S-profile sample, and restart
+  same-id proof
 
-Still missing:
+Phase 1 closed the minimum queryable/recoverable foundation. The current gap is
+no longer "does framework truth exist"; it is "do real master/worker execution
+loops communicate through that truth".
 
-- global Task Center truth
-- per-agent lifecycle truth
-- execution identity/query/subscription
-- framework scheduler tick and timer event truth
-- worker progress/block/submission sync into Task Center
+Still missing after Phase 1:
+
+- worker task queue notification and automatic or explicit worker claim loop
 - master poll loop over TaskBoard and AgentBoard
 - runtime control channel to running workers
-- Phase 1 master/worker prompt contract wiring
-- ADP/CLI samples for multi-task foundation
+- EventInbox cursor and subscription surface beyond board snapshots
+- real lifecycle event coverage from live worker execution
+- Phase 2 master/worker prompt contract wiring
+- ADP/CLI samples for master/worker execution closure
+- UI task/agent projection after the headless loop is real
 
 ## Existing Design Chapters
 
@@ -178,6 +184,19 @@ Defines:
 - action validation and paired error feedback rules
 - Agent Lifecycle as intrinsic agent state rather than a standalone
   model-facing tool
+
+### `framework-mediated-agent-operations.md`
+
+Defines:
+
+- all Agent and Task operations must enter through framework-owned surfaces
+- Task Center owns durable task truth
+- Agent registry is resource registration, not lifecycle
+- Agent Lifecycle is intrinsic state/projection, not a mutation tool
+- worker control is a future safe-point control queue, not Task Center mutation
+- target Agent-to-Agent communication paths through Task Center/EventInbox and
+  worker-control inbox
+- current Phase 1 implemented status versus Phase 2 gaps
 
 ## Implementation Sequence
 
@@ -366,8 +385,7 @@ Validation:
 
 ## First Implementation Goal
 
-The first coding goal after this design should not implement full multi-agent
-scheduling. It should implement:
+The first coding goal after the initial design was Phase 1. It is now closed:
 
 ```text
 Task Center query skeleton
@@ -377,8 +395,19 @@ Scheduler tick timer events
 Headless query samples
 ```
 
-Only after that should Freehand attach these capabilities to real master/worker
-agents.
+The next coding goal should attach these capabilities to a minimal real
+master/worker execution loop, still without UI:
+
+```text
+worker queue / claim loop
+execution id binding
+progress / blocked / recovering / review_ready facts
+reject -> retry -> review_ready -> approve -> close
+restart same-id proof
+```
+
+Use `docs/goals/multi-task-foundation-phase2-gap-plan.md` as the current Phase
+2 gap and execution plan.
 
 ## Non-Goals Until Later
 

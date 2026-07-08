@@ -20,6 +20,7 @@ Use this directory family for durable design truth.
 - `docs/design/task-orchestration-design.md`
 - `docs/design/task-center-truth.md`
 - `docs/design/agent-lifecycle-semantics.md`
+- `docs/design/framework-mediated-agent-operations.md`
 - `docs/design/master-worker-task-state-machine-phase1.md`
 - `docs/design/master-worker-prompt-contract-phase1.md`
 - `docs/design/master-worker-tool-action-contract-phase1.md`
@@ -77,6 +78,8 @@ Use this directory family for durable design truth.
   - global Task Center truth for BigTask, SubTask, Execution, Review, EventInbox, SchedulerTick, agent task indexes, task registration, sync, query, and recovery
 - `agent-lifecycle-semantics.md`
   - per-agent runtime lifecycle semantics for master and worker agents, including live state, current/last activity, model/tool/error counters, runtime stats, control channel, and AgentBoard projections
+- `framework-mediated-agent-operations.md`
+  - durable boundary for framework-mediated Agent/Task operations, including Task Center mutations, Agent registry, Agent Lifecycle projections, worker-control queues, persistence, and current Phase 1 versus Phase 2 status
 - `master-worker-task-state-machine-phase1.md`
   - first multi-task foundation state machine: one active BigTask, multiple SubTasks, MasterPollLoop, WorkerExecutionLoop, FrameworkSchedulerTick, timeout/block/review/retry/recovery acceptance
 - `master-worker-prompt-contract-phase1.md`

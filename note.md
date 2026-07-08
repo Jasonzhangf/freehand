@@ -2748,3 +2748,28 @@ Current real root cause split:
   - After another `scripts/install-launchd.sh restartS`, verify mode against the same ids returned `phase1_foundation_verify_ok` with the same counts/state.
 - Durable rule:
   - Phase 1 restart proof requires same-id verify after restart; a fresh post-restart sample is not recovery evidence.
+
+# 2026-07-08 framework-mediated agent operations design
+
+- Trigger:
+  - Jason asked to clarify whether Agent and Task operations go through the framework, and to complete design docs before implementing the next gap.
+- Added:
+  - `docs/design/framework-mediated-agent-operations.md`
+  - `docs/goals/multi-task-foundation-phase2-gap-plan.md`
+- Updated:
+  - `docs/design/design-doc-index.md`
+  - `docs/design/multi-task-foundation-implementation-plan.md`
+  - `docs/architecture/architecture-gaps.md`
+  - `docs/goals/multi-task-foundation-phase1-loop.md`
+  - `MEMORY.md`
+- Durable design truth:
+  - Task operations go through Task Center / `task(op=...)`.
+  - Agent registry is resource registration, not lifecycle.
+  - Agent Lifecycle is intrinsic typed-event projection, not a model-facing mutation tool.
+  - Future `worker_control(op=...)` is safe-point runtime control only and cannot create/assign/approve/reject/close tasks.
+  - Agent-to-Agent communication target is framework queue truth: Task Center/EventInbox and worker-control inbox, not private mutation.
+  - Phase 2 order is worker execution loop, then master poll/EventInbox, then worker_control, then UI projection.
+- Validation:
+  - `git diff --check` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.

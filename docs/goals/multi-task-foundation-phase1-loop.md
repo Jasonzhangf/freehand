@@ -14,6 +14,7 @@ Canonical design docs:
 
 - `docs/design/task-center-truth.md`
 - `docs/design/agent-lifecycle-semantics.md`
+- `docs/design/framework-mediated-agent-operations.md`
 - `docs/design/master-worker-task-state-machine-phase1.md`
 - `docs/design/master-worker-prompt-contract-phase1.md`
 - `docs/design/master-worker-tool-action-contract-phase1.md`
