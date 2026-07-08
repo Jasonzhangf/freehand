@@ -2652,3 +2652,21 @@ Current real root cause split:
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
   - `git diff --check`
+
+# 2026-07-08 agent lifecycle and worker_control clarification
+
+- Jason clarified: Agent Lifecycle is an agent-owned property, not a standalone task-management tool.
+- Design correction:
+  - Agent Lifecycle is projected through AgentBoard/lifecycle snapshots, scheduler inputs, ADP/debug query surfaces, and master context summaries.
+  - Do not introduce a model-facing `agent` tool just to query lifecycle unless a later owner map proves a separate action surface is required.
+  - `worker_control` is only for safe-point control of a running worker execution.
+- `worker_control` can include:
+  - `query_status`
+  - `ask_at_safe_point`
+  - `add_constraint`
+  - `request_checkpoint`
+  - `request_submission_now`
+  - `pause`
+  - `resume`
+  - `cancel`
+- `worker_control` must not include task creation/assignment/review/close, hidden prompt-history mutation, raw transcript rewrite, or workspace/session truth mutation.

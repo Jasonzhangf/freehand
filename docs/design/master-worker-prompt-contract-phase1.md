@@ -13,8 +13,8 @@ Framework owns time, state, events, and truth.
 
 Models own decisions.
 
-Prompts must teach models to use Task Center and Agent Lifecycle tools instead
-of relying on memory, raw logs, or waiting in prose.
+Prompts must teach models to use Task Center actions and AgentBoard/lifecycle
+truth instead of relying on memory, raw logs, or waiting in prose.
 
 ## Master Prompt Contract
 
@@ -99,9 +99,11 @@ close_big_task
 These names are semantic categories for prompts, docs, tests, and review. They
 are not the default exposed runtime tool names.
 
-The exposed tool surface must stay small and owner-scoped. Use tools such as
-`task`, `agent`, and `worker_control` with typed `op` parameters instead of
-creating one tool per semantic action.
+The exposed tool surface must stay small and owner-scoped. Use `task(op=...)`
+for task-management mutations and queries. Agent lifecycle is agent state
+projected through AgentBoard/lifecycle truth, not a standalone model-facing
+tool. Use `worker_control(op=...)` only for control-channel actions against an
+already running worker execution.
 
 Prompt rule:
 

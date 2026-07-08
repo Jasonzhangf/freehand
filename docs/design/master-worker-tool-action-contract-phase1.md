@@ -45,17 +45,23 @@ Too many exposed tools create avoidable problems:
 
 ## Exposed Tool Surface
 
-Phase 1 should converge on this small owner-scoped surface:
+Phase 1 should converge on this small owner-scoped action surface:
 
 | tool | owner surface | purpose |
 | --- | --- | --- |
 | `task` | Task Center / task orchestration | create, query, assign, claim, heartbeat, progress, review, close, and task-board operations |
-| `agent` | Agent Lifecycle / agent board | query lifecycle, query worker state, list available workers, report heartbeat/status when not represented by a task op |
 | `worker_control` | runtime control channel | ask or control a running worker at safe points |
 
-The existing `task(op=...)` direction remains the baseline. `agent` and
-`worker_control` are Phase 1 candidates only if the owner map proves they should
-not be sub-ops of `task`.
+The existing `task(op=...)` direction remains the baseline.
+
+Agent lifecycle is not an ordinary model tool. It is an intrinsic state property
+of every agent and is projected through AgentBoard/query/subscription surfaces.
+The master may read AgentBoard truth, but it should not need a separate
+model-facing `agent` tool just to discover what an agent is doing.
+
+`worker_control` is a candidate separate tool only for actions against a
+currently running worker execution. It must not mutate durable task truth
+directly; any task-state consequence must flow back through Task Center events.
 
 No implementation should add a new exposed tool name until the function map and
 test design prove a separate owner surface is necessary.
@@ -98,12 +104,12 @@ ops under the small tool surface.
 | approve or reject review | `task(op="approve")` / `task(op="reject")` |
 | close BigTask/SubTask | `task(op="close")` |
 | wait with next check | `task(op="wait")` or scheduler tick event, depending on owner-map decision |
-| query AgentBoard | `agent(op="query_board")` or `task(op="query_agents")` if Task Center owns the projection |
-| query agent lifecycle | `agent(op="query_lifecycle")` |
+| query AgentBoard | read AgentBoard projection from framework/query surface; not a model mutation tool |
+| query agent lifecycle | read lifecycle snapshot for the agent; not a model mutation tool |
 | ask runtime status | `worker_control(op="query_status")` |
 | ask worker model question | `worker_control(op="ask_at_safe_point")` |
 | inject constraint | `worker_control(op="add_constraint")` |
-| pause, resume, cancel | `worker_control(op="pause"|"resume"|"cancel")` plus Task Center state event |
+| pause, resume, cancel running worker | `worker_control(op="pause"|"resume"|"cancel")` plus Task Center state event |
 
 This table is a contract direction, not an implementation claim. P0 must decide
 the final op names and owner placement before code lands.
@@ -118,7 +124,8 @@ Task Center owns durable work truth:
 - review lifecycle
 - restart recovery
 
-Agent Lifecycle owns live agent truth:
+Agent Lifecycle owns live agent truth. It is an Agent property, not a
+standalone task-management tool:
 
 - current activity
 - last activity
@@ -133,6 +140,35 @@ Runtime control channel owns running-worker control:
 - accepted/deferred/rejected control events
 - framework-answerable status replies
 - worker-model-answerable runtime questions
+- non-destructive constraint injection for the active execution
+- pause/resume/cancel requests for the active execution
+
+`worker_control` may contain:
+
+- `query_status`: ask the framework for current lifecycle/task/execution status
+  without waking the worker model when lifecycle truth is sufficient
+- `ask_at_safe_point`: enqueue a question that the worker model answers at the
+  next safe point, then resumes the original execution
+- `add_constraint`: add a runtime constraint or instruction to the active
+  execution inbox; this must be visible as a control event
+- `request_checkpoint`: ask the worker to summarize or checkpoint current
+  progress at a safe point
+- `request_submission_now`: ask the worker to submit current deliverables if
+  possible, or explain what remains
+- `pause`: request a pause at a safe point and emit Task Center state
+- `resume`: resume a paused execution through accepted Task Center/runtime truth
+- `cancel`: request cancellation and emit Task Center state
+
+`worker_control` must not contain:
+
+- create task
+- assign task
+- claim next task
+- approve or reject review
+- close task
+- hidden prompt-history mutation
+- direct raw transcript rewrite
+- direct workspace/session truth mutation
 
 UI owns none of these semantics. UI renders projections and submits typed
 commands. It must not infer status from raw tool names, raw args, or result

@@ -5,8 +5,9 @@
 Design truth for per-agent runtime lifecycle semantics.
 
 This document applies to every agent, whether the agent is acting as master or
-worker. It is not a UI design and not a task design. It defines how an agent's
-reasoning process is reduced into structured lifecycle truth.
+worker. It is not a UI design, not a task design, and not a model-facing tool
+surface. It defines how an agent's reasoning process is reduced into structured
+lifecycle truth.
 
 ## Purpose
 
@@ -41,6 +42,12 @@ runtime/term/provider/tool/error events
 
 Raw events remain available for debug/replay, but normal consumers use typed
 lifecycle truth.
+
+Agent Lifecycle is an intrinsic agent property. It should be queryable through
+framework projections such as AgentBoard, ADP/debug query surfaces, scheduler
+inputs, and master context summaries. It should not become a separate
+model-facing mutation tool unless a later owner map proves a distinct action
+surface is required.
 
 ## Truth Model
 

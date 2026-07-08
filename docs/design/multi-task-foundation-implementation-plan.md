@@ -176,6 +176,8 @@ Defines:
 - semantic-action-to-op mapping
 - Task Center, Agent Lifecycle, and worker-control owner boundaries
 - action validation and paired error feedback rules
+- Agent Lifecycle as intrinsic agent state rather than a standalone
+  model-facing tool
 
 ## Implementation Sequence
 
@@ -195,6 +197,11 @@ Deliverables:
 - decide the actual exposed tool names and op enums; default to the existing
   `task(op=...)` style and add a separate tool name only when owner boundaries
   require it
+- treat Agent Lifecycle as agent state/projection. Do not add a model-facing
+  `agent` tool for lifecycle query unless owner-map analysis proves a separate
+  action surface is required
+- define `worker_control` only for safe-point control of running worker
+  executions, and keep task mutation in Task Center
 - map every semantic action category to one owner-scoped tool/op pair
 - add function-map and test-design pending entries
 - define serializable contract DTOs in the correct owner
@@ -237,8 +244,8 @@ Deliverables:
 - runtime stats counters
 - error profile counters
 - AgentBoard projection
-- `agent(op="query_lifecycle")` / `agent(op="query_board")` direction, unless P0
-  proves those projections belong under `task(op=...)`
+- AgentBoard/lifecycle query projection direction; lifecycle is intrinsic agent
+  state, not a default model-facing `agent` tool
 
 Validation:
 
