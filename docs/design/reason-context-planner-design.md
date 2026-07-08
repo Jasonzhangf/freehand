@@ -29,6 +29,9 @@ Remaining gap:
 
 - final CLI/server runtime loop wiring for real usage metrics and persisted recovery payloads is not yet bound
 - planner diagnostics now accept runtime-supplied tool-schema fingerprint truth; broader runtime metrics/recovery wiring remains the remaining gap
+- multi-task context admission will depend on Task Center accepted summaries and
+  Agent Lifecycle conclusions. Raw worker transcripts remain debug truth. See
+  `task-center-truth.md` and `agent-lifecycle-semantics.md`.
 
 ## Owner
 
@@ -46,6 +49,7 @@ Freehand context planning combines:
 
 - Reasonix cache-first session discipline
 - Codex typed fragment discipline
+- Reasonix successful-history preference after failed-attempt repair
 
 The target is:
 
@@ -54,6 +58,8 @@ The target is:
 3. subagent work does not dump raw transcript into parent context
 4. provider adapters receive already planned request content, not mixed metadata
 5. cache drift is explainable from typed planner output
+6. failed attempts stay model-visible only while needed for immediate repair
+7. successful repaired history is preferred for future cache hits
 
 ## Context Locking Model
 
@@ -86,6 +92,7 @@ Allowed tail additions:
 - current turn tool-result evidence
 - validated learned material promoted for this session
 - validated subagent conclusion segments
+- active repair evidence from failed attempts that have not been superseded
 
 Ordinary turns must not mutate the stable prefix in place.
 
@@ -133,6 +140,34 @@ The parent may ingest only:
 
 This follows Reasonix `task` behavior: the parent sees only the subagent's self-contained final answer while the transcript persists separately.
 
+### Lock 5: Successful History Lock
+
+Failed tool attempts and invalid execution attempts may enter the next immediate
+repair context because the model needs them to correct tool usage.
+
+After a later attempt succeeds and the failure has served its repair purpose,
+ordinary future context should prefer successful history:
+
+- keep the final successful action and result
+- keep the accepted task result or workspace summary
+- keep failure evidence in debug, replay, task, and error ledgers
+- remove or summarize the failed attempt from model-visible session history
+- do not let stale failed attempts keep consuming cacheable session context
+
+This is not error hiding. Audit truth remains durable outside model-visible
+context. The rule applies to future prompt-history selection and explicit
+session-history rewrite/prune decisions.
+
+Do not prune a failed attempt until one of these is true:
+
+- a later successful attempt supersedes the failed attempt for the same purpose
+- the failure is admitted into an accepted summary as a concise lesson
+- an explicit rewrite/compaction gate records why the failure is no longer useful
+
+Provider errors, permission failures, and unrepaired task failures remain
+model-visible when they are still active blockers or the next decision depends
+on them.
+
 ## Typed Context Model
 
 ### Segment Classes
@@ -157,6 +192,9 @@ First-version segment classes:
   - cache role: `NoCache`
   - stability: `TurnVolatile`
 - `ToolResultEvidence`
+  - cache role: `NoCache`
+  - stability: `TurnVolatile`
+- `RepairEvidence`
   - cache role: `NoCache`
   - stability: `TurnVolatile`
 - `UserTurnInput`
@@ -203,6 +241,44 @@ Reason:
 - search noise is isolated
 - debug still has the subagent transcript reference
 
+## Exploration Worker Model
+
+High-capability models should stay focused on thinking, planning, and synthesis.
+Focused exploration should be delegated when the goal is bounded and does not
+need the main model's full reasoning budget.
+
+Allowed delegation modes:
+
+- smaller model worker searches a fixed target and returns one typed final report
+- independent agent performs a focused investigation in its own workspace/session
+  execution and returns one typed final report
+
+The parent context may ingest only the final report as `SubagentConclusion`.
+Raw search logs, failed intermediate commands, and child transcripts remain in
+child/debug truth unless an owner explicitly promotes concise evidence.
+
+### Search Then Decide Strategy
+
+Task dispatch should split broad search from analysis/decision.
+
+Search stage:
+
+- use a clean, small worker context
+- include only task goal, target scope, allowed tools, and output schema
+- avoid inheriting the full parent/master conversation
+- optimize for low context cost and high cache hit rate
+- return one typed search conclusion with evidence summary
+
+Analysis/decision stage:
+
+- main model receives the typed search conclusion
+- main model performs synthesis, trade-off analysis, and next-task decision
+- main model decides whether to create another task, ask the user, or close
+  current work through schema/tool feedback
+
+This keeps noisy search transcripts out of master context while preserving the
+information needed for reasoning.
+
 ## Context Ordering
 
 First-version planned request order is locked as:
@@ -213,8 +289,9 @@ First-version planned request order is locked as:
 4. `SessionMemory`
 5. `SessionSummary`
 6. `SubagentConclusion`
-7. `ToolResultEvidence`
-8. `UserTurnInput`
+7. `RepairEvidence`
+8. `ToolResultEvidence`
+9. `UserTurnInput`
 
 Ordering rule:
 

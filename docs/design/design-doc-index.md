@@ -18,6 +18,13 @@ Use this directory family for durable design truth.
 - `docs/design/control-error-center-refactor.md`
 - `docs/design/instruction-capability-loader-design.md`
 - `docs/design/task-orchestration-design.md`
+- `docs/design/task-center-truth.md`
+- `docs/design/agent-lifecycle-semantics.md`
+- `docs/design/master-worker-task-state-machine-phase1.md`
+- `docs/design/master-worker-prompt-contract-phase1.md`
+- `docs/design/multi-task-foundation-implementation-plan.md`
+- `docs/design/workspace-session-execution-taxonomy.md`
+- `docs/design/multi-agent-dispatch-alignment.md`
 - `docs/design/ui-and-runtime-topology.md`
 - `docs/design/config-core-design.md`
 - `docs/design/contracts-core-design.md`
@@ -65,6 +72,20 @@ Use this directory family for durable design truth.
   - writable-tool preview truth, preview/execute parity, and diff contract direction
 - `task-orchestration-design.md`
   - task lifecycle, one-tool action surface, persistence, startup recovery, runtime memory state, and agent registry skeleton
+- `task-center-truth.md`
+  - global Task Center truth for BigTask, SubTask, Execution, Review, EventInbox, SchedulerTick, agent task indexes, task registration, sync, query, and recovery
+- `agent-lifecycle-semantics.md`
+  - per-agent runtime lifecycle semantics for master and worker agents, including live state, current/last activity, model/tool/error counters, runtime stats, control channel, and AgentBoard projections
+- `master-worker-task-state-machine-phase1.md`
+  - first multi-task foundation state machine: one active BigTask, multiple SubTasks, MasterPollLoop, WorkerExecutionLoop, FrameworkSchedulerTick, timeout/block/review/retry/recovery acceptance
+- `master-worker-prompt-contract-phase1.md`
+  - master and worker prompt/tool behavior contract for Phase 1, including state handling tables, wait semantics, control-channel handling, and context admission rules
+- `multi-task-foundation-implementation-plan.md`
+  - staged plan for implementing Task Center, Agent Lifecycle, lifecycle-to-task sync, scheduler tick, runtime control channel, headless samples, and UI projection before full multi-agent scheduling
+- `workspace-session-execution-taxonomy.md`
+  - canonical vocabulary and ownership rules for master, worker resources, cwd-bound workspaces, workspace-owned sessions, and worker executions
+- `multi-agent-dispatch-alignment.md`
+  - Codex/Reasonix comparison and Freehand dispatch design for model-triggered task dispatch, worker execution tracking, subagent turn subscription, and compact status projection
 - `node-master-slave-design.md`
   - local master/slave topology, pairing, node states, task delegation, turn subscription
 - `ui-protocol-design.md`

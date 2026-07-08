@@ -2607,3 +2607,24 @@ Current real root cause split:
   - Minimal single-agent task lifecycle: proven by deterministic ADP task lifecycle and post-restart task history query.
   - Prompt context economy: proven by `effective_context_uses_last_repaired_round_without_raw_failed_attempt`.
   - Multi-agent work remains out of scope; existing dirty multi-agent design docs were not staged.
+
+# 2026-07-08 multi-task foundation design landing
+
+- scope:
+  - Jason clarified the next phase is not more single-agent reasoning foundation; that is already closed.
+  - The next phase is multi-task task-management foundation before attaching capabilities to agents.
+  - Design covers Master, Worker, Framework Task Runtime, Task Center, Agent Lifecycle, timers, state sensing, prompt/tool contract, and Phase 1 boundaries.
+- landed design docs:
+  - `docs/design/task-center-truth.md`: global Task Center truth for BigTask/SubTask/Execution/Review/EventInbox/SchedulerTick, task registration, sync, query, and recovery.
+  - `docs/design/agent-lifecycle-semantics.md`: every agent, master or worker, emits live lifecycle semantics: state, current/last activity, model/tool/error stats, runtime control channel, safe points, AgentBoard.
+  - `docs/design/master-worker-task-state-machine-phase1.md`: Phase 1 state machine for one active BigTask with multiple SubTasks, MasterPollLoop, WorkerExecutionLoop, FrameworkSchedulerTick, timeout/block/review/retry/recovery.
+  - `docs/design/master-worker-prompt-contract-phase1.md`: master and worker prompt/tool behavior tables for state-driven task management.
+  - `docs/design/multi-task-foundation-implementation-plan.md`: staged implementation plan from owner maps to Task Center skeleton, lifecycle reducer, scheduler tick, runtime control channel, samples, and UI projection.
+  - Existing `workspace-session-execution-taxonomy.md` and `multi-agent-dispatch-alignment.md` are linked as vocabulary and broader dispatch direction; Phase 1 docs constrain immediate implementation scope.
+- key decisions:
+  - Task Center owns "what work exists and what state it is in".
+  - Agent Lifecycle owns "what each agent is doing right now".
+  - Framework owns time, timers, event cursor, state sensing, timeout/stale/blocker detection, and projections.
+  - Master model owns task-management decisions from TaskBoard/AgentBoard truth.
+  - Worker owns execution progress/block/submission/retry updates.
+  - Phase 1 avoids multiple independent BigTasks and cross-session context switching.

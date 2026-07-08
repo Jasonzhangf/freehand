@@ -9,6 +9,7 @@ This document defines:
 - when Freehand should consider compaction
 - when Freehand should trigger rollback
 - when Freehand should trigger resume rebuild
+- when Freehand should prune superseded failed attempts from future context
 - how unexpected states are classified instead of silently tolerated
 
 ## Owner
@@ -41,6 +42,17 @@ Confirmed Reasonix compaction behavior:
 - stale tool results are pruned before compaction if pruning alone can clear the threshold
 - auto compaction pauses after two ineffective consecutive compactions
 
+Additional Reasonix-inspired context direction:
+
+- failed attempts are useful only while they help repair the next attempt
+- after a later successful attempt supersedes them, future prompt history should
+  prefer the successful path and not keep stale failed attempts in cache-hit
+  context
+- audit/debug truth remains durable outside model-visible context
+- multi-task pruning/admission decisions must use Task Center accepted summaries
+  and Agent Lifecycle/Execution truth when they exist; raw worker transcripts
+  still do not enter parent prompt context by default
+
 Important boundary:
 
 - Reasonix does not provide a Freehand-style persisted `SessionHistory` rewrite ledger
@@ -56,10 +68,11 @@ The trigger layer must answer, with explicit typed output:
 1. do nothing
 2. emit a soft warning
 3. prefer stale volatile evidence pruning over rewrite
-4. stage compaction
-5. stage rollback
-6. stage resume rebuild
-7. block because recovery truth is insufficient
+4. prune superseded failed attempts from future prompt history
+5. stage compaction
+6. stage rollback
+7. stage resume rebuild
+8. block because recovery truth is insufficient
 
 ## Trigger Matrix
 
@@ -108,6 +121,33 @@ Rules:
 1. if post-compaction prompt usage drops below the auto threshold, clear the auto-compaction stuck state
 2. if post-compaction prompt usage stays above the auto threshold, keep the consecutive-compaction count
 3. if consecutive ineffective compactions reaches `2`, pause auto compaction and require explicit operator/runtime intervention
+
+### Superseded Failed-Attempt Prune Trigger
+
+This trigger removes failed attempts from future model-visible history only after
+their correction value has been consumed.
+
+Inputs:
+
+- failed attempt id and purpose key
+- later successful attempt id
+- whether both attempts belong to the same task/session/workspace purpose
+- whether debug/replay/error truth is already durable
+- whether an accepted summary or successful result preserves the useful outcome
+
+Rules:
+
+1. if there is no later successful attempt for the same purpose, do not prune
+2. if the failure is still an active blocker, do not prune
+3. if audit/debug/error truth for the failure is missing, block pruning
+4. if the success result is not admitted into task/session truth, do not prune
+5. if success supersedes failure and audit truth exists, prune the failed attempt
+   from future prompt history
+6. if the failure carries a durable lesson, promote that lesson as a concise
+   session summary before pruning raw failed-attempt details
+
+The output is a prompt-history rewrite/prune decision, not deletion of debug,
+replay, task ledger, or error-center evidence.
 
 ### Rollback Trigger
 
@@ -171,6 +211,14 @@ Unexpected cases must not silently fall through.
 - if reclaim estimate is unavailable, policy may still compact by threshold
 - absence of reclaim estimate is not treated as proof that reclaim is impossible
 
+### Superseded Failure Without Audit Truth
+
+- failed attempts must not disappear from all truth
+- if replay/error/debug persistence is unavailable, prompt-history pruning is
+  blocked
+- the system must surface missing audit truth rather than silently favoring the
+  successful path
+
 ### Repeated Ineffective Compaction
 
 - after two consecutive ineffective compactions, auto compaction pauses
@@ -214,6 +262,9 @@ White-box tests must cover:
 - auto compaction threshold
 - force compaction threshold
 - stale-prune-preferred threshold case
+- superseded failed-attempt prune after successful repair
+- no prune while failure remains active blocker
+- no prune when audit/debug truth is missing
 - compaction pause after repeated ineffective folds
 - rollback preferred over rebuild when safe snapshot exists
 - rebuild preferred when restore is missing or invalid
