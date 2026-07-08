@@ -2638,3 +2638,17 @@ Current real root cause split:
   - semantic actions remain visible in docs/prompts/tests, but exposed runtime tools should be few.
   - baseline continues the existing `task(op=...)` direction; `agent` and `worker_control` are only separate tool surfaces if owner-map analysis proves they are needed.
   - invalid op/args/state returns a paired action/tool error to the model; no fallback, no guessed nearby op, no provider-failure conflation.
+
+# 2026-07-08 tool.registry red lock for task-management actions
+
+- Added tool registry tests that lock task-management semantic actions out of the exposed provider tool-name surface.
+- `task_management_semantic_actions_are_not_exposed_as_tools` rejects standalone names such as `query_task_board`, `dispatch_subtask`, `approve_submission`, and `close_big_task`.
+- `task_tool_exposes_operation_parameter` verifies `task` remains present and requires string `op`.
+- This is scoped to task-management actions only. General code tools such as read/write/search/shell remain separate because they are currently aligned with Codex/Reasonix categories and WebUI tool display semantics.
+- Validation:
+  - `cargo test -p freehand-tools -- --nocapture` -> 29 passed
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`

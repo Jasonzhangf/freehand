@@ -37,6 +37,14 @@ Current first implemented set:
 - `todo_write`
 - `complete_step`
 
+Task-management surface:
+
+- `task`
+- task-management semantic action categories must not become standalone tool
+  names by default
+- use typed `op` parameters for task-management behavior
+- see `master-worker-tool-action-contract-phase1.md`
+
 Related lifecycle owners that must stay separate:
 
 - `tool.registry`
@@ -83,6 +91,9 @@ If any of the above is false, the tool may remain registered only as explicitly 
 ## First-Version Direction
 
 - registry names and schemas should stay aligned with the Reasonix tool surface where semantics match
+- task-management behavior uses owner-scoped tools plus typed `op` parameters;
+  semantic action names in master/worker docs are prompt/test categories, not
+  provider tool names
 - first implemented tools should prefer deterministic, low-side-effect tools
 - first real command tool is foreground-only `bash`:
   - input is `command` plus optional `timeout_seconds`

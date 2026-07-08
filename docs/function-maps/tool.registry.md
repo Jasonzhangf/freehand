@@ -24,6 +24,8 @@
 - registry exports provider-neutral tool definitions without importing provider adapter DTOs
 - registry can export one stable implemented-tool schema fingerprint for planner/cache diagnostics without leaking provider DTOs into reason owners
 - registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner
+- registry keeps task-management semantic action categories out of exposed tool
+  names; task-management behavior enters through `task` with typed `op`
 - foreground `bash` starts in one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root
 - path-based read-only tools resolve against one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root
 - path-based tools resolve against one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root
@@ -34,6 +36,8 @@
 ## Response Mainline
 
 - completed provider tool calls enter `BuiltinToolRegistry::execute`
+- task-management tool definitions expose `task(op=...)` rather than one
+  standalone tool name per semantic action
 - first real foreground command execution set is:
   - `bash`
 - first real read-only execution set is:
@@ -140,6 +144,10 @@
   - `ls`
   - `todo_write`
   - `complete_step`
+- task-management semantic action names such as `query_task_board`,
+  `dispatch_subtask`, and `approve_submission` are not exposed as standalone
+  tools; they are prompt/test semantic categories mapped to `task(op=...)` or
+  a future owner-approved small tool surface
 - implemented tool schema fingerprint export is now bound in `freehand-tools` and is the owner path for planner/cache diagnostics consumers
 - first-version path tools are locked to the explicit per-call workspace root when supplied, otherwise the canonical runtime workspace root, and reject path escape outside that root
 - first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing

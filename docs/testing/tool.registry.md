@@ -13,6 +13,8 @@
   - implemented schema fingerprint stability tests
   - implemented schema fingerprint change detection tests
 - `read_only` metadata tests
+- task-management semantic action names are not exposed as standalone tools
+- `task` remains the task-management tool surface and requires typed `op`
 - `bash` success-path, workspace-cwd, explicit workspace root, timeout, and non-zero-exit tests
 - live runtime checkpoint routing must not treat non-file-mutation tools such as `bash` as preview/checkpointable file mutations
   - `read_file` line-window and path-lock tests
@@ -25,6 +27,7 @@
   - `todo_write` argument validation and success tests
   - `complete_step` argument validation and success tests
   - unknown/unimplemented tool error tests
+  - task tool op-dispatch surface tests
 - module black-box plan:
   - runtime live bridge can advertise implemented tool definitions without hardcoded demo tools
   - runtime live bridge can execute a real implemented read-only registry tool and re-enter the result, including requested session cwd execution
@@ -34,6 +37,7 @@
   - daemon and runtime smokes now prove `read_file` can run through the registry-owned live path using session cwd
   - writable file-mutation tools now still enter the live path only through the registry owner instead of runtime orchestration
   - future bash/web/notebook tools still have one owner and cannot be implemented in runtime orchestration
+  - future task-management actions must enter through the small owner-scoped tool/op surface, not new standalone semantic-action tool names
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with tool owner code and function map updates
 - fixtures / replay inputs / runtime evidence paths:

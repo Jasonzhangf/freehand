@@ -2655,6 +2655,76 @@ beta
     }
 
     #[test]
+    fn task_management_semantic_actions_are_not_exposed_as_tools() {
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        let exposed_names = registry
+            .definitions()
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+        let semantic_action_names = [
+            "query_task_board",
+            "query_agent_board",
+            "query_agent_tasks",
+            "query_blocked_tasks",
+            "query_review_queue",
+            "query_stale_executions",
+            "create_subtask",
+            "dispatch_subtask",
+            "query_execution",
+            "query_agent_lifecycle",
+            "ask_runtime_question",
+            "inject_constraint",
+            "approve_submission",
+            "reject_submission",
+            "wait_with_next_check",
+            "close_big_task",
+        ];
+
+        assert!(exposed_names.contains(&"task".to_owned()));
+        for semantic_name in semantic_action_names {
+            assert!(
+                !exposed_names.contains(&semantic_name.to_owned()),
+                "`{semantic_name}` is a semantic action category and must not be exposed as a standalone tool"
+            );
+        }
+    }
+
+    #[test]
+    fn task_tool_exposes_operation_parameter() {
+        let task_definition = reasonix_aligned_builtin_specs()
+            .into_iter()
+            .find(|spec| spec.definition.name == "task")
+            .expect("task tool spec")
+            .definition;
+        let required = task_definition
+            .input_schema
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .expect("required array");
+        let op_schema = task_definition
+            .input_schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|properties| properties.get("op"))
+            .expect("op schema");
+
+        assert!(required.iter().any(|item| item.as_str() == Some("op")));
+        assert_eq!(
+            op_schema.get("type").and_then(serde_json::Value::as_str),
+            Some("string")
+        );
+        assert!(
+            op_schema
+                .get("enum")
+                .and_then(serde_json::Value::as_array)
+                .expect("op enum")
+                .iter()
+                .any(|item| item.as_str() == Some("create"))
+        );
+    }
+
+    #[test]
     fn preview_rejects_non_mutation_tools_and_unimplemented_preview_tools() {
         let registry = BuiltinToolRegistry::reasonix_aligned();
         assert_eq!(
