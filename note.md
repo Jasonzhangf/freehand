@@ -2628,3 +2628,13 @@ Current real root cause split:
   - Master model owns task-management decisions from TaskBoard/AgentBoard truth.
   - Worker owns execution progress/block/submission/retry updates.
   - Phase 1 avoids multiple independent BigTasks and cross-session context switching.
+
+# 2026-07-08 phase1 tool/action surface clarification
+
+- Jason clarified that tool count must stay small: use a few logical tools plus typed parameters, not many single-action tool names.
+- Durable design added `docs/design/master-worker-tool-action-contract-phase1.md`.
+- Contract:
+  - tool name is owner surface; `op` is operation; typed args are payload.
+  - semantic actions remain visible in docs/prompts/tests, but exposed runtime tools should be few.
+  - baseline continues the existing `task(op=...)` direction; `agent` and `worker_control` are only separate tool surfaces if owner-map analysis proves they are needed.
+  - invalid op/args/state returns a paired action/tool error to the model; no fallback, no guessed nearby op, no provider-failure conflation.

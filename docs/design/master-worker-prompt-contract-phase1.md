@@ -75,7 +75,7 @@ When waiting, return a wait action with reason and next_check_after.
 
 ## Master Tool Direction
 
-Minimum tool/action categories:
+Semantic tool/action categories:
 
 ```text
 query_task_board
@@ -96,8 +96,22 @@ wait_with_next_check
 close_big_task
 ```
 
-These may initially be implemented through a smaller op-dispatched task/action
-surface, but the semantic categories must stay visible in docs and tests.
+These names are semantic categories for prompts, docs, tests, and review. They
+are not the default exposed runtime tool names.
+
+The exposed tool surface must stay small and owner-scoped. Use tools such as
+`task`, `agent`, and `worker_control` with typed `op` parameters instead of
+creating one tool per semantic action.
+
+Prompt rule:
+
+```text
+Use the small owner-scoped tools. Select the correct op and typed args. Do not
+invent new tool names for semantic actions.
+```
+
+The durable tool/action contract lives in
+`master-worker-tool-action-contract-phase1.md`.
 
 ## Worker Prompt Contract
 

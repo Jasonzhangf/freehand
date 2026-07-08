@@ -22,6 +22,7 @@ Use this directory family for durable design truth.
 - `docs/design/agent-lifecycle-semantics.md`
 - `docs/design/master-worker-task-state-machine-phase1.md`
 - `docs/design/master-worker-prompt-contract-phase1.md`
+- `docs/design/master-worker-tool-action-contract-phase1.md`
 - `docs/design/multi-task-foundation-implementation-plan.md`
 - `docs/design/workspace-session-execution-taxonomy.md`
 - `docs/design/multi-agent-dispatch-alignment.md`
@@ -80,6 +81,8 @@ Use this directory family for durable design truth.
   - first multi-task foundation state machine: one active BigTask, multiple SubTasks, MasterPollLoop, WorkerExecutionLoop, FrameworkSchedulerTick, timeout/block/review/retry/recovery acceptance
 - `master-worker-prompt-contract-phase1.md`
   - master and worker prompt/tool behavior contract for Phase 1, including state handling tables, wait semantics, control-channel handling, and context admission rules
+- `master-worker-tool-action-contract-phase1.md`
+  - Phase 1 tool/action contract requiring a small owner-scoped tool surface with typed `op` parameters, semantic-action-to-op mapping, owner boundaries, and paired action validation errors
 - `multi-task-foundation-implementation-plan.md`
   - staged plan for implementing Task Center, Agent Lifecycle, lifecycle-to-task sync, scheduler tick, runtime control channel, headless samples, and UI projection before full multi-agent scheduling
 - `workspace-session-execution-taxonomy.md`

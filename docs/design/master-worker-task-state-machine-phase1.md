@@ -76,7 +76,7 @@ has ready subtask
 has all required subtasks closed
 ```
 
-Master actions:
+Master semantic actions:
 
 ```text
 create_subtask
@@ -94,6 +94,10 @@ wait_with_next_check
 close_big_task
 report_to_user
 ```
+
+These are semantic action categories, not exposed runtime tool names. Runtime
+execution must use the small owner-scoped tool surface and typed `op` parameters
+defined in `master-worker-tool-action-contract-phase1.md`.
 
 ## Worker Execution Loop
 

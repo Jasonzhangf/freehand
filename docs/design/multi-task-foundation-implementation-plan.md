@@ -167,6 +167,16 @@ Defines:
 - context admission rules
 - Phase 1 prompt/tool categories
 
+### `master-worker-tool-action-contract-phase1.md`
+
+Defines:
+
+- small owner-scoped exposed tool surface
+- typed `op` parameter contract
+- semantic-action-to-op mapping
+- Task Center, Agent Lifecycle, and worker-control owner boundaries
+- action validation and paired error feedback rules
+
 ## Implementation Sequence
 
 ### P0: Owner Map And Contracts
@@ -182,6 +192,10 @@ Deliverables:
   feature id such as `task.center` is needed
 - decide whether `agent.lifecycle` belongs in `freehand-task`,
   `freehand-node`, `freehand-runtime`, or a new crate
+- decide the actual exposed tool names and op enums; default to the existing
+  `task(op=...)` style and add a separate tool name only when owner boundaries
+  require it
+- map every semantic action category to one owner-scoped tool/op pair
 - add function-map and test-design pending entries
 - define serializable contract DTOs in the correct owner
 
@@ -201,7 +215,7 @@ Deliverables:
 - BigTask/SubTask/Execution snapshot structs
 - EventInbox cursor model
 - TaskBoard projection
-- QueryTaskBoard / QueryAgentTasks / QueryExecution direction
+- `task(op="query_board")`, `task(op="query")`, and execution-query op direction
 - restart restore tests from snapshots/ledger
 
 Validation:
@@ -223,7 +237,8 @@ Deliverables:
 - runtime stats counters
 - error profile counters
 - AgentBoard projection
-- QueryAgentLifecycle / QueryAgentBoard direction
+- `agent(op="query_lifecycle")` / `agent(op="query_board")` direction, unless P0
+  proves those projections belong under `task(op=...)`
 
 Validation:
 
