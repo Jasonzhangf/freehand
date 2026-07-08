@@ -12060,7 +12060,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .expect("master poll result");
         let persisted_cursor = match poll {
             UiQueryResult::MasterPoll(poll) => {
-                assert_eq!(poll.task_board.include_terminal, true);
+                assert!(poll.task_board.include_terminal);
                 assert_eq!(poll.next_cursor.as_deref(), Some(inbox_cursor.as_str()));
                 assert_eq!(
                     poll.persisted_cursor.as_deref(),

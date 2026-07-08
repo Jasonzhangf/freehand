@@ -2874,3 +2874,12 @@ Current real root cause split:
   - After `scripts/install-launchd.sh restartS`, verify mode with the same task/execution/worker/cursor returned `master_poll_foundation_verify_ok` with `inbox_after_cursor_events=0`, `poll_events=0`, same persisted cursor, and classifications containing blocked/review_ready/stale.
 - durable rule:
   - Phase 2B closeout must prove all three: replay-from-start full drain, final owner-backed cursor reread, and same-cursor restart verification returning zero events after cursor. Finite page limits or fresh samples after restart are not valid recovery evidence.
+
+# 2026-07-08 phase2b post-commit workspace clippy audit
+
+- after commit `c01032d`, ran `cargo clippy --workspace --all-targets -- -D warnings`.
+- clippy found one Phase 2B runtime test style error at `crates/freehand-runtime/src/lib.rs`: `assert_eq!(poll.task_board.include_terminal, true)`.
+- fixed it to `assert!(poll.task_board.include_terminal)`.
+- validation:
+  - `cargo test -p freehand-runtime runtime_dispatches_phase2b_master_poll_and_event_inbox -- --nocapture` -> 1 passed.
+  - `cargo clippy --workspace --all-targets -- -D warnings` -> passed.
