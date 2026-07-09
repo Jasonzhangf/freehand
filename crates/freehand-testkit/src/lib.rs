@@ -414,9 +414,16 @@ pub fn stable_test_segment(id: &str, kind: ContextSegmentKind, content: &str) ->
             ContextCachePolicy::CacheAnchor,
             ContextRole::Developer,
         ),
-        ContextSegmentKind::SessionMemory | ContextSegmentKind::SessionSummary => (
+        ContextSegmentKind::SessionMemory
+        | ContextSegmentKind::SessionSummary
+        | ContextSegmentKind::TaskContract => (
             ContextStability::SessionStable,
             ContextCachePolicy::Cacheable,
+            ContextRole::Developer,
+        ),
+        ContextSegmentKind::TaskSpaceSnapshot => (
+            ContextStability::TurnVolatile,
+            ContextCachePolicy::NoCache,
             ContextRole::Developer,
         ),
         _ => panic!("stable_test_segment requires a stable/session-stable segment kind"),

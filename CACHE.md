@@ -1,5 +1,10 @@
 # CACHE
 
+- Current context/task-space closeout:
+  - `TaskContract` and `TaskSpaceSnapshot` are first-class context segment kinds. `original-task` now enters live provider context as `TaskContract`; runtime base live context for every round includes completion contract, control status contract, runtime tool guidance, and task contract before volatile carryover.
+  - Verified S-profile context distribution on `127.0.0.1:4042` with `cli-adp-sample-failure-1783595301535093000`: terminal `runtime-turn-201-r3`, `rounds=3`, `tool_executions=2`, `failed_tools=1`; all three rounds kept stable prefix hash `b25c8265c341fff3`, stable count `4`, tool schema hash `fe8c952141685333`, while `previous-visible-output` stayed volatile/no-cache tail only.
+  - Schema-mismatch prompt-only online proof is not deterministic: old prompt allowed unrelated `bash` tool contamination and the no-tool prompt let the model finish valid schema in one round. Future schema-polishing online proof needs provider fixture/injected invalid first response, not natural prompt steering.
+
 - Current master-autonomy gap:
   - Jason clarified the real multi-task requirement: master model must autonomously trigger worker task creation/dispatch and manage worker success, execution error, and rejected-submission retry loops. Existing Phase 2A/2B/2C samples are CLI/ADP command-driven harnesses, not proof of master model autonomy.
   - Live headless probe with `reason-live --agent master` and compressed prompt proved partial tool-trigger behavior only: task `task-auto-1783582650` reached `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat` through real model/tool path. The turn then stalled for about four minutes and did not reach execution failure, review submission, rejection, retry, approval, or close; the exact process was interrupted to avoid a residual process.

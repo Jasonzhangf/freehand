@@ -969,12 +969,7 @@ where
     let mut round = 0usize;
     let mut tool_executions = 0usize;
     let mut next_prompt = request.prompt.clone();
-    let mut carryover_segments = vec![
-        completion_contract_segment(),
-        control_status_contract_segment(),
-        tool_guidance_segment(),
-        original_task_segment(&request.prompt),
-    ];
+    let mut carryover_segments = base_live_context_segments(&request.prompt);
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
@@ -5264,7 +5259,7 @@ fn original_task_segment(prompt: &str) -> ContextSegment {
     let content = format!("Original operator task:\n{prompt}");
     ContextSegment {
         segment_id: ContextSegmentId::new("original-task"),
-        kind: ContextSegmentKind::SessionMemory,
+        kind: ContextSegmentKind::TaskContract,
         stability: ContextStability::SessionStable,
         cache_policy: ContextCachePolicy::Cacheable,
         role: ContextRole::Developer,
@@ -5275,6 +5270,15 @@ fn original_task_segment(prompt: &str) -> ContextSegment {
             reference: Some("original_task".to_owned()),
         },
     }
+}
+
+fn base_live_context_segments(original_prompt: &str) -> Vec<ContextSegment> {
+    vec![
+        completion_contract_segment(),
+        control_status_contract_segment(),
+        tool_guidance_segment(),
+        original_task_segment(original_prompt),
+    ]
 }
 
 fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
@@ -5290,10 +5294,7 @@ fn next_round_segments(
     visible_text: &str,
     rejection_feedback: Option<&str>,
 ) -> Vec<ContextSegment> {
-    let mut segments = vec![
-        completion_contract_segment(),
-        original_task_segment(original_prompt),
-    ];
+    let mut segments = base_live_context_segments(original_prompt);
     if !visible_text.trim().is_empty() {
         let content = format!("Previous round visible output:\n{visible_text}");
         segments.push(ContextSegment {
@@ -9683,6 +9684,7 @@ provider = "old"
             .iter()
             .find(|segment| segment.segment_id.as_str() == "original-task")
             .expect("original task segment");
+        assert_eq!(original_task.kind, ContextSegmentKind::TaskContract);
         let original_task_cost = outcome
             .turn
             .planned_context
@@ -9729,6 +9731,8 @@ provider = "old"
 
         assert_eq!(outcome.rounds, 2);
         assert!(second_request.contains("SENTINEL_PREVIOUS_VISIBLE_OUTPUT_LONG_END"));
+        assert!(second_request.contains("<<<freehand_status>>>"));
+        assert!(second_request.contains("Master task orchestration examples"));
         let previous_output = outcome
             .turn
             .planned_context

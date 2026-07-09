@@ -2819,6 +2819,60 @@ Current real root cause split:
   - `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample success` -> session `cli-adp-sample-success-1783589888991584000`, turn `runtime-turn-195`, `rounds=1`, `schema_retries=0`.
   - `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample failure` -> session `cli-adp-sample-failure-1783589904038500000`, turn `runtime-turn-196-r2`, `rounds=2`, `tool_executions=1`, `failed_tools=1`, `schema_retries=0`.
 
+# 2026-07-09 task-space context layout gap
+
+- Jason asked whether task space is arranged in context with budget and cache-aware placement.
+- Current code status:
+  - no first-class `task-space` / `TaskSpaceSnapshot` context segment exists yet.
+  - `original-task` is currently a `SessionMemory` segment with content-derived budget via `runtime_prompt_segment_token_budget`.
+  - `previous-visible-output` and `completion-schema-feedback` are `SubagentConclusion` volatile segments with content-derived budgets.
+  - planner order is kind-based: `SystemAnchor`, `DeveloperPolicy`, `CompletionContract`, `SessionMemory`, `SessionSummary`, `SubagentConclusion`, `ToolResultEvidence`, `UserTurnInput`.
+  - this means a future task-space snapshot should be a stable/session-stable segment after static contracts/policies and before volatile execution results/user turn.
+- Gap:
+  - task space exists only as design text in `docs/design/master-worker-task-state-machine-phase1.md`, not as a persisted typed context segment.
+  - first-round runtime carryover includes `completion-contract`, `control-status-contract`, `runtime-tool-guidance`, and `original-task`.
+  - `next_round_segments()` currently rebuilds only `completion-contract`, `original-task`, plus volatile carryover; it omits `control-status-contract` and `runtime-tool-guidance` on later rounds.
+- Required next implementation:
+  - add a typed task-space snapshot owner and context segment contract.
+  - place it after static contracts/policies and before volatile execution results.
+  - assign content-derived admission budget and keep it cache-aware.
+  - add tests locking order, budget, stable-prefix hash behavior, and multi-round static guidance retention.
+
+# 2026-07-09 context ordering and Reasonix compression audit
+
+- Audit scope:
+  - Freehand context planner/runtime/rewrite source.
+  - Reasonix reference at `~/code/DeepSeek-Reasonix/internal/agent/compact.go`, `cache_shape.go`, `prune.go`, and cache-hit tests.
+- Freehand current truth:
+  - `plan_context` sorts by segment kind, not insertion order: `SystemAnchor`, `DeveloperPolicy`, `CompletionContract`, `SessionMemory`, `SessionSummary`, `SubagentConclusion`, `ToolResultEvidence`, `UserTurnInput`.
+  - cache diagnostics treat `Stable | SessionStable` leading segments as stable prefix.
+  - current live first round injects `completion-contract`, `control-status-contract`, `runtime-tool-guidance`, `original-task`.
+  - `original-task` is `SessionMemory + Cacheable` with content-derived budget.
+  - `previous-visible-output` and `completion-schema-feedback` are volatile `SubagentConclusion + NoCache` with content-derived budgets.
+  - `reason.rewrite-policy` pure policy exists with Reasonix-aligned thresholds: soft 50%, auto 80%, force 90%, max tail 16384, max consecutive compactions 2.
+  - `ReasonRewriteRuntime` can call `SessionHistory::stage_compaction` only after policy approval.
+- Freehand gaps:
+  - no first-class `TaskSpaceSnapshot` / task-space context segment exists.
+  - production `provider.reason-live-bridge` does not wire provider usage into `ReasonRewriteRuntime`; compaction is policy/harness-level, not live runtime behavior.
+  - stale volatile pruning executor is pending.
+  - no Reasonix-style byte-level provider cache-hit curve test proving request prefix stability across turns.
+  - no live context status projection showing cache/prefix/compaction state to UI.
+  - task-space dynamic state should not be inside `SessionMemory` if it changes every turn, or it will churn stable-prefix cache.
+- Reasonix reference findings:
+  - prompt grows append-only for high cache hit until soft/auto/force thresholds.
+  - soft threshold reports context growth without rewriting prefix.
+  - prune stale large tool results before paying summarizer cost.
+  - compaction preserves system head plus summarized middle plus token-bounded recent tail.
+  - tail selection is token-budgeted and aligned off orphan tool results.
+  - compaction archives dropped originals and emits started/done UI events.
+  - cache diagnostics hash system/tools/rewrite version and report cache hit/miss usage.
+  - tests simulate provider cache-hit tokens and assert byte-stable request prefixes.
+- Direction:
+  - implement task-space as two context surfaces: stable `TaskContract` and volatile/cache-isolated `TaskSpaceSnapshot`.
+  - put task surfaces after static contracts/policies and before volatile execution evidence/user input.
+  - keep ordinary turns append-only except explicit rewrite gates.
+  - wire real provider usage to rewrite runtime in live bridge, then add Reasonix-style cache-hit and compaction-loop tests.
+
 # 2026-07-09 master autonomy gap audit
 
 - Trigger:
@@ -3045,3 +3099,49 @@ Current real root cause split:
   - After `scripts/install-launchd.sh restartS`, verify mode against the same task/execution/agent/control ids returned `worker_control_foundation_verify_ok` with `status=cancelled`, `control_events=8`, and the same task/control event truth.
 - durable rule:
   - Worker-control stateful consequences must persist `applied` control events only after the Task Center consequence succeeds; otherwise the ledger can falsely claim an action happened.
+
+# 2026-07-09 context distribution closeout
+
+- scope:
+  - Closed P0 context/task-space distribution check for `contracts.core`, `reason.context-planner`, and `provider.reason-live-bridge`.
+  - Added first-class `TaskContract` / `TaskSpaceSnapshot` segment kinds.
+  - Runtime original operator task now enters as `TaskContract`, and every live round starts from completion contract + control status contract + runtime tool guidance + original task contract.
+- local validation:
+  - `cargo test -p freehand-contracts -- --nocapture` -> 10 passed.
+  - `cargo test -p freehand-blocks -- --nocapture` -> 43 passed.
+  - `cargo test -p freehand-runtime live_bridge_admits_long -- --nocapture` -> 2 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 90 passed.
+  - `cargo test -p freehand-reason -- --nocapture` -> 60 passed.
+  - `cargo test -p freehand-testkit -- --nocapture` -> 6 passed.
+  - `cargo test -p freehand-cli -- --nocapture` -> 24 passed.
+  - `cargo build --workspace` -> passed.
+  - `cargo fmt --check` -> passed.
+  - `cargo clippy --workspace --all-targets -- -D warnings` -> passed.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `git diff --check` -> ok.
+- S-profile online validation:
+  - `scripts/install-launchd.sh restartS` refreshed `freehand-cliS/freehand-daemonS` and restarted `com.freehand.daemonS` on `127.0.0.1:4042`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - success sample closed `cli-adp-sample-success-1783594455608254000`, `runtime-turn-197`, `rounds=1`, `tool_executions=0`.
+  - failure sample after current restart closed `cli-adp-sample-failure-1783595301535093000`, terminal `runtime-turn-201-r3`, `rounds=3`, `tool_executions=2`, `failed_tools=1`.
+- context distribution evidence from `~/.freehand/ledgers/reason/master/cli-adp-sample-failure-1783595301535093000.jsonl`:
+  - `runtime-turn-201`: stable/session-stable prefix = `runtime-tool-guidance`, `completion-contract`, `control-status-contract`, `original-task`; volatile tail = `runtime-turn-201-user`.
+  - `runtime-turn-201-r2`: same stable/session-stable prefix; volatile tail = `previous-visible-output`, `runtime-turn-201-r2-user`.
+  - `runtime-turn-201-r3`: same stable/session-stable prefix; volatile tail = `previous-visible-output`, `runtime-turn-201-r3-user`.
+  - stable prefix hash stayed `b25c8265c341fff3` across all three rounds; stable segment count stayed `4`; tool schema hash stayed `fe8c952141685333`.
+  - token distribution stayed bounded: stable/tool guidance 394, completion 167, control status 157, original task 60; volatile previous-visible-output was 43 then 149 tokens.
+- schema-mismatch sample audit:
+  - Old prompt allowed tool contamination; online run `cli-adp-sample-schema-mismatch-1783594499298378000` called `bash` and timed out with ledger stuck at `ToolPending`.
+  - Updated sample prompt to explicit no-tool and added CLI evidence gate `SchemaMismatch => rounds>=2 && schema_retries>=1 && tool_executions==0`.
+  - Mock CLI test now asserts `tool_executions=0`.
+  - Online no-tool run still returned valid schema in one round (`rounds=1`, `schema_retries=0`), so natural-prompt schema mismatch is not deterministic with the current model and must not be counted as schema-polishing online proof.
+  - Future schema-polishing online proof needs a provider fixture or injected first invalid response, not prompt-only steering.
+- MemoryPalace:
+  - First corpus attempt copied source files and was rejected because test code contained `sk-inline` / token-like fixture strings.
+  - Safe corpus `/Volumes/extension/code/memory/freehand-context-distribution-corpus-safe-1783595301535093000` copied only memory/docs/skill files.
+  - Refined secret scan `trojan://|Secret(Id|Key)=|AKID|Bearer ...|(^|[^A-Za-z])sk-...|-----BEGIN` returned zero hits.
+  - `mempalace mine ... --wing freehand --agent codex` processed 19 files.
+  - Search for `cli-adp-sample-failure-1783595301535093000 stable prefix hash b25c8265c341fff3` returned `note.md` rank 1.

@@ -11,7 +11,7 @@ Generated from `docs/mainline-calls/contracts.core.json`. Do not edit by hand.
 ## Request Mainline
 
 - request-chain semantic nodes are defined and exported as cross-module contracts
-- typed context segments replace ad hoc context item pairs
+- typed context segments replace ad hoc context item pairs, including first-class task contract and task-space snapshot kinds
 - provider payload semantic contract carries ordered `input_segments` rather than one rendered prompt string
 - writable-tool preview contracts remain separate from provider request content while staying replay-safe across runtime/tool boundaries
 - request validators stay inside the contract owner and gate request boundaries before orchestrators or adapters proceed
@@ -68,7 +68,7 @@ Generated from `docs/mainline-calls/contracts.core.json`. Do not edit by hand.
 
 ## Sync Status Against Mainline Call
 
-- shared IDs, typed context segment contracts, request nodes, tool contracts, preview contracts, semantic response nodes, and error contracts are bound in code
+- shared IDs, typed context segment contracts including task contract/snapshot kinds, request nodes, tool contracts, preview contracts, semantic response nodes, and error contracts are bound in code
 - request-side validation helpers remain single-owner contract guards and are reused across orchestrator boundaries
 - shared contract types remain serializable, replayable, and persistable by default
 - generated wiki must be regenerated from `docs/mainline-calls/contracts.core.json` when this function-map truth changes

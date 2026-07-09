@@ -2904,6 +2904,7 @@ fn cli_runs_adp_schema_mismatch_turn_sample_against_mock_websocket() {
     assert!(stdout.contains("adp_turn_sample_ok"));
     assert!(stdout.contains("sample=schema-mismatch"));
     assert!(stdout.contains("schema_retries=1"));
+    assert!(stdout.contains("tool_executions=0"));
     assert!(stdout.contains("rounds=2"));
 
     handle.join().expect("adp schema mismatch sample mock join");

@@ -12,8 +12,8 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 
 - selected agent config enters the runtime-owned live bridge with one bound provider
 - live bridge restores or creates the requested session through `ReasonPersistence` before round execution
-- the original operator task enters the planner as an `original-task` segment with a content-derived admission budget instead of a fixed tiny prompt cap
-- multi-round carryover such as `previous-visible-output` and schema feedback uses content-derived admission budgets instead of arbitrary small runtime caps
+- the original operator task enters the planner as an `original-task` `TaskContract` segment with a content-derived admission budget instead of a fixed tiny prompt cap
+- multi-round carryover retains completion contract, control status contract, runtime tool guidance, and `TaskContract` before volatile previous-visible-output or schema feedback, using content-derived admission budgets instead of arbitrary small runtime caps
 - when an existing session is restored, live bridge rebuilds `reason.session-history` base context from effective persisted turns before the next round starts, so same-session follow-up requests include prior user/assistant turn truth
 - restored prompt context keeps only the latest round for each repaired logical turn, so superseded failed repair attempts stay in ledgers/UI truth but do not enter the next default prompt context
 - runtime emits restore lifecycle debug snapshots through `debug.core` without request text
@@ -147,6 +147,8 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - provider executor and transport failures are distinct from schema mismatch polishing and tool execution result failures: recoverable non-stream failures retry up to five attempts, then materialize a failed terminal turn with a concrete provider error code and no active turn before the dispatch error is returned
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported
+- runtime white-box coverage now locks long operator task admission through the live bridge: `original-task` is a `TaskContract`, its budget scales with actual prompt content, and the provider request preserves the prompt tail sentinel
+- runtime white-box coverage now proves multi-round provider re-entry retains status schema and runtime tool guidance
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`
 - generated wiki must be regenerated from `docs/mainline-calls/provider.reason-live-bridge.json` when this function-map truth changes
 - provider executor retry/error metadata is now written through `record_provider_error_metadata` at both single-shot and stream error return paths via pipeline node `RuntimeLive05ProviderError`

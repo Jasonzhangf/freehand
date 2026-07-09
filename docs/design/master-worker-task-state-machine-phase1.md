@@ -138,6 +138,10 @@ injected into later model requests.
 
 The model must return a structured candidate state machine at stop points. The
 framework compares only explicit standard fields, not natural language meaning.
+The model-visible context surface is split into a stable `TaskContract` and a
+volatile `TaskSpaceSnapshot`. The contract preserves the original target and
+acceptance frame; the snapshot carries current phase/progress/blocker fields and
+must not enter the cache-stable rewrite base.
 
 Standard machine-checkable fields:
 

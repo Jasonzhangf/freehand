@@ -14,6 +14,7 @@
   - structured tool argument round-trip
   - writable preview contract round-trip
   - usage total/reasoning/finish-reason round-trip
+  - task context segment kind round-trip for `TaskContract` and `TaskSpaceSnapshot`
   - context-composed request validation
   - provider payload segment validation
 - module black-box plan:
@@ -27,5 +28,5 @@
 - known gaps:
   - versioning policy tests not yet defined
 - sync status between design and implementation:
-- shared IDs, typed context segments, request/response/error contracts, preview contracts, and serialization baseline landed
+  - shared IDs, typed context segments including task contract/snapshot kinds, request/response/error contracts, preview contracts, and serialization baseline landed
   - migrated mainline-call source and generated wiki are kept in sync with this test design

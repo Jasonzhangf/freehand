@@ -9,9 +9,11 @@
   - metadata and request payload stay hard-isolated
   - explicit rewrite events are the only path that changes rewrite version and rewrite mode in planner diagnostics
   - restored same-session context supplied by runtime restore has already excluded superseded repaired-failure rounds from default prompt context
+  - task contracts are stable/cacheable context while task-space snapshots are volatile/no-cache context
 - white-box plan:
   - segment classification tests
   - segment ordering tests
+  - task contract and task-space snapshot cache-shape tests
   - segment token-cap rejection tests
   - subagent conclusion admission tests
   - raw subagent transcript rejection tests
@@ -21,6 +23,7 @@
   - rewrite-base validation tests
 - module black-box plan:
   - planner builds provider-neutral request content from stable + volatile inputs
+  - planner keeps task-space snapshots out of stable-prefix diagnostics while task contract changes drift the stable prefix
   - planner rejects metadata/request mixed inputs
   - planner emits cache diagnostics without changing request content
 - project black-box impact:
@@ -41,4 +44,5 @@
   - session-history rewrite-mode/version wiring is landed
   - runtime tool-schema fingerprint wiring is landed through reason turn input and the runtime live bridge
   - repaired-failure context economy is locked at the runtime restore boundary before segments enter planner admission
+  - task contract and task-space snapshot segment contracts are locked in planner admission
   - migrated mainline-call source and generated wiki are kept in sync with this test design

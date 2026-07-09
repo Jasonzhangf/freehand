@@ -515,12 +515,7 @@ pub fn validate_rewrite_base_segments(
     let mut ordered_segments = Vec::with_capacity(segments.len());
     for segment in segments {
         validate_candidate_segment(segment)?;
-        if matches!(
-            segment.kind,
-            ContextSegmentKind::SubagentConclusion
-                | ContextSegmentKind::ToolResultEvidence
-                | ContextSegmentKind::UserTurnInput
-        ) {
+        if segment.stability == ContextStability::TurnVolatile {
             return Err(ContextPlannerError::InvalidRewriteSegmentKind {
                 segment_id: segment.segment_id.as_str().to_owned(),
                 kind: context_segment_kind_label(segment.kind).to_owned(),
@@ -580,6 +575,8 @@ fn context_segment_kind_label(kind: ContextSegmentKind) -> &'static str {
         ContextSegmentKind::DeveloperPolicy => "developer_policy",
         ContextSegmentKind::SessionMemory => "session_memory",
         ContextSegmentKind::SessionSummary => "session_summary",
+        ContextSegmentKind::TaskContract => "task_contract",
+        ContextSegmentKind::TaskSpaceSnapshot => "task_space_snapshot",
         ContextSegmentKind::SubagentConclusion => "subagent_conclusion",
         ContextSegmentKind::ToolResultEvidence => "tool_result_evidence",
         ContextSegmentKind::UserTurnInput => "user_turn_input",
@@ -710,6 +707,16 @@ fn expected_segment_contract(
             ContextCachePolicy::Cacheable,
             None,
         ),
+        ContextSegmentKind::TaskContract => (
+            ContextStability::SessionStable,
+            ContextCachePolicy::Cacheable,
+            Some(ContextRole::Developer),
+        ),
+        ContextSegmentKind::TaskSpaceSnapshot => (
+            ContextStability::TurnVolatile,
+            ContextCachePolicy::NoCache,
+            Some(ContextRole::Developer),
+        ),
         ContextSegmentKind::SubagentConclusion => (
             ContextStability::TurnVolatile,
             ContextCachePolicy::NoCache,
@@ -809,11 +816,13 @@ fn segment_order_key(kind: ContextSegmentKind) -> u8 {
         ContextSegmentKind::SystemAnchor => 0,
         ContextSegmentKind::DeveloperPolicy => 1,
         ContextSegmentKind::CompletionContract => 2,
-        ContextSegmentKind::SessionMemory => 3,
-        ContextSegmentKind::SessionSummary => 4,
-        ContextSegmentKind::SubagentConclusion => 5,
-        ContextSegmentKind::ToolResultEvidence => 6,
-        ContextSegmentKind::UserTurnInput => 7,
+        ContextSegmentKind::TaskContract => 3,
+        ContextSegmentKind::SessionMemory => 4,
+        ContextSegmentKind::SessionSummary => 5,
+        ContextSegmentKind::TaskSpaceSnapshot => 6,
+        ContextSegmentKind::SubagentConclusion => 7,
+        ContextSegmentKind::ToolResultEvidence => 8,
+        ContextSegmentKind::UserTurnInput => 9,
     }
 }
 
@@ -1017,9 +1026,16 @@ mod tests {
                 ContextCachePolicy::CacheAnchor,
                 ContextRole::Developer,
             ),
-            ContextSegmentKind::SessionMemory | ContextSegmentKind::SessionSummary => (
+            ContextSegmentKind::SessionMemory
+            | ContextSegmentKind::SessionSummary
+            | ContextSegmentKind::TaskContract => (
                 ContextStability::SessionStable,
                 ContextCachePolicy::Cacheable,
+                ContextRole::Developer,
+            ),
+            ContextSegmentKind::TaskSpaceSnapshot => (
+                ContextStability::TurnVolatile,
+                ContextCachePolicy::NoCache,
                 ContextRole::Developer,
             ),
             ContextSegmentKind::SubagentConclusion => (
@@ -1078,6 +1094,20 @@ mod tests {
                     8,
                     "memory",
                 ),
+                segment(
+                    "task-contract",
+                    ContextSegmentKind::TaskContract,
+                    "target contract",
+                    16,
+                    "task_space",
+                ),
+                segment(
+                    "task-snapshot",
+                    ContextSegmentKind::TaskSpaceSnapshot,
+                    "phase executing",
+                    16,
+                    "task_space",
+                ),
             ],
             current_user_text: "hello planner".to_owned(),
             user_segment_id: ContextSegmentId::new("turn-user"),
@@ -1098,13 +1128,20 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             ordered_ids,
-            vec!["head-system", "head-memory", "tail-sub", "turn-user"]
+            vec![
+                "head-system",
+                "task-contract",
+                "head-memory",
+                "task-snapshot",
+                "tail-sub",
+                "turn-user"
+            ]
         );
         assert_eq!(
             planned.diagnostics.rewrite_mode,
             ContextRewriteMode::OrdinaryTurn
         );
-        assert_eq!(planned.diagnostics.stable_segment_hashes.len(), 2);
+        assert_eq!(planned.diagnostics.stable_segment_hashes.len(), 3);
     }
 
     #[test]
@@ -1205,6 +1242,103 @@ mod tests {
         assert_ne!(
             planned_a.diagnostics.stable_prefix_hash,
             planned_b.diagnostics.stable_prefix_hash
+        );
+    }
+
+    #[test]
+    fn task_contract_changes_stable_prefix_but_snapshot_does_not() {
+        let planned_a = plan_context(ContextPlannerInput {
+            candidate_segments: vec![
+                segment(
+                    "task-contract",
+                    ContextSegmentKind::TaskContract,
+                    "target: audit context ordering",
+                    16,
+                    "task_space",
+                ),
+                segment(
+                    "task-snapshot",
+                    ContextSegmentKind::TaskSpaceSnapshot,
+                    "phase: inspect",
+                    16,
+                    "task_space",
+                ),
+            ],
+            current_user_text: "continue".to_owned(),
+            user_segment_id: ContextSegmentId::new("turn-user"),
+            user_provenance: ContextProvenance {
+                source: "turn_input".to_owned(),
+                reference: None,
+            },
+            rewrite_mode: ContextRewriteMode::OrdinaryTurn,
+            rewrite_version: 0,
+            tool_schema_fingerprint: None,
+        })
+        .expect("planned a");
+        let planned_snapshot_changed = plan_context(ContextPlannerInput {
+            candidate_segments: vec![
+                segment(
+                    "task-contract",
+                    ContextSegmentKind::TaskContract,
+                    "target: audit context ordering",
+                    16,
+                    "task_space",
+                ),
+                segment(
+                    "task-snapshot",
+                    ContextSegmentKind::TaskSpaceSnapshot,
+                    "phase: validate",
+                    16,
+                    "task_space",
+                ),
+            ],
+            current_user_text: "continue".to_owned(),
+            user_segment_id: ContextSegmentId::new("turn-user"),
+            user_provenance: ContextProvenance {
+                source: "turn_input".to_owned(),
+                reference: None,
+            },
+            rewrite_mode: ContextRewriteMode::OrdinaryTurn,
+            rewrite_version: 0,
+            tool_schema_fingerprint: None,
+        })
+        .expect("planned snapshot changed");
+        let planned_contract_changed = plan_context(ContextPlannerInput {
+            candidate_segments: vec![
+                segment(
+                    "task-contract",
+                    ContextSegmentKind::TaskContract,
+                    "target: implement context ordering",
+                    16,
+                    "task_space",
+                ),
+                segment(
+                    "task-snapshot",
+                    ContextSegmentKind::TaskSpaceSnapshot,
+                    "phase: inspect",
+                    16,
+                    "task_space",
+                ),
+            ],
+            current_user_text: "continue".to_owned(),
+            user_segment_id: ContextSegmentId::new("turn-user"),
+            user_provenance: ContextProvenance {
+                source: "turn_input".to_owned(),
+                reference: None,
+            },
+            rewrite_mode: ContextRewriteMode::OrdinaryTurn,
+            rewrite_version: 0,
+            tool_schema_fingerprint: None,
+        })
+        .expect("planned contract changed");
+
+        assert_eq!(
+            planned_a.diagnostics.stable_prefix_hash,
+            planned_snapshot_changed.diagnostics.stable_prefix_hash
+        );
+        assert_ne!(
+            planned_a.diagnostics.stable_prefix_hash,
+            planned_contract_changed.diagnostics.stable_prefix_hash
         );
     }
 

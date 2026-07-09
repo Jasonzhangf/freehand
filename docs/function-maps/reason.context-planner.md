@@ -13,6 +13,7 @@
 - `reason.session-history` provides stable base context plus session-owned `rewrite_mode` and `rewrite_version`
 - upstream restore/context rebuild callers may pre-prune superseded repaired-failure rounds before passing session-memory segments to the planner; raw failure truth remains outside request content in ledgers/UI projections
 - it asks the planner owner path to classify context into stable and volatile segments
+- task contract segments are session-stable/cacheable and task-space snapshots are turn-volatile/no-cache, so task state can be visible without poisoning the stable cache prefix
 - the planner admits additional context only through typed segment rules
 - preferred context expansion path is subagent search final report -> `SubagentConclusion`
 - the planner returns request-content-only output; metadata/cache/debug stay outside this mainline
@@ -30,6 +31,7 @@
 - raw subagent transcript attempted as parent context is rejected as an architecture error
 - metadata/request mixing is rejected as an architecture error
 - unbounded or over-budget context segment admission is rejected
+- task-space snapshots are rejected from rewrite-base gates because they are volatile turn state
 - prefix rewrite without explicit rewrite gate is rejected
 
 ## Shared Multi-Reference Functions
@@ -83,6 +85,7 @@
 - planner baseline is landed in `freehand-blocks`
 - current `freehand-reason` baseline now routes turn startup through `plan_context`
 - current baseline enforces segment ordering, segment-contract validation, token-budget rejection, user-turn append ownership, raw-subagent-transcript rejection by provenance, and rewrite-base validation for session history
+- current baseline includes first-class `TaskContract` and `TaskSpaceSnapshot` segment kinds with cache-shape coverage
 - current baseline emits cache diagnostics separated from request content for both ordinary turns and explicit rewrite ledger events
 - rewrite-mode and rewrite-version are now sourced from persistent `SessionHistory` truth instead of turn-local constants
 - runtime live bridge now wires deterministic tool-schema fingerprint truth from `tool.registry` into planner diagnostics without moving tool schema semantics into reason owners

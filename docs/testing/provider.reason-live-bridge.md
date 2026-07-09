@@ -41,6 +41,7 @@
   - restored prompt context for repaired multi-round logical turns keeps only the latest repaired round and excludes superseded failed attempt text
   - long operator prompts for master task orchestration reach the provider request with their tail sentinel intact instead of failing the `original-task` segment with a fixed 128-token budget
   - long previous-round visible output reaches the next provider request with its tail sentinel intact instead of failing `previous-visible-output` with a fixed 512-token budget
+  - every live round includes completion contract, control status contract, runtime tool guidance, and the task contract before volatile carryover
   - master-task prompt contract, exposed `task` tool schema, tool field descriptions, and success/error/retry samples are present in the first provider request before any model task creation decision
   - master-autonomous success path: mock provider emits `task` tool calls for create_agent/create/assign/claim_next/running/review_ready/approve/close, each tool result is paired back to the next provider request, and Task Center truth closes only after review approval
   - master-autonomous execution-error path: mock provider emits a worker `blocked` execution fact, runtime returns it as a normal tool result, and Task Center truth remains blocked without review approval or close
@@ -77,6 +78,7 @@
   - repaired failed-tool logical turn remains fully visible in persisted/UI truth while future prompt context admits only the final repaired round by default
   - long master-task prompt admission preserves semantic payload while still reporting planner token diagnostics
   - long multi-round carryover admission preserves semantic payload while still reporting planner token diagnostics
+  - multi-round provider requests retain status schema and task-tool guidance after tool-result continuation, `continue`, or schema-polishing re-entry
   - master-autonomy mock-provider scenarios prove model-output tool chains route through the live bridge and Task Center owner truth for success, execution-error blocked, and rejected-review retry outcomes
   - structured task execution fact results are rendered from Task Center event semantics before re-entering provider context
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
@@ -105,6 +107,7 @@
   - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes concrete provider error codes such as `anthropic_http_status_500`, retries recoverable non-stream failures up to five attempts, closes the active turn as failed only after exhaustion, and restores with no active turn
   - runtime white-box coverage now explicitly locks context economy for repaired logical turns: superseded failed repair attempts do not leak into rebuilt future prompt context
   - runtime white-box coverage now locks long operator task admission through the live bridge: `original-task` budget scales with actual prompt content and the provider request preserves the prompt tail sentinel
+  - runtime white-box coverage now locks `original-task` as a `TaskContract` segment and proves second-round requests still carry control status and runtime tool guidance
   - runtime white-box coverage now locks master-autonomy tool-loop outcomes with `live_bridge_master_autonomy_success_dispatches_worker_and_closes_task`, `live_bridge_master_autonomy_execution_error_blocks_without_success_close`, and `live_bridge_master_autonomy_rejected_review_retries_and_closes`
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with runtime live bridge owner code and function map updates

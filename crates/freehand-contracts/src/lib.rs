@@ -35,6 +35,8 @@ pub enum ContextSegmentKind {
     DeveloperPolicy,
     SessionMemory,
     SessionSummary,
+    TaskContract,
+    TaskSpaceSnapshot,
     SubagentConclusion,
     ToolResultEvidence,
     UserTurnInput,
@@ -449,6 +451,42 @@ mod tests {
         let decoded: ReasonReq02ContextComposedInput =
             serde_json::from_str(&json).expect("deserialize");
         assert_eq!(decoded, contract);
+    }
+
+    #[test]
+    fn task_context_segment_kinds_round_trip_through_json() {
+        let task_contract = ContextSegment {
+            segment_id: ContextSegmentId::new("task-contract"),
+            kind: ContextSegmentKind::TaskContract,
+            stability: ContextStability::SessionStable,
+            cache_policy: ContextCachePolicy::Cacheable,
+            role: ContextRole::Developer,
+            content: "target: keep task aligned".to_owned(),
+            token_budget: 128,
+            provenance: ContextProvenance {
+                source: "task_space".to_owned(),
+                reference: Some("task-contract:v1".to_owned()),
+            },
+        };
+        let task_snapshot = ContextSegment {
+            segment_id: ContextSegmentId::new("task-space-snapshot"),
+            kind: ContextSegmentKind::TaskSpaceSnapshot,
+            stability: ContextStability::TurnVolatile,
+            cache_policy: ContextCachePolicy::NoCache,
+            role: ContextRole::Developer,
+            content: "phase: executing".to_owned(),
+            token_budget: 128,
+            provenance: ContextProvenance {
+                source: "task_space".to_owned(),
+                reference: Some("snapshot:turn".to_owned()),
+            },
+        };
+
+        for segment in [task_contract, task_snapshot] {
+            let json = serde_json::to_string(&segment).expect("serialize");
+            let decoded: ContextSegment = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(decoded, segment);
+        }
     }
 
     #[test]

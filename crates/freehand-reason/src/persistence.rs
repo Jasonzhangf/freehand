@@ -1347,9 +1347,16 @@ mod tests {
                 ContextCachePolicy::CacheAnchor,
                 ContextRole::Developer,
             ),
-            ContextSegmentKind::SessionMemory | ContextSegmentKind::SessionSummary => (
+            ContextSegmentKind::SessionMemory
+            | ContextSegmentKind::SessionSummary
+            | ContextSegmentKind::TaskContract => (
                 ContextStability::SessionStable,
                 ContextCachePolicy::Cacheable,
+                ContextRole::Developer,
+            ),
+            ContextSegmentKind::TaskSpaceSnapshot => (
+                ContextStability::TurnVolatile,
+                ContextCachePolicy::NoCache,
                 ContextRole::Developer,
             ),
             _ => panic!("unsupported stable segment kind"),

@@ -188,6 +188,14 @@ First-version segment classes:
 - `SessionSummary`
   - cache role: `Cacheable`
   - stability: `SessionStable`
+- `TaskContract`
+  - cache role: `Cacheable`
+  - stability: `SessionStable`
+  - role: stable task target and acceptance contract for the active long-running task
+- `TaskSpaceSnapshot`
+  - cache role: `NoCache`
+  - stability: `TurnVolatile`
+  - role: current task-state snapshot such as phase, step, blocker, and retry count
 - `SubagentConclusion`
   - cache role: `NoCache`
   - stability: `TurnVolatile`

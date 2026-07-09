@@ -172,7 +172,7 @@ impl AdpTurnSample {
                 "ADP failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema."
             }
             Self::SchemaMismatch => {
-                "ADP schema mismatch sample: first answer must intentionally omit the required Freehand completion schema so the client can return the schema issue to you; after that feedback, polish the response into the required schema and finish successfully."
+                "ADP schema mismatch sample: do not call tools. First answer must intentionally omit the required Freehand completion schema so the client can return the schema issue to you; after that feedback, polish the response into the required schema and finish successfully."
             }
             Self::ProviderRetry => {
                 "ADP provider retry sample: make one short answer. This sample is valid only when the daemon/provider path emits provider-domain retry evidence; do not call tools and do not produce schema mismatch."
@@ -1498,11 +1498,13 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
             .await?;
     if !sample_evidence_complete(sample, Some(&evidence)) {
         return Err(format!(
-            "ADP {} sample transcript incomplete rounds={} tool_executions={} failed_tools={} seen={}",
+            "ADP {} sample transcript incomplete rounds={} tool_executions={} failed_tools={} schema_retries={} provider_retries={} seen={}",
             sample.label(),
             evidence.rounds,
             evidence.tool_executions,
             evidence.failed_tools,
+            evidence.schema_retries,
+            evidence.provider_retries,
             seen.join(",")
         ));
     }
@@ -3847,7 +3849,9 @@ fn sample_evidence_complete(
         AdpTurnSample::Failure => {
             evidence.rounds >= 2 && evidence.tool_executions >= 1 && evidence.failed_tools >= 1
         }
-        AdpTurnSample::SchemaMismatch => evidence.rounds >= 2 && evidence.schema_retries >= 1,
+        AdpTurnSample::SchemaMismatch => {
+            evidence.rounds >= 2 && evidence.schema_retries >= 1 && evidence.tool_executions == 0
+        }
         AdpTurnSample::ProviderRetry => evidence.provider_retries >= 1,
     }
 }

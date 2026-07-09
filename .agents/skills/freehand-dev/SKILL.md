@@ -297,6 +297,8 @@ Use this skill for any non-trivial work in this repo.
 - When tool surface or tool execution truth changes, update tool design, function map, test design, and runtime exposure checks in the same change set.
 - When `tool.registry` changes affect live provider exposure, run both owner/workspace gates and one real config-selected `reason-live` smoke when credentials are available; selected-agent bootstrap still requires the configured pair-token env even for CLI live-turn verification.
 - When context-segment admission, cache-shape policy, or subagent context flow changes, update `reason.context-planner` design, test design, function map, and memory in the same task.
+- For live context-distribution claims, inspect persisted `planned_context.ordered_segments` and diagnostics from the reason ledger, not only unit tests. Prove stable/session-stable prefix shape, stable prefix hash, tool schema hash, and volatile/no-cache tail placement across at least one multi-round S-profile sample before claiming closure.
+- For schema-polishing proof, do not rely on prompt-only steering against a live model. A real provider can obey the completion contract immediately or call unrelated tools, so deterministic schema-mismatch closeout needs a provider fixture, mock executor, or injected first invalid response plus no-tool contamination checks.
 
 ## Memory Workflow
 
