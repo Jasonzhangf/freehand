@@ -10,6 +10,7 @@
   - partial tool-use input accumulates until arguments become complete
 - white-box plan:
   - request renderer, response parser, SSE parser, partial tool accumulator
+  - indexed Anthropic streaming tool-use path where `content_block_start` provides id/name but later `input_json_delta` and `content_block_stop` events only provide `index`
   - Anthropic `tools` / `tool_choice` / `tool_result` request rendering
   - executor URL joining, header emission, non-success status handling, SSE event-boundary parsing, and incremental callback delivery
   - raw-capable executor callback coverage for response bodies, HTTP error bodies, and SSE event bodies before semantic parse
@@ -32,6 +33,7 @@
   - request rendering covers Messages API with default `max_tokens=8192`, explicit adapter config validation, and typed input segments
   - request rendering now covers Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result`
   - single-shot and stream parsing cover text, tool use, usage, terminal, and error paths
+  - stream parsing covers indexed tool-use deltas without repeated tool id/name, matching live Anthropic-compatible provider SSE evidence
   - live `minimonth` fixtures now cover thinking/text/usage/cache/terminal replay for single-shot and SSE
   - HTTP executor now supports incremental SSE callback delivery via `AnthropicExecutor::execute_stream_with`
   - raw-capable executor variants now support debug retention of single-shot response bodies, HTTP error bodies, and SSE event bodies before semantic parse

@@ -43,6 +43,7 @@ pub struct AnthropicRenderedRequest {
 pub struct AnthropicAdapter {
     config: AnthropicAdapterConfig,
     partial_tool_calls: BTreeMap<String, PartialToolUseState>,
+    partial_tool_call_indexes: BTreeMap<u64, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -269,6 +270,7 @@ impl AnthropicAdapter {
         Ok(Self {
             config,
             partial_tool_calls: BTreeMap::new(),
+            partial_tool_call_indexes: BTreeMap::new(),
         })
     }
 
@@ -418,7 +420,7 @@ impl AnthropicAdapter {
                     && let Some(kind) = block.get("type").and_then(Value::as_str)
                 {
                     match kind {
-                        "tool_use" => events.push(self.parse_tool_use_block(block, false)?),
+                        "tool_use" => events.push(self.parse_indexed_tool_use_block(value, block)?),
                         "text" => {
                             if let Some(text) = block.get("text").and_then(Value::as_str)
                                 && !text.is_empty()
@@ -444,41 +446,63 @@ impl AnthropicAdapter {
                             }
                         }
                         Some("input_json_delta") => {
-                            let id = value
-                                .get("content_block")
-                                .and_then(|block| block.get("id"))
-                                .and_then(Value::as_str)
-                                .or_else(|| value.get("id").and_then(Value::as_str))
-                                .ok_or(AnthropicAdapterError::MissingToolUseId)?;
+                            let id = self
+                                .stream_tool_use_id(value)
+                                .ok_or(AnthropicAdapterError::MissingToolUseId)?
+                                .to_owned();
                             let name = value
                                 .get("content_block")
                                 .and_then(|block| block.get("name"))
                                 .and_then(Value::as_str)
-                                .unwrap_or("");
+                                .or_else(|| {
+                                    self.partial_tool_calls
+                                        .get(id.as_str())
+                                        .map(|state| state.tool_name.as_str())
+                                })
+                                .unwrap_or("")
+                                .to_owned();
                             let partial = delta
                                 .get("partial_json")
                                 .and_then(Value::as_str)
                                 .unwrap_or("");
-                            events.push(self.apply_partial_tool_delta(id, name, partial, false)?);
+                            events.push(self.apply_partial_tool_delta(
+                                id.as_str(),
+                                name.as_str(),
+                                partial,
+                                false,
+                            )?);
                         }
                         _ => {}
                     }
                 }
             }
             "content_block_stop" => {
-                if let Some(block) = value.get("content_block")
-                    && matches!(block.get("type").and_then(Value::as_str), Some("tool_use"))
-                {
-                    let id = block
-                        .get("id")
+                if let Some(id) = self.stream_tool_use_id(value).map(ToOwned::to_owned) {
+                    let name = value
+                        .get("content_block")
+                        .and_then(|block| block.get("name"))
                         .and_then(Value::as_str)
-                        .ok_or(AnthropicAdapterError::MissingToolUseId)?;
-                    let name = block.get("name").and_then(Value::as_str).unwrap_or("");
-                    let input = block
-                        .get("input")
+                        .or_else(|| {
+                            self.partial_tool_calls
+                                .get(id.as_str())
+                                .map(|state| state.tool_name.as_str())
+                        })
+                        .unwrap_or("")
+                        .to_owned();
+                    let input = value
+                        .get("content_block")
+                        .and_then(|block| block.get("input"))
                         .map(Value::to_string)
-                        .unwrap_or_else(|| "{}".to_owned());
-                    events.push(self.apply_partial_tool_delta(id, name, &input, true)?);
+                        .unwrap_or_default();
+                    events.push(self.apply_partial_tool_delta(
+                        id.as_str(),
+                        name.as_str(),
+                        input.as_str(),
+                        true,
+                    )?);
+                    if let Some(index) = value.get("index").and_then(Value::as_u64) {
+                        self.partial_tool_call_indexes.remove(&index);
+                    }
                 }
             }
             "message_delta" => {
@@ -508,6 +532,21 @@ impl AnthropicAdapter {
         Ok(events)
     }
 
+    fn stream_tool_use_id<'a>(&'a self, value: &'a Value) -> Option<&'a str> {
+        value
+            .get("content_block")
+            .and_then(|block| block.get("id"))
+            .and_then(Value::as_str)
+            .or_else(|| value.get("id").and_then(Value::as_str))
+            .or_else(|| {
+                value
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .and_then(|index| self.partial_tool_call_indexes.get(&index))
+                    .map(String::as_str)
+            })
+    }
+
     fn parse_tool_use_block(
         &mut self,
         block: &Value,
@@ -533,8 +572,27 @@ impl AnthropicAdapter {
             }));
         }
 
-        let input = block.get("input").map(Value::to_string).unwrap_or_default();
+        let input = block
+            .get("input")
+            .filter(|input| !input.as_object().is_some_and(serde_json::Map::is_empty))
+            .map(Value::to_string)
+            .unwrap_or_default();
         self.apply_partial_tool_delta(id, name, &input, false)
+    }
+
+    fn parse_indexed_tool_use_block(
+        &mut self,
+        value: &Value,
+        block: &Value,
+    ) -> Result<ProviderAdapterEvent, AnthropicAdapterError> {
+        let id = block
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or(AnthropicAdapterError::MissingToolUseId)?;
+        if let Some(index) = value.get("index").and_then(Value::as_u64) {
+            self.partial_tool_call_indexes.insert(index, id.to_owned());
+        }
+        self.parse_tool_use_block(block, false)
     }
 
     fn apply_partial_tool_delta(
@@ -1418,6 +1476,59 @@ mod tests {
             ProviderSemanticOutput::ToolCall(call) => {
                 assert!(!call.tool_call.arguments_complete);
                 assert!(call.tool_call.arguments.is_empty());
+            }
+            other => panic!("unexpected output: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_indexed_streaming_tool_use_delta_without_repeated_id() {
+        let mut adapter = adapter();
+        adapter
+            .parse_stream_event(
+                &ctx(),
+                ProviderProtocol::AnthropicMessages,
+                r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_function_s889op96nzbw_1","name":"task","input":{}}}"#,
+            )
+            .expect("start");
+
+        let delta = adapter
+            .parse_stream_event(
+                &ctx(),
+                ProviderProtocol::AnthropicMessages,
+                r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"op\":\"list_agents\"}"}}"#,
+            )
+            .expect("delta");
+
+        match &delta[0] {
+            ProviderSemanticOutput::ToolCall(call) => {
+                assert_eq!(
+                    call.tool_call.tool_call_id.as_str(),
+                    "call_function_s889op96nzbw_1"
+                );
+                assert_eq!(call.tool_call.tool_name, "task");
+                assert!(!call.tool_call.arguments_complete);
+                assert_eq!(call.tool_call.arguments.len(), 1);
+                assert_eq!(call.tool_call.arguments[0].name, "op");
+                assert_eq!(call.tool_call.arguments[0].value, json!("list_agents"));
+            }
+            other => panic!("unexpected output: {other:?}"),
+        }
+
+        let stop = adapter
+            .parse_stream_event(
+                &ctx(),
+                ProviderProtocol::AnthropicMessages,
+                r#"{"type":"content_block_stop","index":1}"#,
+            )
+            .expect("stop");
+        match &stop[0] {
+            ProviderSemanticOutput::ToolCall(call) => {
+                assert_eq!(call.tool_call.tool_name, "task");
+                assert!(call.tool_call.arguments_complete);
+                assert_eq!(call.tool_call.arguments.len(), 1);
+                assert_eq!(call.tool_call.arguments[0].name, "op");
+                assert_eq!(call.tool_call.arguments[0].value, json!("list_agents"));
             }
             other => panic!("unexpected output: {other:?}"),
         }

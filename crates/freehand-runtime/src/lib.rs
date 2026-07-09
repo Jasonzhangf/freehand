@@ -5244,10 +5244,20 @@ fn tool_guidance_segment() -> ContextSegment {
 fn master_task_orchestration_guidance() -> &'static str {
     concat!(
         "Use the available Freehand tool registry when it helps the task. Choose the smallest sufficient tool for repository inspection or task bookkeeping, then continue and provide the required Freehand completion schema.\n\n",
+        "Master task orchestration policy:\n",
+        "- Role: you are the master agent. You own the user conversation, task decomposition, worker coordination, review, and final user-facing answer.\n",
+        "- Dispatch when: work targets another cwd/repository, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
+        "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside your current allowed workspace without isolated execution.\n",
+        "- Workspace boundary: do not directly execute work outside your allowed workspace. Create or reuse a worker resource, create a task with target_cwd, assign it, claim it, then inspect the worker result.\n",
+        "- Multi-agent dispatch: split independent repository/slice work into separate worker tasks, keep each worker focused, then review and synthesize typed worker results in the master answer.\n",
+        "- Concurrency control: assign only useful independent subtasks; avoid duplicate dispatch for work already running, recovering, blocked, or review_ready; poll task truth before starting more work.\n",
+        "- Flow control: use task(op=\"list_agents\"), task(op=\"list_tasks\"), task(op=\"query\"), and task(op=\"history\") to inspect current framework truth before dispatching duplicates, retrying, approving, rejecting, or closing work.\n",
+        "- Task tool workflow: create_agent only when needed; create a task with goal, deliverables, acceptance, target_cwd, and priority; assign; claim_next with execution_id; record_execution as running, blocked, recovering, or review_ready; approve/reject; close only after accepted review.\n\n",
         "Master task orchestration examples:\n",
         "- Use the owner-scoped task tool; do not invent query_task_board, dispatch_subtask, approve_submission, or reject_submission tool names.\n",
         "- Create worker resources with task(op=\"create_agent\") only when the task needs a worker id that does not exist.\n",
         "- Create and dispatch work with task(op=\"create\"), task(op=\"assign\"), and task(op=\"claim_next\"). Keep the same task_id, agent_id, and execution_id across later worker-result calls.\n",
+        "- Cross-workspace sample: for a request comparing ~/code/codex with ~/code/Deepseek-reasonix, create one task for the Codex repository analysis and one task for the Reasonix repository analysis, each with target_cwd, deliverables, acceptance, and evidence requirements; assign/claim separate workers when available, then synthesize the comparison only after reviewing the worker results.\n",
         "- Worker success sample: task(op=\"record_execution\", status=\"review_ready\", task_id=..., agent_id=..., execution_id=..., summary=..., deliverables=[...], evidence=[...]), then task(op=\"approve\"), then task(op=\"close\").\n",
         "- Worker execution error sample: task(op=\"record_execution\", status=\"blocked\", task_id=..., agent_id=..., execution_id=..., phase=\"execution_error\", summary=\"what failed\", evidence=[...]). Do not close this as success.\n",
         "- Worker retry sample: after task(op=\"reject\"), use task(op=\"record_execution\", status=\"recovering\", retry_count=1, task_id=..., agent_id=..., execution_id=..., summary=..., evidence=[...]), then submit a corrected status=\"review_ready\" result.\n",
@@ -8595,7 +8605,23 @@ provider = "old"
 
     fn assert_master_task_request_contract(raw_request: &str, sentinel: &str) {
         assert!(raw_request.contains(sentinel));
+        assert!(raw_request.contains("Master task orchestration policy"));
+        assert!(raw_request.contains("you are the master agent"));
+        assert!(raw_request.contains("Dispatch when"));
+        assert!(raw_request.contains("Multi-agent dispatch"));
+        assert!(raw_request.contains("Concurrency control"));
+        assert!(raw_request.contains("Flow control"));
+        assert!(raw_request.contains("Task tool workflow"));
+        assert!(
+            raw_request.contains("do not directly execute work outside your allowed workspace")
+        );
+        assert!(raw_request.contains("assign only useful independent subtasks"));
+        assert!(raw_request.contains("task(op=\\\"list_agents\\\")"));
         assert!(raw_request.contains("Master task orchestration examples"));
+        assert!(raw_request.contains("Cross-workspace sample"));
+        assert!(raw_request.contains("~/code/codex"));
+        assert!(raw_request.contains("~/code/Deepseek-reasonix"));
+        assert!(raw_request.contains("target_cwd"));
         assert!(raw_request.contains("Worker success sample"));
         assert!(raw_request.contains("Worker execution error sample"));
         assert!(raw_request.contains("Worker retry sample"));

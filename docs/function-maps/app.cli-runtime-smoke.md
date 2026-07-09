@@ -49,6 +49,7 @@
 - for Phase 2A master-worker foundation sample, CLI drives protocol-owned worker agent creation, task assignment, claim-next with execution id, progress/blocked/recovering/review facts, reject, retry, approve, close, and same-id verification through ADP without UI or model prose
 - for master-worker autonomy sample, CLI submits only one user prompt through ADP `SubmitUserInput`; the live model/tool loop must call the single owner-scoped `task(op=...)` tool to create worker state, create/assign/claim tasks, record execution facts, review, reject, retry, approve, and close; CLI then verifies transcript tool activity plus TaskBoard, AgentBoard, AgentLifecycle, and TaskHistory owner truth
 - for master-worker autonomy online proof, `scripts/verify-master-worker-autonomy-online.sh` temporarily points S-profile provider config at a local Anthropic-compatible fixture that dynamically reads the CLI-generated `FHMA_*` ids and returns scenario-specific `task` tool_use sequences for success, execution-error, and reject-retry, then restarts S and verifies the same task/execution/agent ids
+- for formal real-provider master-worker history proof, `scripts/verify-real-provider-master-worker-history.sh` queries owner-backed TaskHistory for one or more real-provider-created task ids and fails when history is empty, unparseable, or only `TaskCreated,TaskAssigned`; assigned-only means the master delegated but no worker lifecycle runner executed the task
 - for Phase 2B master poll foundation sample, CLI drives protocol-owned
   EventInbox query and MasterPoll command through ADP, verifies compact
   classifications and cursor persistence, then verifies the same cursor after
@@ -83,6 +84,7 @@
 - Phase 2A master-worker foundation sample prints task id, worker id, execution id, final closed status, ordered lifecycle events, review retry evidence, and same-id restart verification arguments
 - master-worker autonomy sample prints one line per scenario with session id, generated task/execution/worker ids, final task status, lifecycle state, review submission count, transcript turn count, task tool execution count, ordered history, and same-id restart verification arguments
 - master-worker autonomy online verifier prints all scenario sample output plus same-id verify output after S-profile restart
+- real-provider master-worker history verifier prints one compact line per task with history event count and event types, or an explicit failure reason such as `assigned_only`
 - Phase 2B master poll foundation sample prints task id, worker id, execution
   id, EventInbox cursor, persisted master cursor, classification kinds, and
   same-cursor restart verification arguments
@@ -107,6 +109,7 @@
 - Phase 2A master-worker foundation sample timeout, no claimed task, missing execution id, missing blocked/recovering/review/reject/retry/approve/close history event, missing lifecycle state, or same-id restart mismatch returns explicit terminal errors
 - master-worker autonomy sample fails if CLI emits task mutation commands instead of SubmitUserInput in the mock proof, if transcript lacks the submitted prompt, terminal success, or enough `task` tool executions, if TaskBoard status/lifecycle/assignee/execution mismatches expected scenario truth, if forbidden events appear, if required ordered events are missing, or if same-id restart verification mismatches
 - master-worker autonomy online verifier fails if the provider fixture does not receive exactly 27 `/v1/messages` attempts for all scenarios, if any scenario output is missing, if status/tool/history evidence is missing, or if restart verify cannot query the same owner truth
+- real-provider master-worker history verifier fails if TaskHistory is empty, cannot be parsed, contains only create/assign events, or lacks any worker lifecycle event such as resume, execution recorded, blocked, review submitted, approved, closed, paused, or cancelled
 - Phase 2B master poll foundation sample timeout, missing EventInbox events,
   missing classification kinds, unexpected task status mutation, or same-cursor
   restart mismatch returns explicit terminal errors
@@ -165,6 +168,7 @@
 | 18 | `run_master_worker_foundation_sample` / `run_master_worker_foundation_sample_async` / `verify_master_worker_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2A master/worker task execution loop and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify ids | terminal-facing worker lifecycle evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 | 19 | `run_master_worker_autonomy_sample` / `run_master_worker_autonomy_sample_async` / `verify_master_worker_autonomy_truth` | `apps/freehand-cli/src/main.rs` | submit one ADP user prompt and verify model/tool-driven master-worker autonomy through transcript and Task Center/Agent Lifecycle truth | `--url ws://.../adp --scenario all\|success\|execution-error\|reject-retry` plus optional verify ids | terminal-facing autonomy evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 | 19a | `run_master_worker_autonomy_online` | `scripts/verify-master-worker-autonomy-online.sh` | run a local Anthropic-compatible task-tool fixture, temporarily update S-profile provider config, execute all autonomy scenarios, restart S, and verify same-id owner truth | S-profile daemon on `127.0.0.1:4042` | terminal-facing autonomy proof with 27 provider attempts and same-id restart verification | operator/agent verifier | daemon `/adp` + local mock provider | bound |
+| 19b | `run_verify_real_provider_master_worker_history` | `scripts/verify-real-provider-master-worker-history.sh` | query real-provider-created task histories and reject assigned-only task truth so delegation without worker execution cannot be reported as success | `--url ws://.../adp --task <task_id>` | terminal-facing history proof or explicit assigned-only/empty-history failure | operator/agent verifier | daemon `/adp` + CLI task query | bound |
 | 20 | `run_master_poll_foundation_sample` / `run_master_poll_foundation_sample_async` / `verify_master_poll_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2B EventInbox and MasterPoll loop, reread owner-backed final cursor after command poll, and perform same-cursor restart verification through ADP | `--url ws://.../adp` plus optional verify cursor/task/execution/agent ids | terminal-facing master poll evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 | 21 | `run_worker_control_foundation_sample` / `run_worker_control_foundation_sample_async` / `verify_worker_control_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2C worker-control query/safe-point/pause/resume/cancel loop and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify control/task/execution/agent ids | terminal-facing worker-control evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 
@@ -190,10 +194,12 @@
 - CLI Phase 1 foundation sample is implemented for no-UI TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id proof
 - CLI Phase 2A master-worker foundation sample is implemented for no-UI assign/claim/progress/blocked/recovering/review/reject/retry/approve/close and restart same-id proof
 - CLI master-worker autonomy sample is implemented for no-UI SubmitUserInput-driven task-tool autonomy verification; the mock test rejects direct CLI task mutations, and the online script proves success, execution-error, and reject-retry tool loops against an S-profile provider fixture
+- real-provider master-worker history verifier is implemented as a red gate for the current production gap: real provider task-tool delegation that stops at `TaskCreated,TaskAssigned` is failure, not multi-agent completion
 - CLI Phase 2B master poll foundation sample is implemented and S-profile
   verified with same-cursor restart proof
 - CLI Phase 2C worker-control foundation sample is implemented and S-profile
   verified with same-id restart proof
 - harness-backed app E2E smoke now exists before production CLI/server runtime loop
-- remaining gap: production non-smoke command loop is still pending
+- remaining gap: production non-smoke command loop and formal real-provider
+  online E2E verifier are still pending
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes

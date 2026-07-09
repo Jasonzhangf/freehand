@@ -3214,3 +3214,96 @@ Current real root cause split:
   - `cargo run -p xtask -- mainlines check` passed.
   - `cargo run -p xtask -- gates check` passed.
   - `git diff --check` passed.
+
+# 2026-07-09 formal real-provider E2E standard
+
+- marker:
+  - `formal-real-provider-e2e-standard-20260709`
+- trigger:
+  - Jason clarified that multi-agent production capability must be judged by
+    online E2E real tasks, not only fixture or toy prompts.
+- updated:
+  - `docs/goals/multi-task-foundation-phase2-gap-plan.md`
+  - `docs/architecture/architecture-gaps.md`
+  - `docs/function-maps/app.cli-runtime-smoke.md`
+  - `docs/testing/app.cli-runtime-smoke.md`
+  - `docs/mainline-calls/app.cli-runtime-smoke.json`
+  - `CACHE.md`
+  - `MEMORY.md`
+- standard:
+  - formal E2E prompt asks master agent to research a current AI/semiconductor/
+    international-technology-policy news item from the last 72 hours and write a
+    markdown briefing document.
+  - pass requires real S-profile daemon/provider, normal user-input path,
+    current-source lookup or explicit missing-capability failure, owner truth
+    from task/agent/event/history projections, output artifact, and same-id
+    restart proof when workers are created.
+
+# 2026-07-09 formal WebUI E2E worker-dispatch audit
+
+- marker:
+  - `formal-webui-e2e-worker-dispatch-audit-20260709`
+- user-facing test:
+  - Opened real WebUI in Chrome at `http://127.0.0.1:4042/`.
+  - Selected live session `formal-e2e-news-1783606100493`.
+  - Sent second-turn WebUI input asking to continue existing `task-1783606140` without creating duplicate task.
+  - Screenshot evidence saved: `artifacts/webui-online/formal-e2e-webui-20260709/01-webui-second-turn-submitted.png`.
+- task truth:
+  - `freehand-cliS adp-task-query --url ws://127.0.0.1:4042/adp --history task-1783606140`
+  - history events: `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`.
+  - task list shows `task-1783606140:blocked:50`.
+- ledger truth:
+  - `TaskAssigned` payload assigns `worker-auto-1783582650`.
+  - `TaskResumed` payload claims execution `exec-news-research-1783606140`.
+  - `TaskBlocked` actor is `worker-auto-1783582650`, reason says current-source news research cannot proceed because runtime lacks `web_search`, `http_get`, or live-news fetch tool.
+  - Later `TaskProgressed` actor is `master`, payload says master has `bash+curl` and will perform current-source lookup directly while worker stayed blocked.
+- conclusion:
+  - This run proves model/provider can create, assign, claim, and block a worker task through task truth.
+  - It does not prove production worker autonomous execution.
+  - The actual research after worker block is master-side self execution through `bash/curl`.
+  - Production gap remains: daemon-owned worker runner plus worker tool capability/policy so master dispatch results in real worker execution and review/submit lifecycle, not master self-execution.
+
+# 2026-07-09 Reasonix subagent constraint audit
+
+- marker:
+  - `reasonix-subagent-constraint-audit-20260709`
+- reference source:
+  - `/Users/fanzhang/code/Deepseek-reasonix/docs/GUIDE.md`
+  - `/Users/fanzhang/code/Deepseek-reasonix/docs/SPEC.md`
+  - `/Users/fanzhang/code/Deepseek-reasonix/internal/agent/task.go`
+  - `/Users/fanzhang/code/Deepseek-reasonix/internal/agent/coordinator.go`
+  - `/Users/fanzhang/code/Deepseek-reasonix/internal/skill/tools.go`
+  - `/Users/fanzhang/code/Deepseek-reasonix/internal/skill/builtins.go`
+- finding:
+  - Reasonix does not constrain subagent behavior only by prompt text.
+  - It constrains behavior through isolated child sessions, role/tool-registry filtering, top-level delegation tools, explicit meta-tool exclusion, profile selection, transcript ownership, and final-answer-only return into the parent context.
+  - Planner mode is a separate model/session with read-only research tools only; executor receives a structured handoff and keeps writer/workflow tools.
+  - `task` subagents receive a self-contained prompt, filtered tools, optional step/model/effort bounds, optional background execution, and persisted transcript refs for continue/fork.
+  - Built-in subagent skills (`explore`, `research`, `review`, `security_review`) are exposed as natural top-level tools and are marked non-read-only to prevent parallel write races even when the skill itself is read-heavy.
+  - Subagents exclude recursive/meta tools (`task`, `run_skill`, `read_skill`, `install_skill`, `explore`, `research`, `review`, `security_review`) by default, so delegation stays one layer deep.
+- Freehand implication:
+  - The production master/worker gap should not be solved by adding only prompt wording that says "use worker".
+  - Required locks are: model-visible delegation affordance, child session/thread isolation, fork/continue ownership, role-specific config and instruction layering, tool/capability filtering for the spawned child, permission/hook/runtime gates at execution time, and typed parent-child communication.
+  - It is wrong to solve this by a separate "admission round" that hides execution tools until a routing decision. Reasonix and Codex keep delegation as ordinary model-visible tools, then enforce boundaries when the delegation tool executes and when child tools run.
+  - Current WebUI E2E showed the missing lock: worker blocked on missing search capability, then master continued through `bash/curl`; this must become a visible policy decision such as capability provisioning, worker retry/reassignment, explicit blocked state, or typed takeover, not silent master self-execution.
+- proposed Freehand direction:
+  - Keep `task` / `spawn_agent` style delegation visible to the master alongside other tools; do not depend on hiding tools by phase.
+  - Make the delegation tool create durable Task Center truth plus a child execution context with explicit parent, task, workspace, role, model/effort, inherited runtime policy, and allowed capabilities.
+  - Enforce boundaries in the tool/runtime gate: child agents cannot inherit recursive/meta tools unless explicitly allowed; parent self-execution after worker blockage must be surfaced as an explicit typed takeover or policy decision.
+  - Worker runners should receive only the capability subset needed for the task class; missing capability becomes a typed worker blocked fact returned to the parent/master.
+  - UI should project the task lifecycle and worker state, not infer delegation from raw tool names.
+  - Gates must include a red case proving worker delegation cannot silently degrade into untracked master self-execution, and a green case proving approved typed recovery/takeover is recorded and queryable.
+
+# 2026-07-09 Codex subagent constraint correction
+
+- marker:
+  - `codex-reasonix-subagent-correction-20260709`
+- correction:
+  - The earlier idea that Freehand should force a first "routing/admission" provider round with only routing tools is not aligned with Reasonix or Codex.
+  - Reasonix exposes `task` as a normal tool. The tool execution creates an isolated subagent session, filters child tools, excludes recursive/meta tools, inherits permission gates, and returns only the final answer to the parent.
+  - Codex exposes `spawn_agent` as a normal model-visible tool. The handler builds a child config from the parent turn, applies runtime-owned fields such as model, reasoning, approval policy, sandbox, and cwd, records `SessionSource::SubAgent(ThreadSpawn)`, sends typed inter-agent communication, and notifies the parent on terminal child turn.
+  - Both systems rely on tool affordance + execution-time gates + child session/thread isolation + typed communication, not on removing direct tools from the model's first turn.
+- Freehand corrected target:
+  - Add delegation affordance and stronger runtime ownership gates without inventing a separate routing phase.
+  - The model may choose direct execution or delegation; if it delegates, framework truth must preserve child ownership, status, capability boundary, and parent-visible result.
+  - If direct execution is undesired for a class of tasks, constrain it through policy, role config, user instruction, and execution-time gates that return explicit blocked results to the model, not through unstable prompt-phase assumptions.

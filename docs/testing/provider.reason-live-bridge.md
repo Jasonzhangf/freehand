@@ -42,7 +42,7 @@
   - long operator prompts for master task orchestration reach the provider request with their tail sentinel intact instead of failing the `original-task` segment with a fixed 128-token budget
   - long previous-round visible output reaches the next provider request with its tail sentinel intact instead of failing `previous-visible-output` with a fixed 512-token budget
   - every live round includes completion contract, control status contract, runtime tool guidance, and the task contract before volatile carryover
-  - master-task prompt contract, exposed `task` tool schema, tool field descriptions, and success/error/retry samples are present in the first provider request before any model task creation decision
+  - master-task prompt contract, exposed `task` tool schema, tool field descriptions, dispatch conditions, workspace-boundary rule, concurrency/flow-control guidance, cross-workspace sample, and success/error/retry samples are present in the first provider request before any model task creation decision
   - master-autonomous success path: mock provider emits `task` tool calls for create_agent/create/assign/claim_next/running/review_ready/approve/close, each tool result is paired back to the next provider request, and Task Center truth closes only after review approval
   - master-autonomous execution-error path: mock provider emits a worker `blocked` execution fact, runtime returns it as a normal tool result, and Task Center truth remains blocked without review approval or close
   - master-autonomous rejected-review path: mock provider emits review_ready, reject, recovering with retry_count, second review_ready, approve, and close; Task Center truth preserves the reject-before-retry-before-close event order
@@ -80,6 +80,7 @@
   - long multi-round carryover admission preserves semantic payload while still reporting planner token diagnostics
   - multi-round provider requests retain status schema and task-tool guidance after tool-result continuation, `continue`, or schema-polishing re-entry
   - master-autonomy mock-provider scenarios prove model-output tool chains route through the live bridge and Task Center owner truth for success, execution-error blocked, and rejected-review retry outcomes
+  - first provider request carries the master role, dispatch/no-dispatch boundary, workspace-boundary rule, multi-agent dispatch guidance, concurrency/flow-control guidance, task tool workflow, and the Codex-vs-Deepseek-reasonix cross-workspace sample without adding extra task/deep-research tools
   - structured task execution fact results are rendered from Task Center event semantics before re-entering provider context
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
   - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation

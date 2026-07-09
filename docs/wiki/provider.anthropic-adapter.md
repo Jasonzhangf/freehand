@@ -22,6 +22,7 @@ Generated from `docs/mainline-calls/provider.anthropic-adapter.json`. Do not edi
 - Anthropic single-shot body or SSE event becomes provider-neutral semantic output
 - raw-capable executor paths expose response bodies, HTTP error bodies, and SSE event bodies before semantic parsing so runtime can retain debug-only ledgers even when parsing fails
 - partial tool-use input stays adapter-local until enough JSON exists to emit structured arguments
+- streamed tool-use blocks may carry the tool id/name only on `content_block_start`; subsequent `input_json_delta` and `content_block_stop` events may carry only the stream `index`, so the adapter owns index-to-tool-call state until the block closes
 - live `minimonth` single-shot and SSE fixtures replay through the same parser entrypoints as synthetic tests
 - executor single-shot path parses response body through `AnthropicAdapter::parse_response`
 - executor stream path reads SSE event boundaries incrementally, parses `data:` payloads through `AnthropicAdapter::parse_stream_event`, and can notify callers before the HTTP response finishes
@@ -71,4 +72,5 @@ Generated from `docs/mainline-calls/provider.anthropic-adapter.json`. Do not edi
 - raw-capable executor bindings now preserve single-shot response bodies, HTTP error bodies, and SSE event bodies before semantic parsing
 - request renderer now binds Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result` message rendering from provider-neutral metadata
 - request renderer default output budget is locked by `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`
+- stream parser now binds indexed Anthropic `tool_use` events where `content_block_start` has id/name and later `input_json_delta` / `content_block_stop` events reference only `index`
 - generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes

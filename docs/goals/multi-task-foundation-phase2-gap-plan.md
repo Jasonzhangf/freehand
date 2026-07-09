@@ -90,6 +90,9 @@ Missing:
   task dispatch and verifies whether the model chooses `task(op=...)`
 - evidence that real-provider prompt behavior still follows the task tool
   contract at least in one bounded case
+- a formal online E2E task, not a toy prompt: the agent must perform a real
+  research/document workflow with current-source lookup, background synthesis,
+  task progress, and a durable output artifact
 - explicit documentation that deterministic fixtures remain the regression
   source of truth, while real-provider smoke is behavioral evidence
 
@@ -98,6 +101,54 @@ Why it matters:
 Real model behavior can drift. Deterministic fixture tests lock framework
 correctness; real-provider smoke catches prompt/contract drift without becoming
 the only acceptance gate.
+
+Formal E2E acceptance prompt:
+
+```text
+You are the Freehand master agent. Complete this formal task end to end.
+
+Task:
+Research one important AI/semiconductor/international-technology-policy news
+item from the last 72 hours. Pick the most consequential item you can verify
+from current sources, then produce a background briefing document.
+
+Required behavior:
+1. If the task needs multiple investigation tracks, create and manage worker
+   tasks through task(op=...) rather than doing private, untracked work.
+2. Search current sources. Use at least three independent sources when search is
+   available. If current-source search is unavailable, fail explicitly with the
+   missing capability instead of inventing facts.
+3. Track task state through TaskBoard/AgentBoard/EventInbox/TaskHistory. Do not
+   rely on prose-only status.
+4. Write a markdown briefing document under a deterministic task output path.
+
+Document requirements:
+- title, date, selected news item, and why it matters
+- verified facts with source links or source identifiers
+- background timeline
+- key actors/stakeholders
+- uncertainty / unknowns / disputed claims
+- implications for developers, product teams, or policy watchers
+- next 3 follow-up questions for deeper research
+- concise final executive summary
+
+Final response requirements:
+- output document path
+- task ids, worker ids, and final task statuses
+- what sources were used
+- what could not be verified
+```
+
+Formal E2E pass criteria:
+
+- real S-profile daemon and configured provider are used; no provider fixture
+- prompt enters through normal user input path
+- if workers are created, all task/execution/agent ids are queryable through
+  owner truth and survive `restartS`
+- output document exists and contains the required sections
+- TaskBoard, AgentBoard, EventInbox, and TaskHistory match final visible state
+- failure due to missing search/write capability is explicit and queryable, not
+  a silent or fabricated success
 
 ### G5: UI Projection For Production Loop State
 
@@ -182,13 +233,14 @@ Deliverables:
 - ADP transcript plus Task Center truth for the same session/task
 - explicit pass/fail that distinguishes model behavior drift from framework
   failure
+- formal E2E research/document task using the acceptance prompt above
 
 Validation:
 
 ```bash
 scripts/install-launchd.sh restartS
 freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp
-# real-provider smoke command to be added in P3
+# formal real-provider E2E verifier to be added in P3
 ```
 
 ### P4: UI Projection Only After Runtime Truth
@@ -217,6 +269,6 @@ Production master/worker autonomy is not complete until:
 - success, execution-error, and reject-retry fixture scenarios pass through the
   production loop
 - same task/execution/agent ids survive S-profile restart verification
-- real-provider behavioral smoke is run and its result is documented
+- formal real-provider online E2E task is run and its result is documented
 - function maps, test designs, mainline JSON, generated wiki, `CACHE.md`,
   `MEMORY.md`, `note.md`, and local skill rules are synchronized
