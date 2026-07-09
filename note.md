@@ -2717,6 +2717,61 @@ Current real root cause split:
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 
+# 2026-07-09 multi-task phase2d WebUI projection closeout
+
+- marker:
+  - `phase2d-webui-projection-closeout-1783580948045`
+- scope:
+  - Continued Phase 2D from the multi-task foundation goal.
+  - Implemented WebUI status drawer projection for owner-backed TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl.
+  - Added WorkerControl drawer actions that route through protocol commands and re-query owner truth.
+  - Fixed WebUI and Android command receipt projection so user-facing text does not expose `target_feature_id` or task/execution/control payload ids.
+  - Fixed receipt mapping no-fallback semantics: known statuses map explicitly; unknown statuses render unsupported instead of success text.
+- implementation audit:
+  - WebUI stores only transient render state: `state.taskBoard`, `state.agentBoard`, `state.eventInbox`, `state.taskHistory`, `state.workerControl`.
+  - WebUI Phase 2D query path uses ADP/runtime query truth: `QueryTaskBoard`, `QueryAgentBoard`, `QueryEventInbox`, `QueryTaskHistory`, `QueryWorkerControl`.
+  - WorkerControl buttons submit `WorkerControl` commands and re-query owner projection after command receipt.
+  - Android `AdpEventStream::commandReceiptResponse` keeps raw dispatch status in `CommandResponse.code` and safe/unsupported user text in `message`.
+- local validation:
+  - `jq empty docs/mainline-calls/app.android-client.json docs/mainline-calls/app.webui-smoke.json` -> ok.
+  - `node --check apps/freehand-server/assets/webui.js` -> ok.
+  - `node --check scripts/webui_verify_online.mjs` -> ok.
+  - `cd apps/freehand-android && JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH ./gradlew testDebugUnitTest` -> passed.
+  - `cargo test -p freehand-server webui_smoke_renders_shell_and_asset_routes -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-server -- --nocapture` -> 13 passed.
+  - `cargo test -p freehand-task -- --nocapture` -> 41 passed.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 53 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 84 passed.
+  - `cargo test -p freehand-cli -- --nocapture` -> 24 passed.
+  - `cargo build --workspace` -> ok.
+  - `cargo fmt --check` -> ok.
+  - `cargo clippy --workspace --all-targets -- -D warnings` -> ok.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `git diff --check` -> ok.
+- S-profile owner proof:
+  - `scripts/install-launchd.sh restartS` restarted fixed `127.0.0.1:4042`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - Phase 2A sample passed, then same-id restart verify passed for task `task-cli-master-worker-FHPHASE2A1783579160756571000`, execution `exec-cli-master-worker-FHPHASE2A1783579160756571000`, worker `worker-cli-master-worker-FHPHASE2A1783579160756571000`.
+  - Phase 2B sample passed, then same-cursor restart verify passed for task `task-cli-master-poll-FHPHASE2B1783579160756557000` with `inbox_after_cursor_events=0`.
+  - Phase 2C sample passed, then same-control restart verify passed for task `task-cli-worker-control-FHPHASE2C1783579160756557000` with `control_events=8`.
+- WebUI online proof:
+  - Final `make verify-webui-online` passed after no-fallback fix.
+  - Evidence: `artifacts/webui-online/20260709-verify-4042-1783580948045/summary.json`.
+  - Session: `webui-session-20260709070942-4d8550f6`.
+  - Phase 2D status snapshot: task board `18 task(s) · 1 blocked · 6 review · 8 stale`; agent board `12 agent(s) · 12 active`; event inbox `30 recent event(s) · updated`; history `12 execution event(s)`; worker control `review submitted · 0 control event(s)`.
+  - Checks true: `phase2TaskBoardMatchesService`, `phase2AgentBoardMatchesService`, `phase2EventInboxMatchesService`, `phase2TaskHistoryMatchesService`, `phase2WorkerControlMatchesService`, `phase2ProjectionVisible`, `phase2NoRawInternalChrome`, plus submit clearing, refresh preservation, terminal no-live, mobile drawer/layout, Settings, and clean new-session checks.
+  - Screenshots include `27-phase2-projection.png`; service truth captured in `27-phase2-truth.json`.
+- Android device:
+  - JVM tests passed.
+  - True-device proof not closed: `adb connect 100.104.163.65:5555` returned `unauthorized`; `emulator-5554` was `offline`.
+- final receipt mapping audit:
+  - Found WebUI/Android command receipt user text was safe against id leakage but still used substring classification such as `task_` / `worker_control`.
+  - Tightened both clients to derive a dispatch status code by stripping only `:` or whitespace suffixes, then map through exact known-code whitelist.
+  - Added/updated tests to prove unknown task-like statuses such as `task_unknown:*` render unsupported instead of task success text.
+
 # 2026-07-08 multi-task phase1 implementation closeout
 
 - Scope:

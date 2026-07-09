@@ -28,6 +28,7 @@
     "transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot",
     "transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection",
     "transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history and error-center metadata before using protocol-state snapshots",
+    "front-end Phase 2D status drawer queries TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl through the existing ADP/runtime query path; the browser only caches transient render data and must not persist task/control truth",
     "transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot",
     "HTTP query and POST command ingress remain compatibility routes; SSE latest-turn subscribe is consumed by WebUI as a display-refresh mirror without owning command dispatch",
     "per-turn debug SSE is a live subscription and waits for late debug snapshots when turn projection arrives before debug projection",
@@ -50,6 +51,7 @@
     "WebUI success/failure diagnostic prompts populate the composer through slash commands or keyboard shortcuts, then the operator can send them through the normal ADP submit path; these prompts must not appear as persistent composer buttons",
     "WebUI composer control strip renders low-noise controls below the composer without creating a second protocol or truth source",
     "WebUI provider/model save renders field-level validation errors, disables duplicate save while in flight, re-queries owner-backed config status, and shows restart-required after a successful owner-backed save",
+    "WebUI Phase 2D status drawer renders compact TaskBoard, AgentBoard, EventInbox, task history, and WorkerControl cards from owner query results; worker-control buttons submit WorkerControl commands and then re-query owner truth before updating the drawer",
     "WebUI forwards selected cwd through SubmitUserInput.cwd and keeps draft-session empty state out of the chat stream",
     "WebUI selected empty sessions render a clean empty prompt and ignore latest-active turns from other sessions until the selected session has its own transcript or live turn",
     "WebUI Escape behavior is stateful: active/submit-in-flight cancels, non-empty composer clears, empty composer first Esc arms rollback, and second Esc calls `RollbackLatestSessionTurn` before refilling composer from the rolled-back user text",
@@ -95,6 +97,7 @@
     "transient missing debug snapshots are rendered as pending debug state, not command failure",
     "debug SSE transport errors are rendered as reconnecting state and must not be hidden behind stale pending state",
     "task/error-center subscription initial query failures surface explicit ADP failure frames instead of app-owned fallback state",
+    "Phase 2D query and WorkerControl command failures render explicit user-visible status errors and must not backfill task/control state from local browser guesses",
     "settings provider/model update failures render explicit user-visible config errors and must not update local Settings state as if save succeeded"
   ],
   "shared_functions": [
@@ -271,6 +274,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "11c",
+      "symbol_path": "applyPhase2QueryResult / refreshPhase2Status / renderPhase2Dashboard / renderTaskBoardProjection / renderAgentBoardProjection / renderEventInboxProjection / renderTaskHistoryProjection / renderWorkerControlProjection / sendWorkerControl",
+      "file_path": "apps/freehand-server/assets/webui.js",
+      "responsibility": "query TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl through the existing ADP/runtime owner path; render compact read-only status cards; route worker-control actions through WorkerControl and re-query owner truth after command receipt",
+      "input_semantic": "UiQueryResult Phase 2 projections plus worker-control button intent",
+      "output_semantic": "detail-drawer status cards plus user-safe worker-control receipt/status text",
+      "caller": "WebUI detail drawer",
+      "callee": "runtime owner projections through ADP",
+      "binding_status": "bound"
+    },
+    {
       "step": "12",
       "symbol_path": "handle_query_checkpoints / refreshCheckpoints",
       "file_path": "apps/freehand-server/src/lib.rs / apps/freehand-server/assets/webui.js",
@@ -352,6 +366,8 @@
     "app query transport now accepts an injected UiRuntimeQueryPort while remaining free of runtime/task/error-center imports",
     "app subscription transport now uses the injected UiRuntimeQueryPort for task list and error-center initial snapshots while keeping app dependency boundary protocol-only",
     "WebUI session rail now exposes rename, remove via DeleteSession, and double-Esc rollback as protocol commands over ADP instead of local session truth; archive/restore controls are intentionally absent",
+    "WebUI Phase 2D status drawer now renders TaskBoard, AgentBoard, EventInbox, task history, and WorkerControl from runtime owner query results; it does not write browser-persisted task/control truth",
+    "WebUI WorkerControl buttons now send WorkerControl commands through ADP and re-query the owner projection; the visible receipt hides internal feature ids",
     "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes",
     "WebUI Cancel button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input",
     "WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn",

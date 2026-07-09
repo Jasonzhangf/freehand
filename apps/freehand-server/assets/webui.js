@@ -85,6 +85,16 @@ const inspectorEyebrow = document.getElementById("inspector-eyebrow");
 const inspectorTitle = document.getElementById("inspector-title");
 const inspectorCopy = document.getElementById("inspector-copy");
 const inspectorDebugPanel = document.getElementById("inspector-debug-panel");
+const taskBoardStatus = document.getElementById("task-board-status");
+const taskBoardList = document.getElementById("task-board-list");
+const agentBoardStatus = document.getElementById("agent-board-status");
+const agentBoardList = document.getElementById("agent-board-list");
+const eventInboxStatus = document.getElementById("event-inbox-status");
+const eventInboxList = document.getElementById("event-inbox-list");
+const taskHistoryStatus = document.getElementById("task-history-status");
+const taskHistoryList = document.getElementById("task-history-list");
+const workerControlStatus = document.getElementById("worker-control-status");
+const workerControlList = document.getElementById("worker-control-list");
 const settingsShell = document.getElementById("settings-shell");
 const settingsProviderForm = document.getElementById("settings-provider-form");
 const settingsProviderIdInput = document.getElementById("settings-provider-id-input");
@@ -171,6 +181,14 @@ const state = {
   publicConversation: [],
   debug: null,
   checkpoints: [],
+  taskBoard: null,
+  agentBoard: null,
+  eventInbox: null,
+  taskHistory: null,
+  workerControl: null,
+  phase2StatusError: null,
+  phase2LastRefreshAt: null,
+  workerControlInFlight: false,
   configStatus: null,
   configStatusError: null,
   configSaveInFlight: false,
@@ -500,7 +518,7 @@ function handleAdpFrame(frame) {
         window.clearTimeout(request.timeoutId);
         request.resolve(frame.receipt);
       }
-      setBackgroundCommandStatus(`${frame.receipt.dispatch_status} -> ${frame.receipt.target_feature_id}`);
+      setBackgroundCommandStatus(commandReceiptStatus(frame.receipt));
       return;
     case "subscription_accepted":
       state.adpFailure = null;
@@ -1397,6 +1415,59 @@ function truncateForChat(value, maxLength) {
     return text;
   }
   return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function commandReceiptStatus(receipt) {
+  const rawStatus = `${(receipt && receipt.dispatch_status) || ""}`.trim();
+  const statusCode = commandReceiptCode(rawStatus);
+  if (!statusCode) {
+    return "unsupported command receipt: missing dispatch status";
+  }
+  switch (statusCode) {
+    case "reason_live_turn_cancel_requested":
+      return "cancel requested";
+    case "reason_turn_cancelled":
+      return "request cancelled";
+    case "runtime_checkpoint_rewound":
+      return "checkpoint restored";
+    case "session_metadata_updated":
+    case "session_turn_rolled_back":
+      return "session updated";
+    case "reason_turn_started":
+      return "request accepted";
+    case "reason_live_turn_completed":
+      return "request completed";
+    case "provider_config_saved_restart_required":
+      return "settings saved";
+    case "node_direct_message_dispatched":
+      return "worker message sent";
+    case "worker_control_applied":
+      return "worker control accepted";
+    case "task_agent_created":
+      return "worker updated";
+    case "task_created":
+    case "task_assigned":
+    case "task_claimed":
+    case "task_review_submitted":
+    case "task_review_rejected":
+    case "task_review_approved":
+    case "task_closed":
+    case "execution_fact_applied":
+    case "scheduler_tick_recorded":
+    case "master_poll_recorded":
+      return "task updated";
+    case "queued_by_static_dispatch_port":
+      return "command queued";
+    default:
+      return `unsupported command receipt: ${truncateForChat(statusCode, 80)}`;
+  }
+}
+
+function commandReceiptCode(dispatchStatus) {
+  return `${dispatchStatus || ""}`
+    .trim()
+    .toLowerCase()
+    .split(/[:\s]/, 1)[0];
 }
 
 function executionShell({ status, live }) {
@@ -2684,6 +2755,10 @@ function applyAdpQueryResult(result) {
     state.configStatus = configStatus;
     state.configStatusError = null;
     renderSettingsShell();
+    return;
+  }
+  if (applyPhase2QueryResult(result)) {
+    return;
   }
 }
 
@@ -3115,6 +3190,609 @@ function renderCheckpoints() {
   });
 }
 
+function applyPhase2QueryResult(result) {
+  const taskBoard = variantPayload(result, "TaskBoard");
+  if (taskBoard !== undefined) {
+    state.taskBoard = taskBoard;
+    state.phase2StatusError = null;
+    renderPhase2Dashboard();
+    return true;
+  }
+  const agentBoard = variantPayload(result, "AgentBoard");
+  if (agentBoard !== undefined) {
+    state.agentBoard = agentBoard;
+    state.phase2StatusError = null;
+    renderPhase2Dashboard();
+    return true;
+  }
+  const eventInbox = variantPayload(result, "EventInbox");
+  if (eventInbox !== undefined) {
+    state.eventInbox = eventInbox;
+    state.phase2StatusError = null;
+    renderPhase2Dashboard();
+    return true;
+  }
+  const masterPoll = variantPayload(result, "MasterPoll");
+  if (masterPoll !== undefined) {
+    state.taskBoard = masterPoll.task_board || state.taskBoard;
+    state.agentBoard = masterPoll.agent_board || state.agentBoard;
+    state.eventInbox = masterPoll.event_inbox || state.eventInbox;
+    state.phase2StatusError = null;
+    renderPhase2Dashboard();
+    return true;
+  }
+  const workerControl = variantPayload(result, "WorkerControl");
+  if (workerControl !== undefined) {
+    state.workerControl = workerControl;
+    state.phase2StatusError = null;
+    renderPhase2Dashboard();
+    return true;
+  }
+  const taskHistory = variantPayload(result, "TaskHistory");
+  if (taskHistory !== undefined) {
+    state.taskHistory = taskHistory;
+    state.phase2StatusError = null;
+    renderPhase2Dashboard();
+    return true;
+  }
+  return false;
+}
+
+function renderPhase2Dashboard() {
+  renderTaskBoardProjection();
+  renderAgentBoardProjection();
+  renderEventInboxProjection();
+  renderTaskHistoryProjection();
+  renderWorkerControlProjection();
+}
+
+function renderTaskBoardProjection() {
+  if (!taskBoardStatus || !taskBoardList) {
+    return;
+  }
+  const board = state.taskBoard;
+  if (state.phase2StatusError && !board) {
+    taskBoardStatus.textContent = `status unavailable: ${state.phase2StatusError}`;
+    taskBoardList.textContent = "-";
+    return;
+  }
+  if (!board) {
+    taskBoardStatus.textContent = "waiting";
+    taskBoardList.textContent = "-";
+    return;
+  }
+  const taskCount = (board.tasks || []).length;
+  const blockedCount = (board.blocked || []).length;
+  const reviewCount = (board.review_ready || []).length;
+  const staleCount = (board.stale || []).length;
+  taskBoardStatus.textContent = `${taskCount} task(s) · ${blockedCount} blocked · ${reviewCount} review · ${staleCount} stale`;
+  taskBoardList.replaceChildren();
+  const tasks = phase2SortedTasks(board.tasks || []);
+  if (tasks.length === 0) {
+    taskBoardList.textContent = "no tasks yet";
+    return;
+  }
+  tasks.slice(0, 8).forEach((task) => taskBoardList.appendChild(taskBoardItem(task)));
+}
+
+function taskBoardItem(task) {
+  const item = document.createElement("section");
+  item.className = `phase2-card ${phase2StatusClass(task.status)}`;
+  item.dataset.taskId = task.task_id || "";
+  if (task.active_execution_id) {
+    item.dataset.executionId = task.active_execution_id;
+  }
+  const title = document.createElement("div");
+  title.className = "phase2-card-title";
+  title.textContent = taskTitle(task);
+  const meta = document.createElement("div");
+  meta.className = "phase2-card-meta";
+  meta.textContent = [statusLabel(task.status), assigneeLabel(task.assignee_agent_id), freshnessLabel(task.last_progress_at || task.updated_at)]
+    .filter(Boolean)
+    .join(" · ");
+  const goal = document.createElement("div");
+  goal.className = "phase2-card-copy";
+  goal.textContent = compactSentence(task.goal || task.target_cwd || "task registered", 120);
+  item.append(title, meta, goal);
+  return item;
+}
+
+function renderAgentBoardProjection() {
+  if (!agentBoardStatus || !agentBoardList) {
+    return;
+  }
+  const board = state.agentBoard;
+  if (state.phase2StatusError && !board) {
+    agentBoardStatus.textContent = `status unavailable: ${state.phase2StatusError}`;
+    agentBoardList.textContent = "-";
+    return;
+  }
+  if (!board) {
+    agentBoardStatus.textContent = "waiting";
+    agentBoardList.textContent = "-";
+    return;
+  }
+  const agents = board.agents || [];
+  const activeCount = agents.filter((agent) => agent.alive).length;
+  agentBoardStatus.textContent = `${agents.length} agent(s) · ${activeCount} active`;
+  agentBoardList.replaceChildren();
+  if (agents.length === 0) {
+    agentBoardList.textContent = "no workers yet";
+    return;
+  }
+  agents.slice(0, 8).forEach((agent, index) => agentBoardList.appendChild(agentBoardItem(agent, index)));
+}
+
+function agentBoardItem(agent, index) {
+  const item = document.createElement("section");
+  item.className = `phase2-card ${agent.alive ? "phase2-running" : "phase2-muted"}`;
+  const title = document.createElement("div");
+  title.className = "phase2-card-title";
+  title.textContent = phase2AgentLabel(agent.agent_id, index);
+  const meta = document.createElement("div");
+  meta.className = "phase2-card-meta";
+  meta.textContent = [statusLabel(agent.state), agent.role || "agent", agent.current_model ? `model ${agent.current_model}` : null]
+    .filter(Boolean)
+    .join(" · ");
+  const activity = document.createElement("div");
+  activity.className = "phase2-card-copy";
+  activity.textContent = lifecycleActivityLabel(agent) || "idle";
+  item.append(title, meta, activity);
+  return item;
+}
+
+function renderEventInboxProjection() {
+  if (!eventInboxStatus || !eventInboxList) {
+    return;
+  }
+  const inbox = state.eventInbox;
+  if (state.phase2StatusError && !inbox) {
+    eventInboxStatus.textContent = `status unavailable: ${state.phase2StatusError}`;
+    eventInboxList.textContent = "-";
+    return;
+  }
+  if (!inbox) {
+    eventInboxStatus.textContent = "waiting";
+    eventInboxList.textContent = "-";
+    return;
+  }
+  const events = inbox.events || [];
+  eventInboxStatus.textContent = `${events.length} recent event(s)${inbox.next_cursor ? " · updated" : ""}`;
+  eventInboxList.replaceChildren();
+  if (events.length === 0) {
+    eventInboxList.textContent = "no pending task events";
+    return;
+  }
+  events.slice(-10).reverse().forEach((event) => eventInboxList.appendChild(eventInboxItem(event)));
+}
+
+function eventInboxItem(event) {
+  const item = document.createElement("section");
+  item.className = `phase2-event ${phase2EventClass(event.kind)}`;
+  const title = document.createElement("div");
+  title.className = "phase2-card-title";
+  title.textContent = eventKindLabel(event.kind);
+  const meta = document.createElement("div");
+  meta.className = "phase2-card-meta";
+  meta.textContent = [eventPayloadStatus(event), assigneeLabel(event.agent_id), freshnessLabel(event.created_at)]
+    .filter(Boolean)
+    .join(" · ");
+  const copy = document.createElement("div");
+  copy.className = "phase2-card-copy";
+  copy.textContent = compactSentence(eventPayloadSummary(event), 110);
+  item.append(title, meta, copy);
+  return item;
+}
+
+function renderTaskHistoryProjection() {
+  if (!taskHistoryStatus || !taskHistoryList) {
+    return;
+  }
+  const history = state.taskHistory;
+  if (state.phase2StatusError && !history) {
+    taskHistoryStatus.textContent = `history unavailable: ${state.phase2StatusError}`;
+    taskHistoryList.textContent = "-";
+    return;
+  }
+  if (!history) {
+    if (state.taskBoard) {
+      taskHistoryStatus.textContent = "no task history";
+      taskHistoryList.textContent = "no task selected";
+      return;
+    }
+    taskHistoryStatus.textContent = "waiting";
+    taskHistoryList.textContent = "-";
+    return;
+  }
+  const events = history.events || [];
+  taskHistoryStatus.textContent = `${events.length} execution event(s)`;
+  taskHistoryList.replaceChildren();
+  if (events.length === 0) {
+    taskHistoryList.textContent = "no execution events recorded";
+    return;
+  }
+  events.slice(-10).reverse().forEach((event) => taskHistoryList.appendChild(taskHistoryItem(event)));
+}
+
+function taskHistoryItem(event) {
+  const item = document.createElement("section");
+  item.className = `phase2-event ${phase2EventClass(event.event_type || event.to_status)}`;
+  const title = document.createElement("div");
+  title.className = "phase2-card-title";
+  title.textContent = eventKindLabel(event.event_type);
+  const meta = document.createElement("div");
+  meta.className = "phase2-card-meta";
+  meta.textContent = [statusLabel(event.to_status), freshnessLabel(event.timestamp)]
+    .filter(Boolean)
+    .join(" · ");
+  const copy = document.createElement("div");
+  copy.className = "phase2-card-copy";
+  copy.textContent = compactSentence(eventPayloadSummary({ kind: event.event_type, payload: event.payload || {} }), 110);
+  item.append(title, meta, copy);
+  return item;
+}
+
+function renderWorkerControlProjection() {
+  if (!workerControlStatus || !workerControlList) {
+    return;
+  }
+  const target = currentWorkerControlTarget();
+  const control = state.workerControl;
+  if (state.phase2StatusError && !control) {
+    workerControlStatus.textContent = `status unavailable: ${state.phase2StatusError}`;
+    workerControlList.textContent = "-";
+    return;
+  }
+  if (!target && !control) {
+    workerControlStatus.textContent = "no active execution";
+    workerControlList.textContent = "worker control appears when a task has an execution";
+    return;
+  }
+  const events = (control && control.events) || [];
+  const currentTask = (control && control.task) || (target && target.task) || null;
+  workerControlStatus.textContent = `${statusLabel(currentTask && currentTask.status)} · ${events.length} control event(s)`;
+  workerControlList.replaceChildren();
+  workerControlList.appendChild(workerControlSummaryCard(currentTask, target));
+  workerControlList.appendChild(workerControlActionRow(currentTask, target));
+  if (events.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "phase2-empty-note";
+    empty.textContent = "no control events recorded";
+    workerControlList.appendChild(empty);
+    return;
+  }
+  events.slice(-6).reverse().forEach((event) => workerControlList.appendChild(workerControlEventItem(event)));
+}
+
+function workerControlSummaryCard(task, target) {
+  const item = document.createElement("section");
+  item.className = `phase2-card ${phase2StatusClass(task && task.status)}`;
+  const title = document.createElement("div");
+  title.className = "phase2-card-title";
+  title.textContent = task ? taskTitle(task) : "Worker execution";
+  const meta = document.createElement("div");
+  meta.className = "phase2-card-meta";
+  meta.textContent = [statusLabel(task && task.status), assigneeLabel((task && task.assignee_agent_id) || (target && target.agent_id))]
+    .filter(Boolean)
+    .join(" · ");
+  const copy = document.createElement("div");
+  copy.className = "phase2-card-copy";
+  copy.textContent = task && task.active_execution_id ? "execution is tracked by the service" : "no active execution";
+  item.append(title, meta, copy);
+  return item;
+}
+
+function workerControlActionRow(task, target) {
+  const row = document.createElement("div");
+  row.className = "phase2-action-row";
+  const disabled = !workerControlCanMutate(task, target) || state.workerControlInFlight;
+  [
+    ["query_status", "Query status"],
+    ["request_checkpoint", "Checkpoint"],
+    ["request_submission_now", "Submit now"],
+    ["pause", "Pause"],
+    ["resume", "Resume"],
+    ["cancel", "Cancel"],
+  ].forEach(([op, label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `phase2-action ${op === "cancel" ? "danger" : ""}`;
+    button.dataset.workerControlOp = op;
+    button.textContent = label;
+    button.disabled = disabled;
+    row.appendChild(button);
+  });
+  return row;
+}
+
+function workerControlEventItem(event) {
+  const item = document.createElement("section");
+  item.className = `phase2-event ${phase2ControlStatusClass(event.status)}`;
+  const title = document.createElement("div");
+  title.className = "phase2-card-title";
+  title.textContent = workerControlOpLabel(event.op);
+  const meta = document.createElement("div");
+  meta.className = "phase2-card-meta";
+  meta.textContent = [statusLabel(event.status), assigneeLabel(event.agent_id), freshnessLabel(event.created_at)]
+    .filter(Boolean)
+    .join(" · ");
+  const copy = document.createElement("div");
+  copy.className = "phase2-card-copy";
+  copy.textContent = workerControlPayloadSummary(event);
+  item.append(title, meta, copy);
+  return item;
+}
+
+function phase2SortedTasks(tasks) {
+  return [...tasks].sort((left, right) => {
+    const leftTerminal = terminalTaskStatus(left.status) ? 1 : 0;
+    const rightTerminal = terminalTaskStatus(right.status) ? 1 : 0;
+    if (leftTerminal !== rightTerminal) {
+      return leftTerminal - rightTerminal;
+    }
+    return Number(right.updated_at || 0) - Number(left.updated_at || 0);
+  });
+}
+
+function currentWorkerControlTarget() {
+  const tasks = phase2SortedTasks((state.taskBoard && state.taskBoard.tasks) || []);
+  const task = tasks.find((candidate) => candidate.active_execution_id) || null;
+  if (!task) {
+    return null;
+  }
+  return {
+    task,
+    task_id: task.task_id,
+    execution_id: task.active_execution_id,
+    agent_id: task.assignee_agent_id || null,
+  };
+}
+
+function currentTaskHistoryTarget() {
+  const tasks = phase2SortedTasks((state.taskBoard && state.taskBoard.tasks) || []);
+  const active = tasks.find((candidate) => candidate.active_execution_id);
+  return active || tasks[0] || null;
+}
+
+function workerControlCanMutate(task, target) {
+  return !!(
+    task &&
+    target &&
+    target.task_id &&
+    target.execution_id &&
+    target.agent_id &&
+    !terminalTaskStatus(task.status)
+  );
+}
+
+function taskTitle(task) {
+  const title = `${(task && task.title) || ""}`.trim();
+  return compactSentence(title || "Task", 80);
+}
+
+function statusLabel(status) {
+  const normalized = `${status || ""}`.trim().toLowerCase();
+  if (!normalized) {
+    return "unknown";
+  }
+  return normalized.replace(/_/g, " ");
+}
+
+function phase2StatusClass(status) {
+  const normalized = `${status || ""}`.toLowerCase();
+  if (["blocked", "failed", "cancelled"].includes(normalized)) {
+    return "phase2-failed";
+  }
+  if (["review_ready", "approved", "closed", "completed"].includes(normalized)) {
+    return "phase2-success";
+  }
+  if (["running", "recovering", "assigned", "waiting_agent", "paused"].includes(normalized)) {
+    return "phase2-running";
+  }
+  return "phase2-muted";
+}
+
+function phase2ControlStatusClass(status) {
+  const normalized = `${status || ""}`.toLowerCase();
+  if (normalized === "applied" || normalized === "observed") {
+    return "phase2-success";
+  }
+  if (normalized === "queued" || normalized === "deferred") {
+    return "phase2-running";
+  }
+  if (normalized === "rejected" || normalized === "failed") {
+    return "phase2-failed";
+  }
+  return "phase2-muted";
+}
+
+function phase2EventClass(kind) {
+  const normalized = `${kind || ""}`.toLowerCase();
+  if (normalized.includes("blocked") || normalized.includes("failed") || normalized.includes("cancelled") || normalized.includes("rejected")) {
+    return "phase2-failed";
+  }
+  if (normalized.includes("review") || normalized.includes("approved") || normalized.includes("closed")) {
+    return "phase2-success";
+  }
+  if (normalized.includes("running") || normalized.includes("assigned") || normalized.includes("resumed") || normalized.includes("recorded")) {
+    return "phase2-running";
+  }
+  return "phase2-muted";
+}
+
+function terminalTaskStatus(status) {
+  return ["approved", "closed", "cancelled", "failed"].includes(`${status || ""}`.toLowerCase());
+}
+
+function phase2AgentLabel(agentId, explicitIndex = null) {
+  const normalized = normalizeAgentId(agentId);
+  if (normalized === "master") {
+    return "Master";
+  }
+  const agents = (state.agentBoard && state.agentBoard.agents) || [];
+  const index = explicitIndex === null
+    ? agents.findIndex((agent) => normalizeAgentId(agent.agent_id) === normalized)
+    : explicitIndex;
+  return `Worker ${index >= 0 ? index + 1 : ""}`.trim();
+}
+
+function assigneeLabel(agentId) {
+  if (!agentId) {
+    return null;
+  }
+  return phase2AgentLabel(agentId);
+}
+
+function lifecycleActivityLabel(agent) {
+  const activity = agent && (agent.current_activity || agent.last_activity);
+  if (!activity) {
+    return null;
+  }
+  const elapsed = activity.elapsed_ms ? formatDuration(activity.elapsed_ms) : "";
+  return [compactSentence(activity.semantic_summary || activity.kind || "activity", 90), elapsed]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function freshnessLabel(timestamp) {
+  const value = Number(timestamp || 0);
+  if (!value) {
+    return null;
+  }
+  const ms = value > 10_000_000_000 ? value : value * 1000;
+  const elapsed = Date.now() - ms;
+  if (!Number.isFinite(elapsed) || elapsed < 0) {
+    return "just now";
+  }
+  return `${formatDuration(elapsed)} ago`;
+}
+
+function eventKindLabel(kind) {
+  const raw = `${kind || "TaskEvent"}`;
+  return raw
+    .replace(/^Task/, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .trim()
+    .toLowerCase() || "task event";
+}
+
+function eventPayloadStatus(event) {
+  const payload = (event && event.payload) || {};
+  return statusLabel(payload.to_status || payload.status || event.kind);
+}
+
+function eventPayloadSummary(event) {
+  const payload = (event && event.payload) || {};
+  if (payload.summary) {
+    return payload.summary;
+  }
+  if (payload.reason) {
+    return payload.reason;
+  }
+  if (payload.phase) {
+    return payload.phase;
+  }
+  return eventKindLabel(event && event.kind);
+}
+
+function workerControlOpLabel(op) {
+  const normalized = `${op || ""}`.toLowerCase();
+  const labels = {
+    query_status: "Status queried",
+    ask_at_safe_point: "Question queued",
+    add_constraint: "Constraint queued",
+    request_checkpoint: "Checkpoint requested",
+    request_submission_now: "Submission requested",
+    pause: "Pause requested",
+    resume: "Resume requested",
+    cancel: "Cancel requested",
+  };
+  return labels[normalized] || statusLabel(normalized || "control event");
+}
+
+function workerControlPayloadSummary(event) {
+  const payload = (event && event.payload) || {};
+  if (payload.question) {
+    return compactSentence(payload.question, 110);
+  }
+  if (payload.constraint) {
+    return compactSentence(payload.constraint, 110);
+  }
+  if (payload.note) {
+    return compactSentence(payload.note, 110);
+  }
+  return `${workerControlOpLabel(event && event.op)} · ${statusLabel(event && event.status)}`;
+}
+
+function compactSentence(value, maxLength = 96) {
+  const text = `${value || ""}`.replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+async function refreshPhase2Status() {
+  try {
+    applyPhase2QueryResult(await adpQuery({ QueryTaskBoard: { include_terminal: true } }));
+    applyPhase2QueryResult(await adpQuery("QueryAgentBoard"));
+    applyPhase2QueryResult(await adpQuery({ QueryEventInbox: { limit: 30 } }));
+    const historyTarget = currentTaskHistoryTarget();
+    if (historyTarget && historyTarget.task_id) {
+      applyPhase2QueryResult(await adpQuery({ QueryTaskHistory: { task_id: historyTarget.task_id } }));
+    } else {
+      state.taskHistory = null;
+    }
+    const target = currentWorkerControlTarget();
+    if (target && target.task_id && target.execution_id) {
+      applyPhase2QueryResult(await adpQuery({
+        QueryWorkerControl: {
+          task_id: target.task_id,
+          execution_id: target.execution_id,
+        },
+      }));
+    } else {
+      state.workerControl = null;
+    }
+    state.phase2LastRefreshAt = Date.now();
+    state.phase2StatusError = null;
+  } catch (error) {
+    state.phase2StatusError = error.message;
+    setCommandStatus(`task status refresh failed: ${error.message}`, { stickyMs: 9000 });
+  }
+  renderPhase2Dashboard();
+}
+
+async function sendWorkerControl(op) {
+  const target = currentWorkerControlTarget();
+  const task = target && target.task;
+  if (!workerControlCanMutate(task, target)) {
+    setCommandStatus("worker control requires a non-terminal assigned execution", { stickyMs: 7000 });
+    return;
+  }
+  state.workerControlInFlight = true;
+  renderWorkerControlProjection();
+  try {
+    const control = {
+      control_id: `webui-control-${browserRandomId().slice(0, 12)}`,
+      task_id: target.task_id,
+      execution_id: target.execution_id,
+      agent_id: target.agent_id,
+      op,
+    };
+    const result = await adpCommand({ WorkerControl: { control } });
+    const statusText = `${result.dispatch_status || "accepted"}`.toLowerCase().replace(/_/g, " ");
+    setCommandStatus(`worker control ${statusText}`, { stickyMs: 6000 });
+    await refreshPhase2Status();
+  } catch (error) {
+    setCommandStatus(`worker control failed: ${error.message}`, { stickyMs: 9000 });
+  } finally {
+    state.workerControlInFlight = false;
+    renderWorkerControlProjection();
+  }
+}
+
 function showInspectorPanel(panel) {
   state.inspectorPanel = panel === "settings" ? "settings" : "debug";
   const showingSettings = state.inspectorPanel === "settings";
@@ -3276,6 +3954,7 @@ function renderAll() {
   renderAttachmentTray();
   renderDebug();
   renderCheckpoints();
+  renderPhase2Dashboard();
   renderSettingsShell();
   renderCommandStatus();
 }
@@ -3345,6 +4024,7 @@ async function refreshAllProtocolState() {
   }
   await refreshCheckpoints();
   await refreshConfigStatus();
+  await refreshPhase2Status();
 }
 
 function ensureTurnSubscription() {
@@ -3434,7 +4114,7 @@ async function submitUserInput(text) {
     command.SubmitUserInput.cwd = cwd;
   }
   const payload = await adpCommand(command);
-  setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id}`);
+  setCommandStatus(commandReceiptStatus(payload));
   return payload;
 }
 
@@ -3475,9 +4155,9 @@ async function cancelActiveTurn() {
   state.submitStartedAt = null;
   state.submitInFlight = false;
   composerInput.value = "";
-  setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id}`);
+  setCommandStatus(commandReceiptStatus(payload));
   await refreshTurn().catch((error) => {
-    setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id} (turn refresh failed: ${error.message})`);
+    setCommandStatus(`${commandReceiptStatus(payload)} (refresh failed: ${error.message})`);
   });
 }
 
@@ -3490,7 +4170,7 @@ async function rewindCheckpoint(checkpointId) {
     setCommandStatus(`rewind failed: ${error.message}`);
     return;
   }
-  setCommandStatus(`${payload.dispatch_status} -> ${payload.target_feature_id}`);
+  setCommandStatus(commandReceiptStatus(payload));
   await refreshCheckpoints();
 }
 
@@ -3656,7 +4336,7 @@ composerForm.addEventListener("submit", async (event) => {
       await refreshAllProtocolState();
       renderCommandStatus();
     } catch (error) {
-      setCommandStatus(`${receipt.dispatch_status} -> ${receipt.target_feature_id} (turn refresh failed: ${error.message})`);
+      setCommandStatus(`${commandReceiptStatus(receipt)} (refresh failed: ${error.message})`);
     }
   } catch (error) {
     state.submitInFlight = false;
@@ -3881,9 +4561,22 @@ previewAttachmentsButton.addEventListener("click", () => {
 refreshSessionButton.addEventListener("click", () => {
   setCommandStatus("refreshing selected session...", { stickyMs: 3000 });
   refreshSelectedSession()
+    .then(() => refreshPhase2Status())
     .then(() => setCommandStatus("selected session refreshed", { stickyMs: 4000 }))
     .catch((error) => setCommandStatus(`selected session refresh failed: ${error.message}`, { stickyMs: 8000 }));
 });
+if (workerControlList) {
+  workerControlList.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target ? target.closest("[data-worker-control-op]") : null;
+    if (!button) {
+      return;
+    }
+    sendWorkerControl(button.dataset.workerControlOp).catch((error) => {
+      setCommandStatus(`worker control failed: ${error.message}`, { stickyMs: 9000 });
+    });
+  });
+}
 modelSelector.addEventListener("change", () => {
   modelSelector.value = "runtime";
   setCommandStatus("model selector is read-only; runtime config owns active model", { stickyMs: 6000 });

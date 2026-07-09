@@ -15,6 +15,7 @@
   ],
   "response_mainline": [
     "daemon ADP emits UiAdpResponse::SubscriptionEvent with UiSubscriptionEvent / UiProjection::Turn -> AdpEventStream receives Event -> TimelineProjector::applyAdp updates state + latestRawTurnProjection",
+    "daemon ADP command receipt -> AdpEventStream::commandReceiptResponse keeps raw routing/status in CommandResponse.code and maps CommandResponse.message to user-safe known-status text or explicit unsupported text without owner or payload ids",
     "MainActivity::loadRemoteWebUi hides native chrome after ADP opens and loads the daemon-hosted WebUI root so Android shares WebUI visual/session/ADP rendering truth",
     "MainActivity::pushSnapshotToWebView calls window.__freehand.applySnapshot(json) on bridge.html only before the remote WebUI is loaded",
     "bridge.html JS renders public_conversation items as DOM turn cards only in fallback/config-error mode",
@@ -91,6 +92,17 @@
       "output_semantic": "immediate send result plus later command receipt or failure callback",
       "caller": "CommandIngress",
       "callee": "ADP WebSocket",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06a",
+      "symbol_path": "com.freehand.android.data.AdpEventStream::commandReceiptResponse",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt",
+      "responsibility": "map command receipts to CommandResponse with user-safe known-status text, explicit unsupported text for unknown receipts, and hidden owner/payload ids",
+      "input_semantic": "protocol command receipt JSON",
+      "output_semantic": "CommandResponse with internal status in code and safe known-status or unsupported text in message",
+      "caller": "AdpEventStream handleFrame",
+      "callee": "command receipt parser",
       "binding_status": "bound"
     },
     {
@@ -280,10 +292,11 @@
     }
   ],
   "sync_status": [
-    "all 18 call table rows bound to real Kotlin symbols or owner scripts in apps/freehand-android/",
+    "all 19 call table rows bound to real Kotlin symbols or owner scripts in apps/freehand-android/",
     "Android daemon connection config bootstraps bundled assets/config/client.json into app-owned daemon-connection.json, then uses that JSON file as endpoint truth",
     "SharedPreferences no longer owns daemon host or port persistence",
     "Android live shell now defaults to AdpEventStream for status/control; ProtocolClient and SseEventStream remain compatibility transport classes but are not the default MainActivity live path",
+    "Android command receipt projection hides target_feature_id and payload ids from CommandResponse.message while preserving raw dispatch status in CommandResponse.code and marking unknown dispatch status unsupported",
     "unit tests exist for TimelineProjector, HostConfig, and CommandIngress protocol, including ADP URL/frame/projector coverage",
     "device UI verification script records pass/block/fail evidence for explicit-serial Android true-device validation",
     "mainline JSON generated from function map",

@@ -342,3 +342,147 @@ freehand-cliS master-poll-foundation-sample --url ws://127.0.0.1:4042/adp --veri
 Phase 2B remains no-UI. WebUI/Android dashboards, worker_control, multi
 BigTask, cross-machine workers, and framework-owned business decisions stay out
 of scope.
+
+## Phase 2 Current Closeout Status
+
+Phase 2A, 2B, and 2C are implemented and verified for their no-UI foundation
+scope.
+
+- Phase 2A closed the master-worker execution lifecycle sample: worker
+  creation, assignment, claim, progress, blocked, recovering, review, reject,
+  retry, approve, close, and restart same-id proof.
+- Phase 2B closed EventInbox and MasterPoll truth: four-part event cursors,
+  replay-from-start full drain, persisted cursor, owner-backed cursor reread,
+  and restart same-cursor proof.
+- Phase 2C closed worker-control foundation: `query_status`, safe-point queued
+  requests, Task Center-backed pause/resume/cancel consequences, control
+  ledger/snapshot, and restart same-id proof.
+
+The remaining Phase 2 work is Phase 2D plus final Phase 2 audit. Phase 2D is
+not allowed to invent new task, agent, event, or worker-control truth. It must
+project already-proven owner truth through shared protocol surfaces, then prove
+WebUI/Android-visible state matches ADP/headless truth.
+
+## Phase 2 Full Closeout Plan
+
+### Objective
+
+Complete the Phase 2 master/worker foundation by turning the proven no-UI
+TaskBoard, AgentBoard, EventInbox, execution history, and worker-control truth
+into reliable UI projections, then run a full Phase 2 regression and restart
+recovery audit.
+
+### In Scope
+
+- Revalidate Phase 2A/2B/2C headless owner truth before UI work.
+- Fill any missing `ui.protocol` query/subscription projection needed by UI for
+  TaskBoard, AgentBoard, EventInbox, execution history, and worker-control
+  timeline/status.
+- Implement WebUI Phase 2D projection with compact task/agent surfaces, event
+  timeline, worker status, and worker-control affordances.
+- Keep Android aligned with the WebUI responsive surface when the shared WebUI
+  assets change; validate on browser mobile layout and true Android device when
+  APK/release surface is touched.
+- Hide raw internal transport names, raw ids, and debug-only fields by default;
+  expose them only through explicit debug/details surfaces.
+- Update function maps, test designs, mainline-call manifests, generated wiki,
+  `CACHE.md`, `MEMORY.md`, `note.md`, and local skill rules when truth or
+  verification workflow changes.
+
+### Out Of Scope
+
+- Multiple independent BigTasks and cross-session master context switching.
+- Cross-machine workers and worker autoscaling.
+- Framework-owned business decisions without model/tool admission.
+- Direct private Agent-to-Agent mutation or prompt-history mutation.
+- New provider/model reasoning semantics beyond what is required to project
+  Phase 2 owner truth.
+- Replacing the current worker-control foundation with real preemptive runtime
+  interruption unless a separate owner design and tests are added first.
+
+### Execution Order
+
+1. Baseline audit: run source-only search through feature maps/function maps,
+   then revalidate Phase 2A, 2B, and 2C samples on S-profile `127.0.0.1:4042`
+   including restart same-id/same-cursor proofs.
+2. Projection contract audit: inspect `ui.protocol`,
+   `runtime.ui-command-dispatch`, and CLI samples to identify the exact missing
+   query/subscribe shapes for Phase 2D UI. Add only owner-routed projections;
+   do not let app code infer task or control truth.
+3. WebUI implementation: render TaskBoard/AgentBoard/EventInbox/worker-control
+   from protocol truth, keep conversation primary on phone layouts, use
+   drawers/details for low-frequency surfaces, and keep debug fields hidden by
+   default.
+4. Android alignment: if shared WebUI assets or APK packaging change, install
+   the APK on the online phone and verify the same Phase 2 surfaces through the
+   real WebView.
+5. Final audit: run local gates, online S-profile proof, browser proof, Android
+   proof when applicable, source-only MemoryPalace mine/search, and commit the
+   complete Phase 2 closeout.
+
+### Verification Matrix
+
+Local required checks:
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p freehand-task -- --nocapture
+cargo test -p freehand-ui-protocol -- --nocapture
+cargo test -p freehand-runtime -- --nocapture
+cargo test -p freehand-cli -- --nocapture
+cargo test -p freehand-server -- --nocapture
+cargo run -p xtask -- mainlines generate
+cargo run -p xtask -- mainlines check
+cargo run -p xtask -- gates check
+git diff --check
+```
+
+Online S-profile required checks:
+
+```bash
+scripts/install-launchd.sh restartS
+curl -4fsS http://127.0.0.1:4042/health
+freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp
+freehand-cliS master-worker-foundation-sample --url ws://127.0.0.1:4042/adp
+scripts/install-launchd.sh restartS
+freehand-cliS master-worker-foundation-sample --url ws://127.0.0.1:4042/adp --verify ...
+freehand-cliS master-poll-foundation-sample --url ws://127.0.0.1:4042/adp
+scripts/install-launchd.sh restartS
+freehand-cliS master-poll-foundation-sample --url ws://127.0.0.1:4042/adp --verify-cursor ...
+freehand-cliS worker-control-foundation-sample --url ws://127.0.0.1:4042/adp
+scripts/install-launchd.sh restartS
+freehand-cliS worker-control-foundation-sample --url ws://127.0.0.1:4042/adp --verify-task ...
+```
+
+UI required checks:
+
+- Real browser proof against fixed S-profile `127.0.0.1:4042`.
+- Browser-visible TaskBoard/AgentBoard/EventInbox/worker-control state must
+  match ADP/headless query truth for the same task/execution/agent/control ids.
+- Historical task/control rows must not show fake live animation after terminal
+  state.
+- User-facing UI must not show raw `ADP`, raw runtime turn ids, or debug-only
+  transport plumbing by default.
+- If Android/release assets are changed, run release asset hash proof and true
+  Android device verification with the online phone.
+
+Memory and closeout checks:
+
+- Update `note.md`, promote durable truth to `MEMORY.md`, update `CACHE.md`.
+- Mine a source-only curated MemoryPalace corpus into `wing=freehand`.
+- Verify the new Phase 2 closeout marker is searchable.
+- Commit only after validation evidence is current.
+
+### Done Definition
+
+Phase 2 is complete only when:
+
+- Phase 2A/2B/2C headless samples still pass with restart same-id/same-cursor
+  recovery evidence.
+- Phase 2D UI is a projection of owner truth, not UI-local task/control state.
+- WebUI and Android-visible Phase 2 state can be traced to ADP/headless truth.
+- Function maps, test designs, mainline manifests, generated wiki, memory, and
+  local skill rules are synchronized.
+- Final local gates, online S-profile proof, browser proof, source-only
+  MemoryPalace proof, and required device proof have current evidence.

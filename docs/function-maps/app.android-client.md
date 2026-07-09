@@ -84,6 +84,7 @@
 | 04a | `HostConfig::updateManifestUrl` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt` | construct the daemon-hosted Android APK update manifest URL from the active profile | profile host + port | `http://<host>:<port>/android/update.json` | Android app shell | active profile config | bound |
 | 05 | `AdpEventStream::start` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | open OkHttp WebSocket to `/adp`, subscribe latest turn, and query latest turn | no | ADP WebSocket session | `MainActivity::connectToDaemon` | OkHttp `newWebSocket` | bound |
 | 06 | `AdpEventStream::sendCommand` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | wrap UiCommand JSON in an ADP command frame and send it over the active socket | UiCommand JSON | immediate send result + later command receipt/failure callback | `CommandIngress` | ADP WebSocket | bound |
+| 06a | `AdpEventStream::commandReceiptResponse` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | map command receipts to `CommandResponse` with user-safe known-status text, explicit unsupported text for unknown receipts, and hidden owner/payload ids | protocol command receipt JSON | `CommandResponse` with internal status in `code` and safe known-status or unsupported text in `message` | `AdpEventStream::handleFrame` | command receipt parser | bound |
 | 07 | `CommandIngress::submit` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt` | wrap user text in `{"SubmitUserInput":{"text":"..."}}` and dispatch through injected ADP sender | user text | `CommandResponse` | `InputBarController` | `AdpEventStream::sendCommand` | bound |
 | 08 | `CommandIngress::cancelLatest` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt` | wrap `{"CancelLatestActiveTurn":{}}` and dispatch through injected ADP sender | no | fire-and-forget | `MainActivity::onKeyDown` Escape | `AdpEventStream::sendCommand` | bound |
 | 09 | `TimelineProjector::applyAdp` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt` | apply ADP query/subscription/failure frames to internal turn/slave/error state; update `latestRawTurnProjection` | `AdpEventStream.Event` | updated projector state | `AdpEventStream` onEvent callback | `applyAdpQueryResult`, `applyAdpProjection`, `applyTurnProjection` | bound |
@@ -103,8 +104,9 @@
 
 ## Sync Status Against Code
 
-- all 21 call table rows are bound to real file paths and symbol names
+- all 22 call table rows are bound to real file paths and symbol names
 - Android live shell now defaults to `AdpEventStream` for status/control; `ProtocolClient` and `SseEventStream` remain compatibility transport classes but are not the default `MainActivity` live path
+- Android ADP command receipts keep owner/routing status in internal `code` only; user-facing `CommandResponse.message` hides `target_feature_id` and payload ids such as task/execution identifiers, and unknown dispatch status is shown as unsupported instead of a pretend success
 - current config code bootstraps bundled `assets/config/client.json` into an app-owned JSON file and uses that file as endpoint truth; `SharedPreferences` no longer owns daemon host/port persistence
 - Android APK update checks now use the current daemon as the single release/update truth source; the APK is downloaded locally, but installation still requires Android system confirmation and may require unknown-sources permission per app
 - default remote access direction is Tailscale; relay profile support is schema-reserved and must stay inactive until relay protocol/auth is designed

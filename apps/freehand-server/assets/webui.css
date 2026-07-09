@@ -367,7 +367,8 @@ body.theme-dark .inspector-block {
   border-color: rgba(138, 106, 48, 0.28);
 }
 
-.checkpoint-list {
+.checkpoint-list,
+.phase2-list {
   display: grid;
   gap: 8px;
   margin-top: 10px;
@@ -388,6 +389,120 @@ body.theme-dark .inspector-block {
 
 body.theme-dark .checkpoint-item {
   background: rgba(138, 106, 48, 0.14);
+}
+
+.phase2-board-block {
+  border-color: rgba(31, 108, 88, 0.18);
+}
+
+.phase2-card,
+.phase2-event {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  border: 1px solid rgba(31, 108, 88, 0.15);
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.phase2-card-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase2-card-meta,
+.phase2-card-copy,
+.phase2-empty-note {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.phase2-card-meta {
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.phase2-card-copy,
+.phase2-empty-note {
+  white-space: normal;
+}
+
+.phase2-running {
+  border-color: rgba(47, 111, 237, 0.22);
+  background: #eef3fb;
+}
+
+.phase2-success {
+  border-color: rgba(44, 122, 76, 0.22);
+  background: #edf6ef;
+}
+
+.phase2-failed {
+  border-color: rgba(176, 65, 47, 0.25);
+  background: #f8ece9;
+}
+
+.phase2-muted {
+  border-color: rgba(95, 111, 105, 0.16);
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.phase2-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.phase2-action {
+  border: 1px solid rgba(31, 108, 88, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--master);
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.phase2-action.danger {
+  border-color: rgba(176, 65, 47, 0.22);
+  color: var(--fail);
+}
+
+.phase2-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+body.theme-dark .phase2-card,
+body.theme-dark .phase2-event,
+body.theme-dark .phase2-muted {
+  background: rgba(21, 27, 25, 0.84);
+}
+
+body.theme-dark .phase2-running {
+  background: rgba(47, 111, 237, 0.13);
+}
+
+body.theme-dark .phase2-success {
+  background: rgba(44, 122, 76, 0.13);
+}
+
+body.theme-dark .phase2-failed {
+  background: rgba(176, 65, 47, 0.13);
 }
 
 .settings-shell {

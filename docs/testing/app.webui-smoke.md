@@ -15,6 +15,7 @@
   - app boundary serves protocol-owned HTTP query and SSE subscribe routes
   - app boundary can serve ADP runtime-query-port results without importing runtime/task/error-center owner crates
   - app boundary can serve ADP task list and error-center subscription initial snapshots through the runtime query port without importing runtime/task/error-center owner crates
+  - WebUI Phase 2D status drawer can query and render TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl owner projections without browser-persisted task/control truth
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
 - WebUI control strip and session rail expose session switching, `/new` New dialog, `/task` task mode in that dialog, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
@@ -67,6 +68,7 @@
   - WebUI ADP runtime-query-port failure frame smoke
   - WebUI ADP task list subscription initial snapshot smoke
   - WebUI ADP error-center subscription initial snapshot smoke
+  - WebUI Phase 2D dashboard asset smoke for TaskBoard, AgentBoard, EventInbox, TaskHistory, WorkerControl query/render functions, worker-control command routing, and absence of browser localStorage task/control truth
   - WebUI query projection smoke
   - WebUI debug query projection smoke
   - WebUI latest-turn SSE initial snapshot plus later update smoke
@@ -91,6 +93,7 @@
 - WebUI online black-box coverage must capture screenshots and DOM state for the required viewport matrix and assert `body[data-layout-shape]`, shell `data-layout-shape`, composer visibility, message list visibility, mobile drawer hidden-by-default state for portrait shapes, mobile session/detail drawer open-close behavior, no desktop-strip chrome in phone screenshots, and no historical live animation after terminal refresh
 - WebUI online black-box coverage must remove existing sessions through ADP before `/new`, then assert the new draft session has `selectedTurn=-`, zero chat messages, clean empty-state text, and no prior success/failure/tool/waiting-data leakage
 - WebUI online anti-regression coverage must prove the negative case where ADP session list is empty while `QueryLatestActiveTurn` can still return an old turn from a non-destructively deleted session; after browser refresh, the page must show a clean empty conversation with no selected turn, no chat cards, and no old `runtime-turn-*` text
+- WebUI online Phase 2D coverage must query the same service endpoint for TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl, then assert drawer status text/card counts match service truth and the visible drawer text does not expose raw `ADP`, `runtime-turn-*`, task id, or execution id plumbing
 - WebUI JS asset smoke locks that submitted input remains observable after composer clear: pending submit cards render after existing history, pending input is cleared only after the same user text is materialized in visible turn rows, a live protocol turn with no public rows renders an explicit observable waiting row, and a latest terminal/interrupted turn still renders when selected-session transcript state is empty instead of producing a blank transcript
 - WebUI JS asset smoke locks that an empty selected session remains visually clean: empty `SessionTurns` binds the selected session, clears the previous active turn/debug state, suppresses the generic waiting-data card, and ignores latest-active turns from other sessions
 - WebUI JS asset smoke locks the shared session truth gate: `setSessionList`, `setTurnProjection`, ADP query results, ADP subscription events, latest-turn SSE events, and `setSessionTranscript` must all reject turns or transcripts whose session id is not listed after session-list truth has loaded, except for the current draft or pending-submit session
@@ -132,6 +135,7 @@
   - WebUI session rail now supports `/new` as the New dialog for global conversation or cwd-bound task creation, compact session summaries, and selected-session draft creation without inventing a separate navigation path
   - WebUI settings shell is landed as a provider/model config drawer, not a config/status drawer; it consumes owner-backed `QueryConfigStatus`, provider/model edits route through `UpdateProviderConfig`, and unsupported agent/session/workspace/skills/files/tasks/diagnostics controls remain absent until owner-backed write contracts exist
   - WebUI online verifier owns its Settings valid-save fixture: it backs up S-profile config/env, injects a verifier-only credential env before the browser run, and restores config/env afterward so Settings proof does not depend on stale local launchd environment
+  - WebUI online verifier now captures Phase 2D drawer proof by querying service truth through the same endpoint and comparing TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl status text plus visible card counts
   - WebUI New dialog task path selection and composer cwd input are landed; new task requires an explicit selected or typed cwd and creates a cwd-bound session through ADP `CreateSession`, while new conversation can submit without cwd and rely on runtime default cwd
   - WebUI root shell intentionally does not expose persistent success/failure buttons, while WebUI JS still carries paired diagnostic prompts for slash commands and shortcuts
   - WebUI terminal display defaults to summary-only; evidence, learned notes, and completion reason require debug details to be enabled
@@ -143,6 +147,7 @@
   - command-ingress dispatch-port failure and join-failure projection coverage is landed
   - ADP query transport now accepts an injected runtime query port while the app dependency boundary remains protocol-only
 - ADP subscribe transport now uses the injected runtime query port for task list and error-center initial snapshots while keeping app dependency boundary protocol-only
+  - Phase 2D status drawer is landed as a read-only owner projection plus WorkerControl command affordance; it keeps task/control truth in runtime owners and uses only transient render cache in the browser
   - submit-success path now refreshes latest turn truth after command receipt
   - cancel button and Escape key now send `CancelTurn` instead of only clearing local input
   - submit-in-flight cancel path uses `CancelLatestActiveTurn` before a concrete `turn_id` arrives

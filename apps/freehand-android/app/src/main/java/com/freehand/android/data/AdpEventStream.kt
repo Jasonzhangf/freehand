@@ -111,11 +111,7 @@ class AdpEventStream(
                 pendingCommands.remove(requestId)
                 val receipt = frame.getAsJsonObject("receipt")
                 onCommandResult(
-                    CommandResponse(
-                        ok = true,
-                        code = receipt?.get("dispatch_status")?.asString.orEmpty(),
-                        message = receipt?.get("target_feature_id")?.asString.orEmpty(),
-                    ),
+                    commandReceiptResponse(receipt),
                 )
             }
             "failure" -> {
@@ -146,6 +142,46 @@ class AdpEventStream(
     )
 
     companion object {
+        fun commandReceiptResponse(receipt: JsonObject?): CommandResponse {
+            val status = receipt?.get("dispatch_status")?.asString.orEmpty()
+            return CommandResponse(
+                ok = true,
+                code = status.ifBlank { "command_receipt" },
+                message = commandReceiptMessage(status),
+            )
+        }
+
+        private fun commandReceiptMessage(dispatchStatus: String): String {
+            return when (commandReceiptCode(dispatchStatus)) {
+                "reason_live_turn_cancel_requested" -> "cancel requested"
+                "reason_turn_cancelled" -> "request cancelled"
+                "runtime_checkpoint_rewound" -> "checkpoint restored"
+                "session_metadata_updated",
+                "session_turn_rolled_back" -> "session updated"
+                "provider_config_saved_restart_required" -> "settings saved"
+                "reason_turn_started" -> "request accepted"
+                "reason_live_turn_completed" -> "request completed"
+                "node_direct_message_dispatched" -> "worker message sent"
+                "worker_control_applied" -> "worker control accepted"
+                "task_agent_created" -> "worker updated"
+                "task_created",
+                "task_assigned",
+                "task_claimed",
+                "task_review_submitted",
+                "task_review_rejected",
+                "task_review_approved",
+                "task_closed",
+                "execution_fact_applied",
+                "scheduler_tick_recorded",
+                "master_poll_recorded" -> "task updated"
+                "queued_by_static_dispatch_port" -> "command queued"
+                else -> "unsupported command receipt"
+            }
+        }
+
+        private fun commandReceiptCode(dispatchStatus: String): String =
+            dispatchStatus.trim().lowercase().split(Regex("[:\\s]"), limit = 2).firstOrNull().orEmpty()
+
         fun buildFrame(kind: String, requestId: String, payloadName: String, payload: JsonElement): String {
             val root = JsonObject()
             root.addProperty("kind", kind)

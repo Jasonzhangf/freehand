@@ -19,6 +19,7 @@ Generated from `docs/mainline-calls/app.android-client.json`. Do not edit by han
 ## Response Mainline
 
 - daemon ADP emits UiAdpResponse::SubscriptionEvent with UiSubscriptionEvent / UiProjection::Turn -> AdpEventStream receives Event -> TimelineProjector::applyAdp updates state + latestRawTurnProjection
+- daemon ADP command receipt -> AdpEventStream::commandReceiptResponse keeps raw routing/status in CommandResponse.code and maps CommandResponse.message to user-safe known-status text or explicit unsupported text without owner or payload ids
 - MainActivity::loadRemoteWebUi hides native chrome after ADP opens and loads the daemon-hosted WebUI root so Android shares WebUI visual/session/ADP rendering truth
 - MainActivity::pushSnapshotToWebView calls window.__freehand.applySnapshot(json) on bridge.html only before the remote WebUI is loaded
 - bridge.html JS renders public_conversation items as DOM turn cards only in fallback/config-error mode
@@ -62,6 +63,7 @@ Generated from `docs/mainline-calls/app.android-client.json`. Do not edit by han
 | 04 | `com.freehand.android.data.HostConfig::adpUrl / com.freehand.android.data.HostConfig::healthUrl` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt` | construct selected daemon endpoint URLs from the active profile | profile host plus port plus paths | ws://<host>:<port><adpPath> and health URL | Android app shell | active profile config | bound |
 | 05 | `com.freehand.android.data.AdpEventStream::start` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | open OkHttp WebSocket to /adp, subscribe latest turn, and query latest turn | no | ADP WebSocket session | MainActivity::connectToDaemon | OkHttp newWebSocket | bound |
 | 06 | `com.freehand.android.data.AdpEventStream::sendCommand` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | wrap UiCommand JSON in an ADP command frame and send it over the active socket | UiCommand JSON | immediate send result plus later command receipt or failure callback | CommandIngress | ADP WebSocket | bound |
+| 06a | `com.freehand.android.data.AdpEventStream::commandReceiptResponse` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt` | map command receipts to CommandResponse with user-safe known-status text, explicit unsupported text for unknown receipts, and hidden owner/payload ids | protocol command receipt JSON | CommandResponse with internal status in code and safe known-status or unsupported text in message | AdpEventStream handleFrame | command receipt parser | bound |
 | 07 | `com.freehand.android.data.CommandIngress::submit` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt` | wrap user text in SubmitUserInput UiCommand and dispatch through injected ADP sender | user text | CommandResponse | InputBarController | AdpEventStream::sendCommand | bound |
 | 08 | `com.freehand.android.data.CommandIngress::cancelLatest` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt` | wrap CancelLatestActiveTurn UiCommand and dispatch through injected ADP sender | no | fire-and-forget | MainActivity::onKeyDown Escape | AdpEventStream::sendCommand | bound |
 | 09 | `com.freehand.android.data.TimelineProjector::applyAdp` | `apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt` | apply ADP query, subscription, and failure frames to internal turn/slave/error state; update latestRawTurnProjection | AdpEventStream.Event | updated projector state | AdpEventStream onEvent callback | applyAdpQueryResult, applyAdpProjection, applyTurnProjection | bound |
@@ -78,10 +80,11 @@ Generated from `docs/mainline-calls/app.android-client.json`. Do not edit by han
 
 ## Sync Status Against Mainline Call
 
-- all 18 call table rows bound to real Kotlin symbols or owner scripts in apps/freehand-android/
+- all 19 call table rows bound to real Kotlin symbols or owner scripts in apps/freehand-android/
 - Android daemon connection config bootstraps bundled assets/config/client.json into app-owned daemon-connection.json, then uses that JSON file as endpoint truth
 - SharedPreferences no longer owns daemon host or port persistence
 - Android live shell now defaults to AdpEventStream for status/control; ProtocolClient and SseEventStream remain compatibility transport classes but are not the default MainActivity live path
+- Android command receipt projection hides target_feature_id and payload ids from CommandResponse.message while preserving raw dispatch status in CommandResponse.code and marking unknown dispatch status unsupported
 - unit tests exist for TimelineProjector, HostConfig, and CommandIngress protocol, including ADP URL/frame/projector coverage
 - device UI verification script records pass/block/fail evidence for explicit-serial Android true-device validation
 - mainline JSON generated from function map

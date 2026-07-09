@@ -16,6 +16,7 @@
 5. `HostConfig` constructs correct URLs: `baseUrl`, `adpUrl`, `commandUrl`, `latestTurnUrl`, `latestTurnSseUrl`
 6. `AdpEventStream::start` opens OkHttp WebSocket to `/adp`, sends `SubscribeLatestActiveTurn`, and sends `QueryLatestActiveTurn`
 7. `AdpEventStream::sendCommand` wraps external-tag UiCommand JSON in a `kind=command` ADP frame
+7.1. `AdpEventStream::commandReceiptResponse` maps command receipts to user-safe `CommandResponse.message` text without exposing `target_feature_id`, task ids, execution ids, or protocol field names; unknown dispatch status returns explicit unsupported text instead of a success fallback
 8. `CommandIngress::submit` wraps user text in `{"SubmitUserInput":{"text":"..."}}` JSON shape and dispatches through injected ADP sender by default
 9. `CommandIngress::cancelLatest` wraps `{"CancelLatestActiveTurn":{}}` JSON shape and dispatches through injected ADP sender by default
 10. `SseEventStream::start` opens OkHttp SSE to `ui/subscribe/turn/latest` only as compatibility transport
@@ -62,7 +63,7 @@
 - `ApkUpdateTest`: covers manifest parse, daemon-relative manifest URL resolution, no-update 404/204 handling, and non-empty APK download
 - `DaemonConnectionConfigTest`: bootstrap bundled Tailscale profile, first-run copy to app-owned JSON, edited profile write/read, malformed existing file explicit failure, missing active profile explicit failure, relay enabled rejection
 - aspect-ratio layout classifier tests: map viewport width/height pairs to mobile/foldable/tablet/desktop layout modes without mutating selected session or draft state
-- `CommandIngressProtocolTest`: covers SubmitUserInput shape, CancelLatestActiveTurn shape, ADP command frame shape, ADP subscribe frame shape, query-as-command negative frame shape, old type-field negative, special characters, empty text
+- `CommandIngressProtocolTest`: covers SubmitUserInput shape, CancelLatestActiveTurn shape, ADP command frame shape, ADP subscribe frame shape, query-as-command negative frame shape, old type-field negative, special characters, empty text, and command receipt message projection that hides owner ids plus payload ids while marking unknown receipt status unsupported
 - Android device validation script static checks: explicit serial required, no broad process kill, records `adb devices`, foreground/window dumps, logcat, screenshot, and summary status
 - Android device validation ordering checks: launcher activity class exists in the APK before install when `apkanalyzer` is available; after launch, Freehand package/process fatal/exception logcat is classified as `failed` before lockscreen/not-foreground blocker decisions, while unrelated system/package `AndroidRuntime` lines are ignored
 - Android WebUI layout probe checks must read the `FreehandWebUiLayout` tag directly from logcat after the script-owned `logcat -c`; do not rely on a truncated global logcat tail because Android/WebView noise can drop the early probe and create false `missing_webui_layout_probe` failures
@@ -90,6 +91,7 @@
 - `ApkUpdateClient` round-trips daemon-hosted update manifest and APK download semantics through `MockWebServer`
 - relay profile remains inert unless explicitly selected by the future relay flow
 - `AdpEventStream::buildFrame` produces correct ADP command/subscribe/query misuse frame shapes (verified by protocol shape tests)
+- `AdpEventStream::commandReceiptResponse` keeps raw owner/routing status out of user-facing messages while preserving the raw status in `CommandResponse.code` for diagnostics and marking unknown receipt status unsupported
 - `ProtocolClient::postCommand` remains a compatibility HTTP request body path
 - `handle_android_mock` returns HTTP 200 with `mock-mobile` class (existing server test)
 - `apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` exits with `passed`, `blocked`, or `failed` summary JSON and never treats offline/locked/not-foreground states as success

@@ -137,6 +137,70 @@ class CommandIngressProtocolTest {
     }
 
     @Test
+    fun `ADP command receipt response hides target feature id`() {
+        val receipt = JsonObject().apply {
+            addProperty("target_feature_id", "reason.turn")
+            addProperty("dispatch_status", "reason_turn_started")
+        }
+
+        val response = AdpEventStream.commandReceiptResponse(receipt)
+
+        assertTrue(response.ok)
+        assertEquals("reason_turn_started", response.code)
+        assertEquals("request accepted", response.message)
+        assertFalse(response.message.contains("reason.turn"))
+        assertFalse(response.message.contains("target_feature_id"))
+    }
+
+    @Test
+    fun `ADP command receipt response hides dispatch payload ids`() {
+        val receipt = JsonObject().apply {
+            addProperty("target_feature_id", "task.orchestration")
+            addProperty("dispatch_status", "task_created:task-cli-master-worker-FHPHASE2A123")
+        }
+
+        val response = AdpEventStream.commandReceiptResponse(receipt)
+
+        assertTrue(response.ok)
+        assertEquals("task_created:task-cli-master-worker-FHPHASE2A123", response.code)
+        assertEquals("task updated", response.message)
+        assertFalse(response.message.contains("task.orchestration"))
+        assertFalse(response.message.contains("task-cli-master-worker"))
+        assertFalse(response.message.contains("FHPHASE2A123"))
+    }
+
+    @Test
+    fun `ADP command receipt response marks unknown status unsupported`() {
+        val receipt = JsonObject().apply {
+            addProperty("target_feature_id", "unknown.owner")
+            addProperty("dispatch_status", "unknown_owner_payload:secret-id")
+        }
+
+        val response = AdpEventStream.commandReceiptResponse(receipt)
+
+        assertTrue(response.ok)
+        assertEquals("unknown_owner_payload:secret-id", response.code)
+        assertEquals("unsupported command receipt", response.message)
+        assertFalse(response.message.contains("secret-id"))
+    }
+
+    @Test
+    fun `ADP command receipt response does not infer unknown task-like status`() {
+        val receipt = JsonObject().apply {
+            addProperty("target_feature_id", "task.orchestration")
+            addProperty("dispatch_status", "task_unknown:task-secret-id")
+        }
+
+        val response = AdpEventStream.commandReceiptResponse(receipt)
+
+        assertTrue(response.ok)
+        assertEquals("task_unknown:task-secret-id", response.code)
+        assertEquals("unsupported command receipt", response.message)
+        assertFalse(response.message.contains("task-secret-id"))
+        assertFalse(response.message.contains("task updated"))
+    }
+
+    @Test
     fun `special characters in text are escaped`() {
         val text = "line1\nline2\ttab\"quote"
         val payload = JsonObject().apply {

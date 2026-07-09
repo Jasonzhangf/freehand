@@ -174,6 +174,7 @@ try {
   const viewportSnapshots = await captureViewportMatrix(cdp);
   const mobileDrawerProof = await captureMobileDrawerProof(cdp);
   const mobileComposerProof = await captureMobileComposerProof(cdp);
+  const phase2Proof = await capturePhase2Proof(cdp);
 
   const sessionId = refreshed.state.selectedSession || terminal2.state.selectedSession || terminal1.state.selectedSession;
   const adpQuery = sessionId
@@ -304,6 +305,20 @@ try {
         !cleanNewSession.state.messageText.includes('Read file') &&
         !cleanNewSession.state.messageText.includes('WebUI 正在查询最新 turn。') &&
         !cleanNewSession.state.messageText.includes('等待数据'),
+      phase2TaskBoardMatchesService: phase2Proof.state.phase2TaskBoardStatus === phase2Proof.expected.taskBoardStatus,
+      phase2AgentBoardMatchesService: phase2Proof.state.phase2AgentBoardStatus === phase2Proof.expected.agentBoardStatus,
+      phase2EventInboxMatchesService: phase2Proof.state.phase2EventInboxStatus === phase2Proof.expected.eventInboxStatus,
+      phase2TaskHistoryMatchesService: phase2Proof.state.phase2TaskHistoryStatus === phase2Proof.expected.taskHistoryStatus,
+      phase2WorkerControlMatchesService: phase2Proof.state.phase2WorkerControlStatus === phase2Proof.expected.workerControlStatus,
+      phase2ProjectionVisible:
+        phase2Proof.state.phase2TaskCardCount >= phase2Proof.expected.minimumTaskCards &&
+        phase2Proof.state.phase2AgentCardCount >= phase2Proof.expected.minimumAgentCards &&
+        phase2Proof.state.phase2EventCardCount >= phase2Proof.expected.minimumEventCards,
+      phase2NoRawInternalChrome:
+        !phase2Proof.state.phase2PanelText.includes('ADP') &&
+        !phase2Proof.state.phase2PanelText.includes('runtime-turn-') &&
+        !phase2Proof.state.phase2PanelText.includes('task-cli-') &&
+        !phase2Proof.state.phase2PanelText.includes('exec-cli-'),
     },
     snapshots: {
       cleanNewSession,
@@ -318,6 +333,7 @@ try {
       viewportSnapshots,
       mobileDrawerProof,
       mobileComposerProof,
+      phase2Proof,
     },
     adpQuery,
     chromeProfileDir,
@@ -448,6 +464,23 @@ async function captureState(cdp, label) {
       sessionAgentGroupCount: document.querySelectorAll('.session-agent-group').length,
       sessionAgentNestedCount: document.querySelectorAll('.session-agent-sessions .session-item').length,
       sessionAgentExpandedCount: document.querySelectorAll('.session-agent-group[data-expanded="true"]').length,
+      phase2TaskBoardStatus: document.getElementById('task-board-status')?.textContent?.trim() || '',
+      phase2AgentBoardStatus: document.getElementById('agent-board-status')?.textContent?.trim() || '',
+      phase2EventInboxStatus: document.getElementById('event-inbox-status')?.textContent?.trim() || '',
+      phase2TaskHistoryStatus: document.getElementById('task-history-status')?.textContent?.trim() || '',
+      phase2WorkerControlStatus: document.getElementById('worker-control-status')?.textContent?.trim() || '',
+      phase2PanelText: [
+        document.getElementById('task-board-list')?.innerText || '',
+        document.getElementById('agent-board-list')?.innerText || '',
+        document.getElementById('event-inbox-list')?.innerText || '',
+        document.getElementById('task-history-list')?.innerText || '',
+        document.getElementById('worker-control-list')?.innerText || '',
+      ].join('\n'),
+      phase2TaskCardCount: document.querySelectorAll('#task-board-list .phase2-card').length,
+      phase2AgentCardCount: document.querySelectorAll('#agent-board-list .phase2-card').length,
+      phase2EventCardCount: document.querySelectorAll('#event-inbox-list .phase2-event').length,
+      phase2TaskHistoryCardCount: document.querySelectorAll('#task-history-list .phase2-event').length,
+      phase2WorkerControlCardCount: document.querySelectorAll('#worker-control-list .phase2-card, #worker-control-list .phase2-event').length,
       composerRect: rectOf(document.getElementById('composer-form')),
       composerCardRect: rectOf(document.querySelector('.composer-card')),
       composerInputRect: rectOf(document.getElementById('composer-input')),
@@ -517,6 +550,178 @@ async function captureState(cdp, label) {
   });
   await fs.writeFile(path.join(artifactDir, `${label}.json`), JSON.stringify(state, null, 2));
   return { label, state };
+}
+
+async function capturePhase2Proof(cdp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1280,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await evalInPage(cdp, () => {
+    document.getElementById('composer-input')?.blur();
+    document.getElementById('close-session-drawer-button')?.click();
+    document.getElementById('close-detail-drawer-button')?.click();
+    window.dispatchEvent(new Event('resize'));
+    document.getElementById('refresh-session-button')?.click();
+    return window.__freehandLayout?.applyLayoutShape?.();
+  });
+  const truth = await queryPhase2Truth();
+  await waitForFunction(
+    cdp,
+    (expected) =>
+      document.getElementById('task-board-status')?.textContent?.trim() === expected.taskBoardStatus &&
+      document.getElementById('agent-board-status')?.textContent?.trim() === expected.agentBoardStatus &&
+      document.getElementById('event-inbox-status')?.textContent?.trim() === expected.eventInboxStatus &&
+      document.getElementById('task-history-status')?.textContent?.trim() === expected.taskHistoryStatus &&
+      document.getElementById('worker-control-status')?.textContent?.trim() === expected.workerControlStatus,
+    20_000,
+    'phase2 projection dashboard',
+    truth.expected,
+  );
+  const snapshot = await captureState(cdp, '27-phase2-projection');
+  await fs.writeFile(path.join(artifactDir, '27-phase2-truth.json'), JSON.stringify(truth, null, 2));
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  return { ...snapshot, ...truth };
+}
+
+async function queryPhase2Truth() {
+  const taskBoardResult = await queryService({ QueryTaskBoard: { include_terminal: true } }, 'phase2-task-board');
+  const agentBoardResult = await queryService('QueryAgentBoard', 'phase2-agent-board');
+  const eventInboxResult = await queryService({ QueryEventInbox: { limit: 30 } }, 'phase2-event-inbox');
+  const taskBoard = unwrapQueryResult(taskBoardResult, 'TaskBoard');
+  const agentBoard = unwrapQueryResult(agentBoardResult, 'AgentBoard');
+  const eventInbox = unwrapQueryResult(eventInboxResult, 'EventInbox');
+  const historyTarget = currentTaskHistoryTargetFromBoard(taskBoard);
+  const workerTarget = currentWorkerControlTargetFromBoard(taskBoard);
+  let taskHistory = null;
+  if (historyTarget?.task_id) {
+    taskHistory = unwrapQueryResult(
+      await queryService({ QueryTaskHistory: { task_id: historyTarget.task_id } }, 'phase2-task-history'),
+      'TaskHistory',
+    );
+  }
+  let workerControl = null;
+  if (workerTarget?.task_id && workerTarget?.execution_id) {
+    workerControl = unwrapQueryResult(
+      await queryService({
+        QueryWorkerControl: {
+          task_id: workerTarget.task_id,
+          execution_id: workerTarget.execution_id,
+        },
+      }, 'phase2-worker-control'),
+      'WorkerControl',
+    );
+  }
+  return {
+    truth: { taskBoard, agentBoard, eventInbox, taskHistory, workerControl },
+    expected: phase2ExpectedText(taskBoard, agentBoard, eventInbox, taskHistory, workerControl, workerTarget),
+  };
+}
+
+function phase2ExpectedText(taskBoard, agentBoard, eventInbox, taskHistory, workerControl, workerTarget) {
+  const taskCount = (taskBoard.tasks || []).length;
+  const blockedCount = (taskBoard.blocked || []).length;
+  const reviewCount = (taskBoard.review_ready || []).length;
+  const staleCount = (taskBoard.stale || []).length;
+  const agents = agentBoard.agents || [];
+  const eventCount = (eventInbox.events || []).length;
+  const historyEvents = (taskHistory && taskHistory.events) || [];
+  const workerEvents = (workerControl && workerControl.events) || [];
+  const workerTask = (workerControl && workerControl.task) || (workerTarget && workerTarget.task) || null;
+  return {
+    taskBoardStatus: `${taskCount} task(s) · ${blockedCount} blocked · ${reviewCount} review · ${staleCount} stale`,
+    agentBoardStatus: `${agents.length} agent(s) · ${agents.filter((agent) => agent.alive).length} active`,
+    eventInboxStatus: `${eventCount} recent event(s)${eventInbox.next_cursor ? ' · updated' : ''}`,
+    taskHistoryStatus: taskHistory ? `${historyEvents.length} execution event(s)` : 'no task history',
+    workerControlStatus: workerTarget || workerControl
+      ? `${statusText(workerTask && workerTask.status)} · ${workerEvents.length} control event(s)`
+      : 'no active execution',
+    minimumTaskCards: Math.min(taskCount, 8),
+    minimumAgentCards: Math.min(agents.length, 8),
+    minimumEventCards: Math.min(eventCount, 10),
+  };
+}
+
+function unwrapQueryResult(result, variant) {
+  if (!result || typeof result !== 'object' || !(variant in result)) {
+    throw new Error(`missing ${variant} query result`);
+  }
+  return result[variant];
+}
+
+function queryService(query, label) {
+  const requestId = `webui-verify-${label}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(adpUrl);
+    const timeout = setTimeout(() => {
+      socket.close();
+      reject(new Error(`service query timed out: ${label}`));
+    }, 15_000);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({ kind: 'query', request_id: requestId, query }));
+    });
+    socket.addEventListener('message', (event) => {
+      const frame = JSON.parse(event.data);
+      if (frame.request_id !== requestId) {
+        return;
+      }
+      clearTimeout(timeout);
+      socket.close();
+      if (frame.kind === 'query_result') {
+        resolve(frame.result);
+        return;
+      }
+      if (frame.kind === 'failure') {
+        reject(new Error(frame.failure?.message || frame.failure?.code || `service query failed: ${label}`));
+        return;
+      }
+      reject(new Error(`unexpected service frame for ${label}: ${frame.kind}`));
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timeout);
+      reject(new Error(`service socket failed: ${label}`));
+    });
+  });
+}
+
+function currentTaskHistoryTargetFromBoard(taskBoard) {
+  const tasks = phase2SortedTasks((taskBoard && taskBoard.tasks) || []);
+  return tasks.find((candidate) => candidate.active_execution_id) || tasks[0] || null;
+}
+
+function currentWorkerControlTargetFromBoard(taskBoard) {
+  const task = phase2SortedTasks((taskBoard && taskBoard.tasks) || []).find((candidate) => candidate.active_execution_id);
+  if (!task) {
+    return null;
+  }
+  return {
+    task,
+    task_id: task.task_id,
+    execution_id: task.active_execution_id,
+    agent_id: task.assignee_agent_id || null,
+  };
+}
+
+function phase2SortedTasks(tasks) {
+  return [...tasks].sort((left, right) => {
+    const leftTerminal = terminalTaskStatus(left.status) ? 1 : 0;
+    const rightTerminal = terminalTaskStatus(right.status) ? 1 : 0;
+    if (leftTerminal !== rightTerminal) {
+      return leftTerminal - rightTerminal;
+    }
+    return Number(right.updated_at || 0) - Number(left.updated_at || 0);
+  });
+}
+
+function terminalTaskStatus(status) {
+  return ['approved', 'closed', 'cancelled', 'failed'].includes(`${status || ''}`.toLowerCase());
+}
+
+function statusText(status) {
+  const normalized = `${status || ''}`.trim().toLowerCase();
+  return normalized ? normalized.replace(/_/g, ' ') : 'unknown';
 }
 
 async function captureViewportMatrix(cdp) {
