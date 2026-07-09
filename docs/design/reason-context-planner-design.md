@@ -219,6 +219,13 @@ Every segment must have:
 
 No segment may contain hidden debug fields.
 
+For dynamic model-visible input segments, the budget is an admission guard, not
+a product limit. User/operator prompts, previous-round visible output, schema
+feedback, and task-space state snapshots must derive their segment budget from
+the actual content size plus margin. Runtime code must not add small fixed caps
+such as 128 or 512 tokens that reject otherwise valid context before the planner
+or model context policy can decide.
+
 ## Preferred Context Addition Method
 
 When the system needs to enlarge context from external search or broad exploration, the preferred path is:

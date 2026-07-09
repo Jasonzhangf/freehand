@@ -2772,6 +2772,53 @@ Current real root cause split:
   - Tightened both clients to derive a dispatch status code by stripping only `:` or whitespace suffixes, then map through exact known-code whitelist.
   - Added/updated tests to prove unknown task-like statuses such as `task_unknown:*` render unsupported instead of task success text.
 
+# 2026-07-09 control simple_question and dynamic input-budget closeout
+
+- Jason clarified:
+  - model status must expose a standard `simple_question` field for previous user input.
+  - simple question/answer requests may naturally stop without long-task interception.
+  - model-visible inputs must not be blocked by arbitrary small local limits; only true context overflow should reject.
+  - default output budget should stay 8192 tokens, not an ad hoc smaller runtime cap.
+  - task-space state machine validation can check explicit standard fields only; natural-language target text must be presented to the model for self-review, not machine semantic correction.
+- Implementation:
+  - replaced control-status runtime path from `simple_request` to `simple_question`.
+  - added negative control test proving legacy `simple_request=true` is not an alias.
+  - changed runtime `previous-visible-output` and schema-feedback carryover to content-derived admission budgets.
+  - kept Anthropic output default at provider-owned `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`.
+  - documented task-space validation boundary in `docs/design/master-worker-task-state-machine-phase1.md`.
+- Validation:
+  - `cargo test -p freehand-control -- --nocapture` -> 6 passed.
+  - `cargo test -p freehand-runtime live_bridge_accepts_simple_status_stop_hook_without_completion_schema -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-runtime live_bridge_admits_long_operator_task_without_semantic_truncation -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-runtime live_bridge_admits_long_previous_visible_output_without_fixed_cap -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-ui-protocol public_conversation_strips_hidden_control_status_blocks -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-tools task_tool_exposes_operation_parameter -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 90 passed.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 53 passed.
+  - `cargo test -p freehand-tools -- --nocapture` -> 29 passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `git diff --check`, and `cargo clippy --workspace --all-targets -- -D warnings` passed.
+  - `scripts/install-launchd.sh restartS` rebuilt and restarted `com.freehand.daemonS`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample success` -> `adp_turn_sample_ok`, session `cli-adp-sample-success-1783589237021233000`, turn `runtime-turn-193`, `rounds=1`, `schema_retries=0`.
+  - `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample failure` -> `adp_turn_sample_ok`, session `cli-adp-sample-failure-1783589267826118000`, turn `runtime-turn-194-r2`, `rounds=2`, `tool_executions=1`, `failed_tools=1`, `schema_retries=0`.
+
+# 2026-07-09 simple_question current-agent revalidation
+
+- Revalidated current dirty workspace before reporting:
+  - `cargo test -p freehand-control -- --nocapture` -> 6 passed.
+  - `cargo test -p freehand-runtime live_bridge_accepts_simple_status_stop_hook_without_completion_schema -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-ui-protocol public_conversation_strips_hidden_control_status_blocks -- --nocapture` -> 1 passed.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `git diff --check` -> ok.
+  - `cargo fmt --check` -> ok.
+  - `scripts/install-launchd.sh restartS` restarted S-profile on `127.0.0.1:4042`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample success` -> session `cli-adp-sample-success-1783589888991584000`, turn `runtime-turn-195`, `rounds=1`, `schema_retries=0`.
+  - `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample failure` -> session `cli-adp-sample-failure-1783589904038500000`, turn `runtime-turn-196-r2`, `rounds=2`, `tool_executions=1`, `failed_tools=1`, `schema_retries=0`.
+
 # 2026-07-09 master autonomy gap audit
 
 - Trigger:

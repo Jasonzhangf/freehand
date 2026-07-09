@@ -11,14 +11,15 @@
 
 ## White-Box Coverage
 
-- `freehand-control` parses valid `simple_request=true` status and returns `AllowNaturalStop`
+- `freehand-control` parses valid `simple_question=true` status and returns `AllowNaturalStop`
+- `freehand-control` rejects legacy `simple_request=true` as non-actionable status instead of aliasing it
 - `freehand-control` rejects `task_complete=true` without `evidence`
 - `freehand-control` returns `ContinueWithNextStep` for non-terminal next-step status
 - parser accepts the documented closing tag and the symmetric closing tag for format compatibility, without inventing missing semantics
 
 ## Module Black-Box Coverage
 
-- `freehand-runtime` mock Anthropic turn accepts `simple_request=true` status stop without legacy `<freehand_completion>`
+- `freehand-runtime` mock Anthropic turn accepts `simple_question=true` status stop without legacy `<freehand_completion>`
 - runtime metadata ledger contains `control.center` records for `ControlHook03AfterModelResponse` and `ControlHook04BeforeClientReturn`
 - runtime metadata ledger does not contain raw status block text or assistant content
 - `freehand-ui-protocol` public conversation projection strips hidden status blocks from assistant and terminal text

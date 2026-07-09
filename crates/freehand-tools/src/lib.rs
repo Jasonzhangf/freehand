@@ -474,10 +474,25 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             json!({
                 "type": "object",
                 "properties": {
-                    "op": {"type": "string", "enum": ["create", "query", "list_tasks", "history", "append", "pause", "resume", "heartbeat", "assign", "claim_next", "record_execution", "cancel", "submit_review", "approve", "reject", "close", "list_agents", "query_agent", "create_agent", "close_agent"]},
+                    "op": {
+                        "type": "string",
+                        "description": "Task Center operation. Use create_agent/create/assign/claim_next to dispatch worker work; use record_execution with status to report worker results; use approve/reject/close for review lifecycle.",
+                        "enum": ["create", "query", "list_tasks", "history", "append", "pause", "resume", "heartbeat", "assign", "claim_next", "record_execution", "cancel", "submit_review", "approve", "reject", "close", "list_agents", "query_agent", "create_agent", "close_agent"]
+                    },
                     "task_id": {"type": "string"},
-                    "execution_id": {"type": "string"},
-                    "status": {"type": "string"},
+                    "execution_id": {
+                        "type": "string",
+                        "description": "Required for claim_next and for record_execution status updates so worker results stay paired to the same execution."
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "For list_tasks this filters task status. For record_execution this reports worker state: running, recovering, blocked, or review_ready."
+                    },
+                    "retry_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Required when record_execution status is recovering after a rejected or failed attempt."
+                    },
                     "ttl_seconds": {"type": "integer", "minimum": 1},
                     "note": {"type": "string"},
                     "title": {"type": "string"},
@@ -2709,6 +2724,14 @@ beta
             .and_then(serde_json::Value::as_object)
             .and_then(|properties| properties.get("op"))
             .expect("op schema");
+        let properties = task_definition
+            .input_schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("task properties");
+        let status_schema = properties.get("status").expect("status schema");
+        let execution_id_schema = properties.get("execution_id").expect("execution_id schema");
+        let retry_count_schema = properties.get("retry_count").expect("retry_count schema");
 
         assert!(required.iter().any(|item| item.as_str() == Some("op")));
         assert_eq!(
@@ -2722,6 +2745,40 @@ beta
                 .expect("op enum")
                 .iter()
                 .any(|item| item.as_str() == Some("create"))
+        );
+        assert!(
+            op_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("op description")
+                .contains("record_execution")
+        );
+        assert!(
+            status_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("status description")
+                .contains("review_ready")
+        );
+        assert!(
+            execution_id_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("execution id description")
+                .contains("record_execution")
+        );
+        assert_eq!(
+            retry_count_schema
+                .get("type")
+                .and_then(serde_json::Value::as_str),
+            Some("integer")
+        );
+        assert!(
+            retry_count_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("retry count description")
+                .contains("recovering")
         );
     }
 

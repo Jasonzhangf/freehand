@@ -171,7 +171,7 @@ The future status block is separate from the existing terminal completion block.
     "reason": "target_workspace_not_current",
     "target_cwd": "/Volumes/extension/code/zterm",
     "next_expected_tool": "task",
-    "simple_request": false,
+    "simple_question": false,
     "task_complete": false,
     "blocked": false,
     "needs_user_involvement": false
@@ -194,8 +194,9 @@ Status schema controls whether the framework may naturally stop, continue, ask f
 
 Terminal decision examples:
 
-- `finish_reason=stop` plus `status.simple_request=true` allows natural terminal completion for simple requests.
-- If `simple_request` is absent or false, the framework checks `status.task_complete`.
+- `finish_reason=stop` plus `status.simple_question=true` allows natural terminal completion for simple question/answer requests.
+- If `simple_question` is absent or false, the framework checks `status.task_complete`.
+- `simple_question` is the only accepted field for this decision; `simple_request` must not be treated as an alias or fallback.
 - If `task_complete=true`, the framework requires `evidence`. If evidence exists, terminal completion may be accepted.
 - After accepted task completion, the framework checks `learned` / `needs_record`. If present, it records to `note.md` or the owned memory path and tells the user that the record was made.
 - If `task_complete=false` and `blocked=true`, the framework requires `blocked_reason`. Valid blocked status may stop in blocked state.

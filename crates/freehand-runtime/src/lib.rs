@@ -5207,7 +5207,7 @@ fn control_status_contract_segment() -> ContextSegment {
             "{\n",
             "  \"schema_version\": 1,\n",
             "  \"status\": {\n",
-            "    \"simple_request\": true | false,\n",
+            "    \"simple_question\": true | false,\n",
             "    \"task_complete\": true | false,\n",
             "    \"evidence\": \"required when task_complete=true\",\n",
             "    \"next_step\": \"required when task_complete=false and more reasoning is needed\",\n",
@@ -5230,14 +5230,15 @@ fn control_status_contract_segment() -> ContextSegment {
 }
 
 fn tool_guidance_segment() -> ContextSegment {
+    let content = master_task_orchestration_guidance().to_owned();
     ContextSegment {
         segment_id: ContextSegmentId::new("runtime-tool-guidance"),
         kind: ContextSegmentKind::DeveloperPolicy,
         stability: ContextStability::Stable,
         cache_policy: ContextCachePolicy::CacheAnchor,
         role: ContextRole::Developer,
-        content: "Use the available Freehand tool registry when it helps the task. Choose the smallest sufficient tool for repository inspection or task bookkeeping, then continue and provide the required Freehand completion schema.".to_owned(),
-        token_budget: 160,
+        token_budget: runtime_prompt_segment_token_budget(&content),
+        content,
         provenance: ContextProvenance {
             source: "freehand_runtime".to_owned(),
             reference: Some("runtime_tool_guidance".to_owned()),
@@ -5245,20 +5246,43 @@ fn tool_guidance_segment() -> ContextSegment {
     }
 }
 
+fn master_task_orchestration_guidance() -> &'static str {
+    concat!(
+        "Use the available Freehand tool registry when it helps the task. Choose the smallest sufficient tool for repository inspection or task bookkeeping, then continue and provide the required Freehand completion schema.\n\n",
+        "Master task orchestration examples:\n",
+        "- Use the owner-scoped task tool; do not invent query_task_board, dispatch_subtask, approve_submission, or reject_submission tool names.\n",
+        "- Create worker resources with task(op=\"create_agent\") only when the task needs a worker id that does not exist.\n",
+        "- Create and dispatch work with task(op=\"create\"), task(op=\"assign\"), and task(op=\"claim_next\"). Keep the same task_id, agent_id, and execution_id across later worker-result calls.\n",
+        "- Worker success sample: task(op=\"record_execution\", status=\"review_ready\", task_id=..., agent_id=..., execution_id=..., summary=..., deliverables=[...], evidence=[...]), then task(op=\"approve\"), then task(op=\"close\").\n",
+        "- Worker execution error sample: task(op=\"record_execution\", status=\"blocked\", task_id=..., agent_id=..., execution_id=..., phase=\"execution_error\", summary=\"what failed\", evidence=[...]). Do not close this as success.\n",
+        "- Worker retry sample: after task(op=\"reject\"), use task(op=\"record_execution\", status=\"recovering\", retry_count=1, task_id=..., agent_id=..., execution_id=..., summary=..., evidence=[...]), then submit a corrected status=\"review_ready\" result.\n",
+        "- Tool validation, task transition errors, and worker execution errors are normal model-visible tool results. Use the returned result to decide the next task action instead of treating it as provider failure.\n"
+    )
+}
+
 fn original_task_segment(prompt: &str) -> ContextSegment {
+    let content = format!("Original operator task:\n{prompt}");
     ContextSegment {
         segment_id: ContextSegmentId::new("original-task"),
         kind: ContextSegmentKind::SessionMemory,
         stability: ContextStability::SessionStable,
         cache_policy: ContextCachePolicy::Cacheable,
         role: ContextRole::Developer,
-        content: format!("Original operator task:\n{prompt}"),
-        token_budget: 128,
+        token_budget: runtime_prompt_segment_token_budget(&content),
+        content,
         provenance: ContextProvenance {
             source: "freehand_runtime".to_owned(),
             reference: Some("original_task".to_owned()),
         },
     }
+}
+
+fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
+    let estimated = content.chars().count().div_ceil(4);
+    u32::try_from(estimated)
+        .unwrap_or(u32::MAX)
+        .saturating_add(256)
+        .max(512)
 }
 
 fn next_round_segments(
@@ -5271,14 +5295,15 @@ fn next_round_segments(
         original_task_segment(original_prompt),
     ];
     if !visible_text.trim().is_empty() {
+        let content = format!("Previous round visible output:\n{visible_text}");
         segments.push(ContextSegment {
             segment_id: ContextSegmentId::new("previous-visible-output"),
             kind: ContextSegmentKind::SubagentConclusion,
             stability: ContextStability::TurnVolatile,
             cache_policy: ContextCachePolicy::NoCache,
             role: ContextRole::Developer,
-            content: format!("Previous round visible output:\n{visible_text}"),
-            token_budget: 512,
+            token_budget: runtime_prompt_segment_token_budget(&content),
+            content,
             provenance: ContextProvenance {
                 source: "freehand_runtime".to_owned(),
                 reference: Some("previous_visible_output".to_owned()),
@@ -5286,14 +5311,15 @@ fn next_round_segments(
         });
     }
     if let Some(feedback) = rejection_feedback {
+        let content = format!("Completion schema rejection feedback:\n{feedback}");
         segments.push(ContextSegment {
             segment_id: ContextSegmentId::new("completion-schema-feedback"),
             kind: ContextSegmentKind::SubagentConclusion,
             stability: ContextStability::TurnVolatile,
             cache_policy: ContextCachePolicy::NoCache,
             role: ContextRole::Developer,
-            content: format!("Completion schema rejection feedback:\n{feedback}"),
-            token_budget: 1024,
+            token_budget: runtime_prompt_segment_token_budget(&content),
+            content,
             provenance: ContextProvenance {
                 source: "freehand_runtime".to_owned(),
                 reference: Some("completion_schema_feedback".to_owned()),
@@ -5641,18 +5667,60 @@ fn execute_task_tool(
             }
         }
         "record_execution" => {
-            let outcome = task_runtime
-                .record_execution(TaskExecutionRecordRequest {
-                    task_id: TaskId::new(required_json_string(&args, "task_id")?),
-                    phase: required_json_string(&args, "phase")?.to_owned(),
-                    summary: required_json_string(&args, "summary")?.to_owned(),
-                    evidence: required_json_string_array(&args, "evidence")?,
-                    actor: task_actor(turn),
-                    watermark: task_watermark(tool_call),
-                })
-                .map_err(|err| err.to_string())?;
+            let task_id = TaskId::new(required_json_string(&args, "task_id")?);
+            let phase = required_json_string(&args, "phase")?.to_owned();
+            let summary = required_json_string(&args, "summary")?.to_owned();
+            let evidence = required_json_string_array(&args, "evidence")?;
+            let outcome = if let Some(status) = optional_json_string(&args, "status") {
+                let agent_id = AgentId::new(required_json_string(&args, "agent_id")?);
+                let execution_id = required_json_string(&args, "execution_id")?.to_owned();
+                let kind = match status {
+                    "running" => ExecutionFactKind::Running {
+                        phase,
+                        summary,
+                        evidence,
+                    },
+                    "recovering" => ExecutionFactKind::Recovering {
+                        summary,
+                        evidence,
+                        retry_count: required_json_u32(&args, "retry_count")?,
+                    },
+                    "blocked" => ExecutionFactKind::Blocked {
+                        reason: summary,
+                        evidence,
+                    },
+                    "review_ready" => ExecutionFactKind::ReviewReady {
+                        summary,
+                        deliverables: required_json_string_array(&args, "deliverables")?,
+                        evidence,
+                    },
+                    other => return Err(format!("unsupported execution status `{other}`")),
+                };
+                task_runtime
+                    .apply_execution_fact(ExecutionFact {
+                        execution_id,
+                        task_id,
+                        agent_id,
+                        turn_id: Some(turn.request.turn_id.clone()),
+                        occurred_at: now_unix_seconds(),
+                        kind,
+                        watermark: task_watermark(tool_call),
+                    })
+                    .map_err(|err| err.to_string())?
+            } else {
+                task_runtime
+                    .record_execution(TaskExecutionRecordRequest {
+                        task_id,
+                        phase,
+                        summary,
+                        evidence,
+                        actor: task_actor(turn),
+                        watermark: task_watermark(tool_call),
+                    })
+                    .map_err(|err| err.to_string())?
+            };
             Ok(task_mutation_result(
-                "Task execution recorded",
+                task_event_result_label(&outcome.event),
                 &outcome.task,
                 &outcome.event,
             ))
@@ -5854,6 +5922,16 @@ fn task_mutation_result(
     )
 }
 
+fn task_event_result_label(event: &freehand_task::TaskLedgerEvent) -> &'static str {
+    match event.event_type.as_str() {
+        "TaskBlocked" => "Task blocked",
+        "TaskExecutionRecovering" => "Task execution recovering",
+        "TaskExecutionRecorded" => "Task execution recorded",
+        "TaskReviewSubmitted" => "Task review submitted",
+        _ => "Task event recorded",
+    }
+}
+
 fn tool_arguments_object(arguments: &[ToolArgument]) -> Map<String, Value> {
     arguments
         .iter()
@@ -5908,6 +5986,14 @@ fn optional_json_string<'a>(object: &'a Map<String, Value>, field: &str) -> Opti
 
 fn optional_json_i64(object: &Map<String, Value>, field: &str) -> Option<i64> {
     object.get(field).and_then(Value::as_i64)
+}
+
+fn required_json_u32(object: &Map<String, Value>, field: &str) -> Result<u32, String> {
+    let value = object
+        .get(field)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("`{field}` is required and must be a non-negative integer"))?;
+    u32::try_from(value).map_err(|_| format!("`{field}` is too large"))
 }
 
 fn required_json_string_array(
@@ -8375,7 +8461,7 @@ provider = "old"
 
     fn status_stop_single_response(visible_text: &str) -> String {
         let status = r#"<<<freehand_status>>>
-{"schema_version":1,"status":{"simple_request":true}}
+{"schema_version":1,"status":{"simple_question":true}}
 <</freehand_status>>>"#;
         json!({
             "content": [{
@@ -8396,6 +8482,21 @@ provider = "old"
             r#"{{"content":[{{"type":"text","text":"working\n{tagged}"}}],"usage":{{"input_tokens":14,"output_tokens":40}},"stop_reason":"end_turn"}}"#,
             tagged = tagged.replace('\n', "\\n").replace('"', "\\\""),
         )
+    }
+
+    fn continue_with_visible_response(visible_text: &str, next_step: &str) -> String {
+        let tagged = tagged_completion_json(&format!(
+            r#"{{"claim":"continue","next_step":"{next_step}"}}"#
+        ));
+        json!({
+            "content": [{
+                "type": "text",
+                "text": format!("{visible_text}\n{tagged}")
+            }],
+            "usage": {"input_tokens": 14, "output_tokens": 40},
+            "stop_reason": "end_turn"
+        })
+        .to_string()
     }
 
     fn invalid_complete_response() -> String {
@@ -8464,6 +8565,66 @@ provider = "old"
             "stop_reason": "tool_use"
         })
         .to_string()
+    }
+
+    fn task_tool_use_response(tool_call_id: &str, input: Value) -> String {
+        tool_use_named_response(tool_call_id, "task", input)
+    }
+
+    fn master_autonomy_prompt(sentinel: &str) -> String {
+        format!(
+            "{}\n{sentinel}",
+            (0..80)
+                .map(|index| format!(
+                    "step-{index}: master must create a worker task, dispatch it, inspect worker result, handle success, execution error, and incomplete review retry without losing this instruction."
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    }
+
+    fn collect_provider_requests(rx: &mpsc::Receiver<String>, expected: usize) -> Vec<String> {
+        (0..expected)
+            .map(|index| {
+                rx.recv()
+                    .unwrap_or_else(|err| panic!("provider request {index}: {err}"))
+            })
+            .collect()
+    }
+
+    fn assert_master_task_request_contract(raw_request: &str, sentinel: &str) {
+        assert!(raw_request.contains(sentinel));
+        assert!(raw_request.contains("Master task orchestration examples"));
+        assert!(raw_request.contains("Worker success sample"));
+        assert!(raw_request.contains("Worker execution error sample"));
+        assert!(raw_request.contains("Worker retry sample"));
+        assert!(raw_request.contains("\"name\":\"task\""));
+        assert!(raw_request.contains("\"record_execution\""));
+        assert!(raw_request.contains("\"retry_count\""));
+        assert!(raw_request.contains("create_agent"));
+        assert!(raw_request.contains("review_ready"));
+    }
+
+    fn task_truth(runtime_home: &Path, task_id: &str) -> (TaskSnapshot, Vec<String>) {
+        let task_runtime =
+            TaskRuntime::boot(runtime_home, AgentId::new("agent-live")).expect("task runtime");
+        let task = task_runtime
+            .query_task(&TaskId::new(task_id))
+            .expect("query task truth");
+        let event_types = task_runtime
+            .task_history(&TaskId::new(task_id))
+            .expect("task history")
+            .into_iter()
+            .map(|event| event.event_type)
+            .collect::<Vec<_>>();
+        (task, event_types)
+    }
+
+    fn event_index(events: &[String], event_type: &str) -> usize {
+        events
+            .iter()
+            .position(|event| event == event_type)
+            .unwrap_or_else(|| panic!("missing event {event_type}: {events:?}"))
     }
 
     fn tool_use_single_response() -> String {
@@ -9217,6 +9378,95 @@ provider = "old"
     }
 
     #[test]
+    fn task_tool_structured_execution_status_requires_execution_identity() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-task"),
+                    turn_id: TurnId::new("turn-task"),
+                    trace_id: TraceId::new("trace-task"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-task"),
+                    user_text: "record structured worker state".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("create")),
+                ("task_id", json!("task-runtime-structured-status")),
+                ("title", json!("Structured execution status")),
+                ("content", json!("Reject missing execution identity")),
+                ("goal", json!("No implicit execution id fallback")),
+                ("deliverables", json!(["explicit error"])),
+                ("acceptance", json!(["task remains running"])),
+                ("dispatch", json!({"mode":"self"})),
+            ]),
+        )
+        .expect("create task");
+        execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("resume")),
+                ("task_id", json!("task-runtime-structured-status")),
+            ]),
+        )
+        .expect("resume task");
+
+        let err = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("record_execution")),
+                ("task_id", json!("task-runtime-structured-status")),
+                ("agent_id", json!("agent-task")),
+                ("status", json!("blocked")),
+                ("phase", json!("execution_error")),
+                (
+                    "summary",
+                    json!("worker failed but execution id is missing"),
+                ),
+                ("evidence", json!(["missing execution id"])),
+            ]),
+        )
+        .expect_err("structured execution status requires execution id");
+        assert!(err.contains("`execution_id` is required"));
+
+        let query = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("query")),
+                ("task_id", json!("task-runtime-structured-status")),
+            ]),
+        )
+        .expect("query");
+        assert!(query.contains("\"status\":\"running\""));
+        let history_output = execute_task_tool(
+            &runtime_home,
+            &turn,
+            &task_tool_call(vec![
+                ("op", json!("history")),
+                ("task_id", json!("task-runtime-structured-status")),
+            ]),
+        )
+        .expect("history");
+        assert!(!history_output.contains("TaskBlocked"));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
     fn task_tool_history_returns_ordered_execution_timeline() {
         let runtime_home = temp_runtime_home();
         let engine = ReasonTurnEngine::new();
@@ -9389,6 +9639,555 @@ provider = "old"
             outcome.turn.planned_context.diagnostics.tool_schema_hash,
             empty
         );
+    }
+
+    #[test]
+    fn live_bridge_admits_long_operator_task_without_semantic_truncation() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, rx, handle) = spawn_mock_server(
+            200,
+            "application/json",
+            complete_single_response("accepted"),
+        );
+        let mut request = live_request(false);
+        request.prompt = format!(
+            "{}\nSENTINEL_MASTER_AUTONOMY_LONG_PROMPT_END",
+            (0..80)
+                .map(|index| format!(
+                    "step-{index}: master must create a worker task, dispatch it, inspect worker status, handle rejection, retry, approve, and close without losing this instruction."
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect("long operator task must reach provider request");
+        let raw_request = rx.recv().expect("request");
+        handle.join().expect("join");
+
+        assert!(raw_request.contains("step-79"));
+        assert!(raw_request.contains("SENTINEL_MASTER_AUTONOMY_LONG_PROMPT_END"));
+        assert_master_task_request_contract(
+            &raw_request,
+            "SENTINEL_MASTER_AUTONOMY_LONG_PROMPT_END",
+        );
+        let original_task = outcome
+            .turn
+            .planned_context
+            .ordered_segments
+            .iter()
+            .find(|segment| segment.segment_id.as_str() == "original-task")
+            .expect("original task segment");
+        let original_task_cost = outcome
+            .turn
+            .planned_context
+            .diagnostics
+            .segment_token_costs
+            .iter()
+            .find(|cost| cost.segment_id.as_str() == "original-task")
+            .expect("original task token cost");
+        assert!(original_task.token_budget >= original_task_cost.estimated_tokens);
+        assert!(original_task.token_budget > 128);
+    }
+
+    #[test]
+    fn live_bridge_admits_long_previous_visible_output_without_fixed_cap() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let visible_text = format!(
+            "{}\nSENTINEL_PREVIOUS_VISIBLE_OUTPUT_LONG_END",
+            (0..180)
+                .map(|index| format!(
+                    "round-one-visible-{index}: keep this model-visible repair context for the next round without a short fixed cap."
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                continue_with_visible_response(&visible_text, "finish after carrying prior output"),
+                complete_single_response("final after long visible output"),
+            ],
+        );
+        let request = live_request(false);
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect("long prior visible output must reach next provider request");
+        let _first_request = rx.recv().expect("first request");
+        let second_request = rx.recv().expect("second request");
+        handle.join().expect("join");
+
+        assert_eq!(outcome.rounds, 2);
+        assert!(second_request.contains("SENTINEL_PREVIOUS_VISIBLE_OUTPUT_LONG_END"));
+        let previous_output = outcome
+            .turn
+            .planned_context
+            .ordered_segments
+            .iter()
+            .find(|segment| segment.segment_id.as_str() == "previous-visible-output")
+            .expect("previous visible output segment");
+        let previous_output_cost = outcome
+            .turn
+            .planned_context
+            .diagnostics
+            .segment_token_costs
+            .iter()
+            .find(|cost| cost.segment_id.as_str() == "previous-visible-output")
+            .expect("previous visible output token cost");
+        assert!(previous_output.token_budget >= previous_output_cost.estimated_tokens);
+        assert!(previous_output.token_budget > 512);
+    }
+
+    #[test]
+    fn live_bridge_master_autonomy_success_dispatches_worker_and_closes_task() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let sentinel = "SENTINEL_MASTER_AUTONOMY_SUCCESS_END";
+        let task_id = "task-master-autonomy-success";
+        let worker_id = "worker-master-autonomy-success";
+        let execution_id = "exec-master-autonomy-success";
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                task_tool_use_response(
+                    "toolu_success_agent",
+                    json!({
+                        "op":"create_agent",
+                        "agent_id":worker_id,
+                        "capabilities":["code_edit","test_run"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_success_create",
+                    json!({
+                        "op":"create",
+                        "task_id":task_id,
+                        "title":"Autonomy success task",
+                        "content":"Worker should complete the delegated task successfully.",
+                        "goal":"Prove master can dispatch and close a successful worker task.",
+                        "deliverables":["success report"],
+                        "acceptance":["task closes after approval"],
+                        "dispatch":{"mode":"none"},
+                        "priority":90
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_success_assign",
+                    json!({
+                        "op":"assign",
+                        "task_id":task_id,
+                        "agent_id":worker_id
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_success_claim",
+                    json!({
+                        "op":"claim_next",
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "ttl_seconds":600
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_success_running",
+                    json!({
+                        "op":"record_execution",
+                        "status":"running",
+                        "task_id":task_id,
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "phase":"implementation",
+                        "summary":"worker implemented the requested change",
+                        "evidence":["changed files inspected"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_success_review_ready",
+                    json!({
+                        "op":"record_execution",
+                        "status":"review_ready",
+                        "task_id":task_id,
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "phase":"review",
+                        "summary":"worker completed all acceptance checks",
+                        "deliverables":["success report"],
+                        "evidence":["unit test passed","owner truth updated"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_success_approve",
+                    json!({
+                        "op":"approve",
+                        "task_id":task_id
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_success_close",
+                    json!({
+                        "op":"close",
+                        "task_id":task_id
+                    }),
+                ),
+                complete_single_response("master closed successful worker task"),
+            ],
+        );
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home.clone();
+        request.prompt = master_autonomy_prompt(sentinel);
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect("master autonomy success path");
+        let requests = collect_provider_requests(&rx, 9);
+        handle.join().expect("join provider");
+
+        assert_master_task_request_contract(&requests[0], sentinel);
+        assert!(requests[1].contains("Agent created"));
+        assert!(requests.iter().any(|request| {
+            request.contains("\"tool_use_id\":\"toolu_success_review_ready\"")
+                && request.contains("Task review submitted")
+        }));
+        assert!(requests.iter().any(|request| {
+            request.contains("\"tool_use_id\":\"toolu_success_close\"")
+                && request.contains("Task closed")
+        }));
+        assert_eq!(outcome.tool_executions, 8);
+        assert_eq!(outcome.rounds, 9);
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+
+        let (task, event_types) = task_truth(&runtime_home, task_id);
+        assert_eq!(task.status, TaskStatus::Closed);
+        for required in [
+            "TaskCreated",
+            "TaskAssigned",
+            "TaskResumed",
+            "TaskExecutionRecorded",
+            "TaskReviewSubmitted",
+            "TaskReviewApproved",
+            "TaskClosed",
+        ] {
+            assert!(
+                event_types.iter().any(|event| event == required),
+                "missing {required}: {event_types:?}"
+            );
+        }
+        assert!(
+            !event_types
+                .iter()
+                .any(|event| event == "TaskReviewRejected")
+        );
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_master_autonomy_execution_error_blocks_without_success_close() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let sentinel = "SENTINEL_MASTER_AUTONOMY_EXECUTION_ERROR_END";
+        let task_id = "task-master-autonomy-error";
+        let worker_id = "worker-master-autonomy-error";
+        let execution_id = "exec-master-autonomy-error";
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                task_tool_use_response(
+                    "toolu_error_agent",
+                    json!({
+                        "op":"create_agent",
+                        "agent_id":worker_id,
+                        "capabilities":["code_edit"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_error_create",
+                    json!({
+                        "op":"create",
+                        "task_id":task_id,
+                        "title":"Autonomy execution error task",
+                        "content":"Worker should report an execution error.",
+                        "goal":"Prove master keeps errored worker task blocked instead of closing it.",
+                        "deliverables":["error report"],
+                        "acceptance":["blocked state is visible"],
+                        "dispatch":{"mode":"none"},
+                        "priority":80
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_error_assign",
+                    json!({
+                        "op":"assign",
+                        "task_id":task_id,
+                        "agent_id":worker_id
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_error_claim",
+                    json!({
+                        "op":"claim_next",
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "ttl_seconds":600
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_error_running",
+                    json!({
+                        "op":"record_execution",
+                        "status":"running",
+                        "task_id":task_id,
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "phase":"implementation",
+                        "summary":"worker started execution",
+                        "evidence":["worker heartbeat observed"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_error_blocked",
+                    json!({
+                        "op":"record_execution",
+                        "status":"blocked",
+                        "task_id":task_id,
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "phase":"execution_error",
+                        "summary":"worker hit provider_error_500 and cannot continue without master decision",
+                        "evidence":["provider_error_500","no deliverable produced"]
+                    }),
+                ),
+                complete_single_response("master left errored worker task blocked"),
+            ],
+        );
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home.clone();
+        request.prompt = master_autonomy_prompt(sentinel);
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect("master autonomy execution error path");
+        let requests = collect_provider_requests(&rx, 7);
+        handle.join().expect("join provider");
+
+        assert_master_task_request_contract(&requests[0], sentinel);
+        assert!(requests.iter().any(|request| {
+            request.contains("\"tool_use_id\":\"toolu_error_blocked\"")
+                && request.contains("TaskBlocked")
+                && request.contains("status=Blocked")
+        }));
+        assert_eq!(outcome.tool_executions, 6);
+        assert_eq!(outcome.rounds, 7);
+
+        let (task, event_types) = task_truth(&runtime_home, task_id);
+        assert_eq!(task.status, TaskStatus::Blocked);
+        assert!(event_types.iter().any(|event| event == "TaskBlocked"));
+        assert!(
+            !event_types
+                .iter()
+                .any(|event| event == "TaskReviewSubmitted")
+        );
+        assert!(
+            !event_types
+                .iter()
+                .any(|event| event == "TaskReviewApproved")
+        );
+        assert!(!event_types.iter().any(|event| event == "TaskClosed"));
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_master_autonomy_rejected_review_retries_and_closes() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let sentinel = "SENTINEL_MASTER_AUTONOMY_REJECT_RETRY_END";
+        let task_id = "task-master-autonomy-retry";
+        let worker_id = "worker-master-autonomy-retry";
+        let execution_id = "exec-master-autonomy-retry";
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                task_tool_use_response(
+                    "toolu_retry_agent",
+                    json!({
+                        "op":"create_agent",
+                        "agent_id":worker_id,
+                        "capabilities":["code_edit","test_run"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_retry_create",
+                    json!({
+                        "op":"create",
+                        "task_id":task_id,
+                        "title":"Autonomy retry task",
+                        "content":"Worker first submits incomplete work, then fixes it.",
+                        "goal":"Prove master rejects incomplete worker submission and closes only after retry.",
+                        "deliverables":["complete report"],
+                        "acceptance":["review rejection precedes retry close"],
+                        "dispatch":{"mode":"none"},
+                        "priority":85
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_retry_assign",
+                    json!({
+                        "op":"assign",
+                        "task_id":task_id,
+                        "agent_id":worker_id
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_retry_claim",
+                    json!({
+                        "op":"claim_next",
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "ttl_seconds":600
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_retry_incomplete_review",
+                    json!({
+                        "op":"record_execution",
+                        "status":"review_ready",
+                        "task_id":task_id,
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "phase":"review",
+                        "summary":"worker submitted partial implementation without regression proof",
+                        "deliverables":["partial report"],
+                        "evidence":["no regression evidence"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_retry_reject",
+                    json!({
+                        "op":"reject",
+                        "task_id":task_id,
+                        "reject_reason":"missing regression proof",
+                        "next_requirements":["run regression evidence","resubmit complete deliverable"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_retry_recovering",
+                    json!({
+                        "op":"record_execution",
+                        "status":"recovering",
+                        "task_id":task_id,
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "phase":"retry",
+                        "summary":"worker is fixing rejected submission",
+                        "evidence":["rejection reason acknowledged"],
+                        "retry_count":1
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_retry_complete_review",
+                    json!({
+                        "op":"record_execution",
+                        "status":"review_ready",
+                        "task_id":task_id,
+                        "agent_id":worker_id,
+                        "execution_id":execution_id,
+                        "phase":"review",
+                        "summary":"worker resubmitted complete implementation with regression proof",
+                        "deliverables":["complete report"],
+                        "evidence":["regression passed","missing proof supplied"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_retry_approve",
+                    json!({
+                        "op":"approve",
+                        "task_id":task_id
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_retry_close",
+                    json!({
+                        "op":"close",
+                        "task_id":task_id
+                    }),
+                ),
+                complete_single_response("master closed retried worker task"),
+            ],
+        );
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home.clone();
+        request.prompt = master_autonomy_prompt(sentinel);
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect("master autonomy rejected-review retry path");
+        let requests = collect_provider_requests(&rx, 11);
+        handle.join().expect("join provider");
+
+        assert_master_task_request_contract(&requests[0], sentinel);
+        assert!(requests.iter().any(|request| {
+            request.contains("\"tool_use_id\":\"toolu_retry_reject\"")
+                && request.contains("Task rejected")
+        }));
+        assert!(requests.iter().any(|request| {
+            request.contains("\"tool_use_id\":\"toolu_retry_recovering\"")
+                && request.contains("TaskExecutionRecovering")
+        }));
+        assert!(requests.iter().any(|request| {
+            request.contains("\"tool_use_id\":\"toolu_retry_close\"")
+                && request.contains("Task closed")
+        }));
+        assert_eq!(outcome.tool_executions, 10);
+        assert_eq!(outcome.rounds, 11);
+
+        let (task, event_types) = task_truth(&runtime_home, task_id);
+        assert_eq!(task.status, TaskStatus::Closed);
+        let first_review = event_index(&event_types, "TaskReviewSubmitted");
+        let rejected = event_index(&event_types, "TaskReviewRejected");
+        let recovering = event_index(&event_types, "TaskExecutionRecovering");
+        let second_review = event_types
+            .iter()
+            .enumerate()
+            .skip(rejected.saturating_add(1))
+            .find(|(_, event)| event.as_str() == "TaskReviewSubmitted")
+            .map(|(index, _)| index)
+            .expect("second review submission after rejection");
+        let approved = event_index(&event_types, "TaskReviewApproved");
+        let closed = event_index(&event_types, "TaskClosed");
+        assert!(first_review < rejected);
+        assert!(rejected < recovering);
+        assert!(recovering < second_review);
+        assert!(second_review < approved);
+        assert!(approved < closed);
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
 
     #[test]

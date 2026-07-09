@@ -3419,7 +3419,7 @@ mod tests {
             concat!(
                 "answer\n",
                 "<<<freehand_status>>>\n",
-                "{\"schema_version\":1,\"status\":{\"simple_request\":true}}\n",
+                "{\"schema_version\":1,\"status\":{\"simple_question\":true}}\n",
                 "<</freehand_status>>>"
             )
             .to_owned(),
@@ -3428,7 +3428,7 @@ mod tests {
             concat!(
                 "final\n",
                 "<<<freehand_status>>>\n",
-                "{\"schema_version\":1,\"status\":{\"simple_request\":true}}\n",
+                "{\"schema_version\":1,\"status\":{\"simple_question\":true}}\n",
                 "<</freehand_status>>>"
             )
             .to_owned(),

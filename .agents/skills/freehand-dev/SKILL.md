@@ -165,11 +165,14 @@ Use this skill for any non-trivial work in this repo.
 - In provider work, preserve raw provider events in debug mode and rely on unified semantic events for normal operation.
 - In provider work, read local official protocol snapshots under `docs/references/provider-protocols/` before inventing wire behavior.
 - In reason-turn work, provider `finish_reason=stop/end_turn` is not enough to stop. Completion schema decides stop.
+- In control-status work, the simple user-input stop field is `simple_question`, not `simple_request`. `simple_question=true` means the previous user input is a simple question/answer request and may allow natural stop; do not add aliases or fallback fields for this decision.
 - Reason context planning follows locked Reasonix/Codex direction:
   - stable prefix stays stable across ordinary turns
   - only explicit rewrite events may change prefix layout
   - prefer subagent search final-report enrichment over injecting raw exploration transcripts
   - admit subagent context into parent turns only as typed final conclusion segments
+- Dynamic model-visible input segments must not use arbitrary small runtime caps. User/operator prompts, previous visible output, schema feedback, and future task-space snapshots use content-derived admission budgets and are rejected only by the planner/model context policy, not by fixed 128/512-token local limits.
+- Provider output budget defaults stay provider-owned. Anthropic live requests use `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`; do not add smaller ad hoc runtime output caps.
 - `reason.rewrite-policy` in `freehand-blocks` owns when compaction / rollback / resume rebuild should trigger; `freehand-reason` only owns `SessionHistory` mutation after that decision
 - `ReasonRewriteRuntime` in `freehand-reason` is the baseline consumer that may call `SessionHistory::stage_*` from policy-approved decisions
 - Provider `TokenUsage` enters rewrite policy only through `freehand-blocks::prompt_tokens_from_usage`; do not hand-roll provider usage interpretation in runtime or UI

@@ -23,7 +23,7 @@ pub struct ControlInteractionStatus {
     pub reason: Option<String>,
     pub target_cwd: Option<String>,
     pub next_expected_tool: Option<String>,
-    pub simple_request: Option<bool>,
+    pub simple_question: Option<bool>,
     pub task_complete: Option<bool>,
     pub evidence: Option<String>,
     pub summary: Option<String>,
@@ -298,7 +298,7 @@ pub fn parse_control_status_block(
         reason: optional_string(&mut issues, status_object, "reason"),
         target_cwd: optional_string(&mut issues, status_object, "target_cwd"),
         next_expected_tool: optional_string(&mut issues, status_object, "next_expected_tool"),
-        simple_request: optional_bool(&mut issues, status_object, "simple_request"),
+        simple_question: optional_bool(&mut issues, status_object, "simple_question"),
         task_complete: optional_bool(&mut issues, status_object, "task_complete"),
         evidence: optional_string(&mut issues, status_object, "evidence"),
         summary: optional_string(&mut issues, status_object, "summary"),
@@ -381,7 +381,7 @@ fn validate_control_status_submission(
             message: "must be 1".to_owned(),
         }]));
     }
-    if status.simple_request == Some(true) {
+    if status.simple_question == Some(true) {
         return Ok(ControlRhythmDecision::AllowNaturalStop);
     }
     if status.needs_user_involvement == Some(true) {
@@ -432,7 +432,7 @@ fn validate_control_status_submission(
     }
     Err(status_rejection([ControlStatusIssue {
         field: "status".to_owned(),
-        message: "must set simple_request=true, task_complete=true with evidence, blocked=true with blocked_reason, needs_user_involvement=true with options, or next_step".to_owned(),
+        message: "must set simple_question=true, task_complete=true with evidence, blocked=true with blocked_reason, needs_user_involvement=true with options, or next_step".to_owned(),
     }]))
 }
 
@@ -558,10 +558,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_simple_request_status_and_allows_stop() {
+    fn parses_simple_question_status_and_allows_stop() {
         let raw = r#"public
 <<<freehand_status>>>
-{"schema_version":1,"status":{"simple_request":true}}
+{"schema_version":1,"status":{"simple_question":true}}
 <</freehand_status>>>"#;
 
         let submission = parse_control_status_block(raw).expect("status");
@@ -571,6 +571,19 @@ mod tests {
             Ok(ControlRhythmDecision::AllowNaturalStop)
         );
         assert_eq!(strip_control_status_block(raw), "public");
+    }
+
+    #[test]
+    fn rejects_legacy_simple_request_field_without_aliasing() {
+        let raw = r#"<<<freehand_status>>>
+{"schema_version":1,"status":{"simple_request":true}}
+<</freehand_status>>>"#;
+
+        let rejection = parse_control_status_block(raw).expect_err("legacy field must not stop");
+
+        assert!(rejection.issues.iter().any(|issue| {
+            issue.field == "status" && issue.message.contains("simple_question=true")
+        }));
     }
 
     #[test]

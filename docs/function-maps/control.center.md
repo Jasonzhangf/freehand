@@ -23,7 +23,8 @@
 - accepted status writes watermarked metadata with writer owner `control.center`, hook node, status schema version, validation state, decision, and raw/control hashes
 - rejected status writes watermarked metadata with validation failure and field-level issue summary
 - `ControlHook04BeforeClientReturn` strips hidden control blocks from public projection and records the stripping decision
-- basic stopHook allows terminal stop for `simple_request=true` or `task_complete=true` with `evidence`, while legacy `<freehand_completion>` remains supported when no status block is present
+- basic stopHook allows terminal stop for `simple_question=true` or `task_complete=true` with `evidence`, while legacy `<freehand_completion>` remains supported when no status block is present
+- `simple_question` is the single standard field for "the previous user input was a simple question/answer request"; `simple_request` is not accepted as an alias and must not allow natural stop
 
 ## Error Mainline
 

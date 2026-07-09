@@ -13,12 +13,17 @@
 - selected agent config enters the runtime-owned live bridge with one bound provider
 - live bridge restores or creates the requested session through `ReasonPersistence` before round execution
 - when restoring an existing session, live bridge rebuilds future prompt context from effective persisted turns and keeps only the latest round for each repaired logical turn, so superseded failed repair attempts stay in ledgers/UI truth but do not enter the next default prompt context
+- the original operator task enters the planner as an `original-task` session-memory segment with a budget derived from actual content size plus margin; runtime must not use a fixed tiny prompt cap that rejects ordinary multi-step master instructions before provider execution
+- multi-round carryover such as `previous-visible-output` and schema feedback also uses content-derived admission budgets; runtime must not impose arbitrary small input caps such as 512 tokens on model-visible context, while the planner remains responsible for rejecting context that truly exceeds the model/context policy
+- Anthropic request rendering uses the provider adapter default output budget `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`; runtime must not add a smaller ad hoc output cap in the live bridge
+- master task creation/dispatch is model-decided from the runtime prompt contract, the exposed `task` tool schema, tool field descriptions, and model-visible samples for success, execution error, and rejected-review retry; runtime must not infer task creation from prose outside the tool call path
 - runtime emits restore lifecycle debug snapshots through `debug.core` without request text
 - bridge derives provider descriptor and executor config from selected provider truth
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
 - the first tool-capable request exposes a Reasonix-aligned runtime tool registry through provider-neutral request metadata
 - the same runtime tool registry exports one deterministic implemented-schema fingerprint that is stamped into planner diagnostics before provider request build
+- the first master-task-capable request includes owner-scoped task orchestration guidance and examples that teach the model to use `task(op=...)` instead of standalone semantic-action tool names
 - runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text
 - Anthropic live executor runs the HTTP/SSE request through raw-capable callbacks so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
@@ -138,6 +143,8 @@
 - provider executor/transport failures are distinct from tool execution result failures and schema mismatch polishing: recoverable non-stream provider errors retry up to five attempts, then materialize a failed terminal turn with a concrete code such as `anthropic_http_status_500` and no active turn before the dispatch error is returned
 - runtime white-box coverage now explicitly locks failed-tool-result multi-round continuation, incomplete `tool_use` returning a failed tool result with zero schema retries, and keeps provider/metadata/persistence/checkpoint failures as system/runtime errors
 - runtime dispatcher failure projection now preserves already-restored other-session transcripts while replacing only the failed session turns after provider/system failure recovery
+- runtime white-box coverage now explicitly locks master-autonomous task tool loops through mock provider responses: success dispatch closes after review approval, execution error becomes blocked without success close, and rejected review enters recovering before resubmission/approval/close
+- runtime tool-result text for structured task execution facts is derived from the Task Center event type, so `review_ready`, `blocked`, and `recovering` worker results are paired back to the model with their owner-visible lifecycle semantics
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported
 - CLI and daemon now both consume the runtime-owned bridge instead of `freehand-testkit`

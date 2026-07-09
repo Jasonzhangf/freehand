@@ -130,6 +130,48 @@ Worker requirements:
 - rejection must link feedback to retry
 - approved execution releases the worker resource
 
+## Single-Agent Task Space State Machine
+
+Long-running single-agent work uses a framework-owned task space. The task
+space is persisted context, similar to a scoped skill/memory surface, and is
+injected into later model requests.
+
+The model must return a structured candidate state machine at stop points. The
+framework compares only explicit standard fields, not natural language meaning.
+
+Standard machine-checkable fields:
+
+```text
+schema_version
+simple_question
+phase
+current_step
+next_step
+completed
+blocked
+needs_user_input
+target_alignment
+progress_percent
+retry_count
+```
+
+Rules:
+
+- `simple_question=true` means the previous user input was a simple question or
+  answer request. If the provider also naturally stops, the framework may allow
+  the stop instead of forcing long-task continuation.
+- `simple_question` is a standard boolean field, not a prose hint.
+- task target text is not machine-corrected by the framework. The framework
+  stores the original user target and the model's current target understanding,
+  injects both into later prompts, and asks the model to review drift.
+- framework validation checks enumerations, booleans, required fields, allowed
+  phase transitions, completion consistency, and missing next-step/blocker
+  fields.
+- framework validation must not compare two natural-language target strings and
+  decide they are semantically equivalent or wrong.
+- when structured fields are missing or inconsistent, the response is a schema
+  mismatch/polishing retry, not provider failure.
+
 ## Framework Scheduler Tick
 
 The framework owns time. Models do not.
