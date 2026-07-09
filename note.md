@@ -2772,6 +2772,23 @@ Current real root cause split:
   - Tightened both clients to derive a dispatch status code by stripping only `:` or whitespace suffixes, then map through exact known-code whitelist.
   - Added/updated tests to prove unknown task-like statuses such as `task_unknown:*` render unsupported instead of task success text.
 
+# 2026-07-09 master autonomy gap audit
+
+- Trigger:
+  - Jason clarified that UI projection and command harnesses are not enough; the real requirement is a master agent that can autonomously trigger worker task dispatch and manage success, execution error, and rejected-submission retry loops.
+- Current verified state:
+  - Phase 2A/2B/2C/2D prove owner truth, ADP commands, restart recovery, and UI projection.
+  - `master-worker-foundation-sample` is command-driven by CLI/ADP, not model-autonomous.
+  - `reason-live --agent master --prompt ...` is the closest current headless live model path.
+- Live probe:
+  - First long prompt failed before provider call because `original-task` context segment exceeded the current 128-token budget.
+  - Compressed prompt with ids `worker-auto-1783582650`, `task-auto-1783582650`, `exec-auto-1783582650` entered the real provider path and did call `task` tools.
+  - ADP owner query proved task history reached `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat`.
+  - The turn then stalled for about four minutes without advancing to execution failure, review submission, rejection, retry, approval, or close. The exact headless process was interrupted with Ctrl-C to avoid a residual process.
+- Conclusion:
+  - Current implementation has partial model-trigger evidence for create/assign/claim, but does not yet have complete master-autonomous worker lifecycle proof.
+  - Missing acceptance coverage: worker execution error, worker success, success-but-incomplete review rejection and retry, all initiated/managed by master model decisions rather than CLI scripted commands.
+
 # 2026-07-08 multi-task phase1 implementation closeout
 
 - Scope:

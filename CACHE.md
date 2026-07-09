@@ -1,5 +1,10 @@
 # CACHE
 
+- Current master-autonomy gap:
+  - Jason clarified the real multi-task requirement: master model must autonomously trigger worker task creation/dispatch and manage worker success, execution error, and rejected-submission retry loops. Existing Phase 2A/2B/2C samples are CLI/ADP command-driven harnesses, not proof of master model autonomy.
+  - Live headless probe with `reason-live --agent master` and compressed prompt proved partial tool-trigger behavior only: task `task-auto-1783582650` reached `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat` through real model/tool path. The turn then stalled for about four minutes and did not reach execution failure, review submission, rejection, retry, approval, or close; the exact process was interrupted to avoid a residual process.
+  - Next implementation target should be a headless `master-worker-autonomy-sample` that drives real model decisions through the `task` tool and verifies three owner-truth outcomes: worker execution error/recovery, worker success/close, and success-but-incomplete review rejection then retry/close. Do not claim multi-task autonomy from UI projection or scripted ADP mutation samples alone.
+
 - Current multi-task Phase 2D WebUI projection closeout:
   - Marker: `phase2d-webui-projection-closeout-1783580948045`.
   - Phase 2D status drawer is implemented in `app.webui-smoke`: WebUI queries owner-backed `TaskBoard`, `AgentBoard`, `EventInbox`, `TaskHistory`, and `WorkerControl` through ADP/runtime query truth, renders compact read-only cards, and sends WorkerControl actions back through protocol commands before re-querying owner truth. Browser state is transient render cache only; no browser-persisted task/control truth.
