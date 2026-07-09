@@ -128,7 +128,8 @@
 ## Project Black-Box Impact
 
 - first slice is runtime/tool/persistence level only
-- WebUI/ADP task projection and online restart proof are required before claiming UI task management
+- WebUI/ADP task projection is now owned by `app.webui-smoke`; task.orchestration
+  remains the owner truth behind that projection
 - Phase 1 headless ADP/CLI proof is required before claiming multi-task foundation closeout
 - Phase 2A headless ADP/CLI proof is required before claiming worker execution loop closeout; UI remains out of scope
 - Phase 2B headless ADP/CLI proof is required before claiming master poll/EventInbox closeout; UI remains out of scope and framework must not apply business decisions
@@ -166,10 +167,15 @@ cargo run -p xtask -- gates check
 
 - Phase 2A real worker execution loop is implemented headlessly and
   live-validated on S-profile `127.0.0.1:4042` with restart same-id proof
-- Phase 2B EventInbox/master poll is the next active no-UI implementation
-  target; no UI projection is claimed by this test design
-- no queue runner
-- no UI task timeline
+- Phase 2B EventInbox/master poll is implemented and live-validated on S-profile
+  `127.0.0.1:4042` with same-cursor restart proof
+- Phase 2C worker-control is implemented under `worker.control` and
+  live-validated with same-id restart proof
+- Phase 2D WebUI projection is implemented under `app.webui-smoke`; Android
+  true-device proof is separate from this task owner test design
+- no production daemon-owned worker queue runner
+- no production daemon-owned master scheduler loop
+- no non-fixture real-provider behavioral eval for autonomous task dispatch
 - TaskBoard owner-internal skeleton is implemented in `crates/freehand-task`
 - runtime/ADP TaskBoard surface is implemented for Phase 1/2A headless proof
 - ExecutionFact owner-internal sync is implemented in `crates/freehand-task`

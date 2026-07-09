@@ -3179,3 +3179,38 @@ Current real root cause split:
   - Refined secret scan `trojan://|Secret(Id|Key)=|AKID|Bearer ...|(^|[^A-Za-z])sk-...|-----BEGIN` returned zero hits.
   - `mempalace mine ... --wing freehand --agent codex` processed 19 files.
   - Search for `cli-adp-sample-failure-1783595301535093000 stable prefix hash b25c8265c341fff3` returned `note.md` rank 1.
+# 2026-07-09 production master/worker loop gap reconciliation
+
+- marker:
+  - `production-master-worker-loop-gap-reconcile-20260709`
+- trigger:
+  - Continued after `master-worker-autonomy-online-closeout-1783599325364293000`.
+  - Read current `CACHE.md`, `MEMORY.md`, `note.md`, `freehand-dev` skill, feature map, function maps, and test designs.
+  - MemoryPalace search for current production-loop gap returned no direct result, so repo docs were used as owner truth after source-only search.
+- finding:
+  - `docs/architecture/architecture-gaps.md` Gap 4 was stale. It still claimed Phase 2B EventInbox/master poll, Phase 2C worker_control, and Phase 2D UI projection were missing.
+  - Current memory/source truth says Phase 2B/2C/2D are implemented and verified; `master-worker-autonomy-sample` also closed fixture-driven `SubmitUserInput`-only task-tool autonomy.
+- updated:
+  - `docs/architecture/architecture-gaps.md`
+  - `docs/function-maps/task.orchestration.md`
+  - `docs/testing/task.orchestration.md`
+  - `docs/function-maps/app.cli-runtime-smoke.md`
+  - `docs/testing/app.cli-runtime-smoke.md`
+  - `docs/mainline-calls/app.cli-runtime-smoke.json`
+  - `docs/mainline-calls/task.orchestration.json`
+  - generated wiki for both mainline manifests
+  - `docs/goals/multi-task-foundation-phase2-gap-plan.md` was rewritten from a stale active Phase2 plan into current Phase2 closeout plus production-loop gap plan.
+- current gap now documented:
+  - production non-smoke master/worker orchestration loop
+  - daemon-owned scheduler/worker runner activation
+  - configured worker resource acquisition/release beyond CLI samples
+  - real worker queue claiming without scripted CLI mutation
+  - non-fixture real-provider behavioral eval
+  - Android true-device Phase 2 projection proof only if mobile dashboard changes are claimed
+- validation:
+  - targeted stale-pending phrase searches returned no hits in source docs/manifests.
+  - `jq empty docs/mainline-calls/app.cli-runtime-smoke.json docs/mainline-calls/task.orchestration.json` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.

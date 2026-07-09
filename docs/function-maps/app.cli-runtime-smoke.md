@@ -190,10 +190,10 @@
 - CLI Phase 1 foundation sample is implemented for no-UI TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id proof
 - CLI Phase 2A master-worker foundation sample is implemented for no-UI assign/claim/progress/blocked/recovering/review/reject/retry/approve/close and restart same-id proof
 - CLI master-worker autonomy sample is implemented for no-UI SubmitUserInput-driven task-tool autonomy verification; the mock test rejects direct CLI task mutations, and the online script proves success, execution-error, and reject-retry tool loops against an S-profile provider fixture
-- CLI Phase 2B master poll foundation sample is implemented locally and must
-  pass S-profile same-cursor restart proof before Phase 2B is complete
-- CLI Phase 2C worker-control foundation sample is implemented locally and
-  must pass S-profile same-id restart proof before Phase 2C is complete
+- CLI Phase 2B master poll foundation sample is implemented and S-profile
+  verified with same-cursor restart proof
+- CLI Phase 2C worker-control foundation sample is implemented and S-profile
+  verified with same-id restart proof
 - harness-backed app E2E smoke now exists before production CLI/server runtime loop
 - remaining gap: production non-smoke command loop is still pending
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes

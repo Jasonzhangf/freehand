@@ -208,5 +208,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - Phase 1 ExecutionFact owner-internal sync is implemented
 - Phase 1 SchedulerTick owner-internal facts are implemented
 - Phase 2A real worker execution loop is implemented through headless ADP/CLI
-- Phase 2B EventInbox and master poll owner surfaces are implemented for the no-UI foundation path; S-profile online closeout is still required before claiming the phase complete
-- UI task projection and multi-agent dispatch remain pending later phases
+- Phase 2B EventInbox and master poll owner surfaces are implemented and S-profile verified with same-cursor restart proof
+- Phase 2C worker-control truth is implemented under worker.control and S-profile verified with same-id restart proof
+- Phase 2D WebUI task/agent/control projection is implemented through app.webui-smoke; Android true-device proof is separate and not implied by task.orchestration
+- remaining gap is production non-smoke master/worker orchestration: daemon-owned scheduler/worker runner activation, configured worker resource recycling, and non-fixture real-provider behavioral evaluation

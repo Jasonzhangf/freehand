@@ -120,12 +120,12 @@
   - CLI ADP Phase 2A master-worker foundation sample is implemented in integration tests and live-validated on S-profile `127.0.0.1:4042` with restart same-id verification
   - CLI master-worker autonomy sample is implemented in integration tests; the mock proof rejects direct task mutation commands and validates success, execution-error, and reject-retry branches from transcript plus owner truth
   - S-profile master-worker autonomy online proof is implemented through a local Anthropic-compatible fixture and must pass before claiming model/tool-driven multi-task autonomy
-  - CLI ADP Phase 2B master poll foundation sample is the active next sample
-    target and must verify EventInbox, classifications, persisted cursor, and
+  - CLI ADP Phase 2B master poll foundation sample is implemented and
+    S-profile verified with EventInbox, classifications, persisted cursor, and
     restart same-cursor evidence
   - CLI ADP Phase 2C worker-control foundation sample is implemented in
-    integration tests and verifies control ledger plus pause/resume/cancel
-    consequence evidence through protocol-owned ADP frames
+    integration tests and S-profile verified with control ledger plus
+    pause/resume/cancel consequence evidence through protocol-owned ADP frames
   - CLI ADP session manage command is implemented for live daemon session CRUD and rollback checks
   - CLI ADP task query command is implemented for live daemon task list/history checks
   - CLI ADP task subscribe command is implemented for live daemon task list subscription checks

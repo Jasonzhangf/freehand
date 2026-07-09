@@ -35,21 +35,21 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 | priority | high — required before task/subagent orchestration refactor |
 | closure path | 1) add feature-map/function-map/test-design entries for `error.center` and `task.orchestration` 2) extend `control.center` from basic stopHook to schema repair feedback and action admission 3) implement compact `task` built-in action tool 4) extend metadata center with status/action/error watermark helpers 5) route runtime/reason/provider/tool failures through error center 6) gate owner state transitions on accepted action metadata |
 
-## Gap 4: `task.orchestration` / `agent.lifecycle` — master/worker 执行闭环未接上
+## Gap 4: `task.orchestration` / `provider.reason-live-bridge` / `app.runtime-daemon` — 生产 master/worker loop 未从 smoke 提升
 
 | Field | Value |
 |---|---|
-| feature_id | `task.orchestration`, `agent.lifecycle`, planned `worker_control` |
-| owner crate | `crates/freehand-task` for Task Center and Agent Lifecycle skeleton; future runtime-control owner pending |
-| gap kind | Phase 1 已有 TaskBoard、AgentBoard、ExecutionFact、SchedulerTick headless truth；Phase 2A 已有 no-UI master/worker assign/claim/progress/blocked/recovering/review/reject/retry/approve/close 闭环。剩余 master EventInbox cursor、worker_control safe-point inbox、master poll loop、UI projection 尚未实现 |
-| why not violation | Phase 1/2A 交付范围均已用 headless same-id restart proof 验证；EventInbox/poll loop/control/UI 是后续 Phase 2B/2C/2D scope |
-| risk | 如果先做 UI dashboard，会变成静态投影或假状态；如果 agent 私下通信或直接改状态，会绕过 Task Center 和 Agent Lifecycle owner truth |
-| gate | 当前 gate 锁 Phase 1/2A owner/map/mainline 和 tool surface；尚未要求 master EventInbox/poll loop 或 worker_control inbox |
-| current producers | `TaskRuntime::query_task_board`, `TaskRuntime::query_agent_board`, `TaskRuntime::apply_execution_fact`, `TaskRuntime::run_scheduler_tick`, CLI `phase1-foundation-sample`, CLI `master-worker-foundation-sample` |
-| missing coverage | master EventInbox cursor, master poll loop over TaskBoard/AgentBoard/EventInbox, durable processed-event cursor, `worker_control(op=...)` owner map and safe-point inbox, UI task/agent projection |
-| design doc | `docs/design/framework-mediated-agent-operations.md`, `docs/goals/multi-task-foundation-phase2-gap-plan.md` |
-| priority | high — should happen before WebUI/Android task dashboard |
-| closure path | 1) Phase 2B master poll loop + EventInbox cursor 2) Phase 2C worker_control safe-point channel 3) Phase 2D UI projection |
+| feature_id | `task.orchestration`, `agent.lifecycle`, `worker.control`, `provider.reason-live-bridge`, `app.cli-runtime-smoke`, `app.runtime-daemon` |
+| owner crate | `crates/freehand-task` owns Task Center / Agent Lifecycle / worker-control truth; `crates/freehand-runtime` owns live provider loop and daemon dispatch; `apps/freehand-cli` owns current proof harness |
+| gap kind | Phase 1/2A/2B/2C/2D foundation truth is implemented and verified, and `master-worker-autonomy-sample` proves `SubmitUserInput`-only task-tool autonomy through a deterministic provider fixture. Remaining gap is production promotion: a non-smoke master-worker loop that uses configured worker resources, worker queue/claim runners, real daemon scheduling, and real-provider behavioral evaluation instead of only CLI samples/fixtures. |
+| why not violation | Current claims are scoped and verified: headless owner truth, WebUI projection, fixture-driven master autonomy, and same-id restart recovery are closed. A long-running production orchestration loop and real-provider prompt behavior are not claimed as implemented. |
+| risk | The framework can prove the tool/task/lifecycle path, but a production master may still depend on manual/CLI-triggered samples unless runtime daemon owns an explicit loop. Real model prompt behavior can drift unless locked by deterministic eval fixtures plus separate real-provider smoke evidence. |
+| gate | Current gates lock owner maps, task tool surface, Phase 1/2A/2B/2C samples, WebUI projection, and fixture autonomy. No gate currently requires daemon-started master scheduling, worker runner resource recycling, or non-fixture provider behavioral pass. |
+| current producers | `TaskRuntime::query_task_board`, `TaskRuntime::query_agent_board`, `TaskRuntime::query_event_inbox`, `TaskRuntime::run_master_poll`, worker-control ledger/snapshots, CLI `phase1-foundation-sample`, `master-worker-foundation-sample`, `master-poll-foundation-sample`, `worker-control-foundation-sample`, `master-worker-autonomy-sample`, WebUI Phase 2 projection |
+| missing coverage | production non-smoke master-worker command loop, daemon-owned scheduler/runner activation, configured worker pool resource acquisition/release beyond samples, real worker queue runner that claims assigned tasks without scripted CLI mutation, non-fixture real-provider behavioral eval for task creation/dispatch/review retry, Android true-device Phase 2 projection proof if mobile dashboard changes are claimed |
+| design doc | `docs/design/framework-mediated-agent-operations.md`, `docs/goals/multi-task-foundation-phase2-gap-plan.md`, future production-loop design doc |
+| priority | high — next foundation step after fixture-proven autonomy; required before claiming Freehand can autonomously run master/worker tasks in production |
+| closure path | 1) write production-loop design/function-map/test-design owner records 2) implement daemon-owned master scheduler/worker runner behind explicit config 3) add deterministic fixture tests for success/execution-error/reject-retry plus resource recovery 4) add S-profile online proof with same-id restart verification 5) add separate real-provider behavioral smoke and document nondeterministic limits |
 
 ## 管理规则
 

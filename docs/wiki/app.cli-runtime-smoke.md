@@ -133,12 +133,12 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - CLI Phase 1 foundation sample is implemented and verifies TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id evidence through protocol-owned ADP frames
 - CLI Phase 2A master-worker foundation sample is implemented and verifies assign/claim/progress/blocked/recovering/review/reject/retry/approve/close and restart same-id proof through protocol-owned ADP frames
 - CLI master-worker autonomy sample is implemented in integration tests; the mock proof rejects direct task mutation commands and validates success, execution-error, and reject-retry branches from transcript plus owner truth
-- S-profile master-worker autonomy online proof is implemented through scripts/verify-master-worker-autonomy-online.sh and must pass before claiming model/tool-driven multi-task autonomy
-- CLI Phase 2B master poll foundation sample is implemented and verifies EventInbox, classifications, persisted cursor, and restart same-cursor evidence through protocol-owned ADP frames; S-profile online closeout is still required before claiming the phase complete
+- S-profile master-worker autonomy online proof is implemented through scripts/verify-master-worker-autonomy-online.sh and has closed success, execution-error, and reject-retry scenarios with same-id restart verification
+- CLI Phase 2B master poll foundation sample is implemented and S-profile verified with EventInbox, classifications, persisted cursor, and restart same-cursor evidence through protocol-owned ADP frames
 - CLI ADP task list/history query path is implemented for no-UI task truth diagnosis
 - harness-backed app E2E smoke now exists before production CLI or server runtime loop
 - remaining gap: production non-smoke command loop is still pending
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes
 - CLI ADP task list subscribe path is implemented for no-UI task push diagnosis
 - CLI ADP error-center query path is implemented for no-UI metadata diagnosis
-- CLI Phase 2C worker-control foundation sample is implemented in integration tests and verifies control ledger plus pause/resume/cancel consequence evidence through protocol-owned ADP frames
+- CLI Phase 2C worker-control foundation sample is implemented and S-profile verified with control ledger plus pause/resume/cancel consequence evidence through protocol-owned ADP frames

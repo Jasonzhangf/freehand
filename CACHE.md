@@ -1,5 +1,12 @@
 # CACHE
 
+- Current production master/worker loop gap reconciliation:
+  - Marker: `production-master-worker-loop-gap-reconcile-20260709`.
+  - `docs/architecture/architecture-gaps.md` Gap 4 no longer claims Phase 2B/2C/2D are missing. Current truth: Phase 1/2A/2B/2C/2D foundation and WebUI projection are verified; `master-worker-autonomy-sample` proves `SubmitUserInput`-only task-tool autonomy through deterministic provider fixture and same-id restart verification.
+  - Remaining gap is production promotion: daemon-owned non-smoke master scheduler/worker runner, configured worker resource acquisition/release beyond CLI samples, real worker queue claiming without scripted CLI mutation, and non-fixture real-provider behavioral eval.
+  - Docs synced: architecture gap registry, `task.orchestration` and `app.cli-runtime-smoke` function maps/test designs/mainline JSON, generated wiki.
+  - `docs/goals/multi-task-foundation-phase2-gap-plan.md` was rewritten from stale active Phase2 plan into Phase2 closeout + production-loop gap plan.
+
 - Current master-autonomy closeout:
   - Marker: `master-worker-autonomy-online-closeout-1783599325364293000`.
   - `master-worker-autonomy-sample` is implemented under `app.cli-runtime-smoke`. It submits only ADP `SubmitUserInput`; validation then queries transcript, TaskBoard, AgentBoard, AgentLifecycle, and TaskHistory truth. The mock ADP test rejects direct task mutation commands so scripted CLI task mutation cannot satisfy the autonomy proof.
