@@ -61,6 +61,9 @@ fn run() -> Result<String, String> {
     if flag == "master-worker-foundation-sample" {
         return run_master_worker_foundation_sample(args.collect());
     }
+    if flag == "master-worker-autonomy-sample" {
+        return run_master_worker_autonomy_sample(args.collect());
+    }
     if flag == "master-poll-foundation-sample" {
         return run_master_poll_foundation_sample(args.collect());
     }
@@ -90,7 +93,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
                 .to_owned(),
         );
     }
@@ -330,6 +333,71 @@ fn run_master_worker_foundation_sample(args: Vec<String>) -> Result<String, Stri
         .build()
         .map_err(|err| err.to_string())?;
     runtime.block_on(run_master_worker_foundation_sample_async(url, verify))
+}
+
+fn run_master_worker_autonomy_sample(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]"
+            .to_owned();
+    let mut url = None::<String>;
+    let mut scenario = None::<MasterWorkerAutonomyScenario>;
+    let mut task_id = None::<String>;
+    let mut execution = None::<String>;
+    let mut agent = None::<String>;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--url" if index + 1 < args.len() => {
+                url = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--scenario" if index + 1 < args.len() => {
+                if args[index + 1] == "all" {
+                    scenario = None;
+                } else {
+                    scenario = Some(MasterWorkerAutonomyScenario::parse(&args[index + 1])?);
+                }
+                index += 2;
+            }
+            "--verify-task" if index + 1 < args.len() => {
+                task_id = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--execution" if index + 1 < args.len() => {
+                execution = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--agent" if index + 1 < args.len() => {
+                agent = Some(args[index + 1].clone());
+                index += 2;
+            }
+            _ => return Err(usage),
+        }
+    }
+    let url = url.ok_or_else(|| usage.clone())?;
+    let verify = match (task_id, execution, agent) {
+        (None, None, None) => None,
+        (Some(task_id), Some(execution_id), Some(agent_id)) => {
+            let scenario = scenario.ok_or_else(|| {
+                "--scenario is required with master-worker-autonomy verify".to_owned()
+            })?;
+            Some(MasterWorkerAutonomyVerifyIds {
+                scenario,
+                task_id,
+                execution_id,
+                agent_id,
+            })
+        }
+        _ => return Err(usage),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_master_worker_autonomy_sample_async(
+        url, scenario, verify,
+    ))
 }
 
 fn run_master_poll_foundation_sample(args: Vec<String>) -> Result<String, String> {
@@ -1924,6 +1992,139 @@ struct MasterWorkerFoundationEvidence {
     lifecycle_state: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MasterWorkerAutonomyScenario {
+    Success,
+    ExecutionError,
+    RejectRetry,
+}
+
+impl MasterWorkerAutonomyScenario {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "success" => Ok(Self::Success),
+            "execution-error" => Ok(Self::ExecutionError),
+            "reject-retry" => Ok(Self::RejectRetry),
+            _ => Err(
+                "scenario must be one of: all, success, execution-error, reject-retry".to_owned(),
+            ),
+        }
+    }
+
+    fn all() -> [Self; 3] {
+        [Self::Success, Self::ExecutionError, Self::RejectRetry]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::ExecutionError => "execution-error",
+            Self::RejectRetry => "reject-retry",
+        }
+    }
+
+    fn id_label(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::ExecutionError => "execution-error",
+            Self::RejectRetry => "reject-retry",
+        }
+    }
+
+    fn expected_final_status(self) -> &'static str {
+        match self {
+            Self::Success | Self::RejectRetry => "closed",
+            Self::ExecutionError => "blocked",
+        }
+    }
+
+    fn expected_lifecycle_state(self) -> &'static str {
+        match self {
+            Self::Success | Self::RejectRetry => "closed",
+            Self::ExecutionError => "blocked",
+        }
+    }
+
+    fn expected_tool_executions(self) -> usize {
+        match self {
+            Self::Success => 8,
+            Self::ExecutionError => 6,
+            Self::RejectRetry => 10,
+        }
+    }
+
+    fn required_ordered_events(self) -> &'static [&'static str] {
+        match self {
+            Self::Success => &[
+                "TaskCreated",
+                "TaskAssigned",
+                "TaskResumed",
+                "TaskExecutionRecorded",
+                "TaskReviewSubmitted",
+                "TaskReviewApproved",
+                "TaskClosed",
+            ],
+            Self::ExecutionError => &[
+                "TaskCreated",
+                "TaskAssigned",
+                "TaskResumed",
+                "TaskExecutionRecorded",
+                "TaskBlocked",
+            ],
+            Self::RejectRetry => &[
+                "TaskCreated",
+                "TaskAssigned",
+                "TaskResumed",
+                "TaskReviewSubmitted",
+                "TaskReviewRejected",
+                "TaskExecutionRecovering",
+                "TaskReviewSubmitted",
+                "TaskReviewApproved",
+                "TaskClosed",
+            ],
+        }
+    }
+
+    fn forbidden_events(self) -> &'static [&'static str] {
+        match self {
+            Self::Success => &["TaskBlocked", "TaskReviewRejected"],
+            Self::ExecutionError => &[
+                "TaskReviewSubmitted",
+                "TaskReviewApproved",
+                "TaskClosed",
+                "TaskReviewRejected",
+            ],
+            Self::RejectRetry => &["TaskBlocked"],
+        }
+    }
+
+    fn expected_review_submissions(self) -> usize {
+        match self {
+            Self::Success => 1,
+            Self::ExecutionError => 0,
+            Self::RejectRetry => 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MasterWorkerAutonomyVerifyIds {
+    scenario: MasterWorkerAutonomyScenario,
+    task_id: String,
+    execution_id: String,
+    agent_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct MasterWorkerAutonomyEvidence {
+    final_status: String,
+    lifecycle_state: String,
+    history_events: Vec<String>,
+    review_submissions: usize,
+    transcript_turns: Option<usize>,
+    transcript_tool_executions: Option<usize>,
+}
+
 async fn run_master_worker_foundation_sample_async(
     url: String,
     verify: Option<MasterWorkerVerifyIds>,
@@ -2319,6 +2520,343 @@ async fn verify_master_worker_foundation_truth(
         review_ready_seen,
         history_events: event_types,
         lifecycle_state: lifecycle.state,
+    })
+}
+
+async fn run_master_worker_autonomy_sample_async(
+    url: String,
+    scenario: Option<MasterWorkerAutonomyScenario>,
+    verify: Option<MasterWorkerAutonomyVerifyIds>,
+) -> Result<String, String> {
+    if let Some(ids) = verify {
+        let evidence = verify_master_worker_autonomy_truth(&url, &ids).await?;
+        return Ok(format!(
+            "master_worker_autonomy_verify_ok scenario={} url={} task={} execution={} agent={} status={} lifecycle_state={} review_submissions={} events={}",
+            ids.scenario.label(),
+            url,
+            ids.task_id,
+            ids.execution_id,
+            ids.agent_id,
+            evidence.final_status,
+            evidence.lifecycle_state,
+            evidence.review_submissions,
+            evidence.history_events.join(",")
+        ));
+    }
+
+    let scenarios = scenario
+        .map(|scenario| vec![scenario])
+        .unwrap_or_else(|| MasterWorkerAutonomyScenario::all().to_vec());
+    let mut lines = vec![format!(
+        "master_worker_autonomy_sample_ok url={} count={}",
+        url,
+        scenarios.len()
+    )];
+    for scenario in scenarios {
+        lines.push(run_master_worker_autonomy_scenario(&url, scenario).await?);
+    }
+    Ok(lines.join("\n"))
+}
+
+async fn run_master_worker_autonomy_scenario(
+    url: &str,
+    scenario: MasterWorkerAutonomyScenario,
+) -> Result<String, String> {
+    let stamp = live_id_stamp()?;
+    let session_id = SessionId::new(format!(
+        "cli-master-autonomy-{}-{}",
+        scenario.id_label(),
+        stamp
+    ));
+    let token = format!("FHAUTO{stamp}");
+    let task_id = format!("task-cli-master-autonomy-{}-{token}", scenario.id_label());
+    let execution_id = format!("exec-cli-master-autonomy-{}-{token}", scenario.id_label());
+    let worker_id = format!("worker-cli-master-autonomy-{}-{token}", scenario.id_label());
+    let prompt =
+        master_worker_autonomy_prompt(scenario, &task_id, &worker_id, &execution_id, &token);
+    let label = format!("master-autonomy-{}", scenario.id_label());
+    let seen = submit_adp_sample_prompt_with_timeout(
+        url,
+        &session_id,
+        &label,
+        prompt.clone(),
+        Duration::from_secs(180),
+    )
+    .await?;
+    let transcript = query_session_transcript(
+        url,
+        &session_id,
+        &format!("cli-{label}-transcript"),
+        Duration::from_secs(20),
+    )
+    .await?;
+    let transcript_evidence =
+        master_worker_autonomy_transcript_evidence(&transcript, scenario, &prompt)?;
+    let ids = MasterWorkerAutonomyVerifyIds {
+        scenario,
+        task_id: task_id.clone(),
+        execution_id: execution_id.clone(),
+        agent_id: worker_id.clone(),
+    };
+    let mut evidence = verify_master_worker_autonomy_truth(url, &ids).await?;
+    evidence.transcript_turns = Some(transcript_evidence.0);
+    evidence.transcript_tool_executions = Some(transcript_evidence.1);
+    Ok(format!(
+        "master_worker_autonomy_scenario_ok scenario={} session={} task={} execution={} agent={} status={} lifecycle_state={} review_submissions={} transcript_turns={} tool_executions={} events={} seen={}",
+        scenario.label(),
+        session_id.as_str(),
+        task_id,
+        execution_id,
+        worker_id,
+        evidence.final_status,
+        evidence.lifecycle_state,
+        evidence.review_submissions,
+        evidence.transcript_turns.unwrap_or(0),
+        evidence.transcript_tool_executions.unwrap_or(0),
+        evidence.history_events.join(","),
+        seen.join(",")
+    ))
+}
+
+fn master_worker_autonomy_prompt(
+    scenario: MasterWorkerAutonomyScenario,
+    task_id: &str,
+    worker_id: &str,
+    execution_id: &str,
+    token: &str,
+) -> String {
+    let scenario_instruction = match scenario {
+        MasterWorkerAutonomyScenario::Success => {
+            "Run the success path: create a worker, create and assign a task, claim it, record running progress, record review_ready, approve, close, then finish."
+        }
+        MasterWorkerAutonomyScenario::ExecutionError => {
+            "Run the execution-error path: create a worker, create and assign a task, claim it, record running progress, record a blocked execution error, do not approve or close, then finish with the task blocked."
+        }
+        MasterWorkerAutonomyScenario::RejectRetry => {
+            "Run the rejected-review path: create a worker, create and assign a task, claim it, record incomplete review_ready, reject it, record recovering with retry_count=1, record a second review_ready, approve, close, then finish."
+        }
+    };
+    format!(
+        "Master worker autonomy sample.\n\
+         FHMA_SCENARIO={scenario}\n\
+         FHMA_TOKEN={token}\n\
+         FHMA_TASK_ID={task_id}\n\
+         FHMA_WORKER_ID={worker_id}\n\
+         FHMA_EXECUTION_ID={execution_id}\n\n\
+         {scenario_instruction}\n\
+         Use only the owner-scoped task tool as task(op=...). Do not ask the user. Do not create task state in prose.\n\
+         The framework will validate Task Center truth, task history order, Agent Lifecycle state, and the tool-result transcript.",
+        scenario = scenario.label()
+    )
+}
+
+fn master_worker_autonomy_transcript_evidence(
+    transcript: &freehand_ui_protocol::UiSessionTranscriptProjection,
+    scenario: MasterWorkerAutonomyScenario,
+    prompt: &str,
+) -> Result<(usize, usize), String> {
+    let mut terminal_success = false;
+    let mut saw_prompt = false;
+    let mut tool_executions = BTreeSet::new();
+    for turn in &transcript.turns {
+        if turn.user_text.as_deref() == Some(prompt) {
+            saw_prompt = true;
+        }
+        if turn.terminal_status.as_ref() == Some(&TerminalStatus::Success) {
+            terminal_success = true;
+        }
+        for activity in &turn.tool_activities {
+            if activity.tool_name == "task" {
+                tool_executions.insert(activity.tool_call_id.clone());
+            }
+        }
+    }
+    if !saw_prompt {
+        return Err(format!(
+            "master autonomy transcript missing submitted prompt session={} turns={}",
+            transcript.session_id.as_str(),
+            transcript.turns.len()
+        ));
+    }
+    if !terminal_success {
+        return Err(format!(
+            "master autonomy transcript missing terminal success session={} turns={}",
+            transcript.session_id.as_str(),
+            transcript.turns.len()
+        ));
+    }
+    if tool_executions.len() < scenario.expected_tool_executions() {
+        return Err(format!(
+            "master autonomy transcript has too few task tool executions scenario={} expected_at_least={} actual={}",
+            scenario.label(),
+            scenario.expected_tool_executions(),
+            tool_executions.len()
+        ));
+    }
+    Ok((transcript.turns.len(), tool_executions.len()))
+}
+
+async fn verify_master_worker_autonomy_truth(
+    url: &str,
+    ids: &MasterWorkerAutonomyVerifyIds,
+) -> Result<MasterWorkerAutonomyEvidence, String> {
+    let board = query_task_board_including_terminal(
+        url,
+        &format!(
+            "cli-master-autonomy-{}-verify-board",
+            ids.scenario.id_label()
+        ),
+    )
+    .await?;
+    let Some(task) = board.tasks.iter().find(|task| task.task_id == ids.task_id) else {
+        return Err(format!(
+            "master autonomy task missing scenario={} task={} count={}",
+            ids.scenario.label(),
+            ids.task_id,
+            board.tasks.len()
+        ));
+    };
+    if !task
+        .status
+        .eq_ignore_ascii_case(ids.scenario.expected_final_status())
+    {
+        return Err(format!(
+            "master autonomy task status mismatch scenario={} task={} expected={} actual={}",
+            ids.scenario.label(),
+            ids.task_id,
+            ids.scenario.expected_final_status(),
+            task.status
+        ));
+    }
+    if task.assignee_agent_id.as_ref().map(AgentId::as_str) != Some(ids.agent_id.as_str()) {
+        return Err(format!(
+            "master autonomy task assignee mismatch scenario={} task={} expected_agent={} actual={}",
+            ids.scenario.label(),
+            ids.task_id,
+            ids.agent_id,
+            task.assignee_agent_id
+                .as_ref()
+                .map(AgentId::as_str)
+                .unwrap_or("none")
+        ));
+    }
+    if task.active_execution_id.as_deref() != Some(ids.execution_id.as_str()) {
+        return Err(format!(
+            "master autonomy task execution mismatch scenario={} task={} expected_execution={} actual={}",
+            ids.scenario.label(),
+            ids.task_id,
+            ids.execution_id,
+            task.active_execution_id.as_deref().unwrap_or("none")
+        ));
+    }
+
+    let agent_board = query_agent_board(
+        url,
+        &format!(
+            "cli-master-autonomy-{}-verify-agent-board",
+            ids.scenario.id_label()
+        ),
+    )
+    .await?;
+    if !agent_board
+        .agents
+        .iter()
+        .any(|agent| agent.agent_id.as_str() == ids.agent_id)
+    {
+        return Err(format!(
+            "master autonomy agent missing scenario={} agent={} board_count={}",
+            ids.scenario.label(),
+            ids.agent_id,
+            agent_board.agents.len()
+        ));
+    }
+    let lifecycle = query_agent_lifecycle(
+        url,
+        &format!(
+            "cli-master-autonomy-{}-verify-lifecycle",
+            ids.scenario.id_label()
+        ),
+        &ids.agent_id,
+    )
+    .await?;
+    if lifecycle.state != ids.scenario.expected_lifecycle_state() {
+        return Err(format!(
+            "master autonomy lifecycle mismatch scenario={} agent={} expected={} actual={}",
+            ids.scenario.label(),
+            ids.agent_id,
+            ids.scenario.expected_lifecycle_state(),
+            lifecycle.state
+        ));
+    }
+
+    let history = query_task_history(url, &ids.task_id).await?;
+    let event_types = history
+        .events
+        .iter()
+        .map(|event| event.event_type.clone())
+        .collect::<Vec<_>>();
+    assert_ordered_events(&event_types, ids.scenario.required_ordered_events()).map_err(
+        |message| {
+            format!(
+                "master autonomy history sequence invalid scenario={} task={} execution={} {message}",
+                ids.scenario.label(),
+                ids.task_id,
+                ids.execution_id
+            )
+        },
+    )?;
+    for forbidden in ids.scenario.forbidden_events() {
+        if event_types.iter().any(|event| event == forbidden) {
+            return Err(format!(
+                "master autonomy forbidden event scenario={} task={} forbidden={} events={}",
+                ids.scenario.label(),
+                ids.task_id,
+                forbidden,
+                event_types.join(",")
+            ));
+        }
+    }
+    let review_submissions = event_types
+        .iter()
+        .filter(|event| event.as_str() == "TaskReviewSubmitted")
+        .count();
+    if review_submissions != ids.scenario.expected_review_submissions() {
+        return Err(format!(
+            "master autonomy review count mismatch scenario={} task={} expected={} actual={} events={}",
+            ids.scenario.label(),
+            ids.task_id,
+            ids.scenario.expected_review_submissions(),
+            review_submissions,
+            event_types.join(",")
+        ));
+    }
+    let execution_events = history
+        .events
+        .iter()
+        .filter(|event| {
+            event
+                .payload
+                .get("execution_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(ids.execution_id.as_str())
+        })
+        .count();
+    if execution_events < 3 {
+        return Err(format!(
+            "master autonomy execution evidence too weak scenario={} task={} execution={} matching_events={}",
+            ids.scenario.label(),
+            ids.task_id,
+            ids.execution_id,
+            execution_events
+        ));
+    }
+    Ok(MasterWorkerAutonomyEvidence {
+        final_status: task.status.clone(),
+        lifecycle_state: lifecycle.state,
+        history_events: event_types,
+        review_submissions,
+        transcript_turns: None,
+        transcript_tool_executions: None,
     })
 }
 

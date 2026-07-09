@@ -19,6 +19,8 @@
   - `run_phase1_foundation_verify_async`
   - `run_master_worker_foundation_sample`
   - `run_master_worker_foundation_sample_async`
+  - `run_master_worker_autonomy_sample`
+  - `run_master_worker_autonomy_sample_async`
   - `run_master_poll_foundation_sample`
   - `run_master_poll_foundation_sample_async`
   - `run_worker_control_foundation_sample`
@@ -45,6 +47,8 @@
 - for task lifecycle sample, CLI sends protocol-owned task mutation commands (`CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`) through ADP, then verifies task owner truth through ADP task list/history queries
 - for Phase 1 foundation sample, CLI drives protocol-owned TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and same-id verification commands/queries through ADP without UI or model prose
 - for Phase 2A master-worker foundation sample, CLI drives protocol-owned worker agent creation, task assignment, claim-next with execution id, progress/blocked/recovering/review facts, reject, retry, approve, close, and same-id verification through ADP without UI or model prose
+- for master-worker autonomy sample, CLI submits only one user prompt through ADP `SubmitUserInput`; the live model/tool loop must call the single owner-scoped `task(op=...)` tool to create worker state, create/assign/claim tasks, record execution facts, review, reject, retry, approve, and close; CLI then verifies transcript tool activity plus TaskBoard, AgentBoard, AgentLifecycle, and TaskHistory owner truth
+- for master-worker autonomy online proof, `scripts/verify-master-worker-autonomy-online.sh` temporarily points S-profile provider config at a local Anthropic-compatible fixture that dynamically reads the CLI-generated `FHMA_*` ids and returns scenario-specific `task` tool_use sequences for success, execution-error, and reject-retry, then restarts S and verifies the same task/execution/agent ids
 - for Phase 2B master poll foundation sample, CLI drives protocol-owned
   EventInbox query and MasterPoll command through ADP, verifies compact
   classifications and cursor persistence, then verifies the same cursor after
@@ -77,6 +81,8 @@
 - task lifecycle sample prints task id, closed status, and required history event types
 - Phase 1 foundation sample prints blocked task id, review task id, execution id, agent id, blocked/review/stale counts, lifecycle query evidence, and recovering-event evidence
 - Phase 2A master-worker foundation sample prints task id, worker id, execution id, final closed status, ordered lifecycle events, review retry evidence, and same-id restart verification arguments
+- master-worker autonomy sample prints one line per scenario with session id, generated task/execution/worker ids, final task status, lifecycle state, review submission count, transcript turn count, task tool execution count, ordered history, and same-id restart verification arguments
+- master-worker autonomy online verifier prints all scenario sample output plus same-id verify output after S-profile restart
 - Phase 2B master poll foundation sample prints task id, worker id, execution
   id, EventInbox cursor, persisted master cursor, classification kinds, and
   same-cursor restart verification arguments
@@ -99,6 +105,8 @@
 - task lifecycle timeout, missing task, non-closed status, or missing create/review/approve/close history event returns explicit terminal errors
 - Phase 1 foundation sample timeout, missing TaskBoard/AgentBoard/Lifecycle evidence, missing blocked/review/stale projection, missing recovering history event, or same-id restart mismatch returns explicit terminal errors
 - Phase 2A master-worker foundation sample timeout, no claimed task, missing execution id, missing blocked/recovering/review/reject/retry/approve/close history event, missing lifecycle state, or same-id restart mismatch returns explicit terminal errors
+- master-worker autonomy sample fails if CLI emits task mutation commands instead of SubmitUserInput in the mock proof, if transcript lacks the submitted prompt, terminal success, or enough `task` tool executions, if TaskBoard status/lifecycle/assignee/execution mismatches expected scenario truth, if forbidden events appear, if required ordered events are missing, or if same-id restart verification mismatches
+- master-worker autonomy online verifier fails if the provider fixture does not receive exactly 27 `/v1/messages` attempts for all scenarios, if any scenario output is missing, if status/tool/history evidence is missing, or if restart verify cannot query the same owner truth
 - Phase 2B master poll foundation sample timeout, missing EventInbox events,
   missing classification kinds, unexpected task status mutation, or same-cursor
   restart mismatch returns explicit terminal errors
@@ -155,8 +163,10 @@
 | 16 | `run_adp_session_manage` / `run_adp_session_manage_async` | `apps/freehand-cli/src/main.rs` | send protocol-owned session CRUD or rollback command over ADP and summarize the command receipt | `--url ws://.../adp --action create\|rename\|archive\|restore\|delete\|rollback --session <id> [--title <title>] [--cwd <path>]` | terminal-facing session manage receipt or explicit ADP failure | CLI dispatcher | daemon `/adp` | bound |
 | 17 | `run_phase1_foundation_sample` / `run_phase1_foundation_sample_async` / `run_phase1_foundation_verify_async` | `apps/freehand-cli/src/main.rs` | drive Phase 1 TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify ids | terminal-facing Phase 1 foundation evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 | 18 | `run_master_worker_foundation_sample` / `run_master_worker_foundation_sample_async` / `verify_master_worker_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2A master/worker task execution loop and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify ids | terminal-facing worker lifecycle evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
-| 19 | `run_master_poll_foundation_sample` / `run_master_poll_foundation_sample_async` / `verify_master_poll_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2B EventInbox and MasterPoll loop, reread owner-backed final cursor after command poll, and perform same-cursor restart verification through ADP | `--url ws://.../adp` plus optional verify cursor/task/execution/agent ids | terminal-facing master poll evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
-| 20 | `run_worker_control_foundation_sample` / `run_worker_control_foundation_sample_async` / `verify_worker_control_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2C worker-control query/safe-point/pause/resume/cancel loop and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify control/task/execution/agent ids | terminal-facing worker-control evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
+| 19 | `run_master_worker_autonomy_sample` / `run_master_worker_autonomy_sample_async` / `verify_master_worker_autonomy_truth` | `apps/freehand-cli/src/main.rs` | submit one ADP user prompt and verify model/tool-driven master-worker autonomy through transcript and Task Center/Agent Lifecycle truth | `--url ws://.../adp --scenario all\|success\|execution-error\|reject-retry` plus optional verify ids | terminal-facing autonomy evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
+| 19a | `run_master_worker_autonomy_online` | `scripts/verify-master-worker-autonomy-online.sh` | run a local Anthropic-compatible task-tool fixture, temporarily update S-profile provider config, execute all autonomy scenarios, restart S, and verify same-id owner truth | S-profile daemon on `127.0.0.1:4042` | terminal-facing autonomy proof with 27 provider attempts and same-id restart verification | operator/agent verifier | daemon `/adp` + local mock provider | bound |
+| 20 | `run_master_poll_foundation_sample` / `run_master_poll_foundation_sample_async` / `verify_master_poll_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2B EventInbox and MasterPoll loop, reread owner-backed final cursor after command poll, and perform same-cursor restart verification through ADP | `--url ws://.../adp` plus optional verify cursor/task/execution/agent ids | terminal-facing master poll evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
+| 21 | `run_worker_control_foundation_sample` / `run_worker_control_foundation_sample_async` / `verify_worker_control_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2C worker-control query/safe-point/pause/resume/cancel loop and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify control/task/execution/agent ids | terminal-facing worker-control evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -179,6 +189,7 @@
 - CLI ADP error-center query path is implemented for no-UI metadata truth diagnosis
 - CLI Phase 1 foundation sample is implemented for no-UI TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id proof
 - CLI Phase 2A master-worker foundation sample is implemented for no-UI assign/claim/progress/blocked/recovering/review/reject/retry/approve/close and restart same-id proof
+- CLI master-worker autonomy sample is implemented for no-UI SubmitUserInput-driven task-tool autonomy verification; the mock test rejects direct CLI task mutations, and the online script proves success, execution-error, and reject-retry tool loops against an S-profile provider fixture
 - CLI Phase 2B master poll foundation sample is implemented locally and must
   pass S-profile same-cursor restart proof before Phase 2B is complete
 - CLI Phase 2C worker-control foundation sample is implemented locally and

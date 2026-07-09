@@ -491,7 +491,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.cli-runtime-smoke`
 
 - owner: `apps/freehand-cli`
-- allowed_paths: `apps/freehand-cli/**`, `crates/freehand-testkit/**`, `crates/freehand-reason/**`, `crates/freehand-config/**`, `scripts/verify-provider-retry-online.sh`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/app.cli-runtime-smoke.json`, `docs/wiki/app.cli-runtime-smoke.md`
+- allowed_paths: `apps/freehand-cli/**`, `crates/freehand-testkit/**`, `crates/freehand-reason/**`, `crates/freehand-config/**`, `scripts/verify-provider-retry-online.sh`, `scripts/verify-master-worker-autonomy-online.sh`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/app.cli-runtime-smoke.json`, `docs/wiki/app.cli-runtime-smoke.md`
 - forbidden_paths: `crates/freehand-provider-*/**` except consumed semantic outputs only
 - required_checks:
   - `cargo test -p freehand-cli`
@@ -506,12 +506,14 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - CLI ADP mock WebSocket smoke
   - CLI ADP success/failure turn sample mock WebSocket smoke
   - CLI ADP task query smoke
+  - CLI ADP master-worker autonomy sample mock WebSocket smoke
 - required_project_black_box_tests:
   - app boundary config -> harness-backed reason E2E smoke
   - no-UI ADP smoke against local daemon/server `/adp`
   - no-UI ADP success/failure turn samples against daemon/server `/adp`
   - no-UI provider retry fixture proof against S-profile daemon `/adp`
   - no-UI ADP task list/history query against daemon `/adp`
+  - no-UI master-worker autonomy provider fixture proof against S-profile daemon `/adp`
 - test_design_doc: `docs/testing/app.cli-runtime-smoke.md`
 - function_map_doc: `docs/function-maps/app.cli-runtime-smoke.md`
 - mainline_call_doc: `docs/mainline-calls/app.cli-runtime-smoke.json`

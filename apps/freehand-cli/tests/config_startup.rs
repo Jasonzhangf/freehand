@@ -1383,6 +1383,281 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
     (url, handle)
 }
 
+fn spawn_adp_master_worker_autonomy_mock_server() -> (String, thread::JoinHandle<()>) {
+    spawn_adp_master_worker_autonomy_mock_server_with_connections(
+        18,
+        master_autonomy_truth_for(
+            "reject-retry",
+            "cli-master-autonomy-reject-retry-verify",
+            "task-cli-master-autonomy-reject-retry-verify",
+            "exec-cli-master-autonomy-reject-retry-verify",
+            "worker-cli-master-autonomy-reject-retry-verify",
+            "FHAUTO-verify",
+        ),
+    )
+}
+
+fn spawn_adp_master_worker_autonomy_verify_mock_server() -> (String, thread::JoinHandle<()>) {
+    spawn_adp_master_worker_autonomy_mock_server_with_connections(
+        4,
+        master_autonomy_truth_for(
+            "reject-retry",
+            "cli-master-autonomy-reject-retry-verify",
+            "task-cli-master-autonomy-reject-retry-verify",
+            "exec-cli-master-autonomy-reject-retry-verify",
+            "worker-cli-master-autonomy-reject-retry-verify",
+            "FHAUTO-verify",
+        ),
+    )
+}
+
+fn spawn_adp_master_worker_autonomy_mock_server_with_connections(
+    connection_count: usize,
+    initial_truth: MockMasterWorkerAutonomyTruth,
+) -> (String, thread::JoinHandle<()>) {
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("bind adp master-autonomy mock");
+    let url = format!("ws://{}/adp", listener.local_addr().expect("addr"));
+    let truth = Arc::new(Mutex::new(initial_truth));
+    listener
+        .set_nonblocking(true)
+        .expect("set adp master-autonomy mock nonblocking");
+    let handle = thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("tokio runtime");
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+            for _ in 0..connection_count {
+                let (stream, _) = listener.accept().await.expect("accept adp");
+                let mut socket = tokio_tungstenite::accept_async(stream)
+                    .await
+                    .expect("accept websocket");
+                let mut subscription_id = None::<String>;
+                while let Some(message) = socket.next().await {
+                    let text = match message {
+                        Ok(Message::Text(text)) => text,
+                        Ok(Message::Close(_)) => break,
+                        Ok(_) => continue,
+                        Err(_) => break,
+                    };
+                    let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
+                    match request {
+                        UiAdpRequest::Subscribe { request_id, .. } => {
+                            subscription_id = Some(request_id.clone());
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::SubscriptionAccepted {
+                                    request_id,
+                                    selector: SubscriptionSelector {
+                                        client: UiClientKind::Cli,
+                                        stream_kind: UiStreamKind::Turn,
+                                        target_turn_id: None,
+                                    },
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command:
+                                UiCommand::SubmitUserInput {
+                                    text, session_id, ..
+                                },
+                        } => {
+                            let session_id =
+                                session_id.unwrap_or_else(|| SessionId::new("cli-master-autonomy"));
+                            let parsed = master_autonomy_truth_from_prompt(&text, &session_id);
+                            *truth.lock().expect("master autonomy truth lock") = parsed.clone();
+                            let envelope =
+                                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                                    text: text.clone(),
+                                    session_id: Some(session_id.clone()),
+                                    cwd: None,
+                                })
+                                .expect("master autonomy envelope");
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::CommandReceipt {
+                                    request_id,
+                                    receipt: UiCommandDispatchReceipt {
+                                        ingress: envelope.ingress,
+                                        target_feature_id: envelope.target_feature_id,
+                                        target_owner_module: envelope.target_owner_module,
+                                        dispatch_status: format!(
+                                            "master_autonomy_model_turn_complete:{}",
+                                            parsed.scenario
+                                        ),
+                                    },
+                                },
+                            )
+                            .await;
+                            if let Some(sub_id) = subscription_id.clone() {
+                                send_adp_response(
+                                    &mut socket,
+                                    UiAdpResponse::SubscriptionEvent {
+                                        request_id: sub_id,
+                                        event: UiSubscriptionEvent {
+                                            projection: UiProjection::Turn(
+                                                master_autonomy_turn_projection(&parsed),
+                                            ),
+                                            latest_active_turn_id: Some(TurnId::new(
+                                                "cli-master-autonomy-turn",
+                                            )),
+                                        },
+                                    },
+                                )
+                                .await;
+                            }
+                        }
+                        UiAdpRequest::Command { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::Failure {
+                                    request_id,
+                                    failure: UiAdpFailure {
+                                        code: "direct_task_mutation_forbidden".to_owned(),
+                                        message: "master autonomy sample must submit one user prompt; task mutations must come from the model tool loop".to_owned(),
+                                        retryable: false,
+                                    },
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QuerySessionTurns { .. },
+                        } => {
+                            let truth = truth.lock().expect("master autonomy truth lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::SessionTurns(
+                                        UiSessionTranscriptProjection {
+                                            session_id: truth.session_id.clone(),
+                                            title: None,
+                                            archived: false,
+                                            cwd: Some("/tmp/cli-session".to_owned()),
+                                            turns: vec![master_autonomy_turn_projection(&truth)],
+                                        },
+                                    ),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryTaskBoard { .. },
+                        } => {
+                            let truth = truth.lock().expect("master autonomy truth lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::TaskBoard(master_autonomy_task_board(
+                                        &truth,
+                                    )),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryAgentBoard,
+                        } => {
+                            let truth = truth.lock().expect("master autonomy truth lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::AgentBoard(UiAgentBoardProjection {
+                                        source_agent_id: AgentId::new("cli-agent"),
+                                        agents: vec![phase2a_agent_lifecycle(
+                                            &truth.agent_id,
+                                            &truth.execution_id,
+                                            &truth.lifecycle_state,
+                                        )],
+                                    }),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryAgentLifecycle { .. },
+                        } => {
+                            let truth = truth.lock().expect("master autonomy truth lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::AgentLifecycle(
+                                        phase2a_agent_lifecycle(
+                                            &truth.agent_id,
+                                            &truth.execution_id,
+                                            &truth.lifecycle_state,
+                                        ),
+                                    ),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryTaskHistory { task_id },
+                        } => {
+                            let truth = truth.lock().expect("master autonomy truth lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::TaskHistory(UiTaskHistoryProjection {
+                                        source_agent_id: AgentId::new("cli-agent"),
+                                        task_id,
+                                        events: truth
+                                            .events
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(index, event_type)| {
+                                                task_event_with_payload(
+                                                    u64::try_from(index + 1).expect("event seq"),
+                                                    event_type,
+                                                    serde_json::json!({
+                                                        "execution_id": truth.execution_id,
+                                                    }),
+                                                )
+                                            })
+                                            .collect(),
+                                    }),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::Failure {
+                                    request_id,
+                                    failure: UiAdpFailure {
+                                        code: "unexpected_master_autonomy_frame".to_owned(),
+                                        message: "unexpected master autonomy frame".to_owned(),
+                                        retryable: false,
+                                    },
+                                },
+                            )
+                            .await;
+                        }
+                    }
+                }
+            }
+        });
+    });
+    (url, handle)
+}
+
 fn spawn_adp_master_poll_foundation_mock_server() -> (String, thread::JoinHandle<()>) {
     spawn_adp_master_poll_foundation_mock_server_with_connections(19, false)
 }
@@ -2473,6 +2748,200 @@ fn worker_control_status_for_op(op: &str) -> &'static str {
     }
 }
 
+#[derive(Clone)]
+struct MockMasterWorkerAutonomyTruth {
+    scenario: String,
+    session_id: SessionId,
+    prompt: String,
+    task_id: String,
+    execution_id: String,
+    agent_id: String,
+    final_status: String,
+    lifecycle_state: String,
+    events: Vec<String>,
+    tool_executions: usize,
+}
+
+fn master_autonomy_truth_from_prompt(
+    prompt: &str,
+    session_id: &SessionId,
+) -> MockMasterWorkerAutonomyTruth {
+    let scenario = master_autonomy_prompt_value(prompt, "FHMA_SCENARIO")
+        .unwrap_or_else(|| "reject-retry".to_owned());
+    let token = master_autonomy_prompt_value(prompt, "FHMA_TOKEN")
+        .unwrap_or_else(|| "FHAUTO-missing".to_owned());
+    let task_id = master_autonomy_prompt_value(prompt, "FHMA_TASK_ID")
+        .unwrap_or_else(|| format!("task-cli-master-autonomy-{scenario}-{token}"));
+    let execution_id = master_autonomy_prompt_value(prompt, "FHMA_EXECUTION_ID")
+        .unwrap_or_else(|| format!("exec-cli-master-autonomy-{scenario}-{token}"));
+    let agent_id = master_autonomy_prompt_value(prompt, "FHMA_WORKER_ID")
+        .unwrap_or_else(|| format!("worker-cli-master-autonomy-{scenario}-{token}"));
+    let mut truth = master_autonomy_truth_for(
+        &scenario,
+        session_id.as_str(),
+        &task_id,
+        &execution_id,
+        &agent_id,
+        &token,
+    );
+    truth.prompt = prompt.to_owned();
+    truth
+}
+
+fn master_autonomy_prompt_value(prompt: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    prompt
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&prefix).map(str::to_owned))
+}
+
+fn master_autonomy_truth_for(
+    scenario: &str,
+    session_id: &str,
+    task_id: &str,
+    execution_id: &str,
+    agent_id: &str,
+    token: &str,
+) -> MockMasterWorkerAutonomyTruth {
+    let (final_status, lifecycle_state, events, tool_executions) = match scenario {
+        "success" => (
+            "closed",
+            "closed",
+            vec![
+                "TaskCreated",
+                "TaskAssigned",
+                "TaskResumed",
+                "TaskExecutionRecorded",
+                "TaskReviewSubmitted",
+                "TaskReviewApproved",
+                "TaskClosed",
+            ],
+            8,
+        ),
+        "execution-error" => (
+            "blocked",
+            "blocked",
+            vec![
+                "TaskCreated",
+                "TaskAssigned",
+                "TaskResumed",
+                "TaskExecutionRecorded",
+                "TaskBlocked",
+            ],
+            6,
+        ),
+        "reject-retry" => (
+            "closed",
+            "closed",
+            vec![
+                "TaskCreated",
+                "TaskAssigned",
+                "TaskResumed",
+                "TaskReviewSubmitted",
+                "TaskReviewRejected",
+                "TaskExecutionRecovering",
+                "TaskReviewSubmitted",
+                "TaskReviewApproved",
+                "TaskClosed",
+            ],
+            10,
+        ),
+        other => panic!("unknown master autonomy scenario {other}"),
+    };
+    MockMasterWorkerAutonomyTruth {
+        scenario: scenario.to_owned(),
+        session_id: SessionId::new(session_id.to_owned()),
+        prompt: format!("Master worker autonomy sample {token}"),
+        task_id: task_id.to_owned(),
+        execution_id: execution_id.to_owned(),
+        agent_id: agent_id.to_owned(),
+        final_status: final_status.to_owned(),
+        lifecycle_state: lifecycle_state.to_owned(),
+        events: events.into_iter().map(str::to_owned).collect(),
+        tool_executions,
+    }
+}
+
+fn master_autonomy_task_board(truth: &MockMasterWorkerAutonomyTruth) -> UiTaskBoardProjection {
+    let task = phase2a_task(
+        &truth.task_id,
+        &truth.execution_id,
+        &truth.agent_id,
+        &truth.final_status,
+    );
+    let blocked = if truth.final_status == "blocked" {
+        vec![task.clone()]
+    } else {
+        Vec::new()
+    };
+    UiTaskBoardProjection {
+        source_agent_id: AgentId::new("cli-agent"),
+        status_filter: None,
+        agent_filter: None,
+        include_terminal: true,
+        tasks: vec![task],
+        agents: vec![UiAgentSnapshotProjection {
+            agent_id: AgentId::new(truth.agent_id.clone()),
+            status: if truth.final_status == "blocked" {
+                "blocked"
+            } else {
+                "available"
+            }
+            .to_owned(),
+            current_task_id: if truth.final_status == "blocked" {
+                Some(truth.task_id.clone())
+            } else {
+                None
+            },
+            current_cwd: Some("/tmp/cli-session".to_owned()),
+            running_tasks: 0,
+            queued_tasks: 0,
+            last_seen_at: 1,
+        }],
+        blocked,
+        review_ready: Vec::new(),
+        stale: Vec::new(),
+    }
+}
+
+fn master_autonomy_turn_projection(truth: &MockMasterWorkerAutonomyTruth) -> UiTurnProjection {
+    UiTurnProjection {
+        source: UiSource {
+            source_agent_id: AgentId::new("cli-agent"),
+            source_node_id: "cli-node".to_owned(),
+            source_turn_id: Some(TurnId::new("cli-master-autonomy-turn")),
+            stream_kind: UiStreamKind::Turn,
+        },
+        session_id: truth.session_id.clone(),
+        turn_id: TurnId::new("cli-master-autonomy-turn"),
+        cwd: Some("/tmp/cli-session".to_owned()),
+        user_text: Some(truth.prompt.clone()),
+        model_request: None,
+        reasoning: Vec::new(),
+        text: vec![format!("master autonomy {} complete", truth.scenario)],
+        tool_calls: (0..truth.tool_executions)
+            .map(|index| format!("task:{}", index + 1))
+            .collect(),
+        tool_activities: (0..truth.tool_executions)
+            .map(|index| UiToolActivity {
+                tool_call_id: format!("toolu_task_{}_{}", truth.scenario, index + 1),
+                tool_name: "task".to_owned(),
+                status: UiToolActivityStatus::Completed,
+                detail: Some(format!("task op {}", index + 1)),
+                display: None,
+            })
+            .collect(),
+        usage: Vec::new(),
+        terminal_status: Some(TerminalStatus::Success),
+        terminal_text: Some(format!(
+            "master autonomy {} terminal status {}",
+            truth.scenario, truth.final_status
+        )),
+        errors: Vec::new(),
+        slave_substream_card: false,
+    }
+}
+
 fn phase1_task(task_id: &str, status: &str) -> UiTaskSnapshotProjection {
     UiTaskSnapshotProjection {
         task_id: task_id.to_owned(),
@@ -3079,6 +3548,83 @@ fn cli_runs_master_worker_foundation_verify_against_mock_websocket() {
     assert!(stdout.contains("review_ready_seen=true"));
 
     handle.join().expect("adp master worker verify mock join");
+}
+
+#[test]
+fn cli_runs_master_worker_autonomy_sample_against_mock_websocket() {
+    let (url, handle) = spawn_adp_master_worker_autonomy_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("master-worker-autonomy-sample")
+        .arg("--url")
+        .arg(&url)
+        .arg("--scenario")
+        .arg("all")
+        .output()
+        .expect("run master worker autonomy sample");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("master_worker_autonomy_sample_ok"));
+    assert!(stdout.contains("scenario=success"));
+    assert!(stdout.contains("scenario=execution-error"));
+    assert!(stdout.contains("scenario=reject-retry"));
+    assert!(stdout.contains("task=task-cli-master-autonomy-success-FHAUTO"));
+    assert!(stdout.contains("task=task-cli-master-autonomy-execution-error-FHAUTO"));
+    assert!(stdout.contains("task=task-cli-master-autonomy-reject-retry-FHAUTO"));
+    assert!(stdout.contains("status=closed"));
+    assert!(stdout.contains("status=blocked"));
+    assert!(stdout.contains("tool_executions=8"));
+    assert!(stdout.contains("tool_executions=6"));
+    assert!(stdout.contains("tool_executions=10"));
+    assert!(stdout.contains("TaskReviewRejected"));
+    assert!(stdout.contains("TaskExecutionRecovering"));
+    assert!(stdout.contains("master_autonomy_model_turn_complete:reject-retry"));
+
+    handle.join().expect("adp master autonomy mock join");
+}
+
+#[test]
+fn cli_runs_master_worker_autonomy_verify_against_mock_websocket() {
+    let (url, handle) = spawn_adp_master_worker_autonomy_verify_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("master-worker-autonomy-sample")
+        .arg("--url")
+        .arg(&url)
+        .arg("--scenario")
+        .arg("reject-retry")
+        .arg("--verify-task")
+        .arg("task-cli-master-autonomy-reject-retry-verify")
+        .arg("--execution")
+        .arg("exec-cli-master-autonomy-reject-retry-verify")
+        .arg("--agent")
+        .arg("worker-cli-master-autonomy-reject-retry-verify")
+        .output()
+        .expect("run master worker autonomy verify");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("master_worker_autonomy_verify_ok"));
+    assert!(stdout.contains("scenario=reject-retry"));
+    assert!(stdout.contains("task=task-cli-master-autonomy-reject-retry-verify"));
+    assert!(stdout.contains("execution=exec-cli-master-autonomy-reject-retry-verify"));
+    assert!(stdout.contains("agent=worker-cli-master-autonomy-reject-retry-verify"));
+    assert!(stdout.contains("status=closed"));
+    assert!(stdout.contains("lifecycle_state=closed"));
+    assert!(stdout.contains("review_submissions=2"));
+    assert!(stdout.contains("TaskReviewRejected"));
+    assert!(stdout.contains("TaskClosed"));
+
+    handle.join().expect("adp master autonomy verify mock join");
 }
 
 #[test]

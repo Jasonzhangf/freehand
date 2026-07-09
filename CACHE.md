@@ -1,14 +1,17 @@
 # CACHE
 
+- Current master-autonomy closeout:
+  - Marker: `master-worker-autonomy-online-closeout-1783599325364293000`.
+  - `master-worker-autonomy-sample` is implemented under `app.cli-runtime-smoke`. It submits only ADP `SubmitUserInput`; validation then queries transcript, TaskBoard, AgentBoard, AgentLifecycle, and TaskHistory truth. The mock ADP test rejects direct task mutation commands so scripted CLI task mutation cannot satisfy the autonomy proof.
+  - Covered scenarios: success closes after review approval, execution-error remains blocked without review/close, and rejected review retries through recovering before second review/approval/close.
+  - Local proof: `cargo test -p freehand-cli master_worker_autonomy -- --nocapture` -> 2 passed; `cargo test -p freehand-cli -- --nocapture` -> 26 passed; `cargo test -p freehand-runtime live_bridge_master_autonomy -- --nocapture` -> 3 passed; `cargo fmt --check`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`.
+  - S-profile proof on `127.0.0.1:4042`: `freehand-cliS adp-smoke` passed; `scripts/verify-master-worker-autonomy-online.sh` passed with `mock_attempts=27`. Scenario evidence: success task `task-cli-master-autonomy-success-FHAUTO1783599325364293000` closed with `tool_executions=8`; execution-error task `task-cli-master-autonomy-execution-error-FHAUTO1783599326069343000` stayed `blocked` with `tool_executions=6`; reject-retry task `task-cli-master-autonomy-reject-retry-FHAUTO1783599326552699000` closed after `TaskReviewRejected` and `TaskExecutionRecovering` with `tool_executions=10`. After `restartS`, same-id verify passed for all three scenarios.
+  - Post-proof restoration: S config query returned `base_url_host=api.minimaxi.com default_model=MiniMax-M3 auth_source=inline`; `~/.freehand/daemonS.env` has no `FREEHAND_MASTER_AUTONOMY_FIXTURE_KEY` entry.
+
 - Current context/task-space closeout:
   - `TaskContract` and `TaskSpaceSnapshot` are first-class context segment kinds. `original-task` now enters live provider context as `TaskContract`; runtime base live context for every round includes completion contract, control status contract, runtime tool guidance, and task contract before volatile carryover.
   - Verified S-profile context distribution on `127.0.0.1:4042` with `cli-adp-sample-failure-1783595301535093000`: terminal `runtime-turn-201-r3`, `rounds=3`, `tool_executions=2`, `failed_tools=1`; all three rounds kept stable prefix hash `b25c8265c341fff3`, stable count `4`, tool schema hash `fe8c952141685333`, while `previous-visible-output` stayed volatile/no-cache tail only.
   - Schema-mismatch prompt-only online proof is not deterministic: old prompt allowed unrelated `bash` tool contamination and the no-tool prompt let the model finish valid schema in one round. Future schema-polishing online proof needs provider fixture/injected invalid first response, not natural prompt steering.
-
-- Current master-autonomy gap:
-  - Jason clarified the real multi-task requirement: master model must autonomously trigger worker task creation/dispatch and manage worker success, execution error, and rejected-submission retry loops. Existing Phase 2A/2B/2C samples are CLI/ADP command-driven harnesses, not proof of master model autonomy.
-  - Live headless probe with `reason-live --agent master` and compressed prompt proved partial tool-trigger behavior only: task `task-auto-1783582650` reached `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat` through real model/tool path. The turn then stalled for about four minutes and did not reach execution failure, review submission, rejection, retry, approval, or close; the exact process was interrupted to avoid a residual process.
-  - Next implementation target should be a headless `master-worker-autonomy-sample` that drives real model decisions through the `task` tool and verifies three owner-truth outcomes: worker execution error/recovery, worker success/close, and success-but-incomplete review rejection then retry/close. Do not claim multi-task autonomy from UI projection or scripted ADP mutation samples alone.
 
 - Current multi-task Phase 2D WebUI projection closeout:
   - Marker: `phase2d-webui-projection-closeout-1783580948045`.

@@ -1,5 +1,39 @@
 # note.md
 
+# 2026-07-09 master-worker autonomy online closeout
+
+- user requirement: prove master model/tool-loop autonomy, not command-driven ADP task mutation. The proof must cover worker success, execution error, and rejected-review retry/close.
+- owner: `app.cli-runtime-smoke` for CLI/headless sample and online verifier; consumed runtime owner proof remains `provider.reason-live-bridge`; task truth is `task.orchestration` plus `agent.lifecycle`.
+- implementation:
+  - added `freehand-cli master-worker-autonomy-sample --url ... --scenario <all|success|execution-error|reject-retry>`.
+  - create mode submits only `UiCommand::SubmitUserInput`; it then queries transcript, TaskBoard, AgentBoard, AgentLifecycle, and TaskHistory to verify model/tool-created truth.
+  - verify mode re-queries the same task/execution/agent ids after restart.
+  - CLI mock ADP test rejects any direct task mutation command with `direct_task_mutation_forbidden`, so the sample cannot pass by scripting task commands.
+  - added `scripts/verify-master-worker-autonomy-online.sh`, which temporarily points S-profile provider config at a local Anthropic-compatible fixture. The fixture dynamically parses actual `FHMA_*` ids from provider requests and returns scenario-specific `task` tool_use sequences.
+  - updated `docs/architecture/feature-map.md`, `docs/function-maps/app.cli-runtime-smoke.md`, `docs/testing/app.cli-runtime-smoke.md`, `docs/mainline-calls/app.cli-runtime-smoke.json`, and generated `docs/wiki/app.cli-runtime-smoke.md`.
+- verified so far:
+  - `cargo check -p freehand-cli`
+  - `cargo test -p freehand-cli master_worker_autonomy -- --nocapture` -> 2 passed
+  - `cargo test -p freehand-cli -- --nocapture` -> 26 passed
+  - `cargo test -p freehand-runtime live_bridge_master_autonomy -- --nocapture` -> 3 passed
+  - `cargo fmt --check`
+  - `bash -n scripts/verify-master-worker-autonomy-online.sh`
+  - `jq empty docs/mainline-calls/app.cli-runtime-smoke.json`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - S-profile `scripts/install-launchd.sh restartS`; 4042 health `ok`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+  - `scripts/verify-master-worker-autonomy-online.sh` passed with `mock_attempts=27`.
+  - online scenario evidence:
+    - success: task `task-cli-master-autonomy-success-FHAUTO1783599325364293000`, status `closed`, lifecycle `closed`, `tool_executions=8`, `review_submissions=1`.
+    - execution-error: task `task-cli-master-autonomy-execution-error-FHAUTO1783599326069343000`, status `blocked`, lifecycle `blocked`, `tool_executions=6`, `review_submissions=0`.
+    - reject-retry: task `task-cli-master-autonomy-reject-retry-FHAUTO1783599326552699000`, status `closed`, lifecycle `closed`, `tool_executions=10`, `review_submissions=2`, ordered events include `TaskReviewRejected` then `TaskExecutionRecovering`.
+  - after `restartS`, same-id verify passed for all three scenarios.
+  - post-proof config restored: `base_url_host=api.minimaxi.com default_model=MiniMax-M3 auth_source=inline`; `daemonS.env` has no `FREEHAND_MASTER_AUTONOMY_FIXTURE_KEY`.
+- remaining before commit:
+  - run full local closeout: workspace build, workspace clippy, final mainlines/gates/diff check.
+  - mine updated memory after `MEMORY.md` and skill updates.
+
 # 2026-07-07 Android legacy banner removal and device verifier repair
 
 - user report: Android/WebUI surface still showed old native notification banners such as `Freehand APK is up to date`; these overlays are noisy and must not appear on the conversation surface.

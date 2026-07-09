@@ -18,6 +18,7 @@
   - CLI runs no-UI task lifecycle sample by sending protocol-owned task create/review/approve/close commands and verifying task list/history truth reaches `Closed`
   - CLI runs no-UI Phase 1 foundation sample by driving TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id verification through ADP
   - CLI runs no-UI Phase 2A master-worker foundation sample by driving worker creation, task assignment, claim-next with execution id, progress/blocked/recovering/review facts, reject, retry, approve, close, and restart same-id verification through ADP
+  - CLI runs no-UI master-worker autonomy sample by submitting only `SubmitUserInput` through ADP; model/provider/tool-loop behavior must create worker/task truth through `task(op=...)`, while CLI verifies transcript tool activity plus TaskBoard, AgentBoard, AgentLifecycle, TaskHistory, and restart same-id truth
   - CLI runs no-UI Phase 2B master poll foundation sample by driving EventInbox
     query and MasterPoll command through ADP, verifying classifications,
     cursor persistence, no task status mutation, and restart same-cursor
@@ -52,6 +53,8 @@
   - CLI ADP task lifecycle sample mock WebSocket smoke with closed task list projection and create/review/approve/close history evidence, and with no `SubmitUserInput` prompt dependency
   - CLI ADP Phase 1 foundation sample mock WebSocket smoke with blocked/review/stale board evidence, agent lifecycle query evidence, recovering history event evidence, and explicit verify mode
   - CLI ADP Phase 2A master-worker foundation sample mock WebSocket smoke with worker claim, execution id, ordered history, lifecycle evidence, and explicit verify mode
+  - CLI ADP master-worker autonomy sample mock WebSocket smoke with only `SubmitUserInput` accepted, direct task mutation commands rejected, three scenario transcript/tool-count evidence, TaskBoard/AgentBoard/Lifecycle/History verification, and explicit verify mode
+  - master-worker autonomy online script smoke with real S-profile daemon, local fixture provider, ADP sample output, 27 provider `/v1/messages` attempts across success/execution-error/reject-retry, restart same-id verification, and config restoration
   - CLI ADP Phase 2B master poll foundation sample mock WebSocket smoke with
     EventInbox rows, classification kinds, persisted cursor evidence, no task
     status mutation, explicit verify mode, replay-from-start create mode, and
@@ -74,6 +77,7 @@
   - no-UI task lifecycle sample verifies task owner truth through ADP task list/history without WebUI DOM inspection; CLI only sends protocol-owned task mutation commands and does not write task storage directly
   - no-UI Phase 1 foundation sample verifies TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id proof without model prose or UI DOM inspection
   - no-UI Phase 2A master-worker foundation sample verifies assign/claim/progress/blocked/recovering/review/reject/retry/approve/close and restart same-id proof without model prose or UI DOM inspection
+  - no-UI master-worker autonomy sample verifies the missing black-box gap: the master path is model/tool-loop driven rather than scripted ADP mutation; success closes only after approval, execution-error stays blocked without review/close, and reject-retry preserves reject-before-recover-before-second-review-before-close
   - no-UI Phase 2B master poll foundation sample verifies EventInbox, MasterPoll
     classifications, persisted cursor, and restart same-cursor proof without
     model prose or UI DOM inspection; create mode must use replay-from-start,
@@ -96,6 +100,8 @@
   - local same-session continuation WebSocket mock in CLI tests
   - local task lifecycle WebSocket mock in CLI tests
   - local Phase 1 foundation WebSocket mock in CLI tests
+  - local master-worker autonomy WebSocket mock in CLI tests
+  - S-profile master-worker autonomy fixture verifier `scripts/verify-master-worker-autonomy-online.sh`
   - local Phase 2B master poll WebSocket mock in CLI tests
   - local Phase 2C worker-control WebSocket mock in CLI tests
   - local `freehand-server webui-serve-smoke` for manual/agent positive ADP smoke
@@ -112,6 +118,8 @@
   - CLI ADP task lifecycle sample is implemented in integration tests and verifies closed task/history evidence after protocol-owned task mutation commands
   - CLI ADP Phase 1 foundation sample is implemented in integration tests and verifies TaskBoard/AgentBoard/ExecutionFact/SchedulerTick evidence through protocol-owned ADP frames
   - CLI ADP Phase 2A master-worker foundation sample is implemented in integration tests and live-validated on S-profile `127.0.0.1:4042` with restart same-id verification
+  - CLI master-worker autonomy sample is implemented in integration tests; the mock proof rejects direct task mutation commands and validates success, execution-error, and reject-retry branches from transcript plus owner truth
+  - S-profile master-worker autonomy online proof is implemented through a local Anthropic-compatible fixture and must pass before claiming model/tool-driven multi-task autonomy
   - CLI ADP Phase 2B master poll foundation sample is the active next sample
     target and must verify EventInbox, classifications, persisted cursor, and
     restart same-cursor evidence
