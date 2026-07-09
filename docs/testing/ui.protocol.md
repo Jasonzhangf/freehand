@@ -22,6 +22,9 @@
   - RunMasterPoll cursor mode is explicit: `replay_from_start=true` is allowed
     only without `after_cursor`; protocol rejects the conflicting mode before
     runtime dispatch
+  - Phase 2C WorkerControl/QueryWorkerControl ADP frames use protocol-owned
+    DTOs while runtime/worker-control owners supply safe-point control event
+    truth and Task Center consequence evidence
   - task list ADP subscribe frames use protocol-owned subscription shape and receive runtime-supplied task list projections without making protocol state the task truth owner
   - error-center ADP query/subscribe frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies metadata-backed truth
   - config status ADP query frames use protocol-owned command/result DTOs while runtime owner code supplies config.core-backed truth
@@ -79,6 +82,9 @@
     protocol-state mismatch rejection
   - Phase 2B RunMasterPoll validation covers replay-from-start plus explicit
     cursor conflict rejection
+  - Phase 2C WorkerControl validation covers owner-routing to
+    `worker.control`, query-route misuse, unknown op rejection, and
+    op-specific `question`/`constraint` required fields
   - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
   - error-center query command validation covers empty session id and command-ingress rejection for query-route misuse
   - config status query covers command-ingress rejection, runtime-owned protocol-state rejection, JSON roundtrip, and no-secret DTO serialization
@@ -111,6 +117,9 @@
   - ADP Phase 2B EventInbox/MasterPoll smoke proves protocol frames can carry
     owner-routed event cursor and poll projections without protocol-owned task
     event storage
+  - ADP Phase 2C WorkerControl smoke proves protocol frames can carry
+    owner-routed safe-point control events without protocol-owned control
+    ledger storage
   - ADP task list subscription smoke proves initial task list projection and subsequent runtime-published task changes use the same subscription channel
   - ADP error-center query smoke proves the protocol frame can carry metadata read models supplied by runtime
   - ADP config status query smoke proves the protocol frame can carry safe config read models supplied by runtime
@@ -166,9 +175,12 @@
   - Phase 1 ApplyExecutionFact/RunSchedulerTick command DTOs are landed and route to `task.orchestration` through runtime
   - task mutation command DTOs are landed for `CreateTask`, `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, and `CloseTask`; protocol validation rejects empty required fields and runtime owns mutation dispatch
   - Phase 2A task command validation and owner routing are regression-locked by `phase2a_task_commands_validate_and_route_to_task_orchestration` and `phase2a_task_commands_reject_missing_worker_execution_and_review_fields`
-  - Phase 2B EventInbox/MasterPoll DTOs are the active next implementation
-    target and must be regression-locked by
+  - Phase 2B EventInbox/MasterPoll DTOs are landed and regression-locked by
     `phase2b_event_inbox_and_master_poll_validate_and_route_to_task_orchestration`
+  - Phase 2C WorkerControl command/query DTOs are landed and regression-locked
+    by `worker_control_command_validates_and_routes_to_worker_control`,
+    `worker_control_command_rejects_missing_fields`, and
+    `worker_control_adp_roundtrip_carries_projection`
   - task list subscription shape is landed for runtime-backed ADP task push and stays projection-only
   - error-center query/subscription commands and DTOs are landed; runtime-backed ADP error-center query is regression-locked in daemon tests
   - config status query/result DTO is landed; protocol-state rejection and secret-free serialization are regression-locked

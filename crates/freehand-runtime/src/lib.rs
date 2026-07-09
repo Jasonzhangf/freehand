@@ -69,7 +69,8 @@ use freehand_task::{
     TaskEventInboxProjection, TaskEventInboxQuery, TaskExecutionRecordRequest,
     TaskHeartbeatRequest, TaskId, TaskLedgerEvent, TaskListQuery, TaskMutationRequest,
     TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime, TaskSnapshot,
-    TaskStatus, TaskWatermark,
+    TaskStatus, TaskWatermark, WorkerControlEvent, WorkerControlOp, WorkerControlProjection,
+    WorkerControlRequest,
 };
 use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
 use freehand_ui_protocol::{
@@ -85,8 +86,10 @@ use freehand_ui_protocol::{
     UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
     UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
     UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
-    UiTaskSnapshotProjection, UiTurnProjection, checkpoint_projection_from_runtime_summary,
-    turn_projection_for_client, turn_projection_from_events,
+    UiTaskSnapshotProjection, UiTurnProjection, UiWorkerControlCommand,
+    UiWorkerControlEventProjection, UiWorkerControlProjection,
+    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
+    turn_projection_from_events,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -2445,6 +2448,26 @@ impl RuntimeCommandDispatcher {
                     ),
                 )))
             }
+            UiCommand::QueryWorkerControl {
+                task_id,
+                execution_id,
+            } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let task_runtime =
+                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
+                        .map_err(map_task_query_error)?;
+                let events = task_runtime
+                    .query_worker_control_events(&TaskId::new(task_id.clone()), execution_id)
+                    .map_err(map_task_query_error)?;
+                Ok(Some(UiQueryResult::WorkerControl(Box::new(
+                    project_worker_control_events_for_ui(
+                        state.config.reason_agent_id.clone(),
+                        events,
+                    ),
+                ))))
+            }
             UiCommand::QueryEventInbox {
                 after_cursor,
                 limit,
@@ -3427,6 +3450,9 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
                 self.dispatch_run_scheduler_tick(&mut state, envelope, tick)
             }
             UiCommand::RunMasterPoll { .. } => self.dispatch_run_master_poll(&mut state, envelope),
+            UiCommand::WorkerControl { control } => {
+                self.dispatch_worker_control(&mut state, envelope, control)
+            }
             UiCommand::ResumeTurn { turn_id } => self.dispatch_resume_turn(envelope, turn_id),
             UiCommand::SendDirectMessageToSlave { node_id, text } => {
                 self.dispatch_direct_message(&mut state, envelope, node_id, text)
@@ -3770,6 +3796,40 @@ impl RuntimeCommandDispatcher {
                     .as_deref()
                     .or(outcome.next_cursor.as_deref())
                     .unwrap_or("none")
+            ),
+        })
+    }
+
+    fn dispatch_worker_control(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        control: UiWorkerControlCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let (runtime_home, source_agent_id) = task_runtime_target(state)?;
+        let runtime = TaskRuntime::boot(&runtime_home, source_agent_id.clone())
+            .map_err(map_task_query_error)?;
+        let projection = runtime
+            .apply_worker_control(ui_worker_control_to_task_request(
+                &source_agent_id,
+                control,
+            )?)
+            .map_err(map_task_query_error)?;
+        let task_truth_changed = projection.task_event.is_some();
+        let ui_projection = project_worker_control_for_ui(source_agent_id.clone(), projection);
+        if task_truth_changed {
+            self.publish_task_list_from_runtime(&runtime_home, &source_agent_id)?;
+        }
+        let event = ui_projection
+            .event
+            .expect("worker control dispatch projection always carries latest event");
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!(
+                "worker_control_applied:{}:{}:{}",
+                event.op, event.control_id, event.status
             ),
         })
     }
@@ -4157,21 +4217,78 @@ fn project_task_history_for_ui(
         task_id,
         events: events
             .into_iter()
-            .map(|event| UiTaskLedgerEventProjection {
-                seq: event.seq,
-                event_id: event.event_id,
-                event_type: event.event_type,
-                from_status: event
-                    .from_status
-                    .as_ref()
-                    .map(task_status_label)
-                    .map(str::to_owned),
-                to_status: task_status_label(&event.to_status).to_owned(),
-                timestamp: event.timestamp,
-                actor_agent_id: event.actor.agent_id,
-                payload: event.payload,
-            })
+            .map(project_task_ledger_event_for_ui)
             .collect(),
+    }
+}
+
+fn project_task_ledger_event_for_ui(event: TaskLedgerEvent) -> UiTaskLedgerEventProjection {
+    UiTaskLedgerEventProjection {
+        seq: event.seq,
+        event_id: event.event_id,
+        event_type: event.event_type,
+        from_status: event
+            .from_status
+            .as_ref()
+            .map(task_status_label)
+            .map(str::to_owned),
+        to_status: task_status_label(&event.to_status).to_owned(),
+        timestamp: event.timestamp,
+        actor_agent_id: event.actor.agent_id,
+        payload: event.payload,
+    }
+}
+
+fn project_worker_control_for_ui(
+    source_agent_id: AgentId,
+    projection: WorkerControlProjection,
+) -> UiWorkerControlProjection {
+    let event = project_worker_control_event_for_ui(projection.event);
+    UiWorkerControlProjection {
+        source_agent_id,
+        generated_at: projection.generated_at,
+        event: Some(event.clone()),
+        events: vec![event],
+        task: Some(project_task_snapshot_for_ui(projection.task)),
+        agent: Some(project_agent_snapshot_for_ui(projection.agent)),
+        lifecycle: projection.lifecycle.map(project_agent_lifecycle_for_ui),
+        task_event: projection.task_event.map(project_task_ledger_event_for_ui),
+    }
+}
+
+fn project_worker_control_events_for_ui(
+    source_agent_id: AgentId,
+    events: Vec<WorkerControlEvent>,
+) -> UiWorkerControlProjection {
+    let events = events
+        .into_iter()
+        .map(project_worker_control_event_for_ui)
+        .collect::<Vec<_>>();
+    UiWorkerControlProjection {
+        source_agent_id,
+        generated_at: now_unix_seconds(),
+        event: events.last().cloned(),
+        events,
+        task: None,
+        agent: None,
+        lifecycle: None,
+        task_event: None,
+    }
+}
+
+fn project_worker_control_event_for_ui(
+    event: WorkerControlEvent,
+) -> UiWorkerControlEventProjection {
+    UiWorkerControlEventProjection {
+        control_id: event.control_id,
+        op: worker_control_op_label(&event.op).to_owned(),
+        status: event.status,
+        task_id: event.task_id.as_str().to_owned(),
+        execution_id: event.execution_id,
+        agent_id: event.agent_id,
+        created_at: event.created_at,
+        summary: event.summary,
+        payload: event.payload,
     }
 }
 
@@ -4387,6 +4504,53 @@ fn task_dispatch_from_ui(dispatch: Option<UiTaskDispatchCommand>) -> TaskDispatc
         None | Some(UiTaskDispatchCommand::SelfAgent) => TaskDispatchRequest::SelfAgent,
         Some(UiTaskDispatchCommand::None) => TaskDispatchRequest::None,
         Some(UiTaskDispatchCommand::Agent { agent_id }) => TaskDispatchRequest::Agent { agent_id },
+    }
+}
+
+fn ui_worker_control_to_task_request(
+    source_agent_id: &AgentId,
+    control: UiWorkerControlCommand,
+) -> Result<WorkerControlRequest, UiCommandDispatchPortError> {
+    Ok(WorkerControlRequest {
+        control_id: control.control_id,
+        task_id: TaskId::new(control.task_id),
+        execution_id: control.execution_id,
+        agent_id: control.agent_id,
+        op: worker_control_op_from_ui(&control.op)?,
+        question: control.question,
+        constraint: control.constraint,
+        note: control.note,
+        actor: ui_task_actor(source_agent_id, None, None),
+        watermark: ui_task_watermark("worker_control"),
+    })
+}
+
+fn worker_control_op_from_ui(op: &str) -> Result<WorkerControlOp, UiCommandDispatchPortError> {
+    match op {
+        "query_status" => Ok(WorkerControlOp::QueryStatus),
+        "ask_at_safe_point" => Ok(WorkerControlOp::AskAtSafePoint),
+        "add_constraint" => Ok(WorkerControlOp::AddConstraint),
+        "request_checkpoint" => Ok(WorkerControlOp::RequestCheckpoint),
+        "request_submission_now" => Ok(WorkerControlOp::RequestSubmissionNow),
+        "pause" => Ok(WorkerControlOp::Pause),
+        "resume" => Ok(WorkerControlOp::Resume),
+        "cancel" => Ok(WorkerControlOp::Cancel),
+        other => Err(UiCommandDispatchPortError::DispatchFailed(format!(
+            "unknown worker control op `{other}`"
+        ))),
+    }
+}
+
+fn worker_control_op_label(op: &WorkerControlOp) -> &'static str {
+    match op {
+        WorkerControlOp::QueryStatus => "query_status",
+        WorkerControlOp::AskAtSafePoint => "ask_at_safe_point",
+        WorkerControlOp::AddConstraint => "add_constraint",
+        WorkerControlOp::RequestCheckpoint => "request_checkpoint",
+        WorkerControlOp::RequestSubmissionNow => "request_submission_now",
+        WorkerControlOp::Pause => "pause",
+        WorkerControlOp::Resume => "resume",
+        WorkerControlOp::Cancel => "cancel",
     }
 }
 
@@ -12152,6 +12316,309 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             }
             other => panic!("unexpected recovered master poll result: {other:?}"),
         }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_dispatches_worker_control_to_task_owner() {
+        let runtime_home = temp_runtime_home();
+        let worker_id = AgentId::new("runtime-phase2c-worker");
+        let task_id = "runtime-phase2c-task".to_owned();
+        let execution_id = "runtime-phase2c-exec".to_owned();
+        let turn_id = TurnId::new("runtime-phase2c-turn");
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime");
+
+        for command in [
+            UiCommand::CreateTaskAgent {
+                agent: UiTaskAgentCreateCommand {
+                    agent_id: worker_id.clone(),
+                    capabilities: vec!["code_edit".to_owned(), "test_run".to_owned()],
+                },
+            },
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some(task_id.clone()),
+                    title: "Runtime phase2c task".to_owned(),
+                    content: "Runtime phase2c content".to_owned(),
+                    goal: "prove worker control bridge".to_owned(),
+                    deliverables: vec!["worker control".to_owned()],
+                    acceptance: vec!["control events persist".to_owned()],
+                    priority: 97,
+                    target_cwd: None,
+                    session_id: Some(SessionId::new("runtime-phase2c-session")),
+                    turn_id: Some(turn_id.clone()),
+                    dispatch: Some(UiTaskDispatchCommand::None),
+                },
+            },
+            UiCommand::AssignTask {
+                assignment: UiTaskAssignCommand {
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                },
+            },
+            UiCommand::ClaimNextTask {
+                claim: UiTaskClaimCommand {
+                    agent_id: worker_id.clone(),
+                    execution_id: execution_id.clone(),
+                    ttl_seconds: Some(300),
+                },
+            },
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: Some(turn_id),
+                    kind: UiExecutionFactKind::Running {
+                        phase: "phase2c_running".to_owned(),
+                        summary: "worker running before safe-point control".to_owned(),
+                        evidence: vec!["running evidence".to_owned()],
+                    },
+                },
+            },
+        ] {
+            runtime
+                .dispatch(
+                    build_command_dispatch_envelope(&command).expect("phase2c setup envelope"),
+                )
+                .expect("phase2c setup dispatch");
+        }
+
+        let controls = [
+            (
+                "cli-phase2c-query",
+                "wctl-phase2c-query",
+                "query_status",
+                None,
+                None,
+            ),
+            (
+                "cli-phase2c-ask",
+                "wctl-phase2c-ask",
+                "ask_at_safe_point",
+                Some("what is blocking the execution?".to_owned()),
+                None,
+            ),
+            (
+                "cli-phase2c-constraint",
+                "wctl-phase2c-constraint",
+                "add_constraint",
+                None,
+                Some("do not leave the task without a checkpoint".to_owned()),
+            ),
+            (
+                "cli-phase2c-pause",
+                "wctl-phase2c-pause",
+                "pause",
+                None,
+                None,
+            ),
+            (
+                "cli-phase2c-resume",
+                "wctl-phase2c-resume",
+                "resume",
+                None,
+                None,
+            ),
+            (
+                "cli-phase2c-cancel",
+                "wctl-phase2c-cancel",
+                "cancel",
+                None,
+                None,
+            ),
+        ];
+        for (_request_id, control_id, op, question, constraint) in controls {
+            let receipt = runtime
+                .dispatch(
+                    build_command_dispatch_envelope(&UiCommand::WorkerControl {
+                        control: UiWorkerControlCommand {
+                            control_id: Some(control_id.to_owned()),
+                            task_id: task_id.clone(),
+                            execution_id: execution_id.clone(),
+                            agent_id: worker_id.clone(),
+                            op: op.to_owned(),
+                            question,
+                            constraint,
+                            note: Some("runtime phase2c proof".to_owned()),
+                        },
+                    })
+                    .expect("phase2c worker control envelope"),
+                )
+                .expect("phase2c worker control dispatch");
+            assert!(
+                receipt
+                    .dispatch_status
+                    .starts_with(&format!("worker_control_applied:{op}:{control_id}:")),
+                "unexpected receipt {}",
+                receipt.dispatch_status
+            );
+        }
+
+        let control_query = runtime
+            .query_runtime(&UiCommand::QueryWorkerControl {
+                task_id: task_id.clone(),
+                execution_id: execution_id.clone(),
+            })
+            .expect("worker control query")
+            .expect("worker control result");
+        match control_query {
+            UiQueryResult::WorkerControl(projection) => {
+                assert_eq!(projection.source_agent_id, AgentId::new("agent-live"));
+                assert_eq!(projection.events.len(), 6);
+                let ids = projection
+                    .events
+                    .iter()
+                    .map(|event| event.control_id.as_str())
+                    .collect::<Vec<_>>();
+                for required in [
+                    "wctl-phase2c-query",
+                    "wctl-phase2c-ask",
+                    "wctl-phase2c-constraint",
+                    "wctl-phase2c-pause",
+                    "wctl-phase2c-resume",
+                    "wctl-phase2c-cancel",
+                ] {
+                    assert!(ids.contains(&required), "missing {required}: {ids:?}");
+                }
+                assert_eq!(
+                    projection.event.as_ref().map(|event| event.op.as_str()),
+                    Some("cancel")
+                );
+            }
+            other => panic!("unexpected worker control result: {other:?}"),
+        }
+
+        let board = runtime
+            .query_runtime(&UiCommand::QueryTaskBoard {
+                status: None,
+                agent_id: None,
+                include_terminal: true,
+            })
+            .expect("phase2c board query")
+            .expect("phase2c board result");
+        match board {
+            UiQueryResult::TaskBoard(board) => {
+                let task = board
+                    .tasks
+                    .iter()
+                    .find(|task| task.task_id == task_id)
+                    .expect("phase2c task");
+                assert_eq!(task.status, "cancelled");
+                assert_eq!(
+                    task.active_execution_id.as_deref(),
+                    Some(execution_id.as_str())
+                );
+            }
+            other => panic!("unexpected phase2c board result: {other:?}"),
+        }
+
+        let history = runtime
+            .query_runtime(&UiCommand::QueryTaskHistory {
+                task_id: task_id.clone(),
+            })
+            .expect("phase2c history query")
+            .expect("phase2c history result");
+        match history {
+            UiQueryResult::TaskHistory(history) => {
+                let event_types = history
+                    .events
+                    .iter()
+                    .map(|event| event.event_type.as_str())
+                    .collect::<Vec<_>>();
+                for required in ["TaskPaused", "TaskResumed", "TaskCancelled"] {
+                    assert!(
+                        event_types.contains(&required),
+                        "missing {required}: {event_types:?}"
+                    );
+                }
+            }
+            other => panic!("unexpected phase2c history result: {other:?}"),
+        }
+
+        let recovered = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("recovered runtime");
+        let recovered_control = recovered
+            .query_runtime(&UiCommand::QueryWorkerControl {
+                task_id: task_id.clone(),
+                execution_id: execution_id.clone(),
+            })
+            .expect("recovered worker control query")
+            .expect("recovered worker control result");
+        match recovered_control {
+            UiQueryResult::WorkerControl(projection) => {
+                assert_eq!(projection.events.len(), 6);
+                assert!(projection.events.iter().any(|event| {
+                    event.control_id == "wctl-phase2c-cancel" && event.op == "cancel"
+                }));
+            }
+            other => panic!("unexpected recovered phase2c result: {other:?}"),
+        }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_worker_control_invalid_target_returns_explicit_failure() {
+        let runtime_home = temp_runtime_home();
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime");
+
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::WorkerControl {
+                    control: UiWorkerControlCommand {
+                        control_id: Some("wctl-phase2c-missing".to_owned()),
+                        task_id: "missing-phase2c-task".to_owned(),
+                        execution_id: "missing-phase2c-exec".to_owned(),
+                        agent_id: AgentId::new("missing-phase2c-worker"),
+                        op: "query_status".to_owned(),
+                        question: None,
+                        constraint: None,
+                        note: None,
+                    },
+                })
+                .expect("worker control envelope"),
+            )
+            .expect_err("missing target must fail");
+        assert_eq!(
+            err,
+            UiCommandDispatchPortError::TargetNotFound("missing-phase2c-task".to_owned())
+        );
+
+        let query_err = runtime
+            .query_runtime(&UiCommand::QueryWorkerControl {
+                task_id: "missing-phase2c-task".to_owned(),
+                execution_id: "missing-phase2c-exec".to_owned(),
+            })
+            .expect_err("missing worker-control query must fail");
+        assert_eq!(
+            query_err,
+            UiCommandDispatchPortError::TargetNotFound("missing-phase2c-task".to_owned())
+        );
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }

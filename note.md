@@ -2883,3 +2883,46 @@ Current real root cause split:
 - validation:
   - `cargo test -p freehand-runtime runtime_dispatches_phase2b_master_poll_and_event_inbox -- --nocapture` -> 1 passed.
   - `cargo clippy --workspace --all-targets -- -D warnings` -> passed.
+
+# 2026-07-09 multi-task phase2c worker.control closeout
+
+- marker:
+  - `phase2c-worker-control-closeout-1783572587648779000`
+- scope:
+  - Continued Phase 2C no-UI foundation only.
+  - Implemented safe-point runtime control channel for already-running worker executions.
+  - Did not implement WebUI/Android task dashboard, multi BigTask, cross-machine worker, or actual worker runtime interruption beyond the owner-backed control ledger/snapshot foundation.
+- implementation audit:
+  - `task.orchestration` owns worker-control ledger rows, snapshot projection, status query, safe-point queueing, and task-state consequences.
+  - `ui.protocol` owns worker-control command/query DTO validation and UI-safe projection shape.
+  - `runtime.ui-command-dispatch` routes worker-control commands/queries to task owner without owning business semantics.
+  - `app.cli-runtime-smoke` owns `worker-control-foundation-sample` create and verify modes.
+  - Implemented operations: `query_status`, `ask_at_safe_point`, `add_constraint`, `request_checkpoint`, `request_submission_now`, `pause`, `resume`, `cancel`.
+  - `query_status` persists `observed`; safe-point ops persist `queued`; `pause`/`resume`/`cancel` route through Task Center first and persist `applied` only after the task consequence succeeds.
+  - Worker control does not create, assign, claim, review, approve, reject, or close tasks; it also does not mutate prompt history, raw transcripts, workspace truth, or session truth.
+- local validation already completed:
+  - `cargo test -p freehand-task worker_control -- --nocapture` -> 6 passed.
+  - `cargo test -p freehand-ui-protocol worker_control -- --nocapture` -> 3 passed.
+  - `cargo test -p freehand-runtime worker_control -- --nocapture` -> 2 passed.
+  - `cargo test -p freehand-cli worker_control -- --nocapture` -> 2 passed.
+  - `cargo test -p freehand-cli -- --nocapture` -> 24 passed.
+  - `cargo test -p freehand-task -- --nocapture` -> 41 passed.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 53 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 84 passed.
+  - `cargo fmt --check` -> passed.
+  - `cargo clippy --workspace --all-targets -- -D warnings` -> passed.
+  - `cargo run -p xtask -- mainlines generate` -> ok.
+  - `cargo run -p xtask -- mainlines check` -> ok.
+  - `cargo run -p xtask -- gates check` -> ok.
+  - `git diff --check` -> ok.
+- S-profile online proof already completed:
+  - `scripts/install-launchd.sh restartS` restarted `com.freehand.daemonS` on `127.0.0.1:4042`.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`.
+  - `freehand-cliS worker-control-foundation-sample --url ws://127.0.0.1:4042/adp` -> `worker_control_foundation_sample_ok`.
+  - Created ids: session `cli-worker-control-1783572587648756000`, task `task-cli-worker-control-FHPHASE2C1783572587648779000`, execution `exec-cli-worker-control-FHPHASE2C1783572587648779000`, agent `worker-cli-worker-control-FHPHASE2C1783572587648779000`, cancel control `wctl-cli-worker-control-cancel-FHPHASE2C1783572587648779000`.
+  - Online sample evidence: `status=cancelled`, `control_events=8`, event statuses `query_status:observed,ask_at_safe_point:queued,add_constraint:queued,request_checkpoint:queued,request_submission_now:queued,pause:applied,resume:applied,cancel:applied`.
+  - Task events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskExecutionRecorded,TaskPaused,TaskResumed,TaskHeartbeat,TaskCancelled`.
+  - After `scripts/install-launchd.sh restartS`, verify mode against the same task/execution/agent/control ids returned `worker_control_foundation_verify_ok` with `status=cancelled`, `control_events=8`, and the same task/control event truth.
+- durable rule:
+  - Worker-control stateful consequences must persist `applied` control events only after the Task Center consequence succeeds; otherwise the ledger can falsely claim an action happened.

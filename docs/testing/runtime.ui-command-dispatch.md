@@ -19,6 +19,9 @@
     stale persisted cursor plus omitted `limit` to drain all pending EventInbox
     rows; explicit finite limit remains pagination and cannot prove no events
     remain after the persisted cursor
+  - runtime-backed Phase 2C WorkerControl and QueryWorkerControl route to
+    `worker.control`; runtime only projects owner DTOs and does not own
+    safe-point control semantics or Task Center consequences
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries route from selected live config to UI-safe projection without becoming config truth writers
   - runtime-backed provider/model update commands route to `config.core` persistence, then expose pending restart-required projection without hot-reloading active runtime config
@@ -74,6 +77,9 @@
     persisted cursor, compact classifications, no task status mutation, and a
     backlog larger than 100 events to prove replay plus omitted limit is a full
     drain
+  - Phase 2C WorkerControl dispatch/query coverage, including safe-point event
+    projection, pause/resume/cancel consequence evidence, invalid target
+    failure, and no runtime-local success projection
   - missing task history query target-not-found coverage
   - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
   - config status runtime query coverage, including base URL host projection, auth source projection, and no API key/pair token leakage
@@ -115,6 +121,8 @@
   - daemon ADP EventInbox/MasterPoll smoke over the shared runtime query/command
     path, with same-cursor proof using replay plus omitted limit rather than a
     finite page limit
+  - daemon ADP WorkerControl smoke over the shared runtime query/command path,
+    with same-id proof using persisted worker-control ledger truth
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
 - fixtures / replay inputs / runtime evidence paths:
@@ -156,9 +164,11 @@
   - runtime task query bridge is covered by `runtime_query_reads_task_truth_from_task_runtime`
   - runtime Phase 1 TaskBoard/AgentBoard/Lifecycle query bridge is covered by `runtime_query_reads_phase1_task_and_agent_boards`
   - runtime Phase 1 ExecutionFact/SchedulerTick dispatch bridge is covered by `runtime_dispatch_execution_fact_and_scheduler_tick_update_task_truth`
-  - runtime Phase 2B EventInbox/MasterPoll bridge is the next active
-    implementation target and must be covered by
+  - runtime Phase 2B EventInbox/MasterPoll bridge is covered by
     `runtime_dispatches_phase2b_master_poll_and_event_inbox`
+  - runtime Phase 2C WorkerControl dispatch/query bridge is covered by
+    `runtime_dispatches_worker_control_to_task_owner` and
+    `runtime_worker_control_invalid_target_returns_explicit_failure`
   - runtime task mutation command bridge is covered through CLI ADP lifecycle smoke and must remain a thin route to `task.orchestration`
   - Phase 2A master-worker command bridge is covered by
     `runtime_dispatches_phase2a_master_worker_loop_into_task_truth`

@@ -1,0 +1,76 @@
+# Wiki: `worker.control`
+
+Generated from `docs/mainline-calls/worker.control.json`. Do not edit by hand.
+
+- owner crate: `crates/freehand-task`
+- owner module: `crates/freehand-task/src/lib.rs`
+- function map: `docs/function-maps/worker.control.md`
+- generated wiki: `docs/wiki/worker.control.md`
+- test design: `docs/testing/worker.control.md`
+
+## Request Mainline
+
+- master or framework command enters as worker_control(op=...) semantics against an already-running worker execution
+- UI/CLI protocol wraps that request as UiCommand::WorkerControl and routes it to worker.control
+- runtime dispatch converts protocol DTOs into WorkerControlRequest
+- TaskRuntime::apply_worker_control validates task id, execution id, agent id, op-specific payloads, task existence, agent existence, assignee match, active execution match, and non-terminal control state before writing truth
+- query_status reads Task Center, AgentSnapshot, and AgentLifecycle truth, then writes an auditable control event
+- safe-point requests ask_at_safe_point, add_constraint, request_checkpoint, and request_submission_now write pending/deferred events and do not mutate task status
+- pause, resume, and cancel write a worker-control event and route task-state consequences through Task Center APIs
+
+## Response Mainline
+
+- WorkerControlProjection returns the created control event plus current task, agent, and lifecycle status truth
+- query_status returns framework-derived task status, active execution id, agent status, lifecycle state, elapsed time, and current activity
+- safe-point operations return queued status and a compact summary of what the worker should answer or respect at the next safe point
+- pause returns the control event plus the Task Center event that moved the task to Paused
+- resume returns the control event plus the Task Center event that moved the task to Running
+- cancel returns the control event plus the Task Center event that moved the task to Cancelled
+- TaskRuntime::query_worker_control_events returns persisted control events for restart same-id verification
+
+## Error Mainline
+
+- missing required ids or op-specific payloads return explicit MissingField and write no control event
+- unknown task id returns explicit task-not-found and writes no control event
+- unknown agent id returns explicit agent-not-found and writes no control event
+- task assignee mismatch returns explicit invalid transition and writes no control event
+- active execution mismatch returns explicit invalid transition and writes no control event
+- terminal task states Approved, Closed, Cancelled, and Failed reject all worker-control operations and write no control event
+- Task Center consequence failures from pause/resume/cancel surface as explicit owner errors and must not become queued safe-point success
+- persistence failure for the worker-control ledger or snapshot fails explicitly
+- worker control must not create, assign, claim, approve, reject, close, rewrite transcript, mutate session/workspace truth, or directly edit prompt history
+
+## Shared Multi-Reference Functions
+
+- `TaskRuntime::apply_worker_control`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: validate and persist safe-point worker control events, and route allowed task-state consequences through Task Center
+  - allowed callers: runtime dispatch, CLI/ADP headless samples, tests
+  - related tests: worker_control_query_status_persists_and_recovers, worker_control_safe_point_events_queue_without_task_mutation, worker_control_pause_resume_cancel_write_task_consequences, worker_control_rejects_wrong_execution_without_mutation, worker_control_rejects_terminal_task_without_event
+  - why shared: keeps runtime control truth in one owner instead of UI/runtime-local queues
+- `TaskRuntime::query_worker_control_events`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: read persisted worker-control events for same-id restart verification and UI/debug projection
+  - allowed callers: runtime query dispatch, CLI/ADP headless samples, tests
+  - related tests: worker_control_query_status_persists_and_recovers
+  - why shared: restart proof must read owner truth, not command receipts
+
+## Function Call Table
+
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `UiWorkerControlCommand` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol DTO for worker-control op, target ids, and typed payload | UI/CLI worker-control command | validated DTO | ADP command transport | protocol boundary | bound |
+| 02 | `UiCommand::WorkerControl` | `crates/freehand-ui-protocol/src/lib.rs` | route worker-control mutation-intent commands to worker.control | protocol command | dispatch envelope target | protocol boundary | runtime dispatch | bound |
+| 03 | `RuntimeCommandDispatcher::dispatch_worker_control` | `crates/freehand-runtime/src/lib.rs` | convert protocol DTO to owner request and project result | dispatch envelope | worker-control query result or receipt | runtime dispatch | task owner | bound |
+| 04 | `TaskRuntime::apply_worker_control` | `crates/freehand-task/src/lib.rs` | validate target task/execution/agent and persist the control event | worker control request | worker control projection | runtime dispatch / tests | worker-control owner | bound |
+| 05 | `TaskStore::append_worker_control_event / TaskStore::write_worker_control_snapshot` | `crates/freehand-task/src/lib.rs` | write append-only worker-control ledger rows and latest execution snapshot | worker control event | durable ledger/snapshot truth | worker-control owner | task store | bound |
+| 06 | `TaskRuntime::query_worker_control_events` | `crates/freehand-task/src/lib.rs` | read persisted control events for same-id restart verification | task id and execution id | ordered control events | runtime query / CLI verify | worker-control owner | bound |
+| 07 | `project_worker_control_for_ui` | `crates/freehand-runtime/src/lib.rs` | convert owner projection to UI-safe protocol result | worker-control projection | UiWorkerControlProjection | runtime dispatch | ui.protocol DTO | bound |
+| 08 | `run_worker_control_foundation_sample / run_worker_control_foundation_sample_async / verify_worker_control_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive no-UI Phase 2C sample and restart same-id verification through ADP | ADP URL plus optional verify ids | terminal-facing evidence | CLI dispatcher | daemon /adp | bound |
+
+## Sync Status Against Mainline Call
+
+- worker.control owner is code-bound for Phase 2C safe-point runtime control
+- CLI mock ADP coverage is implemented for create+control sample mode and verify-only mode
+- S-profile online same-id restart proof is required before declaring Phase 2C fully closed
+- Phase 2C excludes WebUI/Android dashboard projection, rich safe-point UI, worker autoscaling, multi BigTask context switching, and cross-machine workers

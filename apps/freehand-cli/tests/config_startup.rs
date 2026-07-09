@@ -20,7 +20,8 @@ use freehand_ui_protocol::{
     UiTaskBoardProjection, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
     UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
     UiTaskListProjection, UiTaskSnapshotProjection, UiToolActivity, UiToolActivityStatus,
-    UiTurnProjection, build_command_dispatch_envelope,
+    UiTurnProjection, UiWorkerControlEventProjection, UiWorkerControlProjection,
+    build_command_dispatch_envelope,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
@@ -1723,6 +1724,322 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
     (url, handle)
 }
 
+fn spawn_adp_worker_control_foundation_mock_server() -> (String, thread::JoinHandle<()>) {
+    spawn_adp_worker_control_foundation_mock_server_with_connections(16)
+}
+
+fn spawn_adp_worker_control_foundation_verify_mock_server() -> (String, thread::JoinHandle<()>) {
+    spawn_adp_worker_control_foundation_mock_server_with_connections(3)
+}
+
+fn spawn_adp_worker_control_foundation_mock_server_with_connections(
+    connection_count: usize,
+) -> (String, thread::JoinHandle<()>) {
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("bind adp worker-control mock");
+    let url = format!("ws://{}/adp", listener.local_addr().expect("addr"));
+    let task_id = Arc::new(Mutex::new("task-cli-worker-control-verify".to_owned()));
+    let execution_id = Arc::new(Mutex::new("exec-cli-worker-control-verify".to_owned()));
+    let agent_id = Arc::new(Mutex::new("worker-cli-worker-control-verify".to_owned()));
+    let control_events = Arc::new(Mutex::new(worker_control_verify_events(
+        "task-cli-worker-control-verify",
+        "exec-cli-worker-control-verify",
+        "worker-cli-worker-control-verify",
+    )));
+    let task_events = Arc::new(Mutex::new(vec![
+        "TaskCreated".to_owned(),
+        "TaskAssigned".to_owned(),
+        "TaskResumed".to_owned(),
+        "TaskExecutionRecorded".to_owned(),
+        "TaskPaused".to_owned(),
+        "TaskResumed".to_owned(),
+        "TaskCancelled".to_owned(),
+    ]));
+    listener
+        .set_nonblocking(true)
+        .expect("set adp worker-control mock nonblocking");
+    let handle = thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("tokio runtime");
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+            for _ in 0..connection_count {
+                let (stream, _) = listener.accept().await.expect("accept adp");
+                let mut socket = tokio_tungstenite::accept_async(stream)
+                    .await
+                    .expect("accept websocket");
+                while let Some(message) = socket.next().await {
+                    let text = match message {
+                        Ok(Message::Text(text)) => text,
+                        Ok(Message::Close(_)) => break,
+                        Ok(_) => continue,
+                        Err(_) => break,
+                    };
+                    let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
+                    match request {
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::CreateTaskAgent { agent },
+                        } => {
+                            *agent_id.lock().expect("phase2c agent lock") =
+                                agent.agent_id.as_str().to_owned();
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "create_task_agent",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "task_agent_created",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::CreateTask { task },
+                        } => {
+                            if task.dispatch != Some(UiTaskDispatchCommand::None) {
+                                send_adp_response(
+                                    &mut socket,
+                                    UiAdpResponse::Failure {
+                                        request_id,
+                                        failure: UiAdpFailure {
+                                            code: "missing_dispatch_none".to_owned(),
+                                            message:
+                                                "worker-control sample must create waiting task"
+                                                    .to_owned(),
+                                            retryable: false,
+                                        },
+                                    },
+                                )
+                                .await;
+                                continue;
+                            }
+                            *task_id.lock().expect("phase2c task lock") =
+                                task.task_id.expect("phase2c task id");
+                            *control_events.lock().expect("phase2c control lock") = Vec::new();
+                            *task_events.lock().expect("phase2c events lock") =
+                                vec!["TaskCreated".to_owned()];
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "create_task",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "task_created",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::AssignTask { .. },
+                        } => {
+                            task_events
+                                .lock()
+                                .expect("phase2c events lock")
+                                .push("TaskAssigned".to_owned());
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "assign_task",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "task_assigned",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::ClaimNextTask { claim },
+                        } => {
+                            *execution_id.lock().expect("phase2c execution lock") =
+                                claim.execution_id;
+                            task_events
+                                .lock()
+                                .expect("phase2c events lock")
+                                .push("TaskResumed".to_owned());
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "claim_next_task",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "task_claimed",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::ApplyExecutionFact { fact },
+                        } => {
+                            *execution_id.lock().expect("phase2c execution lock") =
+                                fact.execution_id;
+                            task_events
+                                .lock()
+                                .expect("phase2c events lock")
+                                .push("TaskExecutionRecorded".to_owned());
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "apply_execution_fact",
+                                "task.orchestration",
+                                "crates/freehand-task",
+                                "execution_fact_applied",
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Command {
+                            request_id,
+                            command: UiCommand::WorkerControl { control },
+                        } => {
+                            let status = worker_control_status_for_op(&control.op);
+                            let event = worker_control_event_projection(
+                                control.control_id.as_deref().unwrap_or("wctl-generated"),
+                                &control.op,
+                                status,
+                                &control.task_id,
+                                &control.execution_id,
+                                control.agent_id.as_str(),
+                                control_events.lock().expect("phase2c control lock").len() + 1,
+                            );
+                            control_events
+                                .lock()
+                                .expect("phase2c control lock")
+                                .push(event.clone());
+                            match control.op.as_str() {
+                                "pause" => task_events
+                                    .lock()
+                                    .expect("phase2c events lock")
+                                    .push("TaskPaused".to_owned()),
+                                "resume" => task_events
+                                    .lock()
+                                    .expect("phase2c events lock")
+                                    .push("TaskResumed".to_owned()),
+                                "cancel" => task_events
+                                    .lock()
+                                    .expect("phase2c events lock")
+                                    .push("TaskCancelled".to_owned()),
+                                _ => {}
+                            }
+                            send_task_command_receipt(
+                                &mut socket,
+                                request_id,
+                                "worker_control",
+                                "worker.control",
+                                "crates/freehand-task",
+                                &format!(
+                                    "worker_control_applied:{}:{}:{}",
+                                    event.op, event.control_id, event.status
+                                ),
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryTaskBoard { .. },
+                        } => {
+                            let task = task_id.lock().expect("phase2c task lock").clone();
+                            let execution =
+                                execution_id.lock().expect("phase2c execution lock").clone();
+                            let agent = agent_id.lock().expect("phase2c agent lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::TaskBoard(phase2c_task_board(
+                                        &task, &execution, &agent,
+                                    )),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query: UiCommand::QueryWorkerControl { .. },
+                        } => {
+                            let events =
+                                control_events.lock().expect("phase2c control lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::WorkerControl(Box::new(
+                                        UiWorkerControlProjection {
+                                            source_agent_id: AgentId::new("cli-agent"),
+                                            generated_at: 10,
+                                            event: events.last().cloned(),
+                                            events,
+                                            task: None,
+                                            agent: None,
+                                            lifecycle: None,
+                                            task_event: None,
+                                        },
+                                    )),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query {
+                            request_id,
+                            query:
+                                UiCommand::QueryTaskHistory {
+                                    task_id: query_task,
+                                },
+                        } => {
+                            let execution =
+                                execution_id.lock().expect("phase2c execution lock").clone();
+                            let events = task_events.lock().expect("phase2c events lock").clone();
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::QueryResult {
+                                    request_id,
+                                    result: UiQueryResult::TaskHistory(UiTaskHistoryProjection {
+                                        source_agent_id: AgentId::new("cli-agent"),
+                                        task_id: query_task,
+                                        events: events
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(index, event_type)| {
+                                                task_event_with_payload(
+                                                    u64::try_from(index + 1).expect("event seq"),
+                                                    event_type,
+                                                    serde_json::json!({
+                                                        "execution_id": execution,
+                                                    }),
+                                                )
+                                            })
+                                            .collect(),
+                                    }),
+                                },
+                            )
+                            .await;
+                        }
+                        UiAdpRequest::Query { request_id, .. }
+                        | UiAdpRequest::Command { request_id, .. }
+                        | UiAdpRequest::Subscribe { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::Failure {
+                                    request_id,
+                                    failure: UiAdpFailure {
+                                        code: "unexpected_worker_control_frame".to_owned(),
+                                        message: "unexpected worker control frame".to_owned(),
+                                        retryable: false,
+                                    },
+                                },
+                            )
+                            .await;
+                        }
+                    }
+                }
+            }
+        });
+    });
+    (url, handle)
+}
+
 fn phase1_task_board(
     blocked_task_id: &str,
     review_task_id: &str,
@@ -2031,6 +2348,128 @@ fn phase2b_master_poll(
                 recommended_actions: vec!["query_agent_lifecycle".to_owned()],
             },
         ],
+    }
+}
+
+fn phase2c_task_board(task_id: &str, execution_id: &str, agent_id: &str) -> UiTaskBoardProjection {
+    UiTaskBoardProjection {
+        source_agent_id: AgentId::new("cli-agent"),
+        status_filter: None,
+        agent_filter: None,
+        include_terminal: true,
+        tasks: vec![phase2c_task(task_id, execution_id, agent_id, "cancelled")],
+        agents: vec![UiAgentSnapshotProjection {
+            agent_id: AgentId::new(agent_id.to_owned()),
+            status: "available".to_owned(),
+            current_task_id: None,
+            current_cwd: Some("/tmp/cli-session".to_owned()),
+            running_tasks: 0,
+            queued_tasks: 0,
+            last_seen_at: 1,
+        }],
+        blocked: Vec::new(),
+        review_ready: Vec::new(),
+        stale: Vec::new(),
+    }
+}
+
+fn phase2c_task(
+    task_id: &str,
+    execution_id: &str,
+    agent_id: &str,
+    status: &str,
+) -> UiTaskSnapshotProjection {
+    UiTaskSnapshotProjection {
+        task_id: task_id.to_owned(),
+        status: status.to_owned(),
+        title: format!("Worker control {task_id}"),
+        goal: "phase2c worker control proof".to_owned(),
+        priority: 98,
+        target_cwd: Some("/tmp/cli-session".to_owned()),
+        assignee_agent_id: Some(AgentId::new(agent_id.to_owned())),
+        active_execution_id: Some(execution_id.to_owned()),
+        updated_at: 1,
+        last_progress_at: Some(1),
+        last_event_seq: 7,
+    }
+}
+
+fn worker_control_verify_events(
+    task_id: &str,
+    execution_id: &str,
+    agent_id: &str,
+) -> Vec<UiWorkerControlEventProjection> {
+    [
+        ("wctl-cli-worker-control-query-verify", "query_status"),
+        ("wctl-cli-worker-control-ask-verify", "ask_at_safe_point"),
+        (
+            "wctl-cli-worker-control-constraint-verify",
+            "add_constraint",
+        ),
+        (
+            "wctl-cli-worker-control-checkpoint-verify",
+            "request_checkpoint",
+        ),
+        (
+            "wctl-cli-worker-control-submit-verify",
+            "request_submission_now",
+        ),
+        ("wctl-cli-worker-control-pause-verify", "pause"),
+        ("wctl-cli-worker-control-resume-verify", "resume"),
+        ("wctl-cli-worker-control-cancel-verify", "cancel"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (control_id, op))| {
+        worker_control_event_projection(
+            control_id,
+            op,
+            worker_control_status_for_op(op),
+            task_id,
+            execution_id,
+            agent_id,
+            index + 1,
+        )
+    })
+    .collect()
+}
+
+fn worker_control_event_projection(
+    control_id: &str,
+    op: &str,
+    status: &str,
+    task_id: &str,
+    execution_id: &str,
+    agent_id: &str,
+    seq: usize,
+) -> UiWorkerControlEventProjection {
+    UiWorkerControlEventProjection {
+        control_id: control_id.to_owned(),
+        op: op.to_owned(),
+        status: status.to_owned(),
+        task_id: task_id.to_owned(),
+        execution_id: execution_id.to_owned(),
+        agent_id: AgentId::new(agent_id.to_owned()),
+        created_at: u64::try_from(seq).expect("worker control seq"),
+        summary: format!("{op} {task_id}"),
+        payload: serde_json::json!({
+            "op": op,
+            "task_status": if op == "cancel" { "cancelled" } else { "running" },
+            "active_execution_id": execution_id,
+            "agent_status": "busy"
+        }),
+    }
+}
+
+fn worker_control_status_for_op(op: &str) -> &'static str {
+    match op {
+        "query_status" => "observed",
+        "ask_at_safe_point"
+        | "add_constraint"
+        | "request_checkpoint"
+        | "request_submission_now" => "queued",
+        "pause" | "resume" | "cancel" => "applied",
+        _ => "unknown",
     }
 }
 
@@ -2706,6 +3145,84 @@ fn cli_runs_master_poll_foundation_verify_against_mock_websocket() {
     assert!(stdout.contains("classifications=blocked,review_ready,stale"));
 
     handle.join().expect("adp master poll verify mock join");
+}
+
+#[test]
+fn cli_runs_worker_control_foundation_sample_against_mock_websocket() {
+    let (url, handle) = spawn_adp_worker_control_foundation_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("worker-control-foundation-sample")
+        .arg("--url")
+        .arg(&url)
+        .output()
+        .expect("run worker control foundation sample");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("worker_control_foundation_sample_ok"));
+    assert!(stdout.contains("task=task-cli-worker-control-FHPHASE2C"));
+    assert!(stdout.contains("execution=exec-cli-worker-control-FHPHASE2C"));
+    assert!(stdout.contains("agent=worker-cli-worker-control-FHPHASE2C"));
+    assert!(stdout.contains("status=cancelled"));
+    assert!(stdout.contains("control_events=8"));
+    assert!(stdout.contains("query_status:observed"));
+    assert!(stdout.contains("ask_at_safe_point:queued"));
+    assert!(stdout.contains("add_constraint:queued"));
+    assert!(stdout.contains("request_checkpoint:queued"));
+    assert!(stdout.contains("request_submission_now:queued"));
+    assert!(stdout.contains("pause:applied"));
+    assert!(stdout.contains("resume:applied"));
+    assert!(stdout.contains("cancel:applied"));
+    assert!(stdout.contains("TaskPaused"));
+    assert!(stdout.contains("TaskResumed"));
+    assert!(stdout.contains("TaskCancelled"));
+
+    handle.join().expect("adp worker control mock join");
+}
+
+#[test]
+fn cli_runs_worker_control_foundation_verify_against_mock_websocket() {
+    let (url, handle) = spawn_adp_worker_control_foundation_verify_mock_server();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .arg("worker-control-foundation-sample")
+        .arg("--url")
+        .arg(&url)
+        .arg("--verify-task")
+        .arg("task-cli-worker-control-verify")
+        .arg("--execution")
+        .arg("exec-cli-worker-control-verify")
+        .arg("--agent")
+        .arg("worker-cli-worker-control-verify")
+        .arg("--control")
+        .arg("wctl-cli-worker-control-cancel-verify")
+        .output()
+        .expect("run worker control foundation verify");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("worker_control_foundation_verify_ok"));
+    assert!(stdout.contains("task=task-cli-worker-control-verify"));
+    assert!(stdout.contains("execution=exec-cli-worker-control-verify"));
+    assert!(stdout.contains("agent=worker-cli-worker-control-verify"));
+    assert!(stdout.contains("control=wctl-cli-worker-control-cancel-verify"));
+    assert!(stdout.contains("status=cancelled"));
+    assert!(stdout.contains("control_events=8"));
+    assert!(stdout.contains("cancel:applied"));
+    assert!(stdout.contains("TaskPaused"));
+    assert!(stdout.contains("TaskResumed"));
+    assert!(stdout.contains("TaskCancelled"));
+
+    handle.join().expect("adp worker control verify mock join");
 }
 
 #[test]

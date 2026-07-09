@@ -435,6 +435,94 @@ pub struct MasterPollOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerControlOp {
+    QueryStatus,
+    AskAtSafePoint,
+    AddConstraint,
+    RequestCheckpoint,
+    RequestSubmissionNow,
+    Pause,
+    Resume,
+    Cancel,
+}
+
+impl WorkerControlOp {
+    fn event_type(&self) -> &'static str {
+        match self {
+            Self::QueryStatus => "WorkerControlStatusQueried",
+            Self::AskAtSafePoint => "WorkerControlSafePointQuestionQueued",
+            Self::AddConstraint => "WorkerControlConstraintQueued",
+            Self::RequestCheckpoint => "WorkerControlCheckpointRequested",
+            Self::RequestSubmissionNow => "WorkerControlSubmissionRequested",
+            Self::Pause => "WorkerControlPauseRequested",
+            Self::Resume => "WorkerControlResumeRequested",
+            Self::Cancel => "WorkerControlCancelRequested",
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::QueryStatus => "query_status",
+            Self::AskAtSafePoint => "ask_at_safe_point",
+            Self::AddConstraint => "add_constraint",
+            Self::RequestCheckpoint => "request_checkpoint",
+            Self::RequestSubmissionNow => "request_submission_now",
+            Self::Pause => "pause",
+            Self::Resume => "resume",
+            Self::Cancel => "cancel",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerControlRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_id: Option<String>,
+    pub task_id: TaskId,
+    pub execution_id: String,
+    pub agent_id: AgentId,
+    pub op: WorkerControlOp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerControlEvent {
+    pub schema_version: u32,
+    pub control_id: String,
+    pub op: WorkerControlOp,
+    pub status: String,
+    pub task_id: TaskId,
+    pub execution_id: String,
+    pub agent_id: AgentId,
+    pub created_at: u64,
+    pub summary: String,
+    pub payload: Value,
+    pub actor: TaskActor,
+    pub watermark: TaskWatermark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerControlProjection {
+    pub schema_version: u32,
+    pub generated_at: u64,
+    pub event: WorkerControlEvent,
+    pub task: TaskSnapshot,
+    pub agent: AgentSnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<AgentLifecycleSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_event: Option<TaskLedgerEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskActor {
     pub agent_id: AgentId,
     pub source: String,
@@ -976,6 +1064,84 @@ impl TaskRuntime {
             agent_board,
             classifications,
         })
+    }
+
+    pub fn apply_worker_control(
+        &self,
+        request: WorkerControlRequest,
+    ) -> Result<WorkerControlProjection, TaskError> {
+        validate_worker_control_request(&request)?;
+        let (task, _agent, _lifecycle) = self.validate_worker_control_target(&request)?;
+        validate_worker_control_transition(&request.op, &task.status)?;
+
+        let task_event = match request.op {
+            WorkerControlOp::Pause => Some(
+                self.pause_task(TaskMutationRequest {
+                    task_id: request.task_id.clone(),
+                    actor: worker_control_task_actor(&request),
+                    watermark: request.watermark.clone(),
+                })?
+                .event,
+            ),
+            WorkerControlOp::Resume => Some(
+                self.resume_task(TaskMutationRequest {
+                    task_id: request.task_id.clone(),
+                    actor: worker_control_task_actor(&request),
+                    watermark: request.watermark.clone(),
+                })?
+                .event,
+            ),
+            WorkerControlOp::Cancel => Some(
+                self.cancel_task(TaskMutationRequest {
+                    task_id: request.task_id.clone(),
+                    actor: worker_control_task_actor(&request),
+                    watermark: request.watermark.clone(),
+                })?
+                .event,
+            ),
+            WorkerControlOp::QueryStatus
+            | WorkerControlOp::AskAtSafePoint
+            | WorkerControlOp::AddConstraint
+            | WorkerControlOp::RequestCheckpoint
+            | WorkerControlOp::RequestSubmissionNow => None,
+        };
+
+        let task = self.query_task(&request.task_id)?;
+        let agent = self.query_agent(&request.agent_id)?;
+        let lifecycle = self.query_agent_lifecycle(&request.agent_id).ok();
+        let event = build_worker_control_event(&request, &task, &agent, lifecycle.as_ref());
+        self.store.append_worker_control_event(&event)?;
+        let projection = WorkerControlProjection {
+            schema_version: 1,
+            generated_at: now_unix_seconds(),
+            event,
+            task,
+            agent,
+            lifecycle,
+            task_event,
+        };
+        self.store.write_worker_control_snapshot(&projection)?;
+        Ok(projection)
+    }
+
+    pub fn query_worker_control_events(
+        &self,
+        task_id: &TaskId,
+        execution_id: &str,
+    ) -> Result<Vec<WorkerControlEvent>, TaskError> {
+        require_text(task_id.as_str(), "task_id")?;
+        require_text(execution_id, "execution_id")?;
+        let exists = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?
+            .tasks
+            .contains_key(task_id);
+        if !exists {
+            return Err(TaskError::TaskNotFound(task_id.as_str().to_owned()));
+        }
+        self.store
+            .load_worker_control_events(task_id, Some(execution_id))
     }
 
     pub fn task_history(&self, task_id: &TaskId) -> Result<Vec<TaskLedgerEvent>, TaskError> {
@@ -1884,6 +2050,51 @@ impl TaskRuntime {
         };
         Ok(entries.into_iter().skip(start_index).take(limit).collect())
     }
+
+    fn validate_worker_control_target(
+        &self,
+        request: &WorkerControlRequest,
+    ) -> Result<(TaskSnapshot, AgentSnapshot, Option<AgentLifecycleSnapshot>), TaskError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        let task = state
+            .tasks
+            .get(&request.task_id)
+            .cloned()
+            .ok_or_else(|| TaskError::TaskNotFound(request.task_id.as_str().to_owned()))?;
+        let agent = state
+            .agents
+            .get(&request.agent_id)
+            .cloned()
+            .ok_or_else(|| TaskError::AgentNotFound(request.agent_id.as_str().to_owned()))?;
+        if is_worker_control_terminal_status(&task.status) {
+            return Err(TaskError::InvalidTransition {
+                from: task.status,
+                event_type: request.op.event_type(),
+            });
+        }
+        let assignee_matches = task
+            .assignee
+            .as_ref()
+            .map(|assignee| assignee.agent_id == request.agent_id)
+            .unwrap_or(false);
+        if !assignee_matches {
+            return Err(TaskError::InvalidTransition {
+                from: task.status,
+                event_type: request.op.event_type(),
+            });
+        }
+        if task.active_execution_id.as_deref() != Some(request.execution_id.as_str()) {
+            return Err(TaskError::InvalidTransition {
+                from: task.status,
+                event_type: request.op.event_type(),
+            });
+        }
+        let lifecycle = state.lifecycle.get(&request.agent_id).cloned();
+        Ok((task, agent, lifecycle))
+    }
 }
 
 const DEFAULT_TASK_LEASE_TTL_SECONDS: u64 = 300;
@@ -2181,6 +2392,59 @@ impl TaskStore {
         )
     }
 
+    fn append_worker_control_event(&self, event: &WorkerControlEvent) -> Result<(), TaskError> {
+        let ledger_path = self.worker_control_ledger_path(&event.task_id);
+        ensure_parent_dir(&ledger_path)?;
+        let line = serde_json::to_string(event).map_err(json_err)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&ledger_path)
+            .map_err(io_err)?;
+        writeln!(file, "{line}").map_err(io_err)
+    }
+
+    fn load_worker_control_events(
+        &self,
+        task_id: &TaskId,
+        execution_id: Option<&str>,
+    ) -> Result<Vec<WorkerControlEvent>, TaskError> {
+        let path = self.worker_control_ledger_path(task_id);
+        if !path.is_file() {
+            return Ok(Vec::new());
+        }
+        let file = fs::File::open(&path).map_err(io_err)?;
+        let reader = BufReader::new(file);
+        let mut events = Vec::new();
+        for line in reader.lines() {
+            let line = line.map_err(io_err)?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event: WorkerControlEvent = serde_json::from_str(&line).map_err(json_err)?;
+            if execution_id
+                .map(|execution_id| event.execution_id == execution_id)
+                .unwrap_or(true)
+            {
+                events.push(event);
+            }
+        }
+        Ok(events)
+    }
+
+    fn write_worker_control_snapshot(
+        &self,
+        projection: &WorkerControlProjection,
+    ) -> Result<(), TaskError> {
+        write_json_atomic(
+            &self.worker_control_snapshot_path(
+                &projection.event.task_id,
+                &projection.event.execution_id,
+            ),
+            projection,
+        )
+    }
+
     fn task_state_dir(&self) -> PathBuf {
         self.runtime_home
             .join("state")
@@ -2221,6 +2485,28 @@ impl TaskStore {
         self.task_runtime_state_dir()
             .join("master-event-cursors")
             .join(format!("{}.json", master_agent_id.as_str()))
+    }
+
+    fn worker_control_state_dir(&self) -> PathBuf {
+        self.task_runtime_state_dir().join("worker-control")
+    }
+
+    fn worker_control_ledger_dir(&self) -> PathBuf {
+        self.runtime_home
+            .join("ledgers")
+            .join("worker-control")
+            .join(self.owner_agent_id.as_str())
+    }
+
+    fn worker_control_snapshot_path(&self, task_id: &TaskId, execution_id: &str) -> PathBuf {
+        self.worker_control_state_dir()
+            .join(task_id.as_str())
+            .join(format!("{execution_id}.json"))
+    }
+
+    fn worker_control_ledger_path(&self, task_id: &TaskId) -> PathBuf {
+        self.worker_control_ledger_dir()
+            .join(format!("{}.jsonl", task_id.as_str()))
     }
 
     fn task_snapshot_path(&self, task_id: &TaskId) -> PathBuf {
@@ -2370,6 +2656,206 @@ fn release_agent_task(agent: &mut AgentSnapshot, task_status: &TaskStatus) {
             agent.queued_tasks = 0;
         }
         _ => {}
+    }
+}
+
+fn validate_worker_control_request(request: &WorkerControlRequest) -> Result<(), TaskError> {
+    require_text(request.task_id.as_str(), "task_id")?;
+    require_text(&request.execution_id, "execution_id")?;
+    require_text(request.agent_id.as_str(), "agent_id")?;
+    if let Some(control_id) = request.control_id.as_ref() {
+        require_text(control_id, "control_id")?;
+    }
+    match request.op {
+        WorkerControlOp::AskAtSafePoint => {
+            require_text(request.question.as_deref().unwrap_or_default(), "question")
+        }
+        WorkerControlOp::AddConstraint => require_text(
+            request.constraint.as_deref().unwrap_or_default(),
+            "constraint",
+        ),
+        WorkerControlOp::QueryStatus
+        | WorkerControlOp::RequestCheckpoint
+        | WorkerControlOp::RequestSubmissionNow
+        | WorkerControlOp::Pause
+        | WorkerControlOp::Resume
+        | WorkerControlOp::Cancel => Ok(()),
+    }
+}
+
+fn validate_worker_control_transition(
+    op: &WorkerControlOp,
+    status: &TaskStatus,
+) -> Result<(), TaskError> {
+    let valid = match op {
+        WorkerControlOp::QueryStatus
+        | WorkerControlOp::AskAtSafePoint
+        | WorkerControlOp::AddConstraint
+        | WorkerControlOp::RequestCheckpoint
+        | WorkerControlOp::RequestSubmissionNow => !is_worker_control_terminal_status(status),
+        WorkerControlOp::Pause => matches!(
+            status,
+            TaskStatus::Assigned | TaskStatus::Running | TaskStatus::Rejected
+        ),
+        WorkerControlOp::Resume => matches!(
+            status,
+            TaskStatus::Paused
+                | TaskStatus::Blocked
+                | TaskStatus::Rejected
+                | TaskStatus::Assigned
+                | TaskStatus::Interrupted
+        ),
+        WorkerControlOp::Cancel => !matches!(
+            status,
+            TaskStatus::Closed | TaskStatus::Cancelled | TaskStatus::Approved
+        ),
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(TaskError::InvalidTransition {
+            from: status.clone(),
+            event_type: op.event_type(),
+        })
+    }
+}
+
+fn is_worker_control_terminal_status(status: &TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Approved | TaskStatus::Closed | TaskStatus::Cancelled | TaskStatus::Failed
+    )
+}
+
+fn build_worker_control_event(
+    request: &WorkerControlRequest,
+    task: &TaskSnapshot,
+    agent: &AgentSnapshot,
+    lifecycle: Option<&AgentLifecycleSnapshot>,
+) -> WorkerControlEvent {
+    let status = worker_control_event_status(&request.op);
+    let payload = worker_control_payload(request, task, agent, lifecycle);
+    WorkerControlEvent {
+        schema_version: 1,
+        control_id: request
+            .control_id
+            .clone()
+            .unwrap_or_else(|| generated_worker_control_id(task, &request.execution_id)),
+        op: request.op.clone(),
+        status: status.to_owned(),
+        task_id: request.task_id.clone(),
+        execution_id: request.execution_id.clone(),
+        agent_id: request.agent_id.clone(),
+        created_at: now_unix_seconds(),
+        summary: worker_control_summary(request),
+        payload,
+        actor: request.actor.clone(),
+        watermark: request.watermark.clone(),
+    }
+}
+
+fn worker_control_event_status(op: &WorkerControlOp) -> &'static str {
+    match op {
+        WorkerControlOp::QueryStatus => "observed",
+        WorkerControlOp::AskAtSafePoint
+        | WorkerControlOp::AddConstraint
+        | WorkerControlOp::RequestCheckpoint
+        | WorkerControlOp::RequestSubmissionNow => "queued",
+        WorkerControlOp::Pause | WorkerControlOp::Resume | WorkerControlOp::Cancel => "applied",
+    }
+}
+
+fn worker_control_summary(request: &WorkerControlRequest) -> String {
+    match request.op {
+        WorkerControlOp::QueryStatus => format!(
+            "queried status for task {} execution {}",
+            request.task_id.as_str(),
+            request.execution_id
+        ),
+        WorkerControlOp::AskAtSafePoint => format!(
+            "queued safe-point question for task {}",
+            request.task_id.as_str()
+        ),
+        WorkerControlOp::AddConstraint => {
+            format!("queued constraint for task {}", request.task_id.as_str())
+        }
+        WorkerControlOp::RequestCheckpoint => {
+            format!("requested checkpoint for task {}", request.task_id.as_str())
+        }
+        WorkerControlOp::RequestSubmissionNow => {
+            format!("requested submission for task {}", request.task_id.as_str())
+        }
+        WorkerControlOp::Pause => format!("requested pause for task {}", request.task_id.as_str()),
+        WorkerControlOp::Resume => {
+            format!("requested resume for task {}", request.task_id.as_str())
+        }
+        WorkerControlOp::Cancel => {
+            format!("requested cancel for task {}", request.task_id.as_str())
+        }
+    }
+}
+
+fn worker_control_payload(
+    request: &WorkerControlRequest,
+    task: &TaskSnapshot,
+    agent: &AgentSnapshot,
+    lifecycle: Option<&AgentLifecycleSnapshot>,
+) -> Value {
+    let mut payload = json!({
+        "op": request.op.as_str(),
+        "task_status": task.status.clone(),
+        "active_execution_id": task.active_execution_id.clone(),
+        "agent_status": agent.status.clone(),
+        "agent_current_task_id": agent.current_task_id.as_ref().map(TaskId::as_str),
+        "agent_current_execution_id": agent.current_execution_id.clone(),
+    });
+    if let Some(lifecycle) = lifecycle
+        && let Some(map) = payload.as_object_mut()
+    {
+        map.insert("lifecycle_state".to_owned(), json!(lifecycle.state));
+        map.insert(
+            "lifecycle_elapsed_ms".to_owned(),
+            json!(lifecycle.elapsed_ms),
+        );
+        map.insert(
+            "lifecycle_activity".to_owned(),
+            lifecycle
+                .current_activity
+                .as_ref()
+                .map(|activity| json!(activity))
+                .unwrap_or(Value::Null),
+        );
+    }
+    if let Some(map) = payload.as_object_mut() {
+        if let Some(question) = request.question.as_ref() {
+            map.insert("question".to_owned(), json!(question));
+        }
+        if let Some(constraint) = request.constraint.as_ref() {
+            map.insert("constraint".to_owned(), json!(constraint));
+        }
+        if let Some(note) = request.note.as_ref() {
+            map.insert("note".to_owned(), json!(note));
+        }
+    }
+    payload
+}
+
+fn generated_worker_control_id(task: &TaskSnapshot, execution_id: &str) -> String {
+    format!(
+        "wctl-{}-{}-{}",
+        task.task_id.as_str(),
+        execution_id,
+        now_unix_nanos()
+    )
+}
+
+fn worker_control_task_actor(request: &WorkerControlRequest) -> TaskActor {
+    TaskActor {
+        agent_id: request.agent_id.clone(),
+        source: "worker.control".to_owned(),
+        session_id: request.actor.session_id.clone(),
+        turn_id: request.actor.turn_id.clone(),
+        trace_id: request.actor.trace_id.clone(),
     }
 }
 
@@ -3238,6 +3724,13 @@ fn now_unix_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn now_unix_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
 }
 
 fn io_err(err: std::io::Error) -> TaskError {
@@ -5036,6 +5529,400 @@ mod tests {
     }
 
     #[test]
+    fn worker_control_query_status_persists_and_recovers() {
+        let runtime_home = temp_runtime_home("worker-control-query-status");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-control-query");
+        let execution_id = "exec-worker-control-query";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-control-query",
+            execution_id,
+            50,
+        );
+
+        let projection = runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                execution_id,
+                WorkerControlOp::QueryStatus,
+                Some("control-query-1"),
+            ))
+            .expect("query status");
+
+        assert_eq!(projection.event.status, "observed");
+        assert_eq!(projection.task.status, TaskStatus::Running);
+        assert_eq!(projection.agent.agent_id, worker_id);
+        assert_eq!(
+            projection
+                .event
+                .payload
+                .get("task_status")
+                .and_then(Value::as_str),
+            Some("running")
+        );
+        assert!(projection.task_event.is_none());
+
+        let recovered = TaskRuntime::boot(&runtime_home, owner_id).expect("recover");
+        let events = recovered
+            .query_worker_control_events(&task.task_id, execution_id)
+            .expect("control events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].control_id, "control-query-1");
+        assert_eq!(events[0].op, WorkerControlOp::QueryStatus);
+        assert!(
+            runtime_home
+                .join("state/task-runtime/master/worker-control/task-worker-control-query/exec-worker-control-query.json")
+                .is_file()
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn worker_control_safe_point_events_queue_without_task_mutation() {
+        let runtime_home = temp_runtime_home("worker-control-safe-point");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-control-safe");
+        let execution_id = "exec-worker-control-safe";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-control-safe",
+            execution_id,
+            50,
+        );
+        let before = runtime.query_task(&task.task_id).expect("before");
+
+        let mut ask = sample_worker_control_request(
+            &owner_id,
+            &worker_id,
+            &task.task_id,
+            execution_id,
+            WorkerControlOp::AskAtSafePoint,
+            Some("control-safe-ask"),
+        );
+        ask.question = Some("What is blocking this task?".to_owned());
+        runtime.apply_worker_control(ask).expect("ask");
+
+        let mut constraint = sample_worker_control_request(
+            &owner_id,
+            &worker_id,
+            &task.task_id,
+            execution_id,
+            WorkerControlOp::AddConstraint,
+            Some("control-safe-constraint"),
+        );
+        constraint.constraint = Some("Do not change public API".to_owned());
+        runtime
+            .apply_worker_control(constraint)
+            .expect("constraint");
+
+        runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                execution_id,
+                WorkerControlOp::RequestCheckpoint,
+                Some("control-safe-checkpoint"),
+            ))
+            .expect("checkpoint");
+        runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                execution_id,
+                WorkerControlOp::RequestSubmissionNow,
+                Some("control-safe-submit"),
+            ))
+            .expect("submission now");
+
+        let after = runtime.query_task(&task.task_id).expect("after");
+        assert_eq!(after.status, TaskStatus::Running);
+        assert_eq!(after.last_event_seq, before.last_event_seq);
+        let events = runtime
+            .query_worker_control_events(&task.task_id, execution_id)
+            .expect("events");
+        assert_eq!(events.len(), 4);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.control_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "control-safe-ask",
+                "control-safe-constraint",
+                "control-safe-checkpoint",
+                "control-safe-submit"
+            ]
+        );
+        assert!(events.iter().all(|event| event.status == "queued"));
+        assert!(events.iter().any(|event| {
+            event.payload.get("question").and_then(Value::as_str)
+                == Some("What is blocking this task?")
+        }));
+        assert!(events.iter().any(|event| {
+            event.payload.get("constraint").and_then(Value::as_str)
+                == Some("Do not change public API")
+        }));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn worker_control_pause_resume_cancel_write_task_consequences() {
+        let runtime_home = temp_runtime_home("worker-control-task-consequences");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-control-consequence");
+        let execution_id = "exec-worker-control-consequence";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-control-consequence",
+            execution_id,
+            50,
+        );
+
+        let paused = runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                execution_id,
+                WorkerControlOp::Pause,
+                Some("control-consequence-pause"),
+            ))
+            .expect("pause");
+        assert_eq!(paused.event.status, "applied");
+        assert_eq!(paused.task.status, TaskStatus::Paused);
+        assert_eq!(
+            paused
+                .task_event
+                .as_ref()
+                .map(|event| event.event_type.as_str()),
+            Some("TaskPaused")
+        );
+
+        let resumed = runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                execution_id,
+                WorkerControlOp::Resume,
+                Some("control-consequence-resume"),
+            ))
+            .expect("resume");
+        assert_eq!(resumed.task.status, TaskStatus::Running);
+        assert_eq!(
+            resumed.task.active_execution_id.as_deref(),
+            Some(execution_id)
+        );
+        assert_eq!(
+            resumed
+                .task_event
+                .as_ref()
+                .map(|event| event.event_type.as_str()),
+            Some("TaskResumed")
+        );
+
+        let cancelled = runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                execution_id,
+                WorkerControlOp::Cancel,
+                Some("control-consequence-cancel"),
+            ))
+            .expect("cancel");
+        assert_eq!(cancelled.task.status, TaskStatus::Cancelled);
+        assert_eq!(
+            cancelled
+                .task_event
+                .as_ref()
+                .map(|event| event.event_type.as_str()),
+            Some("TaskCancelled")
+        );
+
+        let events = runtime
+            .query_worker_control_events(&task.task_id, execution_id)
+            .expect("control events");
+        assert_eq!(events.len(), 3);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.control_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "control-consequence-pause",
+                "control-consequence-resume",
+                "control-consequence-cancel"
+            ]
+        );
+        let history = runtime.task_history(&task.task_id).expect("history");
+        for required in ["TaskPaused", "TaskResumed", "TaskCancelled"] {
+            assert!(
+                history.iter().any(|event| event.event_type == required),
+                "missing {required}"
+            );
+        }
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn worker_control_rejects_wrong_execution_without_mutation() {
+        let runtime_home = temp_runtime_home("worker-control-wrong-exec");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-control-wrong-exec");
+        let execution_id = "exec-worker-control-correct";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-control-wrong-exec",
+            execution_id,
+            50,
+        );
+        let before = runtime.query_task(&task.task_id).expect("before");
+
+        let err = runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                "exec-worker-control-wrong",
+                WorkerControlOp::QueryStatus,
+                Some("control-wrong-exec"),
+            ))
+            .expect_err("wrong execution should fail");
+
+        assert!(matches!(err, TaskError::InvalidTransition { .. }));
+        let after = runtime.query_task(&task.task_id).expect("after");
+        assert_eq!(after.status, before.status);
+        assert_eq!(after.last_event_seq, before.last_event_seq);
+        let events = runtime
+            .query_worker_control_events(&task.task_id, execution_id)
+            .expect("control events");
+        assert!(events.is_empty());
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn worker_control_rejects_terminal_task_without_event() {
+        let runtime_home = temp_runtime_home("worker-control-terminal");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-control-terminal");
+        let execution_id = "exec-worker-control-terminal";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-control-terminal",
+            execution_id,
+            50,
+        );
+        runtime
+            .cancel_task(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("cancel task");
+        let before = runtime.query_task(&task.task_id).expect("before");
+
+        let err = runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                execution_id,
+                WorkerControlOp::QueryStatus,
+                Some("control-terminal-query"),
+            ))
+            .expect_err("terminal control should fail");
+
+        assert!(matches!(
+            err,
+            TaskError::InvalidTransition {
+                from: TaskStatus::Cancelled,
+                ..
+            }
+        ));
+        let after = runtime.query_task(&task.task_id).expect("after");
+        assert_eq!(after.last_event_seq, before.last_event_seq);
+        let events = runtime
+            .query_worker_control_events(&task.task_id, execution_id)
+            .expect("control events");
+        assert!(events.is_empty());
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn worker_control_rejects_missing_question_and_constraint() {
+        let runtime_home = temp_runtime_home("worker-control-missing-fields");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-control-missing-fields");
+        let execution_id = "exec-worker-control-missing-fields";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-control-missing-fields",
+            execution_id,
+            50,
+        );
+
+        let ask_err = runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                execution_id,
+                WorkerControlOp::AskAtSafePoint,
+                Some("control-missing-question"),
+            ))
+            .expect_err("missing question");
+        assert_eq!(ask_err, TaskError::MissingField("question"));
+
+        let constraint_err = runtime
+            .apply_worker_control(sample_worker_control_request(
+                &owner_id,
+                &worker_id,
+                &task.task_id,
+                execution_id,
+                WorkerControlOp::AddConstraint,
+                Some("control-missing-constraint"),
+            ))
+            .expect_err("missing constraint");
+        assert_eq!(constraint_err, TaskError::MissingField("constraint"));
+
+        let events = runtime
+            .query_worker_control_events(&task.task_id, execution_id)
+            .expect("control events");
+        assert!(events.is_empty());
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
     fn agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked() {
         let runtime_home = temp_runtime_home("agent-lifecycle-reducer");
         let agent_id = AgentId::new("master");
@@ -5188,6 +6075,28 @@ mod tests {
             .expect("claim worker task")
             .task
             .expect("claimed worker task")
+    }
+
+    fn sample_worker_control_request(
+        owner_id: &AgentId,
+        worker_id: &AgentId,
+        task_id: &TaskId,
+        execution_id: &str,
+        op: WorkerControlOp,
+        control_id: Option<&str>,
+    ) -> WorkerControlRequest {
+        WorkerControlRequest {
+            control_id: control_id.map(ToOwned::to_owned),
+            task_id: task_id.clone(),
+            execution_id: execution_id.to_owned(),
+            agent_id: worker_id.clone(),
+            op,
+            question: None,
+            constraint: None,
+            note: None,
+            actor: sample_actor(owner_id.clone()),
+            watermark: sample_watermark(),
+        }
     }
 
     fn temp_runtime_home(name: &str) -> PathBuf {

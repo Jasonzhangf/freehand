@@ -142,6 +142,10 @@ pub enum UiCommand {
     QueryTaskHistory {
         task_id: String,
     },
+    QueryWorkerControl {
+        task_id: String,
+        execution_id: String,
+    },
     QueryErrorCenterEvents {
         session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -193,6 +197,9 @@ pub enum UiCommand {
         include_terminal: bool,
         #[serde(default)]
         replay_from_start: bool,
+    },
+    WorkerControl {
+        control: UiWorkerControlCommand,
     },
     QueryNodeStatus {
         node_id: String,
@@ -772,6 +779,53 @@ pub struct UiSchedulerTickCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiWorkerControlCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_id: Option<String>,
+    pub task_id: String,
+    pub execution_id: String,
+    pub agent_id: AgentId,
+    pub op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiWorkerControlEventProjection {
+    pub control_id: String,
+    pub op: String,
+    pub status: String,
+    pub task_id: String,
+    pub execution_id: String,
+    pub agent_id: AgentId,
+    pub created_at: u64,
+    pub summary: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiWorkerControlProjection {
+    pub source_agent_id: AgentId,
+    pub generated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<UiWorkerControlEventProjection>,
+    #[serde(default)]
+    pub events: Vec<UiWorkerControlEventProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<UiTaskSnapshotProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<UiAgentSnapshotProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<UiAgentLifecycleProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_event: Option<UiTaskLedgerEventProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiProjection {
     Turn(UiTurnProjection),
     NodeStatus(NodeStatusSnapshot),
@@ -820,6 +874,7 @@ pub enum UiQueryResult {
     AgentLifecycle(UiAgentLifecycleProjection),
     EventInbox(UiTaskEventInboxProjection),
     MasterPoll(UiMasterPollProjection),
+    WorkerControl(Box<UiWorkerControlProjection>),
     TaskHistory(UiTaskHistoryProjection),
     ErrorCenterEvents(UiErrorCenterEventListProjection),
     ConfigStatus(UiConfigStatusProjection),
@@ -1019,6 +1074,18 @@ pub enum UiProtocolError {
     EmptyTaskReviewRejection,
     #[error("task claim requires non-empty execution id")]
     EmptyTaskExecutionId,
+    #[error("worker-control command requires non-empty control id when provided")]
+    EmptyWorkerControlId,
+    #[error("worker-control command requires non-empty op")]
+    EmptyWorkerControlOp,
+    #[error("worker-control command has unknown op `{0}`")]
+    UnknownWorkerControlOp(String),
+    #[error("worker-control ask_at_safe_point requires non-empty question")]
+    EmptyWorkerControlQuestion,
+    #[error("worker-control add_constraint requires non-empty constraint")]
+    EmptyWorkerControlConstraint,
+    #[error("worker-control command requires non-empty note when provided")]
+    EmptyWorkerControlNote,
     #[error("event cursor must be non-empty when provided")]
     EmptyEventCursor,
     #[error("master poll replay_from_start cannot be combined with after_cursor")]
@@ -1520,7 +1587,9 @@ impl UiProtocolState {
             | UiCommand::QueryAgentBoard
             | UiCommand::QueryAgentLifecycle { .. }
             | UiCommand::QueryTaskHistory { .. }
+            | UiCommand::QueryWorkerControl { .. }
             | UiCommand::RunMasterPoll { .. }
+            | UiCommand::WorkerControl { .. }
             | UiCommand::QueryConfigStatus
             | UiCommand::QueryErrorCenterEvents { .. } => Err(UiProtocolError::StreamKindMismatch),
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
@@ -1639,6 +1708,12 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::QueryTaskHistory { task_id } if task_id.trim().is_empty() => {
             Err(UiProtocolError::EmptyTaskId)
         }
+        UiCommand::QueryWorkerControl { task_id, .. } if task_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskId)
+        }
+        UiCommand::QueryWorkerControl { execution_id, .. } if execution_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTaskExecutionId)
+        }
         UiCommand::QueryEventInbox {
             after_cursor: Some(after_cursor),
             ..
@@ -1715,6 +1790,7 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         {
             Err(UiProtocolError::EmptyTaskId)
         }
+        UiCommand::WorkerControl { control } => validate_worker_control_command(control),
         UiCommand::UpdateProviderConfig { update } if update.agent_name.trim().is_empty() => {
             Err(UiProtocolError::EmptyConfigAgentName)
         }
@@ -1748,6 +1824,68 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
     }
 }
 
+fn validate_worker_control_command(
+    control: &UiWorkerControlCommand,
+) -> Result<(), UiProtocolError> {
+    if control
+        .control_id
+        .as_ref()
+        .is_some_and(|control_id| control_id.trim().is_empty())
+    {
+        return Err(UiProtocolError::EmptyWorkerControlId);
+    }
+    if control.task_id.trim().is_empty() {
+        return Err(UiProtocolError::EmptyTaskId);
+    }
+    if control.execution_id.trim().is_empty() {
+        return Err(UiProtocolError::EmptyTaskExecutionId);
+    }
+    if control.agent_id.as_str().trim().is_empty() {
+        return Err(UiProtocolError::EmptyTaskAgentId);
+    }
+    let op = control.op.trim();
+    if op.is_empty() {
+        return Err(UiProtocolError::EmptyWorkerControlOp);
+    }
+    if !matches!(
+        op,
+        "query_status"
+            | "ask_at_safe_point"
+            | "add_constraint"
+            | "request_checkpoint"
+            | "request_submission_now"
+            | "pause"
+            | "resume"
+            | "cancel"
+    ) {
+        return Err(UiProtocolError::UnknownWorkerControlOp(control.op.clone()));
+    }
+    if control
+        .question
+        .as_ref()
+        .is_some_and(|question| question.trim().is_empty())
+        || (op == "ask_at_safe_point" && control.question.is_none())
+    {
+        return Err(UiProtocolError::EmptyWorkerControlQuestion);
+    }
+    if control
+        .constraint
+        .as_ref()
+        .is_some_and(|constraint| constraint.trim().is_empty())
+        || (op == "add_constraint" && control.constraint.is_none())
+    {
+        return Err(UiProtocolError::EmptyWorkerControlConstraint);
+    }
+    if control
+        .note
+        .as_ref()
+        .is_some_and(|note| note.trim().is_empty())
+    {
+        return Err(UiProtocolError::EmptyWorkerControlNote);
+    }
+    Ok(())
+}
+
 pub fn accept_command_ingress(command: &UiCommand) -> Result<UiCommandIngressAck, UiProtocolError> {
     validate_command(command)?;
     if !is_command_ingress_kind(command) {
@@ -1776,6 +1914,12 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptyTaskReviewSummary => "empty_task_review_summary",
         UiProtocolError::EmptyTaskReviewRejection => "empty_task_review_rejection",
         UiProtocolError::EmptyTaskExecutionId => "empty_task_execution_id",
+        UiProtocolError::EmptyWorkerControlId => "empty_worker_control_id",
+        UiProtocolError::EmptyWorkerControlOp => "empty_worker_control_op",
+        UiProtocolError::UnknownWorkerControlOp(_) => "unknown_worker_control_op",
+        UiProtocolError::EmptyWorkerControlQuestion => "empty_worker_control_question",
+        UiProtocolError::EmptyWorkerControlConstraint => "empty_worker_control_constraint",
+        UiProtocolError::EmptyWorkerControlNote => "empty_worker_control_note",
         UiProtocolError::EmptyEventCursor => "empty_event_cursor",
         UiProtocolError::ConflictingMasterPollCursorMode => "conflicting_master_poll_cursor_mode",
         UiProtocolError::EmptyTaskAgentId => "empty_task_agent_id",
@@ -2366,6 +2510,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryAgentBoard => "query_agent_board",
         UiCommand::QueryAgentLifecycle { .. } => "query_agent_lifecycle",
         UiCommand::QueryTaskHistory { .. } => "query_task_history",
+        UiCommand::QueryWorkerControl { .. } => "query_worker_control",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
         UiCommand::CreateTask { .. } => "create_task",
@@ -2379,6 +2524,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::ApplyExecutionFact { .. } => "apply_execution_fact",
         UiCommand::RunSchedulerTick { .. } => "run_scheduler_tick",
         UiCommand::RunMasterPoll { .. } => "run_master_poll",
+        UiCommand::WorkerControl { .. } => "worker_control",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
         UiCommand::QueryDebugState { .. } => "query_debug_state",
@@ -2413,6 +2559,7 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::ApplyExecutionFact { .. }
             | UiCommand::RunSchedulerTick { .. }
             | UiCommand::RunMasterPoll { .. }
+            | UiCommand::WorkerControl { .. }
             | UiCommand::SendDirectMessageToSlave { .. }
             | UiCommand::RewindCheckpoint { .. }
             | UiCommand::CancelTurn { .. }
@@ -2450,6 +2597,7 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         | UiCommand::ApplyExecutionFact { .. }
         | UiCommand::RunSchedulerTick { .. }
         | UiCommand::RunMasterPoll { .. } => ("task.orchestration", "crates/freehand-task"),
+        UiCommand::WorkerControl { .. } => ("worker.control", "crates/freehand-task"),
         UiCommand::SendDirectMessageToSlave { .. } => ("node.master-slave", "crates/freehand-node"),
         _ => ("ui.protocol", "crates/freehand-ui-protocol"),
     }
@@ -2972,6 +3120,177 @@ mod tests {
         assert!(encoded.contains("MasterPoll"));
         assert!(encoded.contains("review_ready"));
         let decoded: UiAdpResponse = serde_json::from_str(&encoded).expect("poll result decode");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn worker_control_command_validates_and_routes_to_worker_control() {
+        let command = UiCommand::WorkerControl {
+            control: UiWorkerControlCommand {
+                control_id: Some("wctl-phase2c-1".to_owned()),
+                task_id: "task-phase2c".to_owned(),
+                execution_id: "exec-phase2c".to_owned(),
+                agent_id: AgentId::new("worker-phase2c"),
+                op: "ask_at_safe_point".to_owned(),
+                question: Some("what is blocking the task?".to_owned()),
+                constraint: None,
+                note: Some("master runtime query".to_owned()),
+            },
+        };
+        validate_command(&command).expect("valid worker control command");
+        let envelope = build_command_dispatch_envelope(&command).expect("worker control envelope");
+        assert_eq!(envelope.ingress.command_kind, "worker_control");
+        assert_eq!(envelope.target_feature_id, "worker.control");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-task");
+
+        let query = UiCommand::QueryWorkerControl {
+            task_id: "task-phase2c".to_owned(),
+            execution_id: "exec-phase2c".to_owned(),
+        };
+        validate_command(&query).expect("valid worker control query");
+        assert_eq!(
+            accept_command_ingress(&query).expect_err("query cannot enter command ingress"),
+            UiProtocolError::IngressCommandKindMismatch
+        );
+        assert_eq!(
+            UiProtocolState::default()
+                .query(&query)
+                .expect_err("runtime-owned query"),
+            UiProtocolError::StreamKindMismatch
+        );
+    }
+
+    #[test]
+    fn worker_control_command_rejects_missing_fields() {
+        let base = UiWorkerControlCommand {
+            control_id: Some("wctl-phase2c-1".to_owned()),
+            task_id: "task-phase2c".to_owned(),
+            execution_id: "exec-phase2c".to_owned(),
+            agent_id: AgentId::new("worker-phase2c"),
+            op: "query_status".to_owned(),
+            question: None,
+            constraint: None,
+            note: None,
+        };
+
+        let mut missing_task = base.clone();
+        missing_task.task_id = " ".to_owned();
+        let err = validate_command(&UiCommand::WorkerControl {
+            control: missing_task,
+        })
+        .expect_err("missing task id");
+        assert_eq!(err, UiProtocolError::EmptyTaskId);
+
+        let mut missing_execution = base.clone();
+        missing_execution.execution_id = " ".to_owned();
+        let err = validate_command(&UiCommand::WorkerControl {
+            control: missing_execution,
+        })
+        .expect_err("missing execution id");
+        assert_eq!(err, UiProtocolError::EmptyTaskExecutionId);
+
+        let mut missing_control_id = base.clone();
+        missing_control_id.control_id = Some(" ".to_owned());
+        let err = validate_command(&UiCommand::WorkerControl {
+            control: missing_control_id,
+        })
+        .expect_err("missing control id");
+        assert_eq!(err, UiProtocolError::EmptyWorkerControlId);
+
+        let mut missing_op = base.clone();
+        missing_op.op = " ".to_owned();
+        let err = validate_command(&UiCommand::WorkerControl {
+            control: missing_op,
+        })
+        .expect_err("missing op");
+        assert_eq!(err, UiProtocolError::EmptyWorkerControlOp);
+
+        let mut unknown_op = base.clone();
+        unknown_op.op = "teleport".to_owned();
+        let err = validate_command(&UiCommand::WorkerControl {
+            control: unknown_op,
+        })
+        .expect_err("unknown op");
+        assert_eq!(
+            err,
+            UiProtocolError::UnknownWorkerControlOp("teleport".to_owned())
+        );
+        assert_eq!(protocol_rejection(err).code, "unknown_worker_control_op");
+
+        let mut missing_question = base.clone();
+        missing_question.op = "ask_at_safe_point".to_owned();
+        let err = validate_command(&UiCommand::WorkerControl {
+            control: missing_question,
+        })
+        .expect_err("missing safe-point question");
+        assert_eq!(err, UiProtocolError::EmptyWorkerControlQuestion);
+
+        let mut missing_constraint = base.clone();
+        missing_constraint.op = "add_constraint".to_owned();
+        let err = validate_command(&UiCommand::WorkerControl {
+            control: missing_constraint,
+        })
+        .expect_err("missing constraint");
+        assert_eq!(err, UiProtocolError::EmptyWorkerControlConstraint);
+
+        let err = validate_command(&UiCommand::QueryWorkerControl {
+            task_id: "task-phase2c".to_owned(),
+            execution_id: " ".to_owned(),
+        })
+        .expect_err("query missing execution");
+        assert_eq!(err, UiProtocolError::EmptyTaskExecutionId);
+    }
+
+    #[test]
+    fn worker_control_adp_roundtrip_carries_projection() {
+        let request = UiAdpRequest::Command {
+            request_id: "phase2c-worker-control-command".to_owned(),
+            command: UiCommand::WorkerControl {
+                control: UiWorkerControlCommand {
+                    control_id: Some("wctl-phase2c-1".to_owned()),
+                    task_id: "task-phase2c".to_owned(),
+                    execution_id: "exec-phase2c".to_owned(),
+                    agent_id: AgentId::new("worker-phase2c"),
+                    op: "query_status".to_owned(),
+                    question: None,
+                    constraint: None,
+                    note: None,
+                },
+            },
+        };
+        let encoded = serde_json::to_string(&request).expect("worker control request json");
+        assert!(encoded.contains("WorkerControl"));
+        assert!(encoded.contains("query_status"));
+        let decoded: UiAdpRequest = serde_json::from_str(&encoded).expect("request decode");
+        assert_eq!(decoded, request);
+
+        let response = UiAdpResponse::QueryResult {
+            request_id: "phase2c-worker-control-query".to_owned(),
+            result: UiQueryResult::WorkerControl(Box::new(UiWorkerControlProjection {
+                source_agent_id: AgentId::new("master"),
+                generated_at: 10,
+                event: Some(UiWorkerControlEventProjection {
+                    control_id: "wctl-phase2c-1".to_owned(),
+                    op: "query_status".to_owned(),
+                    status: "observed".to_owned(),
+                    task_id: "task-phase2c".to_owned(),
+                    execution_id: "exec-phase2c".to_owned(),
+                    agent_id: AgentId::new("worker-phase2c"),
+                    created_at: 10,
+                    summary: "queried status".to_owned(),
+                    payload: serde_json::json!({"task_status": "running"}),
+                }),
+                events: Vec::new(),
+                task: None,
+                agent: None,
+                lifecycle: None,
+                task_event: None,
+            })),
+        };
+        let encoded = serde_json::to_string(&response).expect("worker control response json");
+        assert!(encoded.contains("WorkerControl"));
+        assert!(encoded.contains("observed"));
+        let decoded: UiAdpResponse = serde_json::from_str(&encoded).expect("response decode");
         assert_eq!(decoded, response);
     }
 

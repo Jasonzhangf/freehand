@@ -11,7 +11,7 @@ use freehand_ui_protocol::{
     UiModelRequestKind, UiProviderConfigUpdate, UiQueryResult, UiSchedulerTickCommand,
     UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
     UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxProjection, UiTaskReviewCommand,
-    UiTaskReviewRejectionCommand,
+    UiTaskReviewRejectionCommand, UiWorkerControlCommand, UiWorkerControlProjection,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
@@ -64,6 +64,9 @@ fn run() -> Result<String, String> {
     if flag == "master-poll-foundation-sample" {
         return run_master_poll_foundation_sample(args.collect());
     }
+    if flag == "worker-control-foundation-sample" {
+        return run_worker_control_foundation_sample(args.collect());
+    }
     if flag == "adp-session-query" {
         return run_adp_session_query(args.collect());
     }
@@ -87,7 +90,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
                 .to_owned(),
         );
     }
@@ -383,6 +386,62 @@ fn run_master_poll_foundation_sample(args: Vec<String>) -> Result<String, String
         .build()
         .map_err(|err| err.to_string())?;
     runtime.block_on(run_master_poll_foundation_sample_async(url, verify))
+}
+
+fn run_worker_control_foundation_sample(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]"
+            .to_owned();
+    let mut url = None::<String>;
+    let mut task_id = None::<String>;
+    let mut execution = None::<String>;
+    let mut agent = None::<String>;
+    let mut control = None::<String>;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--url" if index + 1 < args.len() => {
+                url = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--verify-task" if index + 1 < args.len() => {
+                task_id = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--execution" if index + 1 < args.len() => {
+                execution = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--agent" if index + 1 < args.len() => {
+                agent = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--control" if index + 1 < args.len() => {
+                control = Some(args[index + 1].clone());
+                index += 2;
+            }
+            _ => return Err(usage),
+        }
+    }
+    let url = url.ok_or_else(|| usage.clone())?;
+    let verify = match (task_id, execution, agent, control) {
+        (None, None, None, None) => None,
+        (Some(task_id), Some(execution_id), Some(agent_id), Some(control_id)) => {
+            Some(WorkerControlVerifyIds {
+                task_id,
+                execution_id,
+                agent_id,
+                control_id,
+            })
+        }
+        _ => return Err(usage),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_worker_control_foundation_sample_async(url, verify))
 }
 
 fn run_adp_session_query(args: Vec<String>) -> Result<String, String> {
@@ -2716,6 +2775,328 @@ async fn verify_master_poll_foundation_truth(
     })
 }
 
+#[derive(Debug, Clone)]
+struct WorkerControlVerifyIds {
+    task_id: String,
+    execution_id: String,
+    agent_id: String,
+    control_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct WorkerControlFoundationEvidence {
+    task_status: String,
+    control_count: usize,
+    event_statuses: Vec<String>,
+    task_history_events: Vec<String>,
+}
+
+async fn run_worker_control_foundation_sample_async(
+    url: String,
+    verify: Option<WorkerControlVerifyIds>,
+) -> Result<String, String> {
+    if let Some(ids) = verify {
+        let evidence = verify_worker_control_foundation_truth(&url, &ids).await?;
+        return Ok(format!(
+            "worker_control_foundation_verify_ok url={} task={} execution={} agent={} control={} status={} control_events={} event_statuses={} task_events={}",
+            url,
+            ids.task_id,
+            ids.execution_id,
+            ids.agent_id,
+            ids.control_id,
+            evidence.task_status,
+            evidence.control_count,
+            evidence.event_statuses.join(","),
+            evidence.task_history_events.join(",")
+        ));
+    }
+
+    let session_id = SessionId::new(format!("cli-worker-control-{}", live_id_stamp()?));
+    let token = format!("FHPHASE2C{}", live_id_stamp()?);
+    let task_id = format!("task-cli-worker-control-{token}");
+    let execution_id = format!("exec-cli-worker-control-{token}");
+    let worker_id = format!("worker-cli-worker-control-{token}");
+    let turn_id = TurnId::new(format!("turn-cli-worker-control-{token}"));
+    let worker_agent = AgentId::new(worker_id.clone());
+    let cancel_control_id = format!("wctl-cli-worker-control-cancel-{token}");
+    let mut seen = Vec::new();
+
+    for (request_id, command) in [
+        (
+            "cli-worker-control-create-agent",
+            UiCommand::CreateTaskAgent {
+                agent: UiTaskAgentCreateCommand {
+                    agent_id: worker_agent.clone(),
+                    capabilities: vec!["code_edit".to_owned(), "test_run".to_owned()],
+                },
+            },
+        ),
+        (
+            "cli-worker-control-create-task",
+            UiCommand::CreateTask {
+                task: UiTaskCreateCommand {
+                    task_id: Some(task_id.clone()),
+                    title: format!("Worker control {token}"),
+                    content: format!("Phase2C worker control task {token}"),
+                    goal: "prove safe-point runtime control channel".to_owned(),
+                    deliverables: vec!["worker control ledger".to_owned()],
+                    acceptance: vec!["control events survive restart".to_owned()],
+                    priority: 98,
+                    target_cwd: None,
+                    session_id: Some(session_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                    dispatch: Some(UiTaskDispatchCommand::None),
+                },
+            },
+        ),
+        (
+            "cli-worker-control-assign",
+            UiCommand::AssignTask {
+                assignment: UiTaskAssignCommand {
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                },
+            },
+        ),
+        (
+            "cli-worker-control-claim",
+            UiCommand::ClaimNextTask {
+                claim: UiTaskClaimCommand {
+                    agent_id: worker_agent.clone(),
+                    execution_id: execution_id.clone(),
+                    ttl_seconds: Some(300),
+                },
+            },
+        ),
+        (
+            "cli-worker-control-running",
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_agent.clone(),
+                    turn_id: Some(turn_id),
+                    kind: UiExecutionFactKind::Running {
+                        phase: "phase2c_running".to_owned(),
+                        summary: format!("worker running {token}"),
+                        evidence: vec![format!("execution {execution_id}")],
+                    },
+                },
+            },
+        ),
+    ] {
+        seen.push(send_adp_command_receipt(&url, request_id, command).await?);
+    }
+
+    let controls = [
+        (
+            "cli-worker-control-query",
+            format!("wctl-cli-worker-control-query-{token}"),
+            "query_status",
+            None,
+            None,
+        ),
+        (
+            "cli-worker-control-ask",
+            format!("wctl-cli-worker-control-ask-{token}"),
+            "ask_at_safe_point",
+            Some("report the current blocker at the next safe point".to_owned()),
+            None,
+        ),
+        (
+            "cli-worker-control-constraint",
+            format!("wctl-cli-worker-control-constraint-{token}"),
+            "add_constraint",
+            None,
+            Some("keep evidence compact and durable".to_owned()),
+        ),
+        (
+            "cli-worker-control-checkpoint",
+            format!("wctl-cli-worker-control-checkpoint-{token}"),
+            "request_checkpoint",
+            None,
+            None,
+        ),
+        (
+            "cli-worker-control-submit-now",
+            format!("wctl-cli-worker-control-submit-{token}"),
+            "request_submission_now",
+            None,
+            None,
+        ),
+        (
+            "cli-worker-control-pause",
+            format!("wctl-cli-worker-control-pause-{token}"),
+            "pause",
+            None,
+            None,
+        ),
+        (
+            "cli-worker-control-resume",
+            format!("wctl-cli-worker-control-resume-{token}"),
+            "resume",
+            None,
+            None,
+        ),
+        (
+            "cli-worker-control-cancel",
+            cancel_control_id.clone(),
+            "cancel",
+            None,
+            None,
+        ),
+    ];
+
+    for (request_id, control_id, op, question, constraint) in controls {
+        seen.push(
+            send_adp_command_receipt(
+                &url,
+                request_id,
+                UiCommand::WorkerControl {
+                    control: UiWorkerControlCommand {
+                        control_id: Some(control_id),
+                        task_id: task_id.clone(),
+                        execution_id: execution_id.clone(),
+                        agent_id: worker_agent.clone(),
+                        op: op.to_owned(),
+                        question,
+                        constraint,
+                        note: Some(format!("worker control proof {token}")),
+                    },
+                },
+            )
+            .await?,
+        );
+    }
+
+    let ids = WorkerControlVerifyIds {
+        task_id: task_id.clone(),
+        execution_id: execution_id.clone(),
+        agent_id: worker_id.clone(),
+        control_id: cancel_control_id.clone(),
+    };
+    let evidence = verify_worker_control_foundation_truth(&url, &ids).await?;
+    Ok(format!(
+        "worker_control_foundation_sample_ok url={} session={} task={} execution={} agent={} control={} status={} control_events={} event_statuses={} task_events={} seen={}",
+        url,
+        session_id.as_str(),
+        task_id,
+        execution_id,
+        worker_id,
+        cancel_control_id,
+        evidence.task_status,
+        evidence.control_count,
+        evidence.event_statuses.join(","),
+        evidence.task_history_events.join(","),
+        seen.join(",")
+    ))
+}
+
+async fn verify_worker_control_foundation_truth(
+    url: &str,
+    ids: &WorkerControlVerifyIds,
+) -> Result<WorkerControlFoundationEvidence, String> {
+    let board = query_task_board_including_terminal(url, "cli-worker-control-verify-board").await?;
+    let Some(task) = board.tasks.iter().find(|task| task.task_id == ids.task_id) else {
+        return Err(format!(
+            "worker control task missing from board task={} count={}",
+            ids.task_id,
+            board.tasks.len()
+        ));
+    };
+    if !task.status.eq_ignore_ascii_case("cancelled") {
+        return Err(format!(
+            "worker control task expected cancelled task={} status={}",
+            ids.task_id, task.status
+        ));
+    }
+    if task.assignee_agent_id.as_ref().map(AgentId::as_str) != Some(ids.agent_id.as_str()) {
+        return Err(format!(
+            "worker control assignee mismatch task={} expected_agent={} actual={}",
+            ids.task_id,
+            ids.agent_id,
+            task.assignee_agent_id
+                .as_ref()
+                .map(AgentId::as_str)
+                .unwrap_or("none")
+        ));
+    }
+    if task.active_execution_id.as_deref() != Some(ids.execution_id.as_str()) {
+        return Err(format!(
+            "worker control execution mismatch task={} expected_execution={} actual={}",
+            ids.task_id,
+            ids.execution_id,
+            task.active_execution_id.as_deref().unwrap_or("none")
+        ));
+    }
+
+    let control = query_worker_control(&ids.task_id, &ids.execution_id, url).await?;
+    if !control.events.iter().any(|event| {
+        event.control_id == ids.control_id
+            && event.execution_id == ids.execution_id
+            && event.agent_id.as_str() == ids.agent_id
+    }) {
+        return Err(format!(
+            "worker control event missing task={} execution={} agent={} control={} events={}",
+            ids.task_id,
+            ids.execution_id,
+            ids.agent_id,
+            ids.control_id,
+            control
+                .events
+                .iter()
+                .map(|event| format!("{}:{}:{}", event.control_id, event.op, event.status))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+    let event_ops = control
+        .events
+        .iter()
+        .map(|event| event.op.clone())
+        .collect::<Vec<_>>();
+    for required in [
+        "query_status",
+        "ask_at_safe_point",
+        "add_constraint",
+        "request_checkpoint",
+        "request_submission_now",
+        "pause",
+        "resume",
+        "cancel",
+    ] {
+        require_kind(&event_ops, required, "worker control events")?;
+    }
+
+    let history = query_task_history(url, &ids.task_id).await?;
+    let task_events = history
+        .events
+        .iter()
+        .map(|event| event.event_type.clone())
+        .collect::<Vec<_>>();
+    assert_ordered_events(
+        &task_events,
+        &["TaskPaused", "TaskResumed", "TaskCancelled"],
+    )
+    .map_err(|message| {
+        format!(
+            "worker control task consequence sequence invalid task={} execution={} {message}",
+            ids.task_id, ids.execution_id
+        )
+    })?;
+
+    Ok(WorkerControlFoundationEvidence {
+        task_status: task.status.clone(),
+        control_count: control.events.len(),
+        event_statuses: control
+            .events
+            .iter()
+            .map(|event| format!("{}:{}", event.op, event.status))
+            .collect(),
+        task_history_events: task_events,
+    })
+}
+
 fn assert_ordered_events(actual: &[String], required: &[&str]) -> Result<(), String> {
     let mut cursor = 0_usize;
     for required_event in required {
@@ -3109,6 +3490,27 @@ async fn query_agent_lifecycle(
         return Err("ADP agent lifecycle query returned non-agent-lifecycle result".to_owned());
     };
     Ok(lifecycle)
+}
+
+async fn query_worker_control(
+    task_id: &str,
+    execution_id: &str,
+    url: &str,
+) -> Result<UiWorkerControlProjection, String> {
+    let result = query_adp_once(
+        url,
+        "cli-worker-control-query-events",
+        UiCommand::QueryWorkerControl {
+            task_id: task_id.to_owned(),
+            execution_id: execution_id.to_owned(),
+        },
+        "worker control",
+    )
+    .await?;
+    let UiQueryResult::WorkerControl(control) = result else {
+        return Err("ADP worker control query returned non-worker-control result".to_owned());
+    };
+    Ok(*control)
 }
 
 fn master_poll_classification_kinds(poll: &UiMasterPollProjection) -> Vec<String> {

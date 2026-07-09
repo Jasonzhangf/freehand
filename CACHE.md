@@ -1,5 +1,15 @@
 # CACHE
 
+- Current multi-task Phase 2C worker.control closeout:
+  - Marker: `phase2c-worker-control-closeout-1783572587648779000`.
+  - Phase 2C no-UI foundation is implemented through owner truth: `task.orchestration` owns worker-control ledger/snapshot consequences, `ui.protocol` owns DTO validation and projection, `runtime.ui-command-dispatch` is a thin bridge, and `app.cli-runtime-smoke` owns `worker-control-foundation-sample`.
+  - Implemented operations: `query_status`, `ask_at_safe_point`, `add_constraint`, `request_checkpoint`, `request_submission_now`, `pause`, `resume`, `cancel`.
+  - Safe-point operations persist `queued` without mutating task status. `query_status` persists `observed`. Stateful task consequences route through Task Center first, then persist `applied` worker-control events only after the task consequence succeeds.
+  - Local proof: `cargo test -p freehand-task worker_control -- --nocapture` -> 6 passed; `cargo test -p freehand-ui-protocol worker_control -- --nocapture` -> 3 passed; `cargo test -p freehand-runtime worker_control -- --nocapture` -> 2 passed; `cargo test -p freehand-cli worker_control -- --nocapture` -> 2 passed; package tests passed for task/ui-protocol/runtime/cli; `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo run -p xtask -- mainlines generate`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; `git diff --check`.
+  - Online S-profile proof on `127.0.0.1:4042`: health `ok`; `freehand-cliS adp-smoke` passed; `freehand-cliS worker-control-foundation-sample` returned `worker_control_foundation_sample_ok` for session `cli-worker-control-1783572587648756000`, task `task-cli-worker-control-FHPHASE2C1783572587648779000`, execution `exec-cli-worker-control-FHPHASE2C1783572587648779000`, agent `worker-cli-worker-control-FHPHASE2C1783572587648779000`, final `status=cancelled`, `control_events=8`, event statuses `query_status:observed,ask_at_safe_point:queued,add_constraint:queued,request_checkpoint:queued,request_submission_now:queued,pause:applied,resume:applied,cancel:applied`.
+  - Restart same-id proof: after `scripts/install-launchd.sh restartS`, verify mode against the same task/execution/agent/control ids returned `worker_control_foundation_verify_ok` with `status=cancelled`, `control_events=8`, and the same task/control event truth.
+  - Out of scope remains Phase 2D UI projection, WebUI/Android task dashboard, multi BigTask, cross-machine worker, and actual worker safe-point runtime interruption execution beyond the owner-backed control ledger/snapshot foundation.
+
 - Current multi-task Phase 2B master poll/EventInbox closeout:
   - Marker: `phase2b-master-poll-closeout-1783528034427562000`.
   - Phase 2B no-UI foundation is implemented through owner truth: `task.orchestration` owns EventInbox cursoring and MasterPoll cursor persistence/classification, `ui.protocol` owns DTO validation including `replay_from_start`, `runtime.ui-command-dispatch` is a thin bridge, and `app.cli-runtime-smoke` owns `master-poll-foundation-sample`.
@@ -8,7 +18,7 @@
   - Online S-profile proof on `127.0.0.1:4042`: health `ok`; `freehand-cliS adp-smoke` passed; `freehand-cliS master-poll-foundation-sample` returned `master_poll_foundation_sample_ok` for task `task-cli-master-poll-FHPHASE2B1783528034427562000`, execution `exec-cli-master-poll-FHPHASE2B1783528034427562000`, worker `worker-cli-master-poll-FHPHASE2B1783528034427562000`, final `status=review_submitted`, `inbox_events=187`, `poll_events=0`, and persisted cursor `00000000001783528036:task-cli-phase1-review-FHPHASE11783500244602888000:00000000000000000006:task-cli-phase1-review-FHPHASE11783500244602888000:6`.
   - Restart same-cursor proof: after `scripts/install-launchd.sh restartS`, verify mode against the same task/execution/worker/cursor returned `master_poll_foundation_verify_ok` with `inbox_after_cursor_events=0`, `poll_events=0`, same persisted cursor, and classifications `blocked,review_ready,stale`.
   - Post-closeout workspace clippy audit found and fixed one Phase 2B runtime test style issue (`assert_eq!(bool, true)` -> `assert!(bool)`); `cargo clippy --workspace --all-targets -- -D warnings` now passes.
-  - Out of scope remains Phase 2C `worker_control`, Phase 2D UI projection, WebUI/Android task dashboard, multi BigTask, and cross-machine worker.
+  - Out of scope remains Phase 2D UI projection, WebUI/Android task dashboard, multi BigTask, and cross-machine worker.
 
 - Current multi-task Phase 2A master-worker closeout:
   - Marker: `phase2a-master-worker-closeout-1783515402294813000`.

@@ -28,6 +28,10 @@
     events after that cursor
   - CLI Phase 2B create path rereads the final owner-backed persisted cursor
     after the command poll and uses that cursor for same-cursor verification
+  - CLI runs no-UI Phase 2C worker-control foundation sample by driving
+    worker-control query/safe-point/pause/resume/cancel commands through ADP
+    against an already-running worker execution, then verifying owner control
+    events plus Task Center pause/resume/cancel consequences
   - CLI ADP session manage sends create/rename/archive/restore/delete-as-archive/rollback command frames and reports command receipts without owning session truth
   - CLI ADP task query sends task list/history query frames and reports task projection summaries without WebUI
   - CLI ADP task subscribe sends task list subscribe frames and reports the first task projection event without WebUI
@@ -52,6 +56,9 @@
     EventInbox rows, classification kinds, persisted cursor evidence, no task
     status mutation, explicit verify mode, replay-from-start create mode, and
     no use of finite page limits as same-cursor closeout evidence
+  - CLI ADP Phase 2C worker-control foundation sample mock WebSocket smoke with
+    query/safe-point/pause/resume/cancel control statuses, Task Center
+    consequence events, and explicit verify mode
   - CLI ADP session manage argument/result summary smoke
   - CLI ADP task query argument/result summary smoke
   - CLI ADP task subscribe argument/result summary smoke
@@ -72,6 +79,9 @@
     model prose or UI DOM inspection; create mode must use replay-from-start,
     and finite EventInbox/MasterPoll limits are only pagination and cannot prove
     cursor closeout
+  - no-UI Phase 2C worker-control foundation sample verifies safe-point control
+    event truth and pause/resume/cancel consequences without model prose or UI
+    DOM inspection
   - no-UI ADP session manage can verify daemon session CRUD and rollback receipt paths without WebUI DOM inspection
   - no-UI ADP task query can verify daemon task list/history visibility without WebUI DOM inspection
   - no-UI ADP task subscribe can verify daemon task list subscription visibility without WebUI DOM inspection
@@ -87,6 +97,7 @@
   - local task lifecycle WebSocket mock in CLI tests
   - local Phase 1 foundation WebSocket mock in CLI tests
   - local Phase 2B master poll WebSocket mock in CLI tests
+  - local Phase 2C worker-control WebSocket mock in CLI tests
   - local `freehand-server webui-serve-smoke` for manual/agent positive ADP smoke
   - `~/.freehand/state/config`
   - `~/.freehand/state/turns`
@@ -104,6 +115,9 @@
   - CLI ADP Phase 2B master poll foundation sample is the active next sample
     target and must verify EventInbox, classifications, persisted cursor, and
     restart same-cursor evidence
+  - CLI ADP Phase 2C worker-control foundation sample is implemented in
+    integration tests and verifies control ledger plus pause/resume/cancel
+    consequence evidence through protocol-owned ADP frames
   - CLI ADP session manage command is implemented for live daemon session CRUD and rollback checks
   - CLI ADP task query command is implemented for live daemon task list/history checks
   - CLI ADP task subscribe command is implemented for live daemon task list subscription checks

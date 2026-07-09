@@ -23,6 +23,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - `UiTaskDispatchCommand` lets a task create command explicitly choose self dispatch, agent dispatch, or no immediate dispatch so Phase 2A can create a waiting task before assignment
 - Phase 1 ApplyExecutionFact and RunSchedulerTick are protocol-owned mutation intents routed to task.orchestration through runtime; protocol does not update task state or make scheduler decisions
 - Phase 2B QueryEventInbox and RunMasterPoll are protocol-owned query/mutation-intent shapes routed to task.orchestration; protocol does not store event cursor truth, classify board state, or apply master business actions
+- Phase 2C WorkerControl and QueryWorkerControl are protocol-owned command/query DTOs for already-running worker execution control; protocol validates ids, op names, and op-specific payloads before runtime dispatch
 - RunMasterPoll.replay_from_start is a protocol-owned cursor-mode field that defaults false for older clients and is rejected when combined with after_cursor
 - error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied
 - provider/model update is a protocol-owned mutation command shape that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to config.core
@@ -65,6 +66,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - task list subscription events carry UI-safe task list projections published by runtime owner code
 - provider/model update command receipts report owner dispatch status only; restart-required and saved provider/model state are observed by follow-up config status projection
 - Phase 2B EventInbox and MasterPoll results expose UI-safe event rows, cursor values, compact classifications, and recommended semantic action labels supplied by runtime owner code through UiRuntimeQueryPort
+- WorkerControl query results expose UI-safe persisted control events plus optional task/agent/lifecycle/task-event projections supplied by runtime owner code
 
 ## Error Mainline
 
@@ -84,6 +86,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - task mutation commands reject empty task id/title/content/goal/review summary, empty worker agent id/capabilities, empty claim execution id, and empty review rejection fields before runtime dispatch instead of silently creating partial task truth
 - Phase 1 execution fact commands reject empty ids and malformed facts before runtime dispatch; scheduler tick commands reject invalid threshold shape before runtime dispatch
 - Phase 2B EventInbox and MasterPoll commands reject empty cursor strings before runtime dispatch and must not treat unknown cursors as empty results
+- WorkerControl commands reject empty ids, unknown ops, missing ask_at_safe_point.question, missing add_constraint.constraint, and query-route misuse before runtime dispatch
 - RunMasterPoll rejects replay_from_start=true combined with after_cursor before dispatch
 - empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse
 - task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching
@@ -169,6 +172,12 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
   - allowed callers: runtime.ui-command-dispatch, ADP transports, CLI automation
   - related tests: phase2b_event_inbox_and_master_poll_validate_and_route_to_task_orchestration
   - why shared: keeps EventInbox and MasterPoll projection shape transport-neutral while Task Center remains the truth owner
+- `UiWorkerControlCommand / UiWorkerControlProjection`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: define transport-neutral Phase 2C worker-control command/query DTOs without owning task or control truth
+  - allowed callers: runtime.ui-command-dispatch, ADP transports, CLI automation
+  - related tests: worker_control_command_validates_and_routes_to_worker_control, worker_control_command_rejects_missing_fields, worker_control_adp_roundtrip_carries_projection
+  - why shared: WebUI, Android, CLI, and headless tests need one worker-control frame shape while worker.control owns semantics
 
 ## Function Call Table
 
@@ -208,6 +217,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 28 | `UiTaskAgentCreateCommand / UiTaskAssignCommand / UiTaskClaimCommand / UiTaskReviewRejectionCommand / UiTaskDispatchCommand` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs routed to task.orchestration | worker/task mutation intent | validated mutation intent routed to task.orchestration or protocol rejection | ADP command transport | runtime.ui-command-dispatch | bound |
 | 29 | `UiCommand::QueryEventInbox / UiQueryResult::EventInbox` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B EventInbox query DTOs without owning task event truth or cursor truth | event inbox query cursor | runtime-backed UI-safe event inbox projection | ADP query transport | runtime.ui-command-dispatch | bound |
 | 30 | `UiCommand::RunMasterPoll / UiQueryResult::MasterPoll` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B MasterPoll command/result DTOs routed to task.orchestration, including replay_from_start cursor-mode validation | master poll command cursor | validated mutation intent routed to task.orchestration and owner-supplied poll projection | ADP command transport | runtime.ui-command-dispatch | bound |
+| 28 | `UiWorkerControlCommand / UiCommand::WorkerControl / UiCommand::QueryWorkerControl / UiQueryResult::WorkerControl` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2C worker-control command/query DTOs, validate op-specific fields, and route mutation intent to worker.control | worker-control command or event query | validated mutation intent or runtime-backed control event projection | ADP command/query transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -235,3 +245,4 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - task mutation command DTOs are landed, owner-routed to task.orchestration, and rejected at the protocol boundary when required task, worker, execution, or review fields are empty
 - Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs are landed and locked by protocol owner tests
 - Phase 2B EventInbox/MasterPoll DTOs are landed and locked by phase2b_event_inbox_and_master_poll_validate_and_route_to_task_orchestration, including replay_from_start conflict validation
+- Phase 2C WorkerControl command/query DTOs are landed and locked by protocol owner tests

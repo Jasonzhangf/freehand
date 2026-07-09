@@ -32,3 +32,4 @@ Generated wiki artifacts from machine-readable mainline call source files. Do no
 - [tool.preview](./tool.preview.md) mainline call source `docs/mainline-calls/tool.preview.json`
 - [tool.registry](./tool.registry.md) mainline call source `docs/mainline-calls/tool.registry.json`
 - [ui.protocol](./ui.protocol.md) mainline call source `docs/mainline-calls/ui.protocol.json`
+- [worker.control](./worker.control.md) mainline call source `docs/mainline-calls/worker.control.json`

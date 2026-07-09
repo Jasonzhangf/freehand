@@ -24,6 +24,7 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - for Phase 2B master poll foundation sample, CLI drives protocol-owned EventInbox query and MasterPoll command through ADP, verifies compact classifications and cursor persistence, then verifies the same cursor after daemon restart without UI or model prose
 - Phase 2B sample create mode sends replay_from_start=true plus omitted EventInbox/MasterPoll limits to ignore stale persisted cursors and drain all pending rows before recording the cursor; finite limits are pagination and are not accepted as same-cursor closeout proof
 - Phase 2B sample create mode reads the final persisted cursor with a non-replay owner-backed poll after the command poll, then uses that cursor for same-cursor verification
+- for Phase 2C worker-control foundation sample, CLI drives protocol-owned WorkerControl commands through ADP against an already-running worker execution, then verifies control ledger query truth plus Task Center pause/resume/cancel consequences without UI or model prose
 - for ADP session manage, CLI connects to the same daemon `/adp` and sends protocol-owned create, rename, archive, restore, delete-as-archive, or rollback command frames for no-UI session lifecycle diagnosis
 - for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis
 - for ADP task subscribe, CLI connects to the same daemon `/adp` and sends protocol-owned task list subscription frames for no-UI task push diagnosis
@@ -42,6 +43,7 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - Phase 1 foundation sample prints blocked task id, review task id, execution id, agent id, blocked/review/stale counts, lifecycle query evidence, and recovering-event evidence
 - Phase 2A master-worker foundation sample prints task id, worker id, execution id, final closed status, ordered lifecycle events, review retry evidence, and same-id restart verification arguments
 - Phase 2B master poll foundation sample prints task id, worker id, execution id, EventInbox cursor, persisted master cursor, classification kinds, and same-cursor restart verification arguments
+- Phase 2C worker-control foundation sample prints task id, worker id, execution id, cancel control id, control event count/statuses, and Task Center consequence events for same-id restart verification
 - ADP session manage prints command receipt status for session CRUD and rollback commands without creating a second source of session truth
 - ADP task query prints task list count/task ids or task history event counts from protocol-owned query results
 - ADP task subscribe prints accepted state plus task list count/task ids from the initial protocol-owned subscription event
@@ -60,6 +62,7 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - Phase 2A master-worker foundation sample timeout, no claimed task, missing execution id, missing blocked/recovering/review/reject/retry/approve/close history event, missing lifecycle state, or same-id restart mismatch returns explicit terminal errors
 - Phase 2B master poll foundation sample timeout, missing EventInbox events, missing classification kinds, unexpected task status mutation, or same-cursor restart mismatch returns explicit terminal errors
 - Phase 2B verification fails if replay after the persisted cursor returns events, because that means the create path reused a stale cursor or paginated instead of replaying and draining the backlog
+- Phase 2C worker-control foundation sample timeout, missing worker-control events, missing pause/resume/cancel task consequences, task/execution/agent mismatch, or same-id restart mismatch returns explicit terminal errors
 - ADP session manage failures print explicit ADP failure code/message instead of treating session mutation errors as empty success
 - rewrite recovery block is reported as explicit blocked outcome, not disguised as success
 - ADP query-as-command must return ingress_command_kind_mismatch, proving command/query separation without mutation
@@ -108,6 +111,7 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 | 14 | `run_adp_error_query` | `apps/freehand-cli/src/main.rs` | parse ADP error query URL and optional session/trace/turn/domain filters | --url ws://.../adp --session <id> plus optional error-center filters | selected error-center query command | CLI dispatcher | ADP error query runner | bound |
 | 15 | `run_adp_error_query_async` | `apps/freehand-cli/src/main.rs` | send error-center query over ADP and summarize UI-safe event rows | ADP WebSocket URL plus error-center query command | terminal-facing error-center event summary or explicit ADP failure | ADP error query runner | daemon /adp | bound |
 | 16 | `run_adp_session_manage / run_adp_session_manage_async` | `apps/freehand-cli/src/main.rs` | send protocol-owned session CRUD or rollback command over ADP and summarize the command receipt | --url ws://.../adp --action create|rename|archive|restore|delete|rollback --session <id> plus optional title/cwd | terminal-facing session manage receipt or explicit ADP failure | CLI dispatcher | daemon /adp | bound |
+| 09g | `run_worker_control_foundation_sample / run_worker_control_foundation_sample_async / verify_worker_control_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2C worker-control query/safe-point/pause/resume/cancel loop and same-id restart verification through ADP | ADP URL plus optional verify control/task/execution/agent ids | terminal-facing worker-control evidence or explicit ADP/query failure | CLI dispatcher | daemon /adp | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -127,3 +131,4 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes
 - CLI ADP task list subscribe path is implemented for no-UI task push diagnosis
 - CLI ADP error-center query path is implemented for no-UI metadata diagnosis
+- CLI Phase 2C worker-control foundation sample is implemented in integration tests and verifies control ledger plus pause/resume/cancel consequence evidence through protocol-owned ADP frames

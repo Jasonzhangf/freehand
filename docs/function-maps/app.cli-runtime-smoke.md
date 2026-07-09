@@ -21,6 +21,8 @@
   - `run_master_worker_foundation_sample_async`
   - `run_master_poll_foundation_sample`
   - `run_master_poll_foundation_sample_async`
+  - `run_worker_control_foundation_sample`
+  - `run_worker_control_foundation_sample_async`
   - `run_adp_session_manage`
   - `run_adp_session_manage_async`
   - `run_adp_task_query`
@@ -54,6 +56,10 @@
 - Phase 2B sample create mode reads the final persisted cursor with a
   non-replay owner-backed poll after the command poll, then uses that cursor for
   same-cursor verification
+- for Phase 2C worker-control foundation sample, CLI drives protocol-owned
+  `WorkerControl` commands through ADP against an already-running worker
+  execution, then verifies control ledger query truth plus Task Center
+  pause/resume/cancel consequences without UI or model prose
 - for ADP session manage, CLI connects to the same daemon `/adp` and sends protocol-owned create, rename, archive, restore, delete-as-archive, or rollback command frames for no-UI session lifecycle diagnosis
 - for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis
 - for ADP task subscribe, CLI connects to the same daemon `/adp` and sends protocol-owned task list subscription frames for no-UI task push diagnosis
@@ -74,6 +80,9 @@
 - Phase 2B master poll foundation sample prints task id, worker id, execution
   id, EventInbox cursor, persisted master cursor, classification kinds, and
   same-cursor restart verification arguments
+- Phase 2C worker-control foundation sample prints task id, worker id,
+  execution id, cancel control id, control event count/statuses, and Task Center
+  consequence events for same-id restart verification
 - ADP session manage prints command receipt status for session CRUD and rollback commands without creating a second source of session truth
 - ADP task query prints task list count/task ids or task history event counts from protocol-owned query results
 - ADP task subscribe prints accepted state plus task list count/task ids from the initial protocol-owned subscription event
@@ -96,6 +105,9 @@
 - Phase 2B verification fails if replay after the persisted cursor returns
   events, because that means the create path reused a stale cursor or paginated
   instead of replaying and draining the backlog
+- Phase 2C worker-control foundation sample timeout, missing worker-control
+  events, missing pause/resume/cancel task consequences, task/execution/agent
+  mismatch, or same-id restart mismatch returns explicit terminal errors
 - ADP session manage failures print explicit ADP failure code/message instead of treating session mutation errors as empty success
 - rewrite recovery block is reported as explicit blocked outcome, not disguised as success
 - ADP query-as-command must return `ingress_command_kind_mismatch`, proving command/query separation without mutation
@@ -144,6 +156,7 @@
 | 17 | `run_phase1_foundation_sample` / `run_phase1_foundation_sample_async` / `run_phase1_foundation_verify_async` | `apps/freehand-cli/src/main.rs` | drive Phase 1 TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify ids | terminal-facing Phase 1 foundation evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 | 18 | `run_master_worker_foundation_sample` / `run_master_worker_foundation_sample_async` / `verify_master_worker_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2A master/worker task execution loop and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify ids | terminal-facing worker lifecycle evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 | 19 | `run_master_poll_foundation_sample` / `run_master_poll_foundation_sample_async` / `verify_master_poll_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2B EventInbox and MasterPoll loop, reread owner-backed final cursor after command poll, and perform same-cursor restart verification through ADP | `--url ws://.../adp` plus optional verify cursor/task/execution/agent ids | terminal-facing master poll evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
+| 20 | `run_worker_control_foundation_sample` / `run_worker_control_foundation_sample_async` / `verify_worker_control_foundation_truth` | `apps/freehand-cli/src/main.rs` | drive Phase 2C worker-control query/safe-point/pause/resume/cancel loop and same-id restart verification through ADP | `--url ws://.../adp` plus optional verify control/task/execution/agent ids | terminal-facing worker-control evidence or explicit ADP/query failure | CLI dispatcher | daemon `/adp` | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -168,6 +181,8 @@
 - CLI Phase 2A master-worker foundation sample is implemented for no-UI assign/claim/progress/blocked/recovering/review/reject/retry/approve/close and restart same-id proof
 - CLI Phase 2B master poll foundation sample is implemented locally and must
   pass S-profile same-cursor restart proof before Phase 2B is complete
+- CLI Phase 2C worker-control foundation sample is implemented locally and
+  must pass S-profile same-id restart proof before Phase 2C is complete
 - harness-backed app E2E smoke now exists before production CLI/server runtime loop
 - remaining gap: production non-smoke command loop is still pending
 - generated wiki must be regenerated from `docs/mainline-calls/app.cli-runtime-smoke.json` when this function-map truth changes

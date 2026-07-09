@@ -42,6 +42,9 @@
   local cursor policy; closeout samples use replay plus omitted limit to consume
   all pending events instead of only continuing from a stale persisted cursor or
   the first page
+- Phase 2C WorkerControl command and QueryWorkerControl query shapes route as
+  thin ADP dispatch/query into `worker.control`; runtime converts DTOs and does
+  not own control semantics, safe-point queues, or Task Center consequences
 
 ## Response Mainline
 
@@ -85,6 +88,9 @@
 - runtime-backed EventInbox/MasterPoll closeout proof must use
   `replay_from_start=true` plus omitted limit; explicit finite limits are
   pagination and cannot prove no events remain after cursor persistence
+- runtime-backed WorkerControl dispatch returns owner receipt evidence only
+  after `worker.control` accepts the command, and QueryWorkerControl returns
+  persisted control events for same-id restart verification
 
 ## Error Mainline
 
@@ -110,6 +116,9 @@
 - invalid task board filters, missing agent lifecycle ids, invalid execution facts, and invalid scheduler thresholds map to explicit dispatch failures from the owner APIs
 - invalid EventInbox cursor or MasterPoll cursor persistence failures map to
   explicit dispatch failures from `task.orchestration`
+- invalid worker-control targets, unknown operations, missing op-specific
+  payloads, terminal tasks, and Task Center consequence failures map to
+  explicit dispatch failures from `worker.control`
 
 ## Shared Multi-Reference Functions
 
@@ -152,6 +161,16 @@
   - related tests: `runtime_dispatches_phase2b_master_poll_and_event_inbox`
   - why shared: keeps runtime as a DTO bridge and prevents app-local event
     classification or cursor mutation
+- `project_worker_control_for_ui` / `project_worker_control_events_for_ui`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: convert Phase 2C worker-control owner projections and persisted
+    events into UI-safe DTOs
+  - allowed callers: `RuntimeCommandDispatcher::dispatch`,
+    `RuntimeCommandDispatcher::query_runtime`
+  - related tests: `runtime_dispatches_worker_control_to_task_owner`,
+    `runtime_worker_control_invalid_target_returns_explicit_failure`
+  - why shared: keeps runtime as a DTO bridge while `worker.control` remains the
+    ledger and validation owner
 
 ## Function Call Table
 
@@ -182,6 +201,8 @@
 | 21 | `RuntimeCommandDispatcher::dispatch_create_task_agent` / `dispatch_assign_task` / `dispatch_claim_next_task` / `dispatch_reject_task_review` | `crates/freehand-runtime/src/lib.rs` | route Phase 2A worker registry, assignment, claim, and review rejection commands into task.orchestration | protocol task mutation command | dispatch receipt plus task list projection | `RuntimeCommandDispatcher::dispatch` | `TaskRuntime` task owner APIs | bound |
 | 22 | `project_event_inbox_for_ui` / `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | route Phase 2B EventInbox query into task.orchestration and project UI-safe event rows; omitted limit drains all matching rows | inbox query command | EventInbox query projection | runtime query dispatch | task owner | bound |
 | 23 | `RuntimeCommandDispatcher::dispatch_run_master_poll` / `project_master_poll_for_ui` | `crates/freehand-runtime/src/lib.rs` | route Phase 2B MasterPoll command into task.orchestration and project classifications without business mutations; replay_from_start plus omitted limit drains all rows before cursor persistence | master poll command | MasterPoll projection and persisted cursor receipt | runtime ADP command dispatch / CLI sample | task owner | bound |
+| 24 | `RuntimeCommandDispatcher::dispatch_worker_control` / `project_worker_control_for_ui` | `crates/freehand-runtime/src/lib.rs` | route Phase 2C WorkerControl commands into worker.control and project accepted event receipt without owning control semantics | worker-control dispatch envelope | dispatch receipt with control id/op/status | `RuntimeCommandDispatcher::dispatch` | `TaskRuntime::apply_worker_control` | bound |
+| 25 | `RuntimeCommandDispatcher::query_runtime` / `project_worker_control_events_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryWorkerControl into worker.control persisted event truth for restart verification | task id plus execution id query | `UiWorkerControlProjection` event list | ADP query transport | `TaskRuntime::query_worker_control_events` | bound |
 
 ## Sync Status Against Code
 
@@ -220,6 +241,9 @@
 - runtime Phase 2B EventInbox query and MasterPoll command are implemented as
   thin routes to `task.orchestration`; online S-profile closeout is still
   required before claiming the phase complete
+- runtime Phase 2C WorkerControl command/query bridge is implemented as a thin
+  route to `worker.control`; online S-profile closeout is still required before
+  claiming Phase 2C complete
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`
