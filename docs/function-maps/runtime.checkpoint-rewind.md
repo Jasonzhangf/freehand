@@ -18,7 +18,8 @@
 - runtime receives a writable tool call during live execution
 - runtime requests canonical preview truth from `tool.preview`
 - runtime derives affected locked paths from preview truth
-- runtime resolves and canonicalizes the same locked workspace root used by tool preview/execute before snapshot or rewind
+- master runtime resolves and canonicalizes runtime home as the single locked
+  workspace root used by tool preview, execute, snapshot, query, and rewind
 - runtime snapshots the pre-image set under one checkpoint id before tool execution
 - runtime executes the writable tool only after checkpoint creation succeeds
 - future explicit rewind requests route back into the runtime owner, not into UI or tool owners
@@ -59,7 +60,7 @@
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `RuntimeCheckpointStore::new` / `checkpoint_workspace_root_from_env` | `crates/freehand-runtime/src/lib.rs` | bind runtime home checkpoint directories and canonical workspace root for one selected agent runtime | runtime config plus selected agent plus workspace env | checkpoint store | runtime bootstrap and tests | checkpoint owner | bound |
+| 01 | `RuntimeCheckpointStore::new` | `crates/freehand-runtime/src/lib.rs` | bind runtime home checkpoint directories and canonical runtime-home workspace root for one selected master runtime | runtime home plus selected agent/session | checkpoint store | runtime bootstrap and tests | checkpoint owner | bound |
 | 02 | `BuiltinToolRegistry::preview` | `crates/freehand-tools/src/lib.rs` | request writable-tool preview before any side effect | writable tool call | canonical preview truth | live bridge/tool loop | tool preview owner | bound |
 | 03 | `RuntimeCheckpointStore::create_from_preview` | `crates/freehand-runtime/src/lib.rs` | snapshot previewed pre-image set and write checkpoint manifest | preview truth plus turn identity | checkpoint manifest plus created ledger row | tool loop | checkpoint owner | bound |
 | 04 | `execute_registry_tool_call` | `crates/freehand-runtime/src/lib.rs` | call `tool.registry` execute only after checkpoint succeeds for writable tools | checkpoint id plus writable tool call | tool result plus applied ledger row | tool loop | tool registry owner | bound |
@@ -77,7 +78,9 @@
 
 - design truth is locked
 - current runtime code has live tool execution with checkpoint + rewind owner path now code-bound
-- runtime checkpoint root canonicalization is code-bound so `/var` and `/private/var` do not split path-lock truth on macOS
+- runtime checkpoint root canonicalization is bound to runtime home so process
+  cwd/environment drift and `/var` versus `/private/var` aliases cannot split
+  path-lock truth
 - checkpoint summary query/projection is runtime-owned and code-bound
 - runtime error-path coverage now locks missing manifest, missing blob, and corrupt checkpoint-ledger failure projection without falling back to UI snapshot truth
 - current reason persistence remains authoritative for session/turn truth and is intentionally separate from checkpoint restore truth

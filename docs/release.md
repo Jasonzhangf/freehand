@@ -217,7 +217,7 @@ Default `~/.freehand/daemon.env` values created on first install:
 ```bash
 FREEHAND_DAEMON_AGENT="master"
 FREEHAND_DAEMON_BIND="127.0.0.1:4041"
-FREEHAND_DAEMON_WORKDIR="<repo root at install time>"
+FREEHAND_DAEMON_WORKDIR="$HOME/.freehand"
 FREEHAND_DAEMON_BIN="$HOME/.local/bin/freehand-daemon"
 FREEHAND_PAIR_TOKEN_SHARED="<generated or existing value>"
 ```
@@ -227,7 +227,7 @@ Default `~/.freehand/daemonS.env` values created on first symlink install:
 ```bash
 FREEHAND_DAEMON_AGENT="master"
 FREEHAND_DAEMON_BIND="127.0.0.1:4042"
-FREEHAND_DAEMON_WORKDIR="<repo root at install time>"
+FREEHAND_DAEMON_WORKDIR="$HOME/.freehand"
 FREEHAND_DAEMON_BIN="$HOME/.local/bin/freehand-daemonS"
 FREEHAND_PAIR_TOKEN_SHARED="<generated or existing value>"
 ```

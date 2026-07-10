@@ -3307,3 +3307,25 @@ Current real root cause split:
   - Add delegation affordance and stronger runtime ownership gates without inventing a separate routing phase.
   - The model may choose direct execution or delegation; if it delegates, framework truth must preserve child ownership, status, capability boundary, and parent-visible result.
   - If direct execution is undesired for a class of tasks, constrain it through policy, role config, user instruction, and execution-time gates that return explicit blocked results to the model, not through unstable prompt-phase assumptions.
+
+# 2026-07-10 master runtime-home workspace boundary closeout
+
+- marker:
+  - `master-runtime-home-boundary-closeout-20260710`
+- implementation truth:
+  - `freehand-tools` classifies built-ins as framework/workspace/shell/network and exposes a Master schema that excludes shell tools.
+  - Master workspace tool execution canonicalizes and locks to `runtime_home`; external session CWD or absolute target returns a paired failed tool result with Worker delegation guidance.
+  - `task` is framework-scoped and remains executable so the model can create/reuse a worker, create an external `target_cwd` task, and assign it.
+  - Live Master session default CWD, checkpoint root, and launchd default workdir are all `~/.freehand`.
+  - `RuntimeCommandDispatcher::from_selected_agent_inner` rejects non-Master selected agents, so the current Master-only live bridge does not accidentally impose this policy on a future Worker runner.
+- local verification:
+  - Existing running `make ci` completed successfully after build, fmt, clippy, workspace tests/doc-tests, mainline check, and gate check.
+  - Targeted owner tests passed inside that run: `freehand-tools` 30, `freehand-runtime` 90, `freehand-daemon` 17, `xtask` 23.
+- online S-profile verification:
+  - `scripts/install-launchd.sh restartS` refreshed and restarted `com.freehand.daemonS`.
+  - `~/.freehand/daemonS.env` reports `FREEHAND_DAEMON_WORKDIR="/Users/fanzhang/.freehand"`.
+  - health returned `ok`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` returned `adp_smoke_ok`.
+  - Created session `master-boundary-live-1783650252` with CWD `/Volumes/extension/code/freehand`, then submitted a real request asking Master to read `AGENTS.md`.
+  - Master direct read was rejected with `allowed_root=/Users/fanzhang/.freehand` and requested target `/Volumes/extension/code/freehand`; the persisted model context confirms no file content was returned.
+  - The same live turn used `task` to create/assign/claim `task-1783650293` under the external target CWD and ended successfully after 11 rounds.
+  - Task history is `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat`; this is boundary/delegation proof only. Production daemon-owned Worker execution and completion remain the existing separate gap.

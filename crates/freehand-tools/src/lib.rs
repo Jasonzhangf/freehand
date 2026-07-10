@@ -34,6 +34,14 @@ pub struct ToolExecutionOutput {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinToolExecutionScope {
+    Framework,
+    Workspace,
+    Shell,
+    Network,
+}
+
 thread_local! {
     static TOOL_WORKSPACE_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
@@ -82,6 +90,13 @@ pub enum ToolRegistryError {
     InvalidArguments { tool: String, message: String },
     #[error("tool `{tool}` execution failed: {message}")]
     ExecutionFailed { tool: String, message: String },
+    #[error("tool `{tool}` field `{field}` targets `{target}`, outside locked workspace `{root}`")]
+    WorkspaceBoundaryViolation {
+        tool: String,
+        field: String,
+        root: String,
+        target: String,
+    },
 }
 
 const READ_FILE_DEFAULT_LIMIT: usize = 2_000;
@@ -125,12 +140,42 @@ impl BuiltinToolRegistry {
             .collect()
     }
 
+    pub fn master_implemented_definitions(&self) -> Vec<ProviderToolDefinition> {
+        self.tools
+            .values()
+            .filter(|spec| {
+                spec.implemented
+                    && self.execution_scope(&spec.definition.name)
+                        != Some(BuiltinToolExecutionScope::Shell)
+            })
+            .map(|spec| spec.definition.clone())
+            .collect()
+    }
+
     pub fn implemented_schema_fingerprint(&self) -> String {
         self.implemented_definitions()
             .iter()
             .map(canonicalize_tool_definition)
             .collect::<Vec<_>>()
             .join("\n--\n")
+    }
+
+    pub fn master_implemented_schema_fingerprint(&self) -> String {
+        self.master_implemented_definitions()
+            .iter()
+            .map(canonicalize_tool_definition)
+            .collect::<Vec<_>>()
+            .join("\n--\n")
+    }
+
+    pub fn execution_scope(&self, name: &str) -> Option<BuiltinToolExecutionScope> {
+        self.tools.get(name)?;
+        Some(match name {
+            "task" | "todo_write" | "complete_step" => BuiltinToolExecutionScope::Framework,
+            "bash" | "bg_jobs" | "kill_shell" | "wait_job" => BuiltinToolExecutionScope::Shell,
+            "web_fetch" => BuiltinToolExecutionScope::Network,
+            _ => BuiltinToolExecutionScope::Workspace,
+        })
     }
 
     pub fn read_only(&self, name: &str) -> Option<bool> {
@@ -1445,9 +1490,11 @@ fn resolve_locked_path(
             message: format!("cannot resolve `{field}` `{raw}`: {err}"),
         })?;
     if !canonical.starts_with(root) {
-        return Err(ToolRegistryError::InvalidArguments {
+        return Err(ToolRegistryError::WorkspaceBoundaryViolation {
             tool: tool.to_owned(),
-            message: format!("`{field}` escapes the locked workspace root"),
+            field: field.to_owned(),
+            root: root.to_string_lossy().into_owned(),
+            target: canonical.to_string_lossy().into_owned(),
         });
     }
     Ok(canonical)
@@ -1477,9 +1524,11 @@ fn resolve_locked_write_path(
             message: format!("cannot resolve parent directory for `{field}` `{raw}`: {err}"),
         })?;
     if !canonical_parent.starts_with(root) {
-        return Err(ToolRegistryError::InvalidArguments {
+        return Err(ToolRegistryError::WorkspaceBoundaryViolation {
             tool: tool.to_owned(),
-            message: format!("`{field}` escapes the locked workspace root"),
+            field: field.to_owned(),
+            root: root.to_string_lossy().into_owned(),
+            target: candidate.to_string_lossy().into_owned(),
         });
     }
     Ok(canonical_parent.join(file_name))
@@ -1787,6 +1836,32 @@ mod tests {
         assert_eq!(registry.read_only("grep"), Some(true));
         assert_eq!(registry.read_only("ls"), Some(true));
         assert_eq!(registry.read_only("todo_write"), Some(true));
+    }
+
+    #[test]
+    fn master_tool_surface_excludes_unsandboxed_shell() {
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        let names = registry
+            .master_implemented_definitions()
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+
+        assert!(!names.contains(&"bash".to_owned()));
+        assert!(names.contains(&"task".to_owned()));
+        assert!(names.contains(&"read_file".to_owned()));
+        assert_eq!(
+            registry.execution_scope("bash"),
+            Some(BuiltinToolExecutionScope::Shell)
+        );
+        assert_eq!(
+            registry.execution_scope("read_file"),
+            Some(BuiltinToolExecutionScope::Workspace)
+        );
+        assert_eq!(
+            registry.execution_scope("task"),
+            Some(BuiltinToolExecutionScope::Framework)
+        );
     }
 
     #[test]
@@ -2250,13 +2325,14 @@ beta
                     },
                 ],
             ));
-            assert_eq!(
+            assert!(matches!(
                 escape,
-                Err(ToolRegistryError::InvalidArguments {
-                    tool: "write_file".to_owned(),
-                    message: "`path` escapes the locked workspace root".to_owned(),
-                })
-            );
+                Err(ToolRegistryError::WorkspaceBoundaryViolation {
+                    tool,
+                    field,
+                    ..
+                }) if tool == "write_file" && field == "path"
+            ));
 
             let missing_parent = registry.execute(&tool_call(
                 "write_file",
@@ -2549,13 +2625,14 @@ beta
                     value: json!("../outside.txt"),
                 }],
             ));
-            assert_eq!(
+            assert!(matches!(
                 result,
-                Err(ToolRegistryError::InvalidArguments {
-                    tool: "read_file".to_owned(),
-                    message: "`path` escapes the locked workspace root".to_owned(),
-                })
-            );
+                Err(ToolRegistryError::WorkspaceBoundaryViolation {
+                    tool,
+                    field,
+                    ..
+                }) if tool == "read_file" && field == "path"
+            ));
         });
     }
 

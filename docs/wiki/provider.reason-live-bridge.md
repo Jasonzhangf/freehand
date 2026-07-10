@@ -23,11 +23,11 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - provider semantic request is built from each round's turn-owned provider payload
 - runtime writes provider-request lifecycle metadata without request payload text before executor IO
 - runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text
-- the first tool-capable request exposes a Reasonix-aligned runtime tool registry through provider-neutral request metadata
-- the same runtime tool registry exports one deterministic implemented-schema fingerprint that is stamped into planner diagnostics before provider request build
+- the first master tool-capable request exposes the Reasonix-aligned master-safe registry subset through provider-neutral request metadata
+- the master-safe registry subset omits unrestricted shell scope and exports the matching deterministic schema fingerprint stamped into planner diagnostics
 - Anthropic live executor runs the HTTP/SSE request through raw-capable callbacks so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
-- completed provider tool calls are executed by `freehand-tools`; incomplete `tool_use` calls and execution failures become paired failed tool-result exchanges, while writable tool calls first go through runtime checkpoint preview/snapshot/execute gating before success or execution-failure results are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request
+- completed provider tool calls are classified by registry execution scope; master framework tools remain available, master workspace tools execute only under runtime home, and shell or external-workspace requests return paired failed results with Worker delegation guidance; incomplete `tool_use` calls and execution failures become paired failed tool-result exchanges, while writable in-root tool calls first go through runtime checkpoint preview/snapshot/execute gating before success or execution-failure results are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request
 - runtime writes tool execution lifecycle metadata without tool-result content before tool-result re-entry
 - runtime emits tool execution lifecycle debug snapshots through `debug.core` without tool-result content
 - completion schema is parsed only after terminal-candidate finish reasons; schema/no-schema mismatch is rejected with field-level feedback as a model response-polishing pattern, not provider failure, or used to schedule the next round
@@ -41,6 +41,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - provider-neutral outputs are applied back into the active round through `ReasonTurnEngine::apply_provider_output`
 - every applied live semantic output is recorded through `ReasonPersistence::record_provider_output_applied`
 - tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures
+- master workspace-boundary failures and forbidden shell calls remain paired failed tool results so the model can create and assign external work through `task`
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
 - schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`; provider interruption without a completion-schema candidate writes interrupted terminal truth through `ReasonTurnEngine::interrupt_turn`
@@ -53,6 +54,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - unsupported provider type/protocol is rejected at the bridge boundary
 - provider execution failures are classified with concrete error codes and retried up to five non-stream attempts with exponential backoff starting at 1 second before failed terminal truth is materialized
 - invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times before blocked terminal truth, not provider failed terminal truth
+- master shell or external-workspace attempts are execution-policy failures returned to the model with task/worker instructions; they do not execute, expose external content, or terminalize the turn
 - incomplete tool calls are not executed and do not become tool-result truth
 - writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn
@@ -117,7 +119,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 | 14 | `ReasonPersistence::record_provider_raw_event` | `crates/freehand-reason/src/persistence.rs` | append debug-only provider raw ledger evidence | provider family plus session/turn/trace identity plus scene provenance plus raw body | durable provider raw debug evidence | live bridge | persistence owner | bound |
 | 15 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | write provider-neutral outputs into turn truth | provider semantic output | updated turn record plus broadcast or explicit provider-output apply error | live bridge | reason owner | bound |
 | 16 | `ReasonPersistence::record_provider_output_applied` | `crates/freehand-reason/src/persistence.rs` | persist live semantic output application | session history plus active turn plus provider-neutral output | reason ledger row plus active-turn snapshot | live bridge | persistence owner | bound |
-| 17 | `BuiltinToolRegistry::reasonix_aligned / execute_registry_tool_call` | `crates/freehand-runtime/src/lib.rs` | export Reasonix-aligned tool schemas and route writable tool calls through runtime checkpoint gating before execute | complete tool call | success or failed tool-result re-entry, or explicit system/checkpoint error | live bridge | tool registry owner | bound |
+| 17 | `BuiltinToolRegistry::reasonix_aligned / execute_registry_tool_call` | `crates/freehand-runtime/src/lib.rs` | export master-safe tool schemas, enforce runtime-home and shell boundaries, keep task delegation available, and route writable in-root calls through checkpoint gating | complete tool call | success, paired policy or execution failure for model continuation, or explicit system/checkpoint error | live bridge | tool registry owner | bound |
 | 18 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned tool execution metadata without tool-result content | tool name plus tool call id plus round ordinal | durable runtime metadata record | live bridge | metadata owner | bound |
 | 19 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned tool execution lifecycle debug snapshot without tool-result content | tool name plus tool call id plus round ordinal | runtime-owned debug event | live bridge | debug.core | bound |
 | 20 | `parse_completion_submission_block` | `crates/freehand-blocks/src/lib.rs` | parse tagged completion schema from model text | model text | typed submission or schema rejection list | live bridge | blocks owner | bound |
@@ -135,7 +137,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 ## Sync Status Against Mainline Call
 
 - current live path supports Anthropic `messages` only
-- runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, shared metadata-ledger producer wiring, runtime-owned debug snapshot emission, and checkpoint gating without duplicating adapter semantics
+- runtime owner path preserves incremental stream apply, completion schema loop, persistence, master-safe registry-backed tool loop, matching tool-schema fingerprint wiring, shared metadata-ledger producer wiring, runtime-owned debug snapshot emission, and checkpoint gating without duplicating adapter semantics
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
@@ -144,6 +146,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
 - schema/no-schema response mismatch is a model response-polishing pattern: it remains CompletionSchemaRejected plus error.center repair_schema recovery action and must not be projected as provider failure or fail_turn
 - tool execution result failures, including missing-file read failures and unknown tool names, are surfaced as `ToolResultStatus::Failed` tool-result re-entry truth, sent to Anthropic with `is_error=true`, and do not materialize runtime error or failed terminal truth by themselves
+- master external-workspace and forbidden-shell attempts follow the same paired failed tool-result path with explicit task/worker delegation guidance and no external content leakage
 - provider executor and transport failures are distinct from schema mismatch polishing and tool execution result failures: recoverable non-stream failures retry up to five attempts, then materialize a failed terminal turn with a concrete provider error code and no active turn before the dispatch error is returned
 - runtime metadata write failures are explicit `RuntimeLiveBridgeError::MetadataFailed` errors and abort the live bridge before fallback or silent continuation
 - provider raw ledger write failures are explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed` errors and abort the live bridge before semantic success is reported

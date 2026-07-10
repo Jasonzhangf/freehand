@@ -21,13 +21,13 @@
 - bridge derives provider descriptor and executor config from selected provider truth
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
-- the first tool-capable request exposes a Reasonix-aligned runtime tool registry through provider-neutral request metadata
-- the same runtime tool registry exports one deterministic implemented-schema fingerprint that is stamped into planner diagnostics before provider request build
+- the first master tool-capable request exposes the Reasonix-aligned master-safe registry subset through provider-neutral request metadata
+- the master-safe registry subset omits unrestricted shell scope and exports the matching deterministic schema fingerprint stamped into planner diagnostics
 - the first master-task-capable request includes owner-scoped task orchestration guidance and examples that teach the model to use `task(op=...)` instead of standalone semantic-action tool names
 - runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text
 - Anthropic live executor runs the HTTP/SSE request through raw-capable callbacks so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
-- completed provider tool calls are executed by `freehand-tools`; incomplete `tool_use` calls are converted into failed tool-result re-entry truth instead of schema retry; writable tool calls first go through runtime checkpoint preview/snapshot/execute gating, then success or execution-failure results are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a paired tool result exchange
+- completed provider tool calls are classified by registry execution scope; master framework tools remain available, master workspace tools execute only under runtime home, and shell or external-workspace requests return paired failed results with Worker delegation guidance; incomplete `tool_use` calls are converted into failed tool-result re-entry truth instead of schema retry; writable in-root calls first go through runtime checkpoint preview/snapshot/execute gating, then success or execution-failure results are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a paired tool result exchange
 - runtime emits tool execution lifecycle debug snapshots through `debug.core` without tool-result content
 - completion schema is parsed only when the provider finish reason is a terminal completion candidate such as `stop` or `end_turn`; it is then validated and either accepted, rejected with field-level feedback plus UI-visible retry waiting projection, or used to schedule the next round
 - runtime emits terminal lifecycle debug snapshots through `debug.core` before terminal persistence
@@ -39,6 +39,7 @@
 - provider-neutral outputs are applied back into the active round through `ReasonTurnEngine::apply_provider_output`
 - every applied live semantic output is recorded through `ReasonPersistence::record_provider_output_applied`
 - tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures; runtime publishes a model-continuation waiting event after tool results are paired for the next provider request
+- master workspace-boundary failures and forbidden shell calls remain paired failed tool results, so the model can create and assign external work through `task`
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
 - schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`
@@ -51,6 +52,7 @@
 - unsupported provider type/protocol is rejected at the bridge boundary
 - provider execution failures are classified with concrete error codes, recorded through `error.center`, retried up to five non-stream attempts with exponential backoff starting at 1 second, and returned explicitly only after retry exhaustion or a non-retryable executor error
 - invalid or missing completion schema is a normal response-schema mismatch pattern, not a provider failure: it is rejected with type-aware field-level feedback so the model can polish the response to the contract, then retried up to 3 consecutive terminal-candidate responses
+- master shell or external-workspace attempts are execution-policy failures returned to the model with task/worker instructions; they do not execute, expose external content, or terminalize the turn
 - non-terminal completion-schema rejection retries publish a waiting projection so UI clients can show that repair feedback was sent to the model
 - incomplete tool calls are not executed as successful side effects
 - incomplete `tool_use` responses are paired back to the model as failed tool results; they must not become schema retries or terminal runtime failures

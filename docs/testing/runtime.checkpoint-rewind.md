@@ -5,7 +5,8 @@
 - lifecycle path under test:
   - runtime receives writable tool execution intent
   - runtime requests preview truth from `tool.preview`
-  - runtime canonicalizes the configured workspace root before comparing preview paths
+  - master runtime binds checkpoint workspace truth to the canonical runtime home,
+    independent of process cwd or inherited workspace environment
   - runtime snapshots previewed pre-image paths before tool execute
   - runtime records checkpoint lifecycle rows
   - runtime exposes read-only checkpoint summaries from runtime-owned manifest and ledger truth
@@ -16,7 +17,8 @@
   - checkpoint manifest round-trip tests
   - checkpoint create / apply / restore ledger tests
   - preview-derived path-set snapshot tests
-  - configured daemon workspace root canonicalization tests
+  - runtime-home workspace root canonicalization tests
+  - process cwd / workspace environment cannot redirect master checkpoint rewind
   - restore create / modify / delete state tests
   - no-preview writable-tool rejection tests
   - missing manifest / blob / ledger corruption rejection tests
@@ -25,6 +27,9 @@
 - module black-box plan:
   - runtime writable tool loop creates checkpoint before execute
   - runtime explicit rewind restores prior workspace state
+  - daemon live submit defaults the master session cwd to runtime home, so
+    checkpointed writes and rewind use one root even when the daemon process was
+    launched from another directory
   - runtime restart can inspect checkpoint ledger and manifests without treating them as reason truth
   - runtime dispatcher materializes checkpoint summaries into protocol state for query consumers
 - project black-box impact:
@@ -42,7 +47,8 @@
 - sync status between design and implementation:
   - design is locked
   - runtime checkpoint store, live writable pre-execute checkpointing, and explicit rewind owner API are now code-bound
-  - runtime checkpoint workspace root canonicalization is landed and regression-locked
+  - runtime checkpoint workspace root is the canonical runtime home and is
+    regression-locked against process-cwd/environment drift
   - runtime tests now cover create-file rewind, modify-file rewind, and previewless writable-tool rejection
   - runtime tests now also cover missing manifest rewind, missing blob rewind, corrupt checkpoint-ledger query failure, and corrupt checkpoint-ledger bootstrap failure
   - checkpoint summary query/projection is runtime-owned and code-bound

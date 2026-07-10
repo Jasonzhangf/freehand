@@ -51,6 +51,17 @@
   - provider raw debug-ledger failure path is explicit and aborts the live bridge
   - registry-backed tool schema export path
   - registry-backed tool schema fingerprint reaches planner diagnostics
+  - master-safe tool schema export omits unsandboxed `bash` while retaining
+    `task` and workspace-scoped file/search tools
+  - master workspace-scoped tool execution uses runtime home as the only allowed
+    root, regardless of a requested external session cwd
+  - external session cwd plus a workspace-scoped tool returns one paired failed
+    tool result that names the workspace boundary and instructs the model to use
+    `task` with a worker; it does not fail or terminalize the turn
+  - `task` remains executable when the requested target cwd is outside the master
+    runtime home so the model can create and assign delegated work
+  - a hidden/forbidden `bash` call returns a paired failed tool result with worker
+    delegation guidance instead of executing
   - implemented registry read-only tool execution path
   - implemented registry read-only tool execution failure path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and lets the model continue to a later terminal schema
   - incomplete `tool_use` path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, keeps `schema_rejections=0`, and lets the model continue to a later terminal schema
@@ -80,6 +91,9 @@
   - long multi-round carryover admission preserves semantic payload while still reporting planner token diagnostics
   - multi-round provider requests retain status schema and task-tool guidance after tool-result continuation, `continue`, or schema-polishing re-entry
   - master-autonomy mock-provider scenarios prove model-output tool chains route through the live bridge and Task Center owner truth for success, execution-error blocked, and rejected-review retry outcomes
+  - cross-workspace master fixture first attempts direct workspace access, receives
+    boundary guidance, then calls `task` to create and assign worker work without
+    any direct master-side filesystem execution
   - first provider request carries the master role, dispatch/no-dispatch boundary, workspace-boundary rule, multi-agent dispatch guidance, concurrency/flow-control guidance, task tool workflow, and the Codex-vs-Deepseek-reasonix cross-workspace sample without adding extra task/deep-research tools
   - structured task execution fact results are rendered from Task Center event semantics before re-entering provider context
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`

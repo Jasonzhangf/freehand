@@ -408,7 +408,9 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
         (
             root.join("docs/function-maps/tool.registry.md"),
             &[
-                "path-based read-only tools resolve against one locked workspace root",
+                "the master-safe export excludes unrestricted shell scope",
+                "path-based tools resolve against one owner-supplied locked workspace root",
+                "WorkspaceBoundaryViolation",
                 "first real read-only execution set is",
                 "ExecutionFailed",
                 "execute_read_file",
@@ -438,7 +440,8 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
                 "`glob` recursive and simple-filename pattern tests",
                 "`grep` recursive match tests",
                 "`ls` flat and recursive listing tests",
-                "runtime live bridge can execute a real implemented read-only registry tool and re-enter the result",
+                "runtime live bridge can execute a real implemented read-only registry tool inside the master runtime home and re-enter the result",
+                "runtime live bridge returns a paired failed result for an external requested session cwd",
                 "wiki generated from mainline call",
             ],
         ),
@@ -982,6 +985,22 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     require_contains(
         &install_launchd,
         "env_bind=\"$(awk -F= '$1 == \"FREEHAND_DAEMON_BIND\"",
+        "scripts/install-launchd.sh",
+    )?;
+    if install_launchd.contains("workdir=\"${FREEHAND_DAEMON_WORKDIR:-\"$repo_root\"}\"") {
+        return Err(
+            "scripts/install-launchd.sh must not default the master daemon workdir to the repository root"
+                .to_owned(),
+        );
+    }
+    require_contains(
+        &install_launchd,
+        "workdir=\"${FREEHAND_DAEMON_WORKDIR:-\"$runtime_home\"}\"",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "mkdir -p \"$runtime_home\" \"$logs_dir\" \"$workdir\"",
         "scripts/install-launchd.sh",
     )?;
     if !install_launchd.contains("set -a; [ -f \"$env_file\" ] && . \"$env_file\"; set +a;")
@@ -1797,6 +1816,16 @@ mod tests {
     }
 
     #[test]
+    fn ci_cd_gate_commands_reject_launchd_repo_root_master_workdir() {
+        let root = test_repo_root("ci-cd-launchd-repo-root-workdir");
+        write_ci_cd_fixture(&root, CiFixtureMode::LaunchdRepoRootWorkdir);
+
+        let err = verify_ci_cd_gate_commands(&root)
+            .expect_err("launchd repository-root master workdir must fail");
+        assert!(err.contains("repository root"), "{err}");
+    }
+
+    #[test]
     fn feature_map_unique_entries_accept_single_seed_entry() {
         let root = test_repo_root("feature-map-unique");
         write_feature_map_fixture(&root, FeatureMapFixtureMode::Aligned);
@@ -1942,6 +1971,7 @@ mod tests {
         MakeCiMissingMainlines,
         CiWorkflowPartialGate,
         LaunchdMissingEnvBind,
+        LaunchdRepoRootWorkdir,
     }
 
     enum FeatureMapFixtureMode {
@@ -2037,7 +2067,8 @@ mod tests {
         let makefile = match mode {
             CiFixtureMode::Aligned
             | CiFixtureMode::CiWorkflowPartialGate
-            | CiFixtureMode::LaunchdMissingEnvBind => {
+            | CiFixtureMode::LaunchdMissingEnvBind
+            | CiFixtureMode::LaunchdRepoRootWorkdir => {
                 ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
@@ -2083,6 +2114,10 @@ uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n"
         let launchd_script = match mode {
             CiFixtureMode::LaunchdMissingEnvBind => {
                 "#!/usr/bin/env bash\n\
+runtime_home=\"$HOME/.freehand\"\n\
+logs_dir=\"$runtime_home/logs\"\n\
+workdir=\"${FREEHAND_DAEMON_WORKDIR:-\"$runtime_home\"}\"\n\
+mkdir -p \"$runtime_home\" \"$logs_dir\" \"$workdir\"\n\
 default_daemon_bind() {\n\
   local port=\"$1\"\n\
   local profile_suffix=\"${2:-}\"\n\
@@ -2093,11 +2128,46 @@ default_daemon_bind() {\n\
 }\n\
 bind_addr=\"$default_bind_addr\"\n"
             }
+            CiFixtureMode::LaunchdRepoRootWorkdir => {
+                concat!(
+                    "#!/usr/bin/env bash\n\
+runtime_home=\"$HOME/.freehand\"\n\
+logs_dir=\"$runtime_home/logs\"\n\
+workdir=\"${FREEHAND_DAEMON_WORKDIR:-\"$repo_root\"}\"\n\
+mkdir -p \"$runtime_home\" \"$logs_dir\" \"$workdir\"\n\
+default_daemon_bind() {\n\
+  local port=\"$1\"\n\
+  local profile_suffix=\"${2:-}\"\n\
+  if [[ \"$profile_suffix\" == \"S\" ]]; then\n\
+    printf '127.0.0.1:%s\\n' \"$port\"\n\
+    return 0\n\
+  fi\n\
+}\n\
+bind_addr=\"$default_bind_addr\"\n\
+if [[ -n \"${FREEHAND_DAEMON_BIND:-}\" ]]; then\n\
+  bind_addr=\"$FREEHAND_DAEMON_BIND\"\n\
+elif [[ -f \"$env_file\" ]]; then\n\
+  env_bind=\"$(awk -F= '$1 == \"FREEHAND_DAEMON_BIND\" { print $2; exit }' \"$env_file\")\"\n\
+fi\n",
+                    "set -a; [ -f \"$env_file\" ] && . \"$env_file\"; set +a;\n",
+                    "restartS)\n\
+    env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh\n\
+    write_launchd_env\n\
+    write_launchd_plist\n\
+    launchctl bootout \"gui/$(id -u)\" \"$plist_path\"\n\
+    launchctl bootstrap \"gui/$(id -u)\" \"$plist_path\"\n\
+    restart_launchd\n",
+                )
+            }
             CiFixtureMode::Aligned
             | CiFixtureMode::MakeCiMissingMainlines
             | CiFixtureMode::CiWorkflowPartialGate => {
                 concat!(
                     "#!/usr/bin/env bash\n\
+runtime_home=\"$HOME/.freehand\"\n\
+logs_dir=\"$runtime_home/logs\"\n\
+workdir=\"${FREEHAND_DAEMON_WORKDIR:-\"$runtime_home\"}\"\n\
+mkdir -p \"$runtime_home\" \"$logs_dir\" \"$workdir\"\n\
 default_daemon_bind() {\n\
   local port=\"$1\"\n\
   local profile_suffix=\"${2:-}\"\n\
@@ -2154,7 +2224,8 @@ FREEHAND_WEBUI_PROFILE=\"${FREEHAND_WEBUI_PROFILE:-4041}\" \\\n\
         let ci_workflow = match mode {
             CiFixtureMode::Aligned
             | CiFixtureMode::MakeCiMissingMainlines
-            | CiFixtureMode::LaunchdMissingEnvBind => {
+            | CiFixtureMode::LaunchdMissingEnvBind
+            | CiFixtureMode::LaunchdRepoRootWorkdir => {
                 "name: ci\njobs:\n  rust-gates:\n    steps:\n      - name: Full gate\n        run: make ci\n"
             }
             CiFixtureMode::CiWorkflowPartialGate => {

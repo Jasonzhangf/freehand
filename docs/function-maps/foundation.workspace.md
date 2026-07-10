@@ -29,6 +29,7 @@
 - gate runner verifies feature-map seed entries stay unique per `feature_id`
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
+- gate runner verifies launchd defaults the master daemon workdir to `$HOME/.freehand`, creates that directory before bootstrap, and rejects the former repository-root default
 - gate runner verifies source-only search policy so implementation searches use source code, tests, maintained scripts, and canonical docs rather than generated/runtime output; the wrapper rejects unsafe `rg` options such as `--no-ignore` / `-u` and keeps hard generated-output exclusions after caller args
 - release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
 - WebUI online verification wrapper checks fixed S-profile `127.0.0.1:4042` daemon health and invokes the real browser WebUI + ADP proof for alpha promotion; release-profile `127.0.0.1:4041` proof is a separate explicit target
@@ -56,6 +57,7 @@
 - symlink install exposes `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` on the chosen prefix, pointing host commands at repo debug binaries while keeping the launchd wrapper executable as a prefix-local file
 - launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
 - launchd symlink install exposes `com.freehand.daemonS` as a separate user LaunchAgent with explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4042` WebUI, and separate `daemonS.*.log` files; symlink profile restart refreshes the debug daemon binary copy and health-checks the existing env bind before restarting
+- release and S launchd profiles default `FREEHAND_DAEMON_WORKDIR` to `$HOME/.freehand`, never the repository root
 - release/global-install regressions run without inherited daemon workspace root overrides while the final LaunchAgent still receives the configured daemon workdir
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
 - gate returns explicit failure with missing path or missing policy snippet
@@ -70,6 +72,7 @@
 - missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure
 - duplicate feature-map seed entries for one `feature_id` surface as gate failure
 - missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
+- missing launchd runtime-home workdir initialization or a repository-root default surfaces as gate failure
 - missing source-only search exclusions, missing unsafe-argument guards, or missing `scripts/source-search.sh` policy snippets surface as gate failure
 - missing release prerequisites such as Java or Cargo surface as script failure before artifacts are claimed
 - missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surface as online verification failure before alpha success is claimed

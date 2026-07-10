@@ -10,6 +10,7 @@
     "runtime receives a writable tool call during live execution",
     "runtime requests canonical preview truth from `tool.preview`",
     "runtime derives affected locked paths from preview truth",
+    "master runtime canonicalizes runtime home as the single workspace root for preview, execute, snapshot, query, and rewind",
     "runtime snapshots the pre-image set under one checkpoint id before tool execution",
     "runtime executes the writable tool only after checkpoint creation succeeds",
     "future explicit rewind requests route back into the runtime owner, not into UI or tool owners"
@@ -75,8 +76,8 @@
       "step": "01",
       "symbol_path": "RuntimeCheckpointStore::new",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "bind runtime home checkpoint directories for one selected agent runtime",
-      "input_semantic": "runtime config plus selected agent",
+      "responsibility": "bind runtime home checkpoint directories and the canonical runtime-home workspace root for one selected master runtime",
+      "input_semantic": "runtime home plus selected agent and session",
       "output_semantic": "checkpoint store",
       "caller": "runtime bootstrap and tests",
       "callee": "checkpoint owner",
@@ -141,6 +142,7 @@
   "sync_status": [
     "design truth is locked",
     "current runtime code has live tool execution with checkpoint + rewind owner path now code-bound",
+    "runtime checkpoint workspace root is canonical runtime home and cannot drift with process cwd or inherited workspace environment",
     "checkpoint summary query/projection is runtime-owned and code-bound",
     "runtime error-path coverage now locks missing manifest, missing blob, and corrupt checkpoint-ledger failure projection without falling back to UI snapshot truth",
     "current reason persistence remains authoritative for session/turn truth and is intentionally separate from checkpoint restore truth",

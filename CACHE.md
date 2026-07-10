@@ -1,5 +1,12 @@
 # CACHE
 
+- Current master workspace boundary closeout:
+  - Marker: `master-runtime-home-boundary-closeout-20260710`.
+  - Master direct workspace and checkpoint truth are locked to `~/.freehand`; release and S launchd profiles default their workdir to the same runtime home.
+  - Master provider tool exposure omits unsandboxed shell tools. Workspace tools targeting outside runtime home return a paired failed tool result that names the boundary and instructs the model to use `task` plus a Worker. The `task` framework tool remains available for external `target_cwd` creation and assignment.
+  - Local `make ci` passed, including workspace build/fmt/clippy/tests, mainline checks, and gates.
+  - Real S-profile proof on `127.0.0.1:4042`: session `master-boundary-live-1783650252` attempted to read `/Volumes/extension/code/freehand/AGENTS.md`, received `allowed_root=/Users/fanzhang/.freehand`, created/assigned/claimed `task-1783650293` with external `target_cwd`, and finished the master turn successfully without leaking file contents. Task history is `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat`; production Worker execution remains a separate known gap.
+
 - Current production master/worker loop gap reconciliation:
   - Marker: `production-master-worker-loop-gap-reconcile-20260709`.
   - `docs/architecture/architecture-gaps.md` Gap 4 no longer claims Phase 2B/2C/2D are missing. Current truth: Phase 1/2A/2B/2C/2D foundation and WebUI projection are verified; `master-worker-autonomy-sample` proves `SubmitUserInput`-only task-tool autonomy through deterministic provider fixture and same-id restart verification.

@@ -301,6 +301,7 @@ Use this skill for any non-trivial work in this repo.
 - When context-segment admission, cache-shape policy, or subagent context flow changes, update `reason.context-planner` design, test design, function map, and memory in the same task.
 - For live context-distribution claims, inspect persisted `planned_context.ordered_segments` and diagnostics from the reason ledger, not only unit tests. Prove stable/session-stable prefix shape, stable prefix hash, tool schema hash, and volatile/no-cache tail placement across at least one multi-round S-profile sample before claiming closure.
 - For schema-polishing proof, do not rely on prompt-only steering against a live model. A real provider can obey the completion contract immediately or call unrelated tools, so deterministic schema-mismatch closeout needs a provider fixture, mock executor, or injected first invalid response plus no-tool contamination checks.
+- For Master workspace-boundary changes, lock all direct Master workspace and checkpoint authority to canonical `runtime_home` (`~/.freehand`). Keep external session CWD as routing truth only: workspace or shell execution outside runtime home must return a paired failed tool result with explicit `task`/Worker guidance, while the framework-scoped `task` tool remains available for external `target_cwd` delegation. Online proof must submit a real external-CWD request, show no external content leakage, query the same Task Center task/history truth, and distinguish delegation from actual Worker completion.
 
 ## Memory Workflow
 

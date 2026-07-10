@@ -9,12 +9,11 @@
   "request_mainline": [
     "runtime asks the tool owner for a per-run registry",
     "registry exports provider-neutral tool definitions without importing provider adapter DTOs",
-    "registry can export one stable implemented-tool schema fingerprint for planner/cache diagnostics without leaking provider DTOs into reason owners",
+    "registry can export generic and master-safe stable implemented-tool schema fingerprints for planner/cache diagnostics without leaking provider DTOs into reason owners",
     "registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner",
-    "foreground `bash` starts in one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root",
-    "path-based read-only tools resolve against one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root",
-    "path-based tools resolve against one locked workspace root: the explicit session workspace root when supplied, otherwise the canonical runtime workspace root",
-    "runtime may choose a subset of implemented definitions for live execution",
+    "registry classifies registered tools as framework, workspace, shell, or network execution scope",
+    "the master-safe export excludes unrestricted shell scope while retaining framework and workspace-scoped tools",
+    "path-based tools resolve against one owner-supplied locked workspace root",
     "writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`",
     "provider adapters render schemas; they do not own tool registry truth"
   ],
@@ -24,7 +23,7 @@
     "first real read-only execution set is: `read_file`, `glob`, `grep`, `ls`",
     "first real file-mutation execution set is: `write_file`, `edit_file`, `multi_edit`",
     "implemented tools return user/model-visible tool result text",
-    "foreground `bash` is executable but is not a checkpointable file-mutation preview target",
+    "foreground `bash` remains generically executable for non-master owners and tests but is absent from the master-safe export",
     "runtime may bind one explicit per-call workspace root through `with_workspace_root` without mutating process-global cwd or environment",
     "unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth"
   ],
@@ -32,6 +31,7 @@
     "unknown tool names return `ToolRegistryError::UnknownTool`",
     "registered but not implemented tools return `ToolRegistryError::UnimplementedTool`",
     "invalid tool arguments return `ToolRegistryError::InvalidArguments`",
+    "path escape returns typed `ToolRegistryError::WorkspaceBoundaryViolation`",
     "foreground `bash` timeout and non-zero exit return `ToolRegistryError::ExecutionFailed`",
     "runtime and filesystem failures return `ToolRegistryError::ExecutionFailed`"
   ],
@@ -148,6 +148,34 @@
         "runtime live bridge planner diagnostics tests"
       ],
       "why_shared": "keeps tool-schema truth and canonicalization in the tool owner instead of runtime/reason duplication"
+    },
+    {
+      "symbol": "BuiltinToolRegistry::master_implemented_definitions / BuiltinToolRegistry::master_implemented_schema_fingerprint",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "export the master-safe schema surface and matching deterministic fingerprint without unrestricted shell scope",
+      "allowed_callers": [
+        "runtime master live bridge",
+        "tests"
+      ],
+      "related_tests": [
+        "master tool-surface exclusion test",
+        "runtime planner diagnostics tests"
+      ],
+      "why_shared": "keeps master exposure policy in the registry owner instead of runtime-local filtering"
+    },
+    {
+      "symbol": "BuiltinToolRegistry::execution_scope",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "classify registered tools for execution-time role and workspace policy",
+      "allowed_callers": [
+        "runtime live bridge",
+        "tests"
+      ],
+      "related_tests": [
+        "master tool-surface exclusion test",
+        "cross-workspace boundary test"
+      ],
+      "why_shared": "keeps tool category truth out of runtime string lists"
     }
   ],
   "call_table": [
@@ -175,22 +203,22 @@
     },
     {
       "step": "03",
-      "symbol_path": "BuiltinToolRegistry::implemented_definitions",
+      "symbol_path": "BuiltinToolRegistry::master_implemented_definitions",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "export currently executable provider-neutral tool schemas",
+      "responsibility": "export master-safe provider-neutral tool schemas without unrestricted shell scope",
       "input_semantic": "registry",
-      "output_semantic": "provider tool definitions",
+      "output_semantic": "master provider tool definitions",
       "caller": "runtime live bridge",
       "callee": "tool owner",
       "binding_status": "bound"
     },
     {
       "step": "04",
-      "symbol_path": "BuiltinToolRegistry::implemented_schema_fingerprint",
+      "symbol_path": "BuiltinToolRegistry::master_implemented_schema_fingerprint",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "export deterministic implemented-tool schema fingerprint for planner/cache diagnostics",
+      "responsibility": "export deterministic master-safe tool schema fingerprint for planner/cache diagnostics",
       "input_semantic": "registry",
-      "output_semantic": "stable tool-schema fingerprint string",
+      "output_semantic": "stable master tool-schema fingerprint string",
       "caller": "runtime live bridge",
       "callee": "tool owner",
       "binding_status": "bound"
@@ -298,8 +326,9 @@
   "sync_status": [
     "Reasonix-aligned built-in names and schemas are bound in `freehand-tools`",
     "current implemented tool set is: `bash`, `read_file`, `write_file`, `edit_file`, `multi_edit`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`",
-    "implemented tool schema fingerprint export is now bound in `freehand-tools` and is the owner path for planner/cache diagnostics consumers",
-    "first-version path tools are locked to the canonical process current working directory and reject path escape outside that root",
+    "generic and master-safe implemented tool schema fingerprints are bound in `freehand-tools`; the runtime master bridge consumes only the master-safe fingerprint",
+    "tool execution scopes are bound in the registry owner and master exposure excludes shell scope",
+    "path tools are locked to the owner-supplied workspace root and return typed workspace-boundary violations on escape",
     "first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing",
     "first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path",
     "checkpointed live writable execution now depends on the code-bound `tool.preview` and `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts",

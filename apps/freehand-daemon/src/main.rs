@@ -1355,6 +1355,8 @@ mod tests {
             ],
         );
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
+        let runtime_workspace = server.home.join(".freehand");
+        fs::create_dir_all(runtime_workspace.join("scratch")).expect("create runtime parent dir");
         let client = Client::builder().build().expect("client");
 
         let submitted = client
@@ -1382,7 +1384,7 @@ mod tests {
         let _ = request_rx.recv().expect("second request");
         provider_handle.join().expect("join provider");
 
-        let file_path = workspace.root().join("scratch/daemon-rewind.txt");
+        let file_path = runtime_workspace.join("scratch/daemon-rewind.txt");
         assert_eq!(
             fs::read_to_string(&file_path).expect("written file"),
             "daemon rewind\n"
@@ -1449,6 +1451,8 @@ mod tests {
             ],
         );
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
+        let runtime_workspace = server.home.join(".freehand");
+        fs::create_dir_all(runtime_workspace.join("scratch")).expect("create runtime parent dir");
         let client = Client::builder().build().expect("client");
 
         let submitted = client
@@ -1471,7 +1475,7 @@ mod tests {
         let _ = request_rx.recv().expect("second request");
         provider_handle.join().expect("join provider");
 
-        let file_path = workspace.root().join("scratch/daemon-rewind-missing.txt");
+        let file_path = runtime_workspace.join("scratch/daemon-rewind-missing.txt");
         assert_eq!(
             fs::read_to_string(&file_path).expect("written file"),
             "daemon rewind missing\n"

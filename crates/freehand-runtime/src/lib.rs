@@ -72,7 +72,9 @@ use freehand_task::{
     TaskStatus, TaskWatermark, WorkerControlEvent, WorkerControlOp, WorkerControlProjection,
     WorkerControlRequest,
 };
-use freehand_tools::{BuiltinToolRegistry, with_workspace_root};
+use freehand_tools::{
+    BuiltinToolExecutionScope, BuiltinToolRegistry, ToolRegistryError, with_workspace_root,
+};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiAgentBoardProjection, UiAgentLifecycleActivityProjection,
     UiAgentLifecycleProjection, UiAgentSnapshotProjection, UiCheckpointSummary, UiClientKind,
@@ -314,7 +316,7 @@ impl RuntimeCheckpointStore {
             runtime_home,
             agent_id,
             session_id,
-            checkpoint_workspace_root()?,
+            runtime_home.to_path_buf(),
         )
     }
 
@@ -691,25 +693,6 @@ impl RuntimeCheckpointStore {
     }
 }
 
-fn checkpoint_workspace_root() -> Result<PathBuf, RuntimeCheckpointError> {
-    checkpoint_workspace_root_from_env(
-        env::var_os("FREEHAND_WORKSPACE_ROOT").or_else(|| env::var_os("FREEHAND_DAEMON_WORKDIR")),
-    )
-}
-
-fn checkpoint_workspace_root_from_env(
-    configured_root: Option<std::ffi::OsString>,
-) -> Result<PathBuf, RuntimeCheckpointError> {
-    let root = if let Some(path) = configured_root {
-        PathBuf::from(path)
-    } else {
-        env::current_dir()
-            .map_err(|err| RuntimeCheckpointError::StoreBootstrapFailed(err.to_string()))?
-    };
-    fs::canonicalize(root)
-        .map_err(|err| RuntimeCheckpointError::StoreBootstrapFailed(err.to_string()))
-}
-
 pub fn rewind_checkpoint(
     runtime_home: impl AsRef<Path>,
     agent_id: &AgentId,
@@ -973,7 +956,7 @@ where
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
-    let tool_schema_fingerprint = tool_registry.implemented_schema_fingerprint();
+    let tool_schema_fingerprint = tool_registry.master_implemented_schema_fingerprint();
 
     loop {
         ensure_live_not_cancelled(&request)?;
@@ -1011,7 +994,7 @@ where
             debug_hub.is_enabled(),
         )
         .map_err(|err| RuntimeLiveBridgeError::ProviderRequestBuildFailed(err.to_string()))?;
-        semantic_request.tools = tool_registry.implemented_definitions();
+        semantic_request.tools = tool_registry.master_implemented_definitions();
         semantic_request.tool_choice = None;
         semantic_request.tool_exchanges = tool_exchanges.clone();
         write_control_hook_metadata(
@@ -2544,7 +2527,7 @@ impl RuntimeCommandDispatcher {
         requested_cwd: Option<String>,
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
         let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
-        let cwd = resolve_session_cwd(state, &session_id, requested_cwd)?;
+        let cwd = resolve_session_cwd(state, &session_id, requested_cwd, None)?;
         state.next_turn_ordinal += 1;
         let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
         let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
@@ -2606,7 +2589,8 @@ impl RuntimeCommandDispatcher {
     ) -> Option<PreparedLiveSubmit> {
         let live = state.config.live.clone()?;
         let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
-        let cwd = resolve_session_cwd(state, &session_id, requested_cwd).ok()?;
+        let cwd = resolve_session_cwd(state, &session_id, requested_cwd, Some(&live.runtime_home))
+            .ok()?;
         state.next_turn_ordinal += 1;
         let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
         let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
@@ -3067,13 +3051,14 @@ fn resolve_session_cwd(
     state: &mut RuntimeCommandDispatcherState,
     session_id: &SessionId,
     requested_cwd: Option<String>,
+    default_root: Option<&Path>,
 ) -> Result<PathBuf, UiCommandDispatchPortError> {
     let cwd = if let Some(cwd) = requested_cwd {
         canonicalize_session_cwd(&cwd)?
     } else if let Some(existing) = state.session_cwds.get(session_id) {
         existing.clone()
     } else {
-        canonicalize_default_runtime_cwd()?
+        canonicalize_default_runtime_cwd(default_root)?
     };
     state.session_cwds.insert(session_id.clone(), cwd.clone());
     Ok(cwd)
@@ -3350,18 +3335,24 @@ fn canonicalize_session_cwd(cwd: &str) -> Result<PathBuf, UiCommandDispatchPortE
     })
 }
 
-fn canonicalize_default_runtime_cwd() -> Result<PathBuf, UiCommandDispatchPortError> {
-    let root = env::var_os("FREEHAND_WORKSPACE_ROOT")
-        .or_else(|| env::var_os("FREEHAND_DAEMON_WORKDIR"))
-        .map(PathBuf::from)
-        .map(Ok)
-        .unwrap_or_else(|| {
-            env::current_dir().map_err(|err| {
-                UiCommandDispatchPortError::DispatchFailed(format!(
-                    "cannot read runtime current working directory: {err}"
-                ))
-            })
-        })?;
+fn canonicalize_default_runtime_cwd(
+    default_root: Option<&Path>,
+) -> Result<PathBuf, UiCommandDispatchPortError> {
+    let root = if let Some(default_root) = default_root {
+        default_root.to_path_buf()
+    } else {
+        env::var_os("FREEHAND_WORKSPACE_ROOT")
+            .or_else(|| env::var_os("FREEHAND_DAEMON_WORKDIR"))
+            .map(PathBuf::from)
+            .map(Ok)
+            .unwrap_or_else(|| {
+                env::current_dir().map_err(|err| {
+                    UiCommandDispatchPortError::DispatchFailed(format!(
+                        "cannot read runtime current working directory: {err}"
+                    ))
+                })
+            })?
+    };
     fs::canonicalize(&root).map_err(|err| {
         UiCommandDispatchPortError::DispatchFailed(format!(
             "cannot canonicalize runtime workspace `{}`: {err}",
@@ -5422,15 +5413,87 @@ fn execute_registry_tool_call(
             task_truth_changed: false,
         });
     }
-    if let Some(root) = workspace_root {
-        return with_workspace_root(root, || {
-            execute_registry_tool_call_with_workspace(registry, runtime_home, root, turn, tool_call)
-        })
-        .map_err(|err| RuntimeLiveBridgeError::ToolExecutionFailed(err.to_string()))?;
+    let tool_name = tool_call.tool_call.tool_name.as_str();
+    if tool_name == "task" {
+        return execute_registry_tool_call_with_workspace(
+            registry,
+            runtime_home,
+            runtime_home,
+            turn,
+            tool_call,
+        );
     }
-    let root = checkpoint_workspace_root()
-        .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
-    execute_registry_tool_call_with_workspace(registry, runtime_home, &root, turn, tool_call)
+    if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Shell) {
+        return Ok(master_workspace_denied_result(
+            turn,
+            tool_call,
+            runtime_home,
+            workspace_root,
+            "unsandboxed shell execution is not available to the master",
+        ));
+    }
+    let root = fs::canonicalize(runtime_home).map_err(|err| {
+        RuntimeLiveBridgeError::ToolExecutionFailed(format!(
+            "cannot canonicalize master runtime home `{}`: {err}",
+            runtime_home.display()
+        ))
+    })?;
+    if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Workspace)
+        && let Some(requested_root) = workspace_root
+    {
+        let requested_root = fs::canonicalize(requested_root).map_err(|err| {
+            RuntimeLiveBridgeError::ToolExecutionFailed(format!(
+                "cannot canonicalize requested workspace `{}`: {err}",
+                requested_root.display()
+            ))
+        })?;
+        if !requested_root.starts_with(&root) {
+            return Ok(master_workspace_denied_result(
+                turn,
+                tool_call,
+                &root,
+                Some(&requested_root),
+                "requested workspace is outside the master runtime home",
+            ));
+        }
+    }
+    with_workspace_root(&root, || {
+        execute_registry_tool_call_with_workspace(registry, runtime_home, &root, turn, tool_call)
+    })
+    .map_err(|err| RuntimeLiveBridgeError::ToolExecutionFailed(err.to_string()))?
+}
+
+fn master_workspace_denied_result(
+    turn: &TurnRecord,
+    tool_call: &ReasonReq04ToolCall,
+    allowed_root: &Path,
+    requested_root: Option<&Path>,
+    reason: &str,
+) -> ExecutedToolResult {
+    let requested = requested_root
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "(tool request)".to_owned());
+    ExecutedToolResult {
+        result: tool_result_reentry(
+            turn,
+            tool_call,
+            ToolResultStatus::Failed,
+            format!(
+                "Master workspace boundary: {reason}. allowed_root={} requested_target={requested}. Use task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{requested}\"), and task(op=\"assign\") so a worker performs the external work.",
+                allowed_root.display()
+            ),
+        ),
+        task_truth_changed: false,
+    }
+}
+
+fn master_registry_error_text(error: &ToolRegistryError) -> String {
+    match error {
+        ToolRegistryError::WorkspaceBoundaryViolation { root, target, .. } => format!(
+            "Master workspace boundary: requested target `{target}` is outside `{root}`. Use task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{target}\"), and task(op=\"assign\") so a worker performs the external work."
+        ),
+        _ => format!("Tool execution failed: {error}"),
+    }
 }
 
 fn execute_registry_tool_call_with_workspace(
@@ -5468,15 +5531,29 @@ fn execute_registry_tool_call_with_workspace(
             workspace_root.to_path_buf(),
         )
         .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
-        let preview = registry.preview(tool_call).map_err(|err| {
-            RuntimeLiveBridgeError::ToolCheckpointFailed(
-                RuntimeCheckpointError::UncheckpointableTool {
-                    tool: tool_name.to_owned(),
-                    message: err.to_string(),
-                }
-                .to_string(),
-            )
-        })?;
+        let preview = match registry.preview(tool_call) {
+            Ok(preview) => preview,
+            Err(err @ ToolRegistryError::WorkspaceBoundaryViolation { .. }) => {
+                return Ok(ExecutedToolResult {
+                    result: tool_result_reentry(
+                        turn,
+                        tool_call,
+                        ToolResultStatus::Failed,
+                        master_registry_error_text(&err),
+                    ),
+                    task_truth_changed: false,
+                });
+            }
+            Err(err) => {
+                return Err(RuntimeLiveBridgeError::ToolCheckpointFailed(
+                    RuntimeCheckpointError::UncheckpointableTool {
+                        tool: tool_name.to_owned(),
+                        message: err.to_string(),
+                    }
+                    .to_string(),
+                ));
+            }
+        };
         let manifest = store
             .create_from_preview(turn, &preview, tool_name)
             .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
@@ -5484,10 +5561,7 @@ fn execute_registry_tool_call_with_workspace(
             Ok(output) => (ToolResultStatus::Success, output.text),
             Err(err) => {
                 let _ = store.mark_failed(&manifest, &err.to_string());
-                (
-                    ToolResultStatus::Failed,
-                    format!("Tool execution failed: {err}"),
-                )
+                (ToolResultStatus::Failed, master_registry_error_text(&err))
             }
         };
         if status == ToolResultStatus::Success {
@@ -5502,10 +5576,7 @@ fn execute_registry_tool_call_with_workspace(
     }
     let (status, output) = match registry.execute(tool_call) {
         Ok(output) => (ToolResultStatus::Success, output.text),
-        Err(err) => (
-            ToolResultStatus::Failed,
-            format!("Tool execution failed: {err}"),
-        ),
+        Err(err) => (ToolResultStatus::Failed, master_registry_error_text(&err)),
     };
     Ok(ExecutedToolResult {
         result: tool_result_reentry(turn, tool_call, status, output),
@@ -6574,6 +6645,9 @@ mod tests {
         );
 
         let request = live_request(false);
+        fs::create_dir_all(&request.runtime_home).expect("create runtime home");
+        fs::write(request.runtime_home.join("Cargo.toml"), "[workspace]\n")
+            .expect("write master workspace fixture");
 
         let outcome = run_live_reason_turn(
             &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
@@ -7460,11 +7534,18 @@ provider = "old"
     #[test]
     fn live_bootstrap_restores_multiround_turns_as_separate_ui_cards() {
         let runtime_home = temp_runtime_home();
+        fs::create_dir_all(&runtime_home).expect("create runtime home");
+        fs::write(runtime_home.join("restore.txt"), "restored tool content\n")
+            .expect("write restore fixture");
         with_temp_workspace(|_| {
             let (base_url, rx, handle) = spawn_sequence_server(
                 "application/json",
                 vec![
-                    tool_use_bash_response("printf restored-tool"),
+                    tool_use_named_response(
+                        "toolu_restore_read",
+                        "read_file",
+                        json!({"path":"restore.txt","offset":0,"limit":2}),
+                    ),
                     complete_single_response("final after tool"),
                 ],
             );
@@ -7506,11 +7587,11 @@ provider = "old"
                     );
                     assert!(
                         tool_turn.tool_activities.iter().any(|tool| {
-                            tool.tool_name == "bash"
+                            tool.tool_name == "read_file"
                                 && tool.status
                                     == freehand_ui_protocol::UiToolActivityStatus::Completed
                         }),
-                        "restored first round must retain its own bash activity: {:?}",
+                        "restored first round must retain its own file-read activity: {:?}",
                         tool_turn.tool_activities
                     );
                     assert!(tool_turn.terminal_text.is_none());
@@ -8000,7 +8081,7 @@ provider = "old"
     }
 
     #[test]
-    fn live_tool_execution_uses_requested_session_cwd() {
+    fn live_master_tool_execution_rejects_external_session_cwd() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -8051,7 +8132,9 @@ provider = "old"
                 .dispatch_status
                 .contains("reason_live_turn_completed")
         );
-        assert!(reentry_request.contains("session cwd content"));
+        assert!(reentry_request.contains("Master workspace boundary"));
+        assert!(reentry_request.contains("task(op=\\\"create\\\""));
+        assert!(!reentry_request.contains("session cwd content"));
         match runtime
             .ui_state()
             .lock()
@@ -8852,7 +8935,7 @@ provider = "old"
             1
         );
         let expected_tool_count = BuiltinToolRegistry::reasonix_aligned()
-            .implemented_definitions()
+            .master_implemented_definitions()
             .len();
         assert!(
             runtime_debug_events(&debug_events, "RuntimeLive02ProviderRequestBuilt")
@@ -9655,7 +9738,7 @@ provider = "old"
         handle.join().expect("join");
 
         let registry = BuiltinToolRegistry::reasonix_aligned();
-        let expected = fnv1a_hex_for_test(&registry.implemented_schema_fingerprint());
+        let expected = fnv1a_hex_for_test(&registry.master_implemented_schema_fingerprint());
         let empty = fnv1a_hex_for_test("");
 
         assert_eq!(
@@ -10832,6 +10915,112 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
+    fn live_bridge_blocks_external_master_work_then_accepts_worker_dispatch() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let external_workspace = temp_runtime_home().join("external-repo");
+        fs::create_dir_all(&runtime_home).expect("create runtime home");
+        fs::create_dir_all(&external_workspace).expect("create external workspace");
+        fs::write(external_workspace.join("secret.txt"), "must-not-be-read")
+            .expect("write external fixture");
+        let task_id = "task-cross-workspace-boundary";
+        let agent_id = "worker-cross-workspace-boundary";
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_named_response(
+                    "toolu_external_read",
+                    "read_file",
+                    json!({"path": external_workspace.join("secret.txt")}),
+                ),
+                task_tool_use_response(
+                    "toolu_create_worker",
+                    json!({
+                        "op": "create_agent",
+                        "agent_id": agent_id,
+                        "capabilities": ["repository"]
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_create_task",
+                    json!({
+                        "op": "create",
+                        "task_id": task_id,
+                        "title": "Inspect external repository",
+                        "content": "Inspect the target repository without master-side access",
+                        "goal": "Delegate external workspace work",
+                        "deliverables": ["worker report"],
+                        "acceptance": ["worker owns external access"],
+                        "priority": 90,
+                        "target_cwd": external_workspace,
+                        "dispatch": {"mode": "none"}
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_assign_task",
+                    json!({
+                        "op": "assign",
+                        "task_id": task_id,
+                        "agent_id": agent_id
+                    }),
+                ),
+                complete_single_response("delegated external workspace"),
+            ],
+        );
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home.clone();
+        request.cwd = Some(external_workspace.clone());
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect("boundary failure must return to model and permit task dispatch");
+        let requests = (0..5)
+            .map(|_| rx.recv().expect("provider request"))
+            .collect::<Vec<_>>();
+        handle.join().expect("join");
+
+        assert!(!requests[0].contains("\"name\":\"bash\""));
+        assert!(requests[0].contains("\"name\":\"task\""));
+        assert!(requests[1].contains("Master workspace boundary"));
+        assert!(requests[1].contains("task(op=\\\"create\\\""));
+        assert!(!requests[1].contains("must-not-be-read"));
+        assert!(requests[2].contains("Agent created"));
+        assert!(requests[3].contains("Task created"));
+        assert!(requests[4].contains("Task assigned"));
+        assert_eq!(outcome.rounds, 5);
+        assert_eq!(outcome.tool_executions, 4);
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+
+        let task_runtime =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+        let task = task_runtime
+            .query_task(&TaskId::new(task_id))
+            .expect("delegated task");
+        assert_eq!(
+            task.assignee.as_ref().map(|assignee| &assignee.agent_id),
+            Some(&AgentId::new(agent_id))
+        );
+        assert_eq!(task.target_cwd.as_deref(), external_workspace.to_str());
+        let _ = fs::remove_dir_all(runtime_home);
+        let _ = fs::remove_dir_all(
+            external_workspace
+                .parent()
+                .expect("external workspace parent"),
+        );
+    }
+
+    #[test]
     fn live_bridge_returns_unknown_tool_as_failed_tool_result_without_terminalizing() {
         let _cwd_lock = cwd_lock()
             .lock()
@@ -11252,7 +11441,8 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     complete_single_response("write done"),
                 ],
             );
-            let request = live_request(false);
+            let mut request = live_request(false);
+            request.runtime_home = root.to_path_buf();
             let runtime_home = request.runtime_home.clone();
             let session_id = request.session_id.clone();
 
@@ -11317,7 +11507,8 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     complete_single_response("edit done"),
                 ],
             );
-            let request = live_request(false);
+            let mut request = live_request(false);
+            request.runtime_home = root.to_path_buf();
             let runtime_home = request.runtime_home.clone();
             let session_id = request.session_id.clone();
 
@@ -11367,8 +11558,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
     #[test]
     fn rewind_checkpoint_rejects_missing_manifest_explicitly() {
+        let runtime_home = temp_runtime_home();
+        fs::create_dir_all(&runtime_home).expect("create runtime home");
         let err = rewind_checkpoint(
-            temp_runtime_home(),
+            &runtime_home,
             &AgentId::new("agent-live"),
             &SessionId::new("session-live"),
             "checkpoint-missing",
@@ -11379,18 +11572,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             err,
             RuntimeCheckpointError::MissingManifest("checkpoint-missing".to_owned())
         );
-    }
-
-    #[test]
-    fn checkpoint_store_uses_daemon_workdir_env_before_current_dir() {
-        let workspace_root = temp_runtime_home().join("daemon-workdir");
-        fs::create_dir_all(&workspace_root).expect("create workspace root");
-        let root = checkpoint_workspace_root_from_env(Some(workspace_root.clone().into()))
-            .expect("workspace root");
-        assert_eq!(
-            root,
-            fs::canonicalize(workspace_root).expect("canonical workspace root")
-        );
+        let _ = fs::remove_dir_all(runtime_home);
     }
 
     #[test]
@@ -11406,7 +11588,8 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     complete_single_response("edit done"),
                 ],
             );
-            let request = live_request(false);
+            let mut request = live_request(false);
+            request.runtime_home = root.to_path_buf();
             let runtime_home = request.runtime_home.clone();
             let session_id = request.session_id.clone();
 
@@ -12058,7 +12241,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                     complete_single_response("write done"),
                 ],
             );
-            let runtime_home = temp_runtime_home();
+            let runtime_home = root.to_path_buf();
             let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
                 &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
                 runtime_home.clone(),

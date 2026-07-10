@@ -18,6 +18,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
+- gate runner verifies launchd defaults the master daemon workdir to `$HOME/.freehand`, creates it before bootstrap, and rejects the former repository-root default
 - gate runner verifies source-only search policy so implementation searches use source code, tests, maintained scripts, and canonical docs rather than generated/runtime output; the wrapper rejects unsafe rg ignore-bypass options and keeps hard generated-output exclusions after caller args
 - release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
 - WebUI online verification wrapper checks fixed S-profile 127.0.0.1:4042 daemon health and invokes the real browser WebUI plus ADP proof for alpha promotion; release-profile 127.0.0.1:4041 proof is a separate explicit target
@@ -42,6 +43,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - symlink install exposes freehand-cliS, freehand-serverS, freehand-daemonS, and freehand-daemon-launchdS on the chosen install prefix, with host commands pointing at repo debug binaries and the launchd wrapper installed as a prefix-local file
 - launchd install exposes com.freehand.daemon as a user LaunchAgent with RunAtLoad, KeepAlive, explicit FREEHAND_DAEMON_BIN, fixed 127.0.0.1:4041 WebUI, and logs under ~/.freehand/logs
 - launchd symlink install exposes com.freehand.daemonS as a separate user LaunchAgent with explicit FREEHAND_DAEMON_BIN, fixed 127.0.0.1:4042 WebUI, and daemonS logs under ~/.freehand/logs; symlink profile restart refreshes the debug daemon binary copy and health-checks the existing env bind before restarting
+- release and S launchd profiles default `FREEHAND_DAEMON_WORKDIR` to `$HOME/.freehand`, never the repository root
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
 - gate returns explicit failure with missing path, missing policy snippet, or stale generated wiki
 - mainline generation writes `docs/wiki/*.md` and `docs/wiki/README.md` from JSON truth
@@ -55,6 +57,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - mismatched mainline manifest source path, function map path, test design path, generated wiki path, or feature-map link surfaces as gate failure
 - missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure
 - missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
+- missing launchd runtime-home workdir initialization or a repository-root default surfaces as gate failure
 - missing source-only search exclusions, missing unsafe-argument guards, or missing `scripts/source-search.sh` policy snippets surface as gate failure
 - missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surfaces as online verification failure before alpha success is claimed
 - launchd bootstrap, kickstart, env-backed health endpoint, or daemon binary prefix mismatch failure surfaces as script failure before background service success is claimed
@@ -87,7 +90,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 | 12 | `render_mainline_wiki` | `xtask/src/main.rs` | render one human-readable wiki artifact from one typed mainline document | typed mainline document | wiki markdown | renderer pipeline | markdown renderer | bound |
 | 13 | `verify_mainline_manifest_links` | `xtask/src/main.rs` | validate migrated mainline manifest cross-links | JSON mainline truth plus feature/function/testing docs | pass/fail | run_gates_check | filesystem and mainline loader | bound |
 | 14 | `verify_mainline_call_table_bindings` | `xtask/src/main.rs` | validate migrated mainline call-table file and symbol bindings | JSON mainline truth plus source files | pass/fail | run_gates_check | filesystem and symbol resolver | bound |
-| 15 | `verify_ci_cd_gate_commands` | `xtask/src/main.rs` | validate local hook, Makefile, CI, and release full-gate command alignment | automation config files | pass/fail | run_gates_check | filesystem and policy snippets | bound |
+| 15 | `verify_ci_cd_gate_commands` | `xtask/src/main.rs` | validate local hook, Makefile, CI/release full-gate alignment, and launchd runtime-home workdir policy | automation config files | pass/fail | run_gates_check | filesystem and policy snippets | bound |
 | 16 | `verify_source_search_policy` | `xtask/src/main.rs` | validate source-only implementation search boundaries, including unsafe rg option rejection | ignore file, source search script, debug docs, and local skill | pass/fail | run_gates_check | filesystem and policy snippets | bound |
 | 17 | `verify_data_control_boundaries` | `xtask/src/main.rs` | validate static data/control isolation rules on source-owned request and metadata types | Rust source files for contracts and metadata owners | pass/fail | run_gates_check | source scanners | bound |
 | 18 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that docs/architecture/feature-map.md keeps one seed entry per feature_id | feature-map markdown | pass/fail | run_gates_check | feature-map scanner | bound |

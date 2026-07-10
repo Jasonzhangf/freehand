@@ -7,7 +7,7 @@ bin_dir="$prefix/bin"
 runtime_home="${FREEHAND_RUNTIME_HOME:-"$HOME/.freehand"}"
 logs_dir="$runtime_home/logs"
 agent="${FREEHAND_DAEMON_AGENT:-master}"
-workdir="${FREEHAND_DAEMON_WORKDIR:-"$repo_root"}"
+workdir="${FREEHAND_DAEMON_WORKDIR:-"$runtime_home"}"
 pair_token="${FREEHAND_PAIR_TOKEN_SHARED:-}"
 command="${1:-install}"
 
@@ -72,6 +72,7 @@ elif [[ -f "$env_file" ]]; then
 fi
 
 cd "$repo_root"
+mkdir -p "$runtime_home" "$logs_dir" "$workdir"
 
 upsert_env_var() {
   local key="$1"

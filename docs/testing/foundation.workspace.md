@@ -15,6 +15,9 @@
   - launchd install script installs release host binaries, writes `~/Library/LaunchAgents/com.freehand.daemon.plist`, writes `~/.freehand/daemon.env` with explicit daemon binary path, starts the user service, and exposes fixed logs/WebUI
   - launchd symlink profile writes `~/Library/LaunchAgents/com.freehand.daemonS.plist`, writes `~/.freehand/daemonS.env`, uses `freehand-daemonS-bin` for launchd execution, refreshes that debug binary copy during `restartS`, rewrites the plist, reloads only the service-scoped launchd label so new ProgramArguments/env sourcing are active, health-checks the env-backed bind, and exposes `127.0.0.1:4042` plus separate `daemonS.*.log` files
   - launchd install script does not leak daemon workspace root overrides into release/global-install regression subprocesses
+  - launchd release and S profiles default `FREEHAND_DAEMON_WORKDIR` to
+    `$HOME/.freehand`, create it before service bootstrap, and never default the
+    master daemon to the repository root
   - gate command can validate policy locks
   - source-only search policy keeps implementation search out of generated/runtime outputs and rejects unsafe `rg` ignore-bypass options
   - gate command can reject data/control boundary leaks at the repo source level
@@ -38,6 +41,7 @@
   - launchd S-profile label/env/bin/bind/log separation, including fixed loopback `127.0.0.1:4042` defaults and env-backed health checks on restart
   - launchd `restartS` debug daemon binary refresh, plist refresh, service-scoped launchd reload, and env-file sourcing before health check
   - launchd release subprocess daemon-workdir env isolation
+  - launchd default master workdir is `$HOME/.freehand`
   - source-only search policy checks `.ignore`, `scripts/source-search.sh`, debug docs, local skill snippets, and unsafe-argument rejection
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
   - loop governance docs include required L1 report-only files and deny automated action until explicit L2 approval

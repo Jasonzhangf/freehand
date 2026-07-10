@@ -5,13 +5,20 @@
 - lifecycle path under test:
   - registry is created per run
   - Reasonix-aligned tool names and schemas are exported in stable registry order
-  - implemented tools execute against the explicit per-call workspace root when runtime supplies session cwd and return explicit result text
+  - generic implemented tools execute against the explicit per-call workspace root and return explicit result text
+  - the master-safe export is a stable subset that excludes unrestricted shell tools
   - unimplemented registered tools fail explicitly
   - unknown tools fail explicitly
 - white-box plan:
   - registry name/schema export tests
   - implemented schema fingerprint stability tests
   - implemented schema fingerprint change detection tests
+  - master-safe tool export excludes unsandboxed shell execution while retaining
+    task and workspace-scoped file/search tools
+  - tool execution scope classification distinguishes framework, workspace, and
+    unrestricted process tools in the registry owner
+  - path escape returns a typed workspace-boundary error instead of an
+    unstructured invalid-argument string
 - `read_only` metadata tests
 - task-management semantic action names are not exposed as standalone tools
 - `task` remains the task-management tool surface and requires typed `op`
@@ -30,11 +37,17 @@
   - task tool op-dispatch surface tests
 - module black-box plan:
   - runtime live bridge can advertise implemented tool definitions without hardcoded demo tools
-  - runtime live bridge can execute a real implemented read-only registry tool and re-enter the result, including requested session cwd execution
+  - runtime live bridge can execute a real implemented read-only registry tool inside the master runtime home and re-enter the result
+  - runtime live bridge returns a paired failed result for an external requested session cwd without exposing external file content
 - project black-box impact:
-  - provider live turn tool loop may now execute foreground `bash` through the registry owner instead of forcing file-only tools
+  - master live turns cannot receive or execute unsandboxed `bash`; cross-workspace
+    work must enter through `task` and a worker
+  - master workspace-scoped tools execute only inside the runtime home
+    (`~/.freehand` in production)
+  - generic registry coverage retains foreground `bash`, but the master live tool
+    surface neither advertises nor executes it
   - provider live turn tool loop no longer depends on `echo_json` or forced `todo_write`
-  - daemon and runtime smokes now prove `read_file` can run through the registry-owned live path using session cwd
+  - daemon and runtime smokes prove `read_file` can run through the registry-owned live path only inside master runtime home
   - writable file-mutation tools now still enter the live path only through the registry owner instead of runtime orchestration
   - future bash/web/notebook tools still have one owner and cannot be implemented in runtime orchestration
   - future task-management actions must enter through the small owner-scoped tool/op surface, not new standalone semantic-action tool names
@@ -48,6 +61,6 @@
 - sync status between design and implementation:
   - registry-backed foreground `bash`, read-only file/search, and first text-mutation tools are landed
   - explicit per-call workspace root support is landed through `with_workspace_root`
-  - implemented tool schema fingerprint export is landed for planner/cache diagnostics consumers
+  - generic and master-safe implemented tool schema exports and fingerprints are landed for their respective consumers
   - writable tool live exposure is routed through the code-bound `tool.preview` plus `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts
   - runtime and daemon smokes now consume real registry tools instead of a forced demo first tool
