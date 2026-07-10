@@ -72,6 +72,9 @@ fn run() -> Result<String, String> {
     if flag == "task-restart-seed-blocked" {
         return run_task_restart_seed(args.collect(), RestartSeedState::Blocked);
     }
+    if flag == "task-restart-seed-running" {
+        return run_task_restart_seed(args.collect(), RestartSeedState::Running);
+    }
     if flag == "phase1-foundation-sample" {
         return run_phase1_foundation_sample(args.collect());
     }
@@ -110,7 +113,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-running --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
                 .to_owned(),
         );
     }
@@ -253,6 +256,7 @@ enum RestartSeedState {
     Review,
     Rejected,
     Blocked,
+    Running,
 }
 
 impl RestartSeedState {
@@ -261,6 +265,7 @@ impl RestartSeedState {
             Self::Review => "task-restart-seed-review",
             Self::Rejected => "task-restart-seed-rejected",
             Self::Blocked => "task-restart-seed-blocked",
+            Self::Running => "task-restart-seed-running",
         }
     }
 
@@ -269,6 +274,7 @@ impl RestartSeedState {
             Self::Review => "review",
             Self::Rejected => "rejected",
             Self::Blocked => "blocked",
+            Self::Running => "running",
         }
     }
 }
@@ -278,7 +284,7 @@ fn run_task_restart_seed(
     seed_state: RestartSeedState,
 ) -> Result<String, String> {
     let usage = format!(
-        "usage: freehand-cli {} --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>",
+        "usage: freehand-cli {} --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text> [--ttl-seconds <seconds>]",
         seed_state.command()
     );
     let mut agent = None::<String>;
@@ -287,6 +293,7 @@ fn run_task_restart_seed(
     let mut execution = None::<String>;
     let mut target_cwd = None::<String>;
     let mut summary = None::<String>;
+    let mut ttl_seconds = 300_u64;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -312,6 +319,10 @@ fn run_task_restart_seed(
             }
             "--summary" if index + 1 < args.len() => {
                 summary = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--ttl-seconds" if index + 1 < args.len() => {
+                ttl_seconds = args[index + 1].parse::<u64>().map_err(|_| usage.clone())?;
                 index += 2;
             }
             _ => return Err(usage),
@@ -382,7 +393,7 @@ fn run_task_restart_seed(
         .claim_next_task(TaskClaimRequest {
             agent_id: worker_id.clone(),
             execution_id: execution_id.clone(),
-            ttl_seconds: 300,
+            ttl_seconds,
             actor: cli_task_actor(&worker_id, seed_state.command()),
             watermark: watermark.clone(),
         })
@@ -447,6 +458,7 @@ fn run_task_restart_seed(
                 })
                 .map_err(|err| err.to_string())?;
         }
+        RestartSeedState::Running => {}
     }
     let history = runtime
         .task_history(&task_id)

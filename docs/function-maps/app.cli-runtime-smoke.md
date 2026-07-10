@@ -47,11 +47,12 @@
 - for same-session continuation sample, CLI submits two prompts into one isolated session and verifies the second terminal answer uses a unique token from prior effective history
 - for task lifecycle sample, CLI sends protocol-owned task mutation commands (`CreateTask`, `SubmitTaskReview`, `ApproveTaskReview`, `CloseTask`) through ADP, then verifies task owner truth through ADP task list/history queries
 - for strict lifecycle restart recovery proof, CLI `task-restart-seed-review`,
-  `task-restart-seed-rejected`, and `task-restart-seed-blocked` use
-  `TaskRuntime` directly while the daemon is stopped to seed persisted
-  `TaskReviewSubmitted`, `TaskReviewRejected`, or `TaskBlocked` owner truth;
-  after restart, the lifecycle runners must consume that persisted truth and
-  continue through normal Task Center transitions
+  `task-restart-seed-rejected`, `task-restart-seed-blocked`, and
+  `task-restart-seed-running` use `TaskRuntime` directly while daemons are
+  stopped to seed persisted `TaskReviewSubmitted`, `TaskReviewRejected`,
+  `TaskBlocked`, or lease-backed `Running` owner truth; after restart, the
+  lifecycle runners must consume that persisted truth and continue through
+  normal Task Center transitions
 - for Phase 1 foundation sample, CLI drives protocol-owned TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and same-id verification commands/queries through ADP without UI or model prose
 - for Phase 2A master-worker foundation sample, CLI drives protocol-owned worker agent creation, task assignment, claim-next with execution id, progress/blocked/recovering/review facts, reject, retry, approve, close, and same-id verification through ADP without UI or model prose
 - for master-worker autonomy sample, CLI submits only one user prompt through ADP `SubmitUserInput`; the live model/tool loop must call the single owner-scoped `task(op=...)` tool to create worker state, create/assign/claim tasks, record execution facts, review, reject, retry, approve, and close; CLI then verifies transcript tool activity plus TaskBoard, AgentBoard, AgentLifecycle, and TaskHistory owner truth
@@ -89,7 +90,8 @@
 - task lifecycle sample prints task id, closed status, and required history event types
 - task restart seed commands print task id, worker id, execution id, seed
   state, and seeded event types; they do not approve, close, or run
-  model/protocol transport
+  model/protocol transport; `task-restart-seed-running` intentionally stops
+  after `TaskResumed`/`TaskHeartbeat`
 - Phase 1 foundation sample prints blocked task id, review task id, execution id, agent id, blocked/review/stale counts, lifecycle query evidence, and recovering-event evidence
 - Phase 2A master-worker foundation sample prints task id, worker id, execution id, final closed status, ordered lifecycle events, review retry evidence, and same-id restart verification arguments
 - master-worker autonomy sample prints one line per scenario with session id, generated task/execution/worker ids, final task status, lifecycle state, review submission count, transcript turn count, task tool execution count, ordered history, and same-id restart verification arguments
@@ -171,7 +173,7 @@
 | 09a | `run_verify_provider_retry_online` | `scripts/verify-provider-retry-online.sh` | run a local provider-error fixture, temporarily update S-profile provider config, execute provider-retry ADP sample, verify error-center retry truth, and restore config/env | S-profile daemon on `127.0.0.1:4042` | terminal-facing provider retry proof with five mock attempts and provider error-center rows | operator/agent verifier | daemon `/adp` + local mock provider | bound |
 | 09b | `run_session_continue_sample` / `run_session_continue_sample_async` | `apps/freehand-cli/src/main.rs` | submit two prompts into one isolated session and query transcript evidence that the second answer used prior effective history | ADP WebSocket URL | terminal-facing two-turn continuation result | CLI dispatcher | daemon `/adp` | bound |
 | 09c | `run_task_lifecycle_sample` / `run_task_lifecycle_sample_async` | `apps/freehand-cli/src/main.rs` | send protocol-owned task create/review/approve/close commands and query task list/history evidence that the task closed through owner truth | ADP WebSocket URL | terminal-facing task lifecycle result | CLI dispatcher | daemon `/adp` | bound |
-| 09d | `run_task_restart_seed` | `apps/freehand-cli/src/main.rs` | seed review/rejected/blocked Task Center truth while daemon is stopped for strict restart recovery proof | master agent + task/worker/execution/cwd/summary + seed state | terminal-facing seeded event order | CLI dispatcher | `freehand-task::TaskRuntime` | bound |
+| 09d | `run_task_restart_seed` | `apps/freehand-cli/src/main.rs` | seed review/rejected/blocked/running Task Center truth while daemon is stopped for strict restart recovery proof | master agent + task/worker/execution/cwd/summary + optional TTL + seed state | terminal-facing seeded event order | CLI dispatcher | `freehand-task::TaskRuntime` | bound |
 | 10 | `run_adp_task_query` | `apps/freehand-cli/src/main.rs` | parse ADP task query URL and optional list/history filters | `--url ws://.../adp [--status <status>] [--agent <id>] [--history <task_id>]` | selected task query command | CLI dispatcher | ADP task query runner | bound |
 | 11 | `run_adp_task_query_async` | `apps/freehand-cli/src/main.rs` | send task list/history query over ADP and summarize the task projection | ADP WebSocket URL + task query command | terminal-facing task list/history summary or explicit ADP failure | ADP task query runner | daemon `/adp` | bound |
 | 12 | `run_adp_task_subscribe` | `apps/freehand-cli/src/main.rs` | parse ADP task subscribe URL and optional list filters | `--url ws://.../adp [--status <status>] [--agent <id>]` | selected task subscribe command | CLI dispatcher | ADP task subscribe runner | bound |
@@ -203,9 +205,10 @@
 - CLI same-session continuation sample is implemented and verifies second-turn token recovery from prior effective history
 - CLI task lifecycle sample is implemented and verifies closed task plus create/review/approve/close history evidence after protocol-owned task mutation commands
 - CLI task restart seed commands are implemented for deterministic strict
-  Master lifecycle restart recovery proof; they write through `TaskRuntime` API
-  only and leave subsequent retry/approve/close/blocked-decision work to the
-  restarted lifecycle runners
+  Master/Worker lifecycle restart recovery proof; they write through
+  `TaskRuntime` API only and leave subsequent retry/approve/close,
+  blocked-decision, or interrupted-running recovery work to the restarted
+  lifecycle runners
 - CLI ADP session manage path is implemented for no-UI session CRUD and rollback diagnosis
 - CLI ADP task list/history query path is implemented for no-UI task truth diagnosis
 - CLI ADP task list subscribe path is implemented for no-UI task push diagnosis

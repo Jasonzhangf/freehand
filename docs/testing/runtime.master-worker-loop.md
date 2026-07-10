@@ -48,6 +48,7 @@ BigTasks remain out of scope until every row below is closed.
 | daemon stopped before review is pending | `TaskReviewSubmitted` is seeded through TaskRuntime owner API while Master daemon is offline | after restart, Master consumes persisted review truth and closes or rejects |
 | daemon stopped before rejected retry | `TaskReviewRejected` is seeded through TaskRuntime owner API while Master and Worker daemons are offline | after restart, Worker uses a new execution and Master closes or rejects the new review |
 | daemon stopped before blocked decision | `TaskBlocked` is seeded through TaskRuntime owner API while Master daemon is offline | after restart, Master writes a persisted `blocked_decision` or reassignment |
+| Worker stopped while task is running | lease-backed `Running` is seeded through TaskRuntime owner API, then the Worker service is stopped long enough for lease expiry | after Worker/Master recovery, TaskHistory contains `TaskInterrupted`, a new execution, and terminal review/close or explicit blocked truth |
 
 Lifecycle closure must not rely on a user sending another chat message. The
 Master loop is event/board driven, and every retry/review decision must write
@@ -194,9 +195,10 @@ Task Center truth before another execution starts.
   - Slave mode creates Worker runner
   - Slave mode does not bind WebUI/ADP transport
 - restart test opens a new runner against the same runtime home and verifies same task/execution/agent/history ids.
-- strict restart recovery proofs stop/unload daemonS, seed review/rejected/blocked
-  truth through `freehand-cliS task-restart-seed-*`, restart daemonS/workerS as
-  needed, and verify TaskHistory reaches the expected next lifecycle event.
+- strict restart recovery proofs stop/unload daemonS/workerS as needed, seed
+  review/rejected/blocked/running truth through
+  `freehand-cliS task-restart-seed-*`, restart daemonS/workerS as needed, and
+  verify TaskHistory reaches the expected next lifecycle event.
 
 ## Project Black-Box Coverage
 

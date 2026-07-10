@@ -16,10 +16,11 @@
   - provider retry online verifier temporarily redirects S-profile provider config to a local 500 fixture, requires five real upstream attempts, queries provider-domain error-center rows, and restores config/env before exit
   - CLI runs no-UI same-session continuation sample by submitting two turns into one isolated session and verifying the second terminal answer uses a unique token from the first turn's effective history
   - CLI runs no-UI task lifecycle sample by sending protocol-owned task create/review/approve/close commands and verifying task list/history truth reaches `Closed`
-  - CLI runs `task-restart-seed-review`, `task-restart-seed-rejected`, and
-    `task-restart-seed-blocked` while daemon is stopped to seed
-    `TaskReviewSubmitted`, `TaskReviewRejected`, or `TaskBlocked` through
-    `TaskRuntime` API for deterministic restart recovery proof
+  - CLI runs `task-restart-seed-review`, `task-restart-seed-rejected`,
+    `task-restart-seed-blocked`, and `task-restart-seed-running` while daemons
+    are stopped to seed `TaskReviewSubmitted`, `TaskReviewRejected`,
+    `TaskBlocked`, or lease-backed `Running` through `TaskRuntime` API for
+    deterministic restart recovery proof
   - CLI runs no-UI Phase 1 foundation sample by driving TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id verification through ADP
   - CLI runs no-UI Phase 2A master-worker foundation sample by driving worker creation, task assignment, claim-next with execution id, progress/blocked/recovering/review facts, reject, retry, approve, close, and restart same-id verification through ADP
   - CLI runs no-UI master-worker autonomy sample by submitting only `SubmitUserInput` through ADP; model/provider/tool-loop behavior must create worker/task truth through `task(op=...)`, while CLI verifies transcript tool activity plus TaskBoard, AgentBoard, AgentLifecycle, TaskHistory, and restart same-id truth
@@ -57,8 +58,8 @@
   - CLI ADP same-session continuation sample mock WebSocket smoke with two turns in one session and second-turn token evidence
   - CLI ADP task lifecycle sample mock WebSocket smoke with closed task list projection and create/review/approve/close history evidence, and with no `SubmitUserInput` prompt dependency
   - CLI task restart seed command smoke with direct TaskRuntime API,
-    non-master rejection, review/rejected/blocked seed states, and no direct
-    JSON persistence writes
+    non-master rejection, review/rejected/blocked/running seed states, and no
+    direct JSON persistence writes
   - CLI ADP Phase 1 foundation sample mock WebSocket smoke with blocked/review/stale board evidence, agent lifecycle query evidence, recovering history event evidence, and explicit verify mode
   - CLI ADP Phase 2A master-worker foundation sample mock WebSocket smoke with worker claim, execution id, ordered history, lifecycle evidence, and explicit verify mode
   - CLI ADP master-worker autonomy sample mock WebSocket smoke with only `SubmitUserInput` accepted, direct task mutation commands rejected, three scenario transcript/tool-count evidence, TaskBoard/AgentBoard/Lifecycle/History verification, and explicit verify mode
@@ -85,9 +86,9 @@
   - no-UI same-session continuation sample verifies session history inclusion without WebUI DOM inspection
   - no-UI task lifecycle sample verifies task owner truth through ADP task list/history without WebUI DOM inspection; CLI only sends protocol-owned task mutation commands and does not write task storage directly
   - strict restart recovery can now be verified without ADP race by stopping
-    daemonS, seeding review/rejected/blocked truth through `TaskRuntime`, then
-    restarting daemonS/workerS as needed and requiring lifecycle runners to
-    continue from persisted truth
+    daemonS/workerS as needed, seeding review/rejected/blocked/running truth
+    through `TaskRuntime`, then restarting daemonS/workerS as needed and
+    requiring lifecycle runners to continue from persisted truth
   - no-UI Phase 1 foundation sample verifies TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id proof without model prose or UI DOM inspection
   - no-UI Phase 2A master-worker foundation sample verifies assign/claim/progress/blocked/recovering/review/reject/retry/approve/close and restart same-id proof without model prose or UI DOM inspection
   - no-UI master-worker autonomy sample verifies the missing black-box gap: the master path is model/tool-loop driven rather than scripted ADP mutation; success closes only after approval, execution-error stays blocked without review/close, and reject-retry preserves reject-before-recover-before-second-review-before-close
@@ -136,7 +137,8 @@
   - CLI ADP same-session continuation sample is implemented in integration tests and verifies token recovery from prior effective history
   - CLI ADP task lifecycle sample is implemented in integration tests and verifies closed task/history evidence after protocol-owned task mutation commands
   - CLI task restart seed states are implemented; review/rejected/blocked
-    S-profile proofs were run with daemonS offline during seed
+    S-profile proofs were run with daemonS offline during seed, and running is
+    available for Worker crash/restart recovery proof
   - CLI ADP Phase 1 foundation sample is implemented in integration tests and verifies TaskBoard/AgentBoard/ExecutionFact/SchedulerTick evidence through protocol-owned ADP frames
   - CLI ADP Phase 2A master-worker foundation sample is implemented in integration tests and live-validated on S-profile `127.0.0.1:4042` with restart same-id verification
   - CLI master-worker autonomy sample is implemented in integration tests; the mock proof rejects direct task mutation commands and validates success, execution-error, and reject-retry branches from transcript plus owner truth

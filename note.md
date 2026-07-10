@@ -3588,3 +3588,48 @@ Current real root cause split:
   - first seed attempt failed because offline CLI was run without sourcing daemon env; no task was written
   - one restart attempt failed after sourcing daemon env because the env PATH did not include cargo; recovery used a clean shell and the same seeded task
   - a polling script used zsh readonly variable name `history`; rerun used `hist_out` and succeeded
+
+# 2026-07-10 background Master/Worker non-happy-path online proof
+
+- marker:
+  - `background-master-worker-nonhappy-proof-1781783694885`
+- implementation:
+  - added `freehand-cli task-restart-seed-running`
+  - added optional `--ttl-seconds` to the restart seed harness
+  - running seed writes through `TaskRuntime` only: create, assign, claim, heartbeat; it does not write review/blocked/terminal truth
+- local validation:
+  - `cargo fmt --check` passed
+  - `cargo check -p freehand-cli` passed
+  - `cargo test -p freehand-cli --test config_startup -- --nocapture` passed: 26 tests
+  - earlier full `cargo test -p freehand-cli -- --nocapture` PTY session returned later and passed: 26 tests
+  - `git diff --check` passed before online proof
+- rejected retry online proof:
+  - stopped daemonS and workerS through service-scoped `launchctl bootout`
+  - seeded rejected truth while both services were offline:
+    - task: `task-bg-rejected-1781783693503`
+    - first execution: `exec-bg-rejected-1781783693503`
+    - seed events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected`
+  - restarted daemonS then workerS
+  - final ADP TaskHistory:
+    - `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+- blocked decision online proof:
+  - stopped daemonS through service-scoped `launchctl bootout`
+  - seeded blocked truth while daemonS was offline:
+    - task: `task-bg-blocked-1781783693672`
+    - execution: `exec-bg-blocked-1781783693672`
+    - seed events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked`
+  - restarted daemonS
+  - final ADP TaskHistory:
+    - `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`
+- worker crash/restart online proof:
+  - restarted current S-profile binaries
+  - stopped daemonS and workerS through service-scoped `launchctl bootout`
+  - seeded lease-backed running truth with `--ttl-seconds 1`:
+    - task: `task-bg-crash-1781783694885`
+    - expired execution: `exec-bg-crash-1781783694885`
+    - seed events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat`
+  - waited for lease expiry, restarted daemonS then workerS
+  - first recovery evidence:
+    - `TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted`
+  - final ADP TaskHistory:
+    - `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
