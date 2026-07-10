@@ -90,8 +90,7 @@ function inferIds(body) {
     || (body.includes("execution-error") ? "execution-error" : body.includes("reject-retry") ? "reject-retry" : "success");
   const taskId = matchValue(body, "FHMA_TASK_ID")
     || (body.match(/task-cli-master-autonomy-[A-Za-z0-9-]+/) || [])[0];
-  const workerId = matchValue(body, "FHMA_WORKER_ID")
-    || (body.match(/worker-cli-master-autonomy-[A-Za-z0-9-]+/) || [])[0];
+  const workerId = matchValue(body, "FHMA_WORKER_ID");
   const executionId = matchValue(body, "FHMA_EXECUTION_ID")
     || (body.match(/exec-cli-master-autonomy-[A-Za-z0-9-]+/) || [])[0];
   if (!taskId || !workerId || !executionId) {
@@ -129,7 +128,6 @@ function complete(text) {
 function sequenceFor(ids) {
   const { scenario, taskId, workerId, executionId } = ids;
   const common = [
-    toolUse(`toolu_${scenario}_agent`, { op: "create_agent", agent_id: workerId, capabilities: ["code_edit", "test_run"] }),
     toolUse(`toolu_${scenario}_create`, {
       op: "create",
       task_id: taskId,
@@ -278,7 +276,7 @@ NODE
       exit 1
     fi
   done
-  for expected in "tool_executions=8" "tool_executions=6" "tool_executions=10" "status=blocked" "TaskReviewRejected" "TaskExecutionRecovering"; do
+  for expected in "tool_executions=7" "tool_executions=5" "tool_executions=9" "status=blocked" "TaskReviewRejected" "TaskExecutionRecovering"; do
     if ! grep -q "$expected" <<<"$sample_output"; then
       echo "$sample_output" >&2
       echo "sample output missing expected evidence: $expected" >&2
@@ -286,9 +284,9 @@ NODE
     fi
   done
   mock_count="$(grep -c '"url":"/v1/messages"' "$mock_log" || true)"
-  if [[ "$mock_count" != "27" ]]; then
+  if [[ "$mock_count" != "24" ]]; then
     cat "$mock_log" >&2
-    echo "expected 27 provider attempts, got $mock_count" >&2
+    echo "expected 24 provider attempts, got $mock_count" >&2
     exit 1
   fi
 

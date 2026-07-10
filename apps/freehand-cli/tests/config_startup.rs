@@ -1391,7 +1391,7 @@ fn spawn_adp_master_worker_autonomy_mock_server() -> (String, thread::JoinHandle
             "cli-master-autonomy-reject-retry-verify",
             "task-cli-master-autonomy-reject-retry-verify",
             "exec-cli-master-autonomy-reject-retry-verify",
-            "worker-cli-master-autonomy-reject-retry-verify",
+            "worker",
             "FHAUTO-verify",
         ),
     )
@@ -1405,7 +1405,7 @@ fn spawn_adp_master_worker_autonomy_verify_mock_server() -> (String, thread::Joi
             "cli-master-autonomy-reject-retry-verify",
             "task-cli-master-autonomy-reject-retry-verify",
             "exec-cli-master-autonomy-reject-retry-verify",
-            "worker-cli-master-autonomy-reject-retry-verify",
+            "worker",
             "FHAUTO-verify",
         ),
     )
@@ -2775,7 +2775,7 @@ fn master_autonomy_truth_from_prompt(
     let execution_id = master_autonomy_prompt_value(prompt, "FHMA_EXECUTION_ID")
         .unwrap_or_else(|| format!("exec-cli-master-autonomy-{scenario}-{token}"));
     let agent_id = master_autonomy_prompt_value(prompt, "FHMA_WORKER_ID")
-        .unwrap_or_else(|| format!("worker-cli-master-autonomy-{scenario}-{token}"));
+        .unwrap_or_else(|| "worker".to_owned());
     let mut truth = master_autonomy_truth_for(
         &scenario,
         session_id.as_str(),
@@ -2816,7 +2816,7 @@ fn master_autonomy_truth_for(
                 "TaskReviewApproved",
                 "TaskClosed",
             ],
-            8,
+            7,
         ),
         "execution-error" => (
             "blocked",
@@ -2828,7 +2828,7 @@ fn master_autonomy_truth_for(
                 "TaskExecutionRecorded",
                 "TaskBlocked",
             ],
-            6,
+            5,
         ),
         "reject-retry" => (
             "closed",
@@ -2844,7 +2844,7 @@ fn master_autonomy_truth_for(
                 "TaskReviewApproved",
                 "TaskClosed",
             ],
-            10,
+            9,
         ),
         other => panic!("unknown master autonomy scenario {other}"),
     };
@@ -3578,9 +3578,9 @@ fn cli_runs_master_worker_autonomy_sample_against_mock_websocket() {
     assert!(stdout.contains("task=task-cli-master-autonomy-reject-retry-FHAUTO"));
     assert!(stdout.contains("status=closed"));
     assert!(stdout.contains("status=blocked"));
-    assert!(stdout.contains("tool_executions=8"));
-    assert!(stdout.contains("tool_executions=6"));
-    assert!(stdout.contains("tool_executions=10"));
+    assert!(stdout.contains("tool_executions=7"));
+    assert!(stdout.contains("tool_executions=5"));
+    assert!(stdout.contains("tool_executions=9"));
     assert!(stdout.contains("TaskReviewRejected"));
     assert!(stdout.contains("TaskExecutionRecovering"));
     assert!(stdout.contains("master_autonomy_model_turn_complete:reject-retry"));
@@ -3603,7 +3603,7 @@ fn cli_runs_master_worker_autonomy_verify_against_mock_websocket() {
         .arg("--execution")
         .arg("exec-cli-master-autonomy-reject-retry-verify")
         .arg("--agent")
-        .arg("worker-cli-master-autonomy-reject-retry-verify")
+        .arg("worker")
         .output()
         .expect("run master worker autonomy verify");
 
@@ -3617,7 +3617,7 @@ fn cli_runs_master_worker_autonomy_verify_against_mock_websocket() {
     assert!(stdout.contains("scenario=reject-retry"));
     assert!(stdout.contains("task=task-cli-master-autonomy-reject-retry-verify"));
     assert!(stdout.contains("execution=exec-cli-master-autonomy-reject-retry-verify"));
-    assert!(stdout.contains("agent=worker-cli-master-autonomy-reject-retry-verify"));
+    assert!(stdout.contains("agent=worker"));
     assert!(stdout.contains("status=closed"));
     assert!(stdout.contains("lifecycle_state=closed"));
     assert!(stdout.contains("review_submissions=2"));

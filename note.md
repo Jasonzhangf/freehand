@@ -3633,3 +3633,40 @@ Current real root cause split:
     - `TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted`
   - final ADP TaskHistory:
     - `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+# 2026-07-10 normal master/worker E2E gate closeout
+
+- marker:
+  - `normal-master-worker-e2e-gate-1781783700473`
+- implementation:
+  - added `scripts/verify-normal-master-worker-e2e.sh`
+  - gate restarts S-profile master/worker on fixed `127.0.0.1:4042`
+  - gate runs SubmitUserInput-only `master-worker-autonomy` fixture, then production branch proofs for rejected retry, blocked decision, and worker crash recovery
+  - autonomy fixture now uses configured Worker id `worker` instead of dynamic `worker-cli-master-autonomy-*`
+  - removed fixture `create_agent`; provider attempt gate is now exactly 24 attempts
+  - autonomy verification now treats TaskBoard/TaskHistory/transcript as task-scoped truth; shared Worker AgentLifecycle is queried for visibility but not used as per-scenario terminal truth because the configured Worker global state can be overwritten by concurrent/background tasks
+  - rejected/crash production branches now create deterministic `instructions.txt` files in target cwd so Worker tasks have exact file/output criteria
+- root causes fixed:
+  - old autonomy fixture generated dynamic worker ids, but production runtime accepts only configured paired Worker `worker`
+  - old CLI verification used shared Worker's global lifecycle state as if it were task-local; online verify showed lifecycle could be `closed` or `running` while the target task truth was correctly `blocked`
+  - initial normal rejected/crash branches had vague/empty target workspaces, causing Worker heartbeat without review submission
+- local verification:
+  - `cargo fmt --check` passed
+  - `cargo check -p freehand-cli` passed
+  - `cargo test -p freehand-cli --test config_startup -- --nocapture` passed: 26 tests
+  - `cargo test -p freehand-cli -- --nocapture` passed: 26 tests
+  - `cargo run -p xtask -- mainlines generate` passed
+  - `cargo run -p xtask -- mainlines check` passed
+  - `cargo run -p xtask -- gates check` passed
+  - `cargo clippy --workspace --all-targets -- -D warnings` passed
+  - `git diff --check` passed
+- online S-profile proof:
+  - `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` restored to `provider=minimax`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`
+  - `scripts/verify-normal-master-worker-e2e.sh` passed with final `normal_master_worker_e2e_ok url=ws://127.0.0.1:4042/adp`
+  - autonomy fixture: `master_worker_autonomy_online_ok mock_attempts=24`
+  - autonomy tasks:
+    - success `task-cli-master-autonomy-success-FHAUTO1783700365778249000`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskExecutionRecorded,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+    - execution-error `task-cli-master-autonomy-execution-error-FHAUTO1783700366668480000`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskExecutionRecorded,TaskBlocked`
+    - reject-retry `task-cli-master-autonomy-reject-retry-FHAUTO1783700367280302000`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected,TaskResumed,TaskHeartbeat,TaskExecutionRecovering,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+  - production rejected retry `task-normal-rejected-1781783700382`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+  - production blocked decision `task-normal-blocked-1781783700459`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`
+  - production worker crash recovery `task-normal-crash-1781783700473`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`

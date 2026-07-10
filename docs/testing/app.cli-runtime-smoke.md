@@ -23,8 +23,9 @@
     deterministic restart recovery proof
   - CLI runs no-UI Phase 1 foundation sample by driving TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id verification through ADP
   - CLI runs no-UI Phase 2A master-worker foundation sample by driving worker creation, task assignment, claim-next with execution id, progress/blocked/recovering/review facts, reject, retry, approve, close, and restart same-id verification through ADP
-  - CLI runs no-UI master-worker autonomy sample by submitting only `SubmitUserInput` through ADP; model/provider/tool-loop behavior must create worker/task truth through `task(op=...)`, while CLI verifies transcript tool activity plus TaskBoard, AgentBoard, AgentLifecycle, TaskHistory, and restart same-id truth
+  - CLI runs no-UI master-worker autonomy sample by submitting only `SubmitUserInput` through ADP; model/provider/tool-loop behavior must create task truth for the configured Worker through `task(op=...)`, while CLI verifies transcript tool activity plus task-scoped TaskBoard/TaskHistory truth, configured Worker AgentBoard presence, AgentLifecycle queryability, and restart same-id truth
   - CLI runs formal real-provider master-worker history verification by querying TaskHistory for real-provider-created task ids; assigned-only histories are explicit failures because they prove delegation happened without worker execution
+  - CLI/script runs normal S-profile master-worker E2E by starting master/worker services, proving SubmitUserInput autonomy, then proving production background rejected retry, blocked decision, and Worker crash recovery branches from ADP TaskHistory
   - CLI runs no-UI Phase 2B master poll foundation sample by driving EventInbox
     query and MasterPoll command through ADP, verifying classifications,
     cursor persistence, no task status mutation, and restart same-cursor
@@ -62,9 +63,10 @@
     direct JSON persistence writes
   - CLI ADP Phase 1 foundation sample mock WebSocket smoke with blocked/review/stale board evidence, agent lifecycle query evidence, recovering history event evidence, and explicit verify mode
   - CLI ADP Phase 2A master-worker foundation sample mock WebSocket smoke with worker claim, execution id, ordered history, lifecycle evidence, and explicit verify mode
-  - CLI ADP master-worker autonomy sample mock WebSocket smoke with only `SubmitUserInput` accepted, direct task mutation commands rejected, three scenario transcript/tool-count evidence, TaskBoard/AgentBoard/Lifecycle/History verification, and explicit verify mode
-  - master-worker autonomy online script smoke with real S-profile daemon, local fixture provider, ADP sample output, 27 provider `/v1/messages` attempts across success/execution-error/reject-retry, restart same-id verification, and config restoration
+  - CLI ADP master-worker autonomy sample mock WebSocket smoke with only `SubmitUserInput` accepted, direct task mutation commands rejected, three scenario transcript/tool-count evidence, task-scoped TaskBoard/History verification, configured Worker AgentBoard presence, AgentLifecycle queryability, and explicit verify mode
+  - master-worker autonomy online script smoke with real S-profile daemon, local fixture provider, ADP sample output, 24 provider `/v1/messages` attempts across success/execution-error/reject-retry, restart same-id verification, and config restoration
   - real-provider master-worker history verifier smoke with real S-profile daemon and task ids from live provider runs; the negative branch must fail on `TaskCreated,TaskAssigned` only, and the positive branch must require at least one worker lifecycle event after assignment
+  - normal master-worker E2E verifier smoke with real S-profile daemon and worker services, autonomy fixture output, branch TaskHistory evidence, and final `normal_master_worker_e2e_ok`
   - CLI ADP Phase 2B master poll foundation sample mock WebSocket smoke with
     EventInbox rows, classification kinds, persisted cursor evidence, no task
     status mutation, explicit verify mode, replay-from-start create mode, and
@@ -93,6 +95,7 @@
   - no-UI Phase 2A master-worker foundation sample verifies assign/claim/progress/blocked/recovering/review/reject/retry/approve/close and restart same-id proof without model prose or UI DOM inspection
   - no-UI master-worker autonomy sample verifies the missing black-box gap: the master path is model/tool-loop driven rather than scripted ADP mutation; success closes only after approval, execution-error stays blocked without review/close, and reject-retry preserves reject-before-recover-before-second-review-before-close
   - real-provider master-worker history verifier prevents false green reports for live provider multi-agent tests: task-tool creation/assignment is not enough; worker lifecycle events must exist before the run can be counted as executing
+  - normal master-worker E2E verifier gives one command that Jason can run before manual WebUI testing; it fails if SubmitUserInput autonomy, rejected retry, blocked decision, or crash recovery branch truth is missing
   - future formal real-provider online E2E must use a real provider and a real
     research/document task, then verify transcript, TaskBoard, AgentBoard,
     EventInbox, TaskHistory, output document path, and same-id restart truth
@@ -122,6 +125,7 @@
   - local master-worker autonomy WebSocket mock in CLI tests
   - S-profile master-worker autonomy fixture verifier `scripts/verify-master-worker-autonomy-online.sh`
   - S-profile real-provider master-worker history verifier `scripts/verify-real-provider-master-worker-history.sh`
+  - S-profile normal master-worker E2E verifier `scripts/verify-normal-master-worker-e2e.sh`
   - local Phase 2B master poll WebSocket mock in CLI tests
   - local Phase 2C worker-control WebSocket mock in CLI tests
   - local `freehand-server webui-serve-smoke` for manual/agent positive ADP smoke
@@ -144,6 +148,7 @@
   - CLI master-worker autonomy sample is implemented in integration tests; the mock proof rejects direct task mutation commands and validates success, execution-error, and reject-retry branches from transcript plus owner truth
   - S-profile master-worker autonomy online proof is implemented through a local Anthropic-compatible fixture and must pass before claiming model/tool-driven multi-task autonomy
   - real-provider master-worker history verifier is implemented and currently expected to fail assigned-only live-provider tasks until production worker runner/scheduler truth exists
+  - normal S-profile master-worker E2E verifier is implemented as the current pre-WebUI normal test gate
   - CLI ADP Phase 2B master poll foundation sample is implemented and
     S-profile verified with EventInbox, classifications, persisted cursor, and
     restart same-cursor evidence

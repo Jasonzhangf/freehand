@@ -2310,18 +2310,11 @@ impl MasterWorkerAutonomyScenario {
         }
     }
 
-    fn expected_lifecycle_state(self) -> &'static str {
-        match self {
-            Self::Success | Self::RejectRetry => "closed",
-            Self::ExecutionError => "blocked",
-        }
-    }
-
     fn expected_tool_executions(self) -> usize {
         match self {
-            Self::Success => 8,
-            Self::ExecutionError => 6,
-            Self::RejectRetry => 10,
+            Self::Success => 7,
+            Self::ExecutionError => 5,
+            Self::RejectRetry => 9,
         }
     }
 
@@ -2843,7 +2836,7 @@ async fn run_master_worker_autonomy_scenario(
     let token = format!("FHAUTO{stamp}");
     let task_id = format!("task-cli-master-autonomy-{}-{token}", scenario.id_label());
     let execution_id = format!("exec-cli-master-autonomy-{}-{token}", scenario.id_label());
-    let worker_id = format!("worker-cli-master-autonomy-{}-{token}", scenario.id_label());
+    let worker_id = "worker".to_owned();
     let prompt =
         master_worker_autonomy_prompt(scenario, &task_id, &worker_id, &execution_id, &token);
     let label = format!("master-autonomy-{}", scenario.id_label());
@@ -2899,13 +2892,13 @@ fn master_worker_autonomy_prompt(
 ) -> String {
     let scenario_instruction = match scenario {
         MasterWorkerAutonomyScenario::Success => {
-            "Run the success path: create a worker, create and assign a task, claim it, record running progress, record review_ready, approve, close, then finish."
+            "Run the success path: create and assign a task to the configured Worker, claim it, record running progress, record review_ready, approve, close, then finish."
         }
         MasterWorkerAutonomyScenario::ExecutionError => {
-            "Run the execution-error path: create a worker, create and assign a task, claim it, record running progress, record a blocked execution error, do not approve or close, then finish with the task blocked."
+            "Run the execution-error path: create and assign a task to the configured Worker, claim it, record running progress, record a blocked execution error, do not approve or close, then finish with the task blocked."
         }
         MasterWorkerAutonomyScenario::RejectRetry => {
-            "Run the rejected-review path: create a worker, create and assign a task, claim it, record incomplete review_ready, reject it, record recovering with retry_count=1, record a second review_ready, approve, close, then finish."
+            "Run the rejected-review path: create and assign a task to the configured Worker, claim it, record incomplete review_ready, reject it, record recovering with retry_count=1, record a second review_ready, approve, close, then finish."
         }
     };
     format!(
@@ -3051,15 +3044,6 @@ async fn verify_master_worker_autonomy_truth(
         &ids.agent_id,
     )
     .await?;
-    if lifecycle.state != ids.scenario.expected_lifecycle_state() {
-        return Err(format!(
-            "master autonomy lifecycle mismatch scenario={} agent={} expected={} actual={}",
-            ids.scenario.label(),
-            ids.agent_id,
-            ids.scenario.expected_lifecycle_state(),
-            lifecycle.state
-        ));
-    }
 
     let history = query_task_history(url, &ids.task_id).await?;
     let event_types = history
