@@ -8,8 +8,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use freehand_config::{AgentMode, SelectedAgentConfig};
 use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_task::{
-    AgentCreateRequest, ExecutionFact, ExecutionFactKind, TaskActor, TaskClaimRequest, TaskError,
-    TaskId, TaskRuntime, TaskSnapshot, TaskWatermark,
+    AgentCreateRequest, ExecutionFact, ExecutionFactKind, TaskActor, TaskAssignRequest,
+    TaskClaimOutcome, TaskClaimRequest, TaskError, TaskId, TaskListQuery, TaskRuntime,
+    TaskSnapshot, TaskStatus, TaskWatermark,
 };
 use thiserror::Error;
 
@@ -44,6 +45,12 @@ pub enum ProductionWorkerTickOutcome {
         turn_id: Option<TurnId>,
         reason: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkerRetryKind {
+    Interrupted,
+    ReviewRejected,
 }
 
 #[derive(Debug, Error)]
@@ -159,16 +166,14 @@ impl ProductionWorkerRunner {
         let task_runtime = Arc::new(self.open_task_center()?);
         self.ensure_worker_registered_in(&task_runtime)?;
         let execution_id = next_execution_id(&self.worker_agent_id);
-        let actor = worker_actor(&self.worker_agent_id, None);
-        let claim = task_runtime
-            .claim_next_task(TaskClaimRequest {
-                agent_id: self.worker_agent_id.clone(),
-                execution_id: execution_id.clone(),
-                ttl_seconds: DEFAULT_LEASE_TTL_SECONDS,
-                actor,
-                watermark: worker_watermark(&execution_id, "claim"),
-            })
-            .map_err(task_center_error)?;
+        let mut retry_kind = None;
+        let mut claim = self.claim_assigned_task(&task_runtime, &execution_id)?;
+        if claim.task.is_none() {
+            retry_kind = self.requeue_retryable_task(&task_runtime)?;
+            if retry_kind.is_some() {
+                claim = self.claim_assigned_task(&task_runtime, &execution_id)?;
+            }
+        }
         let Some(task) = claim.task else {
             return Ok(ProductionWorkerTickOutcome::Idle);
         };
@@ -200,7 +205,13 @@ impl ProductionWorkerRunner {
             self.worker_agent_id.clone(),
             execution_id.clone(),
         );
-        let request = worker_live_request(&self.runtime_home, &task, &execution_id, workspace);
+        let request = worker_live_request(
+            &self.runtime_home,
+            &task,
+            &execution_id,
+            workspace,
+            retry_kind,
+        );
         let execution = self.executor.execute(&self.selected, request);
         if let Err(error) = heartbeat.stop() {
             return self.report_blocked(
@@ -276,6 +287,52 @@ impl ProductionWorkerRunner {
             .map_err(task_center_error)
     }
 
+    fn claim_assigned_task(
+        &self,
+        task_runtime: &TaskRuntime,
+        execution_id: &str,
+    ) -> Result<TaskClaimOutcome, ProductionWorkerRunnerError> {
+        task_runtime
+            .claim_next_task(TaskClaimRequest {
+                agent_id: self.worker_agent_id.clone(),
+                execution_id: execution_id.to_owned(),
+                ttl_seconds: DEFAULT_LEASE_TTL_SECONDS,
+                actor: worker_actor(&self.worker_agent_id, None),
+                watermark: worker_watermark(execution_id, "claim"),
+            })
+            .map_err(task_center_error)
+    }
+
+    fn requeue_retryable_task(
+        &self,
+        task_runtime: &TaskRuntime,
+    ) -> Result<Option<WorkerRetryKind>, ProductionWorkerRunnerError> {
+        let retryable = task_runtime
+            .list_tasks(TaskListQuery {
+                status: None,
+                assignee: Some(self.worker_agent_id.clone()),
+            })
+            .map_err(task_center_error)?
+            .into_iter()
+            .find_map(|task| match task.status {
+                TaskStatus::Interrupted => Some((task, WorkerRetryKind::Interrupted)),
+                TaskStatus::Rejected => Some((task, WorkerRetryKind::ReviewRejected)),
+                _ => None,
+            });
+        let Some((task, retry_kind)) = retryable else {
+            return Ok(None);
+        };
+        task_runtime
+            .assign_task(TaskAssignRequest {
+                task_id: task.task_id,
+                agent_id: self.worker_agent_id.clone(),
+                actor: worker_actor(&self.worker_agent_id, None),
+                watermark: worker_watermark("retry", "requeue"),
+            })
+            .map_err(task_center_error)?;
+        Ok(Some(retry_kind))
+    }
+
     fn ensure_worker_registered(&self) -> Result<(), ProductionWorkerRunnerError> {
         let task_runtime = self.open_task_center()?;
         self.ensure_worker_registered_in(&task_runtime)
@@ -344,6 +401,7 @@ fn worker_live_request(
     task: &TaskSnapshot,
     execution_id: &str,
     workspace: PathBuf,
+    retry_kind: Option<WorkerRetryKind>,
 ) -> LiveReasonTurnRequest {
     let task_key = sanitize_identifier(task.task_id.as_str());
     let execution_key = sanitize_identifier(execution_id);
@@ -352,14 +410,25 @@ fn worker_live_request(
         session_id: SessionId::new(format!("worker-task-{task_key}")),
         turn_id: TurnId::new(format!("worker-turn-{execution_key}")),
         trace_id: TraceId::new(format!("worker-trace-{execution_key}")),
-        prompt: worker_task_prompt(task),
+        prompt: worker_task_prompt(task, retry_kind),
         cwd: Some(workspace),
         stream: false,
         cancel_token: None,
     }
 }
 
-fn worker_task_prompt(task: &TaskSnapshot) -> String {
+fn worker_task_prompt(task: &TaskSnapshot, retry_kind: Option<WorkerRetryKind>) -> String {
+    let retry_context = match retry_kind {
+        Some(WorkerRetryKind::Interrupted) => {
+            "\nRetry context:\nThe previous execution was interrupted. Inspect persisted workspace state, continue safely, and re-run verification before submission.".to_owned()
+        }
+        Some(WorkerRetryKind::ReviewRejected) => format!(
+            "\nReview rejection:\nReason: {}\nRequired changes:\n{}",
+            task.review.reject_reason.as_deref().unwrap_or("not provided"),
+            render_lines(&task.review.next_requirements),
+        ),
+        None => String::new(),
+    };
     format!(
         "Execute the assigned Task Center task.\n\
 Task ID: {}\n\
@@ -368,13 +437,14 @@ Goal: {}\n\
 Content: {}\n\
 Deliverables:\n{}\n\
 Acceptance criteria:\n{}\n\
-Work only inside the locked target workspace. Complete the implementation and verification, then return the required Freehand completion schema.",
+Work only inside the locked target workspace. Complete the implementation and verification, then return the required Freehand completion schema.{}",
         task.task_id.as_str(),
         task.title,
         task.goal,
         task.content,
         render_lines(&task.deliverables),
         render_lines(&task.acceptance),
+        retry_context,
     )
 }
 

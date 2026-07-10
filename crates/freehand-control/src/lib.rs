@@ -180,7 +180,9 @@ pub fn classify_error_center_failure(observed: &ErrorCenterObservedFailure) -> E
     let source = observed.source_owner.as_str();
     let node = observed.source_pipeline_node.as_str();
     let code = observed.code.as_str();
-    if source == "reason.turn" && code == "completion_schema_rejected" {
+    if (source == "reason.turn" && code == "completion_schema_rejected")
+        || (source == "control.center" && code == "control_status_schema_rejected")
+    {
         return ErrorCenterDecision {
             domain: ErrorCenterDomain::Schema,
             class: ErrorCenterClass::Validation,
@@ -321,6 +323,22 @@ pub fn parse_control_status_block(
     validate_control_status_submission(&submission).map(|_| submission)
 }
 
+pub fn control_status_rejection_feedback(rejection: &ControlStatusRejection) -> String {
+    let issues = rejection
+        .issues
+        .iter()
+        .map(|issue| format!("- `{}`: {}", issue.field, issue.message))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Your Freehand status schema was rejected. Fix these fields in the next response:\n\
+{issues}\n\n\
+Return one corrected `<<<freehand_status>>>...<</freehand_status>>>` JSON block. \
+Optional fields may be omitted or set to null; every non-null value must match the documented type. \
+Continue the same task because this schema mismatch is not a terminal failure."
+    )
+}
+
 pub fn control_status_rhythm_decision(
     submission: &ControlStatusSubmission,
 ) -> Result<ControlRhythmDecision, ControlStatusRejection> {
@@ -442,7 +460,7 @@ fn optional_string(
     field: &'static str,
 ) -> Option<String> {
     match object.get(field) {
-        None => None,
+        None | Some(Value::Null) => None,
         Some(Value::String(value)) => Some(value.clone()),
         Some(value) => {
             issues.push(ControlStatusIssue {
@@ -460,7 +478,7 @@ fn optional_bool(
     field: &'static str,
 ) -> Option<bool> {
     match object.get(field) {
-        None => None,
+        None | Some(Value::Null) => None,
         Some(Value::Bool(value)) => Some(*value),
         Some(value) => {
             issues.push(ControlStatusIssue {
@@ -478,7 +496,7 @@ fn optional_string_array(
     field: &'static str,
 ) -> Vec<String> {
     match object.get(field) {
-        None => Vec::new(),
+        None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(values)) => values
             .iter()
             .filter_map(|value| match value {
@@ -545,6 +563,11 @@ fn schema_repair_fields(message: &str) -> Vec<String> {
         "learned",
         "next_step",
         "blocked_reason",
+        "simple_question",
+        "task_complete",
+        "blocked",
+        "needs_user_involvement",
+        "options",
     ] {
         if message.contains(candidate) {
             fields.push(candidate.to_owned());
@@ -619,6 +642,39 @@ mod tests {
     }
 
     #[test]
+    fn accepts_explicit_null_for_optional_status_fields() {
+        let raw = r#"<<<freehand_status>>>
+{"schema_version":1,"status":{"simple_question":true,"next_step":null,"blocked_reason":null,"options":null}}
+<</freehand_status>>>"#;
+
+        let submission = parse_control_status_block(raw).expect("nullable optional status");
+
+        assert_eq!(submission.status.next_step, None);
+        assert_eq!(submission.status.blocked_reason, None);
+        assert!(submission.status.options.is_empty());
+        assert_eq!(
+            control_status_rhythm_decision(&submission),
+            Ok(ControlRhythmDecision::AllowNaturalStop)
+        );
+    }
+
+    #[test]
+    fn rejects_non_null_wrong_type_for_optional_status_field() {
+        let raw = r#"<<<freehand_status>>>
+{"schema_version":1,"status":{"simple_question":true,"next_step":42}}
+<</freehand_status>>>"#;
+
+        let rejection = parse_control_status_block(raw).expect_err("wrong type must reject");
+
+        assert_eq!(rejection.issues.len(), 1);
+        assert_eq!(rejection.issues[0].field, "next_step");
+        assert!(rejection.issues[0].message.contains("got number"));
+        let feedback = control_status_rejection_feedback(&rejection);
+        assert!(feedback.contains("`next_step`: must be a string, got number"));
+        assert!(feedback.contains("not a terminal failure"));
+    }
+
+    #[test]
     fn classifies_schema_error_as_repair_until_retry_cap() {
         let decision = classify_error_center_failure(&ErrorCenterObservedFailure {
             source_owner: "reason.turn".to_owned(),
@@ -652,6 +708,21 @@ mod tests {
             }
         });
         assert_eq!(capped.recovery_action, ErrorCenterRecoveryAction::StopTurn);
+
+        let control_status = classify_error_center_failure(&ErrorCenterObservedFailure {
+            source_owner: "control.center".to_owned(),
+            source_pipeline_node: "ControlHook03AfterModelResponse".to_owned(),
+            code: "control_status_schema_rejected".to_owned(),
+            message: "next_step: must be a string, got number".to_owned(),
+            retry_index: 1,
+            retry_cap: 3,
+        });
+        assert_eq!(control_status.domain, ErrorCenterDomain::Schema);
+        assert_eq!(
+            control_status.recovery_action,
+            ErrorCenterRecoveryAction::RepairSchema
+        );
+        assert_eq!(control_status.repair_fields, vec!["next_step".to_owned()]);
     }
 
     #[test]

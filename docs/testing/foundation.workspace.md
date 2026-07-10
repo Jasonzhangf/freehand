@@ -14,6 +14,10 @@
   - symlink install script builds debug host binaries, exposes S-suffixed development commands, and installs a prefix-local launchd wrapper without replacing global release commands
   - launchd install script installs release host binaries, writes `~/Library/LaunchAgents/com.freehand.daemon.plist`, writes `~/.freehand/daemon.env` with explicit daemon binary path, starts the user service, and exposes fixed logs/WebUI
   - launchd symlink profile writes `~/Library/LaunchAgents/com.freehand.daemonS.plist`, writes `~/.freehand/daemonS.env`, uses `freehand-daemonS-bin` for launchd execution, refreshes that debug binary copy during `restartS`, rewrites the plist, reloads only the service-scoped launchd label so new ProgramArguments/env sourcing are active, health-checks the env-backed bind, and exposes `127.0.0.1:4042` plus separate `daemonS.*.log` files
+  - launchd Worker profiles write `com.freehand.worker` / `com.freehand.workerS`,
+    source the matching master profile pair token, omit `--bind`, use
+    `RunAtLoad=true` and `KeepAlive=true`, and prove the worker PID remains
+    stable before reporting startup success
   - launchd install script does not leak daemon workspace root overrides into release/global-install regression subprocesses
   - launchd release and S profiles default `FREEHAND_DAEMON_WORKDIR` to
     `$HOME/.freehand`, create it before service bootstrap, and never default the
@@ -40,6 +44,8 @@
   - launchd daemon binary prefix mismatch rejection
   - launchd S-profile label/env/bin/bind/log separation, including fixed loopback `127.0.0.1:4042` defaults and env-backed health checks on restart
   - launchd `restartS` debug daemon binary refresh, plist refresh, service-scoped launchd reload, and env-file sourcing before health check
+  - launchd Worker profile command, shared-token, no-bind, stable-PID, and
+    separate env/log path checks
   - launchd release subprocess daemon-workdir env isolation
   - launchd default master workdir is `$HOME/.freehand`
   - source-only search policy checks `.ignore`, `scripts/source-search.sh`, debug docs, local skill snippets, and unsafe-argument rejection
@@ -71,6 +77,9 @@
   - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
   - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`
   - `scripts/install-launchd.sh restartS` refreshes S debug binaries, rewrites the env-sourcing plist, reloads only `com.freehand.daemonS`, reads the existing env bind for health checks, and restarts only that label
+  - `scripts/install-launchd.sh installWorkerS` starts
+    `com.freehand.workerS` from the same debug binary and pair token without a
+    WebUI bind; `restartWorkerS` preserves the same service contract
   - `make verify-webui-online` runs the fixed S-profile `127.0.0.1:4042` real-browser WebUI + ADP proof after symlink install/restartS, injects the verifier-only provider credential env required for Settings valid-save proof, restores S-profile config/env afterward, and saves screenshots plus `summary.json` under `artifacts/webui-online/`; `make verify-webui-release-online` is the explicit release-profile `127.0.0.1:4041` proof
   - machine-readable mainline truth remains the only source for generated wiki artifacts
   - loop governance starts as report-only project control, not unattended automation

@@ -51,9 +51,16 @@
 
 - unsupported provider type/protocol is rejected at the bridge boundary
 - provider execution failures are classified with concrete error codes, recorded through `error.center`, retried up to five non-stream attempts with exponential backoff starting at 1 second, and returned explicitly only after retry exhaustion or a non-retryable executor error
-- invalid or missing completion schema is a normal response-schema mismatch pattern, not a provider failure: it is rejected with type-aware field-level feedback so the model can polish the response to the contract, then retried up to 3 consecutive terminal-candidate responses
+- invalid or missing completion/control-status schema is a normal
+  response-schema mismatch pattern, not a provider failure: nullable optional
+  fields are treated as absent, non-null wrong types receive type-aware
+  field-level feedback, and the model may polish the response for up to 3
+  consecutive terminal-candidate responses
 - master shell or external-workspace attempts are execution-policy failures returned to the model with task/worker instructions; they do not execute, expose external content, or terminalize the turn
 - non-terminal completion-schema rejection retries publish a waiting projection so UI clients can show that repair feedback was sent to the model
+- non-terminal control-status rejection uses the same persisted response-schema
+  retry truth and waiting projection; it must not return
+  `ProviderRequestBuildFailed`
 - incomplete tool calls are not executed as successful side effects
 - incomplete `tool_use` responses are paired back to the model as failed tool results; they must not become schema retries or terminal runtime failures
 - writable tools without preview/checkpoint support are rejected explicitly

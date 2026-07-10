@@ -10,9 +10,9 @@ use freehand_config::{
 };
 use freehand_contracts::{AgentId, TerminalStatus, TurnId};
 use freehand_task::{
-    AgentStatus, ExecutionFact, ExecutionFactKind, TaskActor, TaskClaimRequest, TaskCreateRequest,
-    TaskDispatchRequest, TaskId, TaskListQuery, TaskMutationRequest, TaskParentRef,
-    TaskReviewRejection, TaskRuntime, TaskStatus, TaskWatermark,
+    AgentStatus, TaskActor, TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskId,
+    TaskListQuery, TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskRuntime,
+    TaskStatus, TaskWatermark,
 };
 use serde_json::Value;
 

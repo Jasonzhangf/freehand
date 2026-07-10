@@ -3554,3 +3554,37 @@ Current real root cause split:
   - `launchctl print gui/$(id -u)/com.freehand.workerS` showed `state = running`
 - caution:
   - during restore, daemonS and workerS install commands were started in parallel and waited on Cargo locks; future same-owner/service install validation should be sequential unless explicitly independent
+
+# 2026-07-10 background Master lifecycle runner proof
+
+- marker:
+  - `background-master-runner-review-proof-1781783690592`
+- current P0 target:
+  - prove the Master daemon can consume Task Center lifecycle events in the background without a user sending another chat message
+  - this validates the manual user path after a Worker submits review: the framework advances the task lifecycle by event polling
+- implementation under review:
+  - `ProductionMasterRunner` polls TaskEventInbox with a persisted cursor under `~/.freehand/state/master-loop/<agent>.json`
+  - retryable lifecycle failures keep the same event cursor and increment persisted attempt state
+  - Master daemon starts the WebUI/ADP server and the Master lifecycle runner together; the runner executes through a blocking boundary
+  - live bridge supports a target task decision boundary so a lifecycle turn closes as soon as the expected task mutation is persisted
+- local verification before online:
+  - `cargo test -p freehand-runtime production_master -- --nocapture` passed: 11 tests
+  - `cargo test -p freehand-runtime production_worker -- --nocapture` passed: 9 tests
+  - `cargo test -p freehand-daemon worker_mode -- --nocapture` passed: 1 test
+  - `bash -n scripts/install-launchd.sh && bash -n scripts/uninstall-launchd.sh` passed
+- online proof:
+  - restarted S-profile services after current workspace build:
+    - `scripts/install-launchd.sh restartS`
+    - `scripts/install-launchd.sh restartWorkerS`
+  - stopped daemonS through service-scoped `launchctl bootout`
+  - sourced `~/.freehand/daemonS.env` and seeded review truth while daemonS was offline:
+    - task: `task-master-bg-review-1781783690592`
+    - execution: `exec-master-bg-review-1781783690592`
+    - seed events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted`
+  - restarted daemonS through `scripts/install-launchd.sh restartS`
+  - final TaskHistory from ADP:
+    - `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+- observed mistakes:
+  - first seed attempt failed because offline CLI was run without sourcing daemon env; no task was written
+  - one restart attempt failed after sourcing daemon env because the env PATH did not include cargo; recovery used a clean shell and the same seeded task
+  - a polling script used zsh readonly variable name `history`; rerun used `hist_out` and succeeded

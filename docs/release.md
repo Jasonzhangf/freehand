@@ -42,6 +42,8 @@ Run the alpha closeout sequence from the repo root:
 ```bash
 scripts/install-launchd.sh installS
 scripts/install-launchd.sh restartS
+scripts/install-launchd.sh installWorkerS
+scripts/install-launchd.sh restartWorkerS
 make verify-webui-online
 ```
 
@@ -155,6 +157,13 @@ Development symlink service truth:
 - stdout log: `~/.freehand/logs/daemonS.stdout.log`
 - stderr log: `~/.freehand/logs/daemonS.stderr.log`
 - daemon binary: `$HOME/.local/bin/freehand-daemonS`
+- worker label: `com.freehand.workerS`
+- worker env: `~/.freehand/workerS.env`
+- worker stdout/stderr: `~/.freehand/logs/workerS.*.log`
+- worker startup: `serve --agent worker` with no `--bind`
+- worker lifecycle: `RunAtLoad=true`, `KeepAlive=true`
+- worker pair token: copied from `~/.freehand/daemonS.env`; missing Master
+  token is an explicit install failure
 
 First-time install and start:
 

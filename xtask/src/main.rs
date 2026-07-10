@@ -847,7 +847,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks",
+        ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -947,6 +947,11 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     )?;
     require_contains(
         &makefile,
+        "install-worker-launchdS:\n\tscripts/install-launchd.sh installWorkerS",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
         "restart-launchd:\n\tscripts/install-launchd.sh restart",
         "Makefile",
     )?;
@@ -957,12 +962,22 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     )?;
     require_contains(
         &makefile,
+        "restart-worker-launchdS:\n\tscripts/install-launchd.sh restartWorkerS",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
         "uninstall-launchd:\n\tscripts/uninstall-launchd.sh",
         "Makefile",
     )?;
     require_contains(
         &makefile,
         "uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS",
+        "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "uninstall-worker-launchdS:\n\tscripts/uninstall-launchd.sh uninstallWorkerS",
         "Makefile",
     )?;
     let install_launchd = fs::read_to_string(root.join("scripts/install-launchd.sh"))
@@ -1013,6 +1028,36 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         );
     }
     require_contains(&install_launchd, "restartS)", "scripts/install-launchd.sh")?;
+    require_contains(
+        &install_launchd,
+        "installWorkerS|restartWorkerS)",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "default_label=\"com.freehand.workerS\"",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "exec \"$daemon_bin\" serve --agent \"$agent\"</string>",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "worker requires FREEHAND_PAIR_TOKEN_SHARED",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "wait_for_worker_service",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "kill -0 \"$service_pid\"",
+        "scripts/install-launchd.sh",
+    )?;
     require_contains(
         &install_launchd,
         "write_launchd_plist",
@@ -2069,7 +2114,7 @@ mod tests {
             | CiFixtureMode::CiWorkflowPartialGate
             | CiFixtureMode::LaunchdMissingEnvBind
             | CiFixtureMode::LaunchdRepoRootWorkdir => {
-                ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
+                ".PHONY: build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
@@ -2084,13 +2129,16 @@ install-global:\n\tscripts/install-global.sh\n\
 install-symlink:\n\tscripts/install-symlink.sh\n\
 install-launchd:\n\tscripts/install-launchd.sh\n\
 install-launchdS:\n\tscripts/install-launchd.sh installS\n\
+install-worker-launchdS:\n\tscripts/install-launchd.sh installWorkerS\n\
 restart-launchd:\n\tscripts/install-launchd.sh restart\n\
 restart-launchdS:\n\tscripts/install-launchd.sh restartS\n\
+restart-worker-launchdS:\n\tscripts/install-launchd.sh restartWorkerS\n\
 uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n\
-uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n"
+uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n\
+uninstall-worker-launchdS:\n\tscripts/uninstall-launchd.sh uninstallWorkerS\n"
             }
             CiFixtureMode::MakeCiMissingMainlines => {
-                ".PHONY: build fmt clippy test gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS restart-launchd restart-launchdS uninstall-launchd uninstall-launchdS launchd-status launchd-statusS launchd-logs launchd-logsS hooks\n\
+                ".PHONY: build fmt clippy test gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
@@ -2104,16 +2152,20 @@ install-global:\n\tscripts/install-global.sh\n\
 install-symlink:\n\tscripts/install-symlink.sh\n\
 install-launchd:\n\tscripts/install-launchd.sh\n\
 install-launchdS:\n\tscripts/install-launchd.sh installS\n\
+install-worker-launchdS:\n\tscripts/install-launchd.sh installWorkerS\n\
 restart-launchd:\n\tscripts/install-launchd.sh restart\n\
 restart-launchdS:\n\tscripts/install-launchd.sh restartS\n\
+restart-worker-launchdS:\n\tscripts/install-launchd.sh restartWorkerS\n\
 uninstall-launchd:\n\tscripts/uninstall-launchd.sh\n\
-uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n"
+uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n\
+uninstall-worker-launchdS:\n\tscripts/uninstall-launchd.sh uninstallWorkerS\n"
             }
         };
         fs::write(root.join("Makefile"), makefile).expect("write Makefile fixture");
         let launchd_script = match mode {
             CiFixtureMode::LaunchdMissingEnvBind => {
-                "#!/usr/bin/env bash\n\
+                concat!(
+                    "#!/usr/bin/env bash\n\
 runtime_home=\"$HOME/.freehand\"\n\
 logs_dir=\"$runtime_home/logs\"\n\
 workdir=\"${FREEHAND_DAEMON_WORKDIR:-\"$runtime_home\"}\"\n\
@@ -2126,7 +2178,14 @@ default_daemon_bind() {\n\
     return 0\n\
   fi\n\
 }\n\
-bind_addr=\"$default_bind_addr\"\n"
+bind_addr=\"$default_bind_addr\"\n",
+                    "installWorkerS|restartWorkerS)\n\
+default_label=\"com.freehand.workerS\"\n\
+exec \"$daemon_bin\" serve --agent \"$agent\"</string>\n\
+echo \"worker requires FREEHAND_PAIR_TOKEN_SHARED\"\n\
+wait_for_worker_service\n\
+kill -0 \"$service_pid\"\n",
+                )
             }
             CiFixtureMode::LaunchdRepoRootWorkdir => {
                 concat!(
@@ -2157,6 +2216,12 @@ fi\n",
     launchctl bootout \"gui/$(id -u)\" \"$plist_path\"\n\
     launchctl bootstrap \"gui/$(id -u)\" \"$plist_path\"\n\
     restart_launchd\n",
+                    "installWorkerS|restartWorkerS)\n\
+default_label=\"com.freehand.workerS\"\n\
+exec \"$daemon_bin\" serve --agent \"$agent\"</string>\n\
+echo \"worker requires FREEHAND_PAIR_TOKEN_SHARED\"\n\
+wait_for_worker_service\n\
+kill -0 \"$service_pid\"\n",
                 )
             }
             CiFixtureMode::Aligned
@@ -2190,6 +2255,12 @@ fi\n",
     launchctl bootout \"gui/$(id -u)\" \"$plist_path\"\n\
     launchctl bootstrap \"gui/$(id -u)\" \"$plist_path\"\n\
     restart_launchd\n",
+                    "installWorkerS|restartWorkerS)\n\
+default_label=\"com.freehand.workerS\"\n\
+exec \"$daemon_bin\" serve --agent \"$agent\"</string>\n\
+echo \"worker requires FREEHAND_PAIR_TOKEN_SHARED\"\n\
+wait_for_worker_service\n\
+kill -0 \"$service_pid\"\n",
                 )
             }
         };

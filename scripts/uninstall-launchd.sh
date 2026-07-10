@@ -10,8 +10,14 @@ case "$command" in
   uninstallS)
     default_label="com.freehand.daemonS"
     ;;
+  uninstallWorker)
+    default_label="com.freehand.worker"
+    ;;
+  uninstallWorkerS)
+    default_label="com.freehand.workerS"
+    ;;
   *)
-    echo "usage: $0 [uninstall|uninstallS]" >&2
+    echo "usage: $0 [uninstall|uninstallS|uninstallWorker|uninstallWorkerS]" >&2
     exit 2
     ;;
 esac

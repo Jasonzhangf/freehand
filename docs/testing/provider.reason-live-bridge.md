@@ -33,6 +33,12 @@
   - missing completion-schema feedback must be sent to the next provider request with the missing `<freehand_completion>` tag requirement
   - invalid-schema rejection feedback must be sent to the next provider request with concrete missing field names, not only a generic retry prompt
   - schema/no-schema response mismatch must remain `CompletionSchemaRejected` plus `error.center` polishing guidance (`repair_schema` recovery action internally); it must not be projected as provider failure or `fail_turn`
+  - nullable optional fields in completion and control-status schemas are
+    treated as absent, while non-null wrong types remain explicit field-level
+    mismatches
+  - invalid control-status schema is paired back to the model as a
+    schema-polishing retry with observable waiting feedback; it must not be
+    returned as `ProviderRequestBuildFailed` or terminate the live turn
   - terminal-candidate-only schema parsing path proving `tool_use` responses do not trigger schema retry
   - `claim=continue` next-round path
   - retry-exhausted failed terminal path
@@ -82,6 +88,9 @@
   - missing completion schema polishing request includes the required tag guidance needed by the model to align the response to the contract
   - invalid completion schema polishing request includes the missing schema fields required by the model to align the response to the contract
   - non-string completion fields produce explicit type feedback instead of being reported as missing
+  - non-string control-status fields produce explicit type feedback in the
+    next provider request, then a corrected status can close the same logical
+    turn successfully
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
   - recoverable non-stream provider HTTP/executor failure retries five attempts with exponential backoff starting at 1 second before explicit dispatch failure, materializes failed terminal/error truth with a concrete provider error code, and leaves no active turn hanging
   - recoverable non-stream provider HTTP/executor failure can succeed after earlier attempts; metadata records `retry_same_step` attempts without terminal `fail_turn`

@@ -1,9 +1,10 @@
 use std::future::pending;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use freehand_runtime::{
-    ProductionWorkerRunner, RuntimeAgentBootstrap, RuntimeCommandDispatcher,
-    load_default_runtime_agent,
+    ProductionMasterRunner, ProductionWorkerRunner, RuntimeAgentBootstrap,
+    RuntimeCommandDispatcher, load_default_runtime_agent,
 };
 use freehand_server::{parse_bind_arg, serve_webui_listener};
 use tokio::net::TcpListener;
@@ -45,36 +46,67 @@ async fn run() -> Result<String, String> {
                 return run_worker_mode(agent_name, bootstrap).await;
             }
             let bind_addr = parse_bind_arg(trailing_args.into_iter())?;
-            let dispatcher = RuntimeCommandDispatcher::from_selected_agent_with_live(
-                &bootstrap.selected_agent,
-                bootstrap.runtime_home,
-                false,
-            )
-            .map(Arc::new)
-            .map_err(|err| format!("failed to build runtime dispatcher: {err}"))?;
-            let listener = TcpListener::bind(bind_addr)
-                .await
-                .map_err(|err| format!("failed to bind {bind_addr}: {err}"))?;
-            let local_addr = listener
-                .local_addr()
-                .map_err(|err| format!("failed to read local addr: {err}"))?;
-            println!("freehand-daemon listening on http://{local_addr}");
-            let ui_state = dispatcher.ui_state();
-            let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> =
-                dispatcher.clone();
-            let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher.clone();
-            serve_webui_listener(
-                listener,
-                ui_state,
-                dispatch_port,
-                query_port,
-                pending::<()>(),
-            )
-            .await
-            .map_err(|err| format!("daemon server error: {err}"))?;
-            Ok(String::new())
+            run_master_mode(agent_name, bootstrap, bind_addr).await
         }
         _ => Err(usage()),
+    }
+}
+
+async fn run_master_mode(
+    agent_name: String,
+    bootstrap: RuntimeAgentBootstrap,
+    bind_addr: std::net::SocketAddr,
+) -> Result<String, String> {
+    let master_runner = ProductionMasterRunner::from_selected_agent(
+        bootstrap.selected_agent.clone(),
+        bootstrap.runtime_home.clone(),
+    )
+    .map_err(|err| format!("failed to build production master runner: {err}"))?;
+    let dispatcher = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &bootstrap.selected_agent,
+        bootstrap.runtime_home,
+        false,
+    )
+    .map(Arc::new)
+    .map_err(|err| format!("failed to build runtime dispatcher: {err}"))?;
+    let listener = TcpListener::bind(bind_addr)
+        .await
+        .map_err(|err| format!("failed to bind {bind_addr}: {err}"))?;
+    let local_addr = listener
+        .local_addr()
+        .map_err(|err| format!("failed to read local addr: {err}"))?;
+    println!("freehand-daemon listening on http://{local_addr}");
+    let ui_state = dispatcher.ui_state();
+    let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> = dispatcher.clone();
+    let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher.clone();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let runner_cancel = Arc::clone(&cancel);
+    let mut runner_task =
+        tokio::task::spawn_blocking(move || master_runner.run_until(runner_cancel));
+    let server = serve_webui_listener(
+        listener,
+        ui_state,
+        dispatch_port,
+        query_port,
+        pending::<()>(),
+    );
+    tokio::pin!(server);
+    tokio::select! {
+        result = &mut server => {
+            cancel.store(true, Ordering::Release);
+            runner_task
+                .await
+                .map_err(|error| format!("master lifecycle runner task failed: {error}"))?
+                .map_err(|error| format!("master lifecycle runner stopped: {error}"))?;
+            result.map_err(|err| format!("daemon server error: {err}"))?;
+            Ok(String::new())
+        }
+        result = &mut runner_task => {
+            result
+                .map_err(|error| format!("master lifecycle runner task failed: {error}"))?
+                .map_err(|error| format!("master lifecycle runner stopped: {error}"))?;
+            Err(format!("master lifecycle runner stopped unexpectedly for {agent_name}"))
+        }
     }
 }
 

@@ -37,6 +37,11 @@
 - symlink install script builds debug host binaries, exposes `freehand-cliS`, `freehand-serverS`, and `freehand-daemonS` as symlinks, and installs a copied `freehand-daemon-launchdS` wrapper for development without replacing global release commands
 - launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths
 - launchd install script supports a coexisting symlink profile through `installS` / `restartS`, using `com.freehand.daemonS`, `~/.freehand/daemonS.env`, `127.0.0.1:4042`, and `daemonS.*.log`; `restartS` refreshes the debug daemon binary copy, rewrites the plist, reloads only the service-scoped launchd label, sources the env file at daemon start, and health-checks the env-backed bind so Tailscale defaults cannot move the S profile off loopback
+- launchd install script supports release and S Worker services through
+  `installWorker` / `restartWorker` and `installWorkerS` / `restartWorkerS`;
+  Worker services source the matching Master pair token, never pass `--bind`,
+  use separate env/log/plist truth, and require a stable running PID before the
+  install/restart command succeeds
 - launchd install script keeps daemon workspace env out of the release/global-install regression subprocess so daemon runtime path selection cannot pollute workspace tests
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
@@ -57,6 +62,9 @@
 - symlink install exposes `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` on the chosen prefix, pointing host commands at repo debug binaries while keeping the launchd wrapper executable as a prefix-local file
 - launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
 - launchd symlink install exposes `com.freehand.daemonS` as a separate user LaunchAgent with explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4042` WebUI, and separate `daemonS.*.log` files; symlink profile restart refreshes the debug daemon binary copy and health-checks the existing env bind before restarting
+- launchd Worker install exposes `com.freehand.worker` and
+  `com.freehand.workerS` as separate `RunAtLoad` + `KeepAlive` services with no
+  UI port and with pair-token identity shared from the matching Master profile
 - release and S launchd profiles default `FREEHAND_DAEMON_WORKDIR` to `$HOME/.freehand`, never the repository root
 - release/global-install regressions run without inherited daemon workspace root overrides while the final LaunchAgent still receives the configured daemon workdir
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields

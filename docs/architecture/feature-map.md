@@ -63,7 +63,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | master/slave pairing, node status, delegation, slave turn publication | `node.master-slave` | `crates/freehand-node` | `docs/function-maps/node.master-slave.md` | `docs/testing/node.master-slave.md` |
 | UI commands, query/subscribe, UI projections | `ui.protocol` | `crates/freehand-ui-protocol` | `docs/function-maps/ui.protocol.md` | `docs/testing/ui.protocol.md` |
 | runtime wiring for UI command dispatch into owner modules | `runtime.ui-command-dispatch` | `crates/freehand-runtime` | `docs/function-maps/runtime.ui-command-dispatch.md` | `docs/testing/runtime.ui-command-dispatch.md` |
-| production slave worker claim/execute/report loop | `runtime.master-worker-loop` | `crates/freehand-runtime` | `docs/function-maps/runtime.master-worker-loop.md` | `docs/testing/runtime.master-worker-loop.md` |
+| production Master lifecycle review/recovery loop and slave Worker claim/execute/report loop | `runtime.master-worker-loop` | `crates/freehand-runtime` | `docs/function-maps/runtime.master-worker-loop.md` | `docs/testing/runtime.master-worker-loop.md` |
 | writable-tool checkpoints, restore manifests, and runtime rewind | `runtime.checkpoint-rewind` | `crates/freehand-runtime` | `docs/function-maps/runtime.checkpoint-rewind.md` | `docs/testing/runtime.checkpoint-rewind.md` |
 | CLI reason smoke and config-selected runtime harness | `app.cli-runtime-smoke` | `apps/freehand-cli` | `docs/function-maps/app.cli-runtime-smoke.md` | `docs/testing/app.cli-runtime-smoke.md` |
 | CLI live provider turn and completion loop smoke | `app.cli-live-turn` | `apps/freehand-cli` | `docs/function-maps/app.cli-live-turn.md` | `docs/testing/app.cli-live-turn.md` |

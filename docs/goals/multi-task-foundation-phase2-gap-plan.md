@@ -182,7 +182,9 @@ Still open:
 - managed Worker process auto-start/restart and health projection
 - multiple configured Worker resource allocation/release
 - background Master timeout/poll scheduler outside an active user turn
-- production blocked/reject/retry/reassignment/takeover loops
+- production Master lifecycle runner and interrupted/rejected Worker requeue are
+  implemented locally; real-provider blocked/reject/retry/reassignment proof
+  remains open
 - formal current-source research/document task and browser-visible WebUI proof
 
 ## Next Implementation Sequence
@@ -246,7 +248,7 @@ freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp
 # managed Worker lifecycle verifier to be added in P2
 ```
 
-### P3: Background Master Scheduling And Recovery
+### P3: Background Master Scheduling And Recovery — In Progress
 
 Deliverables:
 

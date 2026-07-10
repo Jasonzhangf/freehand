@@ -228,7 +228,7 @@ fn optional_string_field(
     field: &'static str,
 ) -> Option<String> {
     match object.get(field) {
-        None => None,
+        None | Some(Value::Null) => None,
         Some(Value::String(value)) => Some(value.clone()),
         Some(value) => {
             issues.push(CompletionSchemaIssue {
@@ -907,6 +907,29 @@ mod tests {
         assert_eq!(err.issues[0].field, "evidence");
         assert!(err.issues[0].message.contains("must be a string"));
         assert!(err.issues[0].message.contains("array"));
+    }
+
+    #[test]
+    fn accepts_null_for_unused_optional_completion_fields() {
+        let parsed = parse_completion_submission_block(
+            r#"
+<freehand_completion>
+{
+  "claim": "complete",
+  "completion_reason": "done",
+  "evidence": "verified",
+  "summary": "ok",
+  "learned": "keep schema typed",
+  "next_step": null,
+  "blocked_reason": null
+}
+</freehand_completion>
+"#,
+        )
+        .expect("nullable optional fields");
+
+        assert_eq!(parsed.next_step, None);
+        assert_eq!(parsed.blocked_reason, None);
     }
 
     #[test]

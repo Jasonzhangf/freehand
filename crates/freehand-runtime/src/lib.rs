@@ -1,7 +1,11 @@
 //! Runtime wiring owner for UI command dispatch.
 
+mod master_runner;
 mod worker_runner;
 
+pub use master_runner::{
+    ProductionMasterRunner, ProductionMasterRunnerError, ProductionMasterTickOutcome,
+};
 pub use worker_runner::{
     ProductionWorkerRunner, ProductionWorkerRunnerError, ProductionWorkerTickOutcome,
 };
@@ -19,8 +23,8 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::{
-    CompletionClaim, CompletionDecision, CompletionSchemaRejection, CompletionSubmission,
-    completion_schema_guidance, completion_schema_rejection_feedback,
+    CompletionClaim, CompletionDecision, CompletionSchemaIssue, CompletionSchemaRejection,
+    CompletionSubmission, completion_schema_guidance, completion_schema_rejection_feedback,
     parse_completion_submission_block, strip_completion_submission_block,
     validate_completion_submission,
 };
@@ -37,8 +41,8 @@ use freehand_contracts::{
 };
 use freehand_control::{
     ControlRhythmDecision, ControlStatusRejection, ControlStatusSubmission, ErrorCenterDecision,
-    ErrorCenterObservedFailure, classify_error_center_failure, control_status_rhythm_decision,
-    parse_control_status_block, strip_control_status_block,
+    ErrorCenterObservedFailure, classify_error_center_failure, control_status_rejection_feedback,
+    control_status_rhythm_decision, parse_control_status_block, strip_control_status_block,
 };
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
@@ -120,6 +124,20 @@ pub struct LiveReasonTurnRequest {
 }
 
 pub type LiveReasonCancelToken = Arc<AtomicBool>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LiveReasonTaskDecisionMode {
+    TargetMutation,
+    TargetStatuses(Vec<TaskStatus>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LiveReasonTaskDecisionBoundary {
+    pub task_id: TaskId,
+    pub initial_event_seq: u64,
+    pub mode: LiveReasonTaskDecisionMode,
+    pub max_rounds: usize,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveReasonTurnOutcome {
@@ -211,6 +229,11 @@ impl LiveReasonExecutionRole {
 struct ExecutedToolResult {
     result: ReasonReq05ToolResultReentry,
     task_truth_changed: bool,
+}
+
+enum FrameworkLiveTurnFinalization {
+    Complete(String),
+    Blocked(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -827,6 +850,23 @@ pub fn run_live_reason_turn(
         selected,
         request,
         LiveReasonExecutionRole::Master,
+        None,
+        |_| {},
+        |_| {},
+        |_| {},
+    )
+}
+
+pub(crate) fn run_master_lifecycle_reason_turn(
+    selected: &SelectedAgentConfig,
+    request: LiveReasonTurnRequest,
+    decision_boundary: LiveReasonTaskDecisionBoundary,
+) -> Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError> {
+    run_live_reason_turn_with_policy(
+        selected,
+        request,
+        LiveReasonExecutionRole::Master,
+        Some(decision_boundary),
         |_| {},
         |_| {},
         |_| {},
@@ -841,6 +881,7 @@ pub fn run_worker_live_reason_turn(
         selected,
         request,
         LiveReasonExecutionRole::Worker,
+        None,
         |_| {},
         |_| {},
         |_| {},
@@ -863,6 +904,7 @@ where
         selected,
         request,
         LiveReasonExecutionRole::Master,
+        None,
         on_broadcast,
         on_debug,
         on_task_list_projection,
@@ -873,6 +915,7 @@ fn run_live_reason_turn_with_policy<FB, FD, FT>(
     selected: &SelectedAgentConfig,
     request: LiveReasonTurnRequest,
     role: LiveReasonExecutionRole,
+    task_decision_boundary: Option<LiveReasonTaskDecisionBoundary>,
     on_broadcast: FB,
     on_debug: FD,
     on_task_list_projection: FT,
@@ -897,6 +940,7 @@ where
                 selected,
                 request,
                 role,
+                task_decision_boundary,
                 on_broadcast,
                 on_debug,
                 on_task_list_projection,
@@ -913,6 +957,7 @@ fn run_live_anthropic_reason_turn<FB, FD, FT>(
     selected: &SelectedAgentConfig,
     request: LiveReasonTurnRequest,
     role: LiveReasonExecutionRole,
+    task_decision_boundary: Option<LiveReasonTaskDecisionBoundary>,
     mut on_broadcast: FB,
     mut on_debug: FD,
     mut on_task_list_projection: FT,
@@ -1053,7 +1098,12 @@ where
     let mut round = 0usize;
     let mut tool_executions = 0usize;
     let mut next_prompt = request.prompt.clone();
-    let mut carryover_segments = base_live_context_segments(&request.prompt, role);
+    let configured_worker = match role {
+        LiveReasonExecutionRole::Master => Some(selected.paired_agent_name.as_str()),
+        LiveReasonExecutionRole::Worker => None,
+    };
+    let mut carryover_segments =
+        base_live_context_segments(&request.prompt, role, configured_worker);
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
@@ -1405,6 +1455,7 @@ where
         let pending_tool_calls = pending_tool_calls_for_execution(&turn, &executed_tool_call_ids);
         if !pending_tool_calls.is_empty() {
             consecutive_schema_rejections = 0;
+            let mut reached_task_decision = None;
             for tool_call in pending_tool_calls {
                 ensure_live_not_cancelled(&request)?;
                 let executed_tool_result = execute_registry_tool_call(
@@ -1412,6 +1463,7 @@ where
                     &request.runtime_home,
                     request.cwd.as_deref(),
                     role,
+                    configured_worker,
                     &turn,
                     &tool_call,
                 )?;
@@ -1556,6 +1608,15 @@ where
                     )
                     .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
                     on_task_list_projection(&projection);
+                    if let Some(boundary) = task_decision_boundary.as_ref()
+                        && reached_task_decision.is_none()
+                    {
+                        reached_task_decision = task_decision_boundary_summary(
+                            &request.runtime_home,
+                            &agent_id,
+                            boundary,
+                        )?;
+                    }
                 }
                 executed_tool_call_ids.push(tool_call.tool_call.tool_call_id.as_str().to_owned());
                 tool_exchanges.push(ProviderToolExchange {
@@ -1563,6 +1624,60 @@ where
                     tool_result,
                 });
                 tool_executions = tool_executions.saturating_add(1);
+            }
+            if let Some(summary) = reached_task_decision {
+                finalize_framework_live_turn(
+                    &engine,
+                    &persistence,
+                    &history,
+                    &receiver,
+                    &debug_receiver,
+                    &mut broadcasts,
+                    &mut on_broadcast,
+                    &mut on_debug,
+                    &mut turn,
+                    FrameworkLiveTurnFinalization::Complete(summary),
+                    schema_rejections.len() as u32,
+                )?;
+                turns.push(turn.clone());
+                return Ok(LiveReasonTurnOutcome {
+                    turn,
+                    turns,
+                    broadcasts,
+                    rounds: round,
+                    schema_rejections,
+                    tool_executions,
+                    restore_status,
+                    restored_closed_turns,
+                });
+            }
+            if let Some(reason) =
+                task_decision_round_budget_reason(task_decision_boundary.as_ref(), round)
+            {
+                finalize_framework_live_turn(
+                    &engine,
+                    &persistence,
+                    &history,
+                    &receiver,
+                    &debug_receiver,
+                    &mut broadcasts,
+                    &mut on_broadcast,
+                    &mut on_debug,
+                    &mut turn,
+                    FrameworkLiveTurnFinalization::Blocked(reason),
+                    schema_rejections.len() as u32,
+                )?;
+                turns.push(turn.clone());
+                return Ok(LiveReasonTurnOutcome {
+                    turn,
+                    turns,
+                    broadcasts,
+                    rounds: round,
+                    schema_rejections,
+                    tool_executions,
+                    restore_status,
+                    restored_closed_turns,
+                });
             }
             let failed_tool_results = tool_exchanges
                 .iter()
@@ -1595,8 +1710,13 @@ where
             on_broadcast(&wait_event);
             broadcasts.push(wait_event);
             next_prompt = "The tool result has been returned. Use it to continue the task, then provide the required Freehand completion schema when done.".to_owned();
-            carryover_segments =
-                next_round_segments(&request.prompt, &collect_turn_text(&turn), None, role);
+            carryover_segments = next_round_segments(
+                &request.prompt,
+                &collect_turn_text(&turn),
+                None,
+                role,
+                configured_worker,
+            );
             turns.push(turn);
             continue;
         }
@@ -1632,13 +1752,110 @@ where
         let provider_text = collect_turn_text(&turn);
         let public_provider_text =
             strip_control_status_block(&strip_completion_submission_block(&provider_text));
-        let status_decision = run_control_status_stop_hook(
+        let status_decision = match run_control_status_stop_hook(
             &metadata_center,
             &agent_id,
             &request.session_id,
             &turn,
             &provider_text,
-        )?;
+        )? {
+            ControlStatusHookOutcome::Absent => None,
+            ControlStatusHookOutcome::Accepted(decision) => Some(decision),
+            ControlStatusHookOutcome::Rejected {
+                rejection,
+                feedback,
+            } => {
+                ensure_live_not_cancelled(&request)?;
+                let response_rejection = completion_rejection_from_control_status(&rejection);
+                schema_rejections.push(response_rejection.clone());
+                consecutive_schema_rejections = consecutive_schema_rejections.saturating_add(1);
+                write_error_center_metadata(
+                    &metadata_center,
+                    &agent_id,
+                    &request.session_id,
+                    RuntimeErrorCenterWriteSpec {
+                        turn_id: Some(&turn.request.turn_id),
+                        trace_id: &turn.request.trace_id,
+                        pipeline_node: "ControlHook03AfterModelResponse",
+                        metadata_suffix: format!(
+                            "control_status_schema_rejected:{}",
+                            consecutive_schema_rejections
+                        ),
+                        symbol_path: "run_live_anthropic_reason_turn",
+                        observed: ErrorCenterObservedFailure {
+                            source_owner: "control.center".to_owned(),
+                            source_pipeline_node: "ControlHook03AfterModelResponse".to_owned(),
+                            code: "control_status_schema_rejected".to_owned(),
+                            message: feedback.clone(),
+                            retry_index: consecutive_schema_rejections as u32,
+                            retry_cap: 3,
+                        },
+                    },
+                )?;
+                persistence
+                    .record_completion_rejected(
+                        &history,
+                        &turn,
+                        &response_rejection,
+                        consecutive_schema_rejections as u32,
+                    )
+                    .map_err(|err| {
+                        RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                    })?;
+                if consecutive_schema_rejections >= 3 {
+                    engine.block_turn(
+                        &mut turn,
+                        format!(
+                            "Response schema still invalid after 3 polishing attempts.\n{}",
+                            feedback
+                        ),
+                    );
+                    drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                    drain_debug_events(&debug_receiver, &mut on_debug);
+                    ensure_live_not_cancelled(&request)?;
+                    persistence
+                        .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                        .map_err(|err| {
+                            RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                        })?;
+                    turns.push(turn.clone());
+                    return Ok(LiveReasonTurnOutcome {
+                        turn,
+                        turns,
+                        broadcasts,
+                        rounds: round,
+                        schema_rejections,
+                        tool_executions,
+                        restore_status,
+                        restored_closed_turns,
+                    });
+                }
+                let retry_event = ReasonBroadcastEvent::CompletionSchemaRejected(
+                    ReasonResp04CompletionSchemaRejected {
+                        session_id: turn.request.session_id.clone(),
+                        turn_id: turn.request.turn_id.clone(),
+                        trace_id: turn.request.trace_id.clone(),
+                        feature_id: turn.request.feature_id.clone(),
+                        agent_id: turn.request.agent_id.clone(),
+                        retry_index: consecutive_schema_rejections as u32,
+                        rejection: response_rejection,
+                        feedback: feedback.clone(),
+                    },
+                );
+                on_broadcast(&retry_event);
+                broadcasts.push(retry_event);
+                next_prompt = feedback.clone();
+                carryover_segments = next_round_segments(
+                    &request.prompt,
+                    &public_provider_text,
+                    Some(feedback.as_str()),
+                    role,
+                    configured_worker,
+                );
+                turns.push(turn);
+                continue;
+            }
+        };
         if let Some(decision) = status_decision {
             match decision {
                 ControlRhythmDecision::AllowNaturalStop
@@ -1808,10 +2025,43 @@ where
                     });
                 }
                 ControlRhythmDecision::ContinueWithNextStep(next_step) => {
+                    if let Some(reason) =
+                        task_decision_round_budget_reason(task_decision_boundary.as_ref(), round)
+                    {
+                        finalize_framework_live_turn(
+                            &engine,
+                            &persistence,
+                            &history,
+                            &receiver,
+                            &debug_receiver,
+                            &mut broadcasts,
+                            &mut on_broadcast,
+                            &mut on_debug,
+                            &mut turn,
+                            FrameworkLiveTurnFinalization::Blocked(reason),
+                            schema_rejections.len() as u32,
+                        )?;
+                        turns.push(turn.clone());
+                        return Ok(LiveReasonTurnOutcome {
+                            turn,
+                            turns,
+                            broadcasts,
+                            rounds: round,
+                            schema_rejections,
+                            tool_executions,
+                            restore_status,
+                            restored_closed_turns,
+                        });
+                    }
                     consecutive_schema_rejections = 0;
                     next_prompt = next_step;
-                    carryover_segments =
-                        next_round_segments(&request.prompt, &public_provider_text, None, role);
+                    carryover_segments = next_round_segments(
+                        &request.prompt,
+                        &public_provider_text,
+                        None,
+                        role,
+                        configured_worker,
+                    );
                     turns.push(turn);
                     continue;
                 }
@@ -1908,10 +2158,43 @@ where
                     });
                 }
                 CompletionDecision::ContinueWithNextStep { next_step } => {
+                    if let Some(reason) =
+                        task_decision_round_budget_reason(task_decision_boundary.as_ref(), round)
+                    {
+                        finalize_framework_live_turn(
+                            &engine,
+                            &persistence,
+                            &history,
+                            &receiver,
+                            &debug_receiver,
+                            &mut broadcasts,
+                            &mut on_broadcast,
+                            &mut on_debug,
+                            &mut turn,
+                            FrameworkLiveTurnFinalization::Blocked(reason),
+                            schema_rejections.len() as u32,
+                        )?;
+                        turns.push(turn.clone());
+                        return Ok(LiveReasonTurnOutcome {
+                            turn,
+                            turns,
+                            broadcasts,
+                            rounds: round,
+                            schema_rejections,
+                            tool_executions,
+                            restore_status,
+                            restored_closed_turns,
+                        });
+                    }
                     consecutive_schema_rejections = 0;
                     next_prompt = next_step;
-                    carryover_segments =
-                        next_round_segments(&request.prompt, &visible_text, None, role);
+                    carryover_segments = next_round_segments(
+                        &request.prompt,
+                        &visible_text,
+                        None,
+                        role,
+                        configured_worker,
+                    );
                     turns.push(turn);
                 }
             },
@@ -2061,6 +2344,7 @@ where
                     &visible_text,
                     Some(feedback.as_str()),
                     role,
+                    configured_worker,
                 );
                 turns.push(turn);
             }
@@ -3316,43 +3600,74 @@ fn config_base_url_host_for_ui(raw: &str) -> String {
     }
 }
 
+enum ControlStatusHookOutcome {
+    Absent,
+    Accepted(ControlRhythmDecision),
+    Rejected {
+        rejection: ControlStatusRejection,
+        feedback: String,
+    },
+}
+
 fn run_control_status_stop_hook(
     center: &Arc<Mutex<MetadataCenter>>,
     agent_id: &AgentId,
     session_id: &SessionId,
     turn: &TurnRecord,
     provider_text: &str,
-) -> Result<Option<ControlRhythmDecision>, RuntimeLiveBridgeError> {
+) -> Result<ControlStatusHookOutcome, RuntimeLiveBridgeError> {
     if !provider_text.contains("<<<freehand_status>>>") {
-        return Ok(None);
+        return Ok(ControlStatusHookOutcome::Absent);
     }
     let raw_hash = stable_debug_hash(provider_text);
     match parse_control_status_block(provider_text) {
-        Ok(submission) => {
-            let decision = control_status_rhythm_decision(&submission).map_err(|rejection| {
-                RuntimeLiveBridgeError::ProviderRequestBuildFailed(
-                    control_status_rejection_summary(&rejection),
-                )
-            })?;
-            record_control_status_metadata(
-                center,
-                agent_id,
-                session_id,
-                turn,
-                &submission,
-                &decision,
-                raw_hash,
-            )?;
-            Ok(Some(decision))
-        }
+        Ok(submission) => match control_status_rhythm_decision(&submission) {
+            Ok(decision) => {
+                record_control_status_metadata(
+                    center,
+                    agent_id,
+                    session_id,
+                    turn,
+                    &submission,
+                    &decision,
+                    raw_hash,
+                )?;
+                Ok(ControlStatusHookOutcome::Accepted(decision))
+            }
+            Err(rejection) => {
+                record_control_status_rejection_metadata(
+                    center, agent_id, session_id, turn, &rejection, raw_hash,
+                )?;
+                Ok(ControlStatusHookOutcome::Rejected {
+                    feedback: control_status_rejection_feedback(&rejection),
+                    rejection,
+                })
+            }
+        },
         Err(rejection) => {
             record_control_status_rejection_metadata(
                 center, agent_id, session_id, turn, &rejection, raw_hash,
             )?;
-            Err(RuntimeLiveBridgeError::ProviderRequestBuildFailed(
-                control_status_rejection_summary(&rejection),
-            ))
+            Ok(ControlStatusHookOutcome::Rejected {
+                feedback: control_status_rejection_feedback(&rejection),
+                rejection,
+            })
         }
+    }
+}
+
+fn completion_rejection_from_control_status(
+    rejection: &ControlStatusRejection,
+) -> CompletionSchemaRejection {
+    CompletionSchemaRejection {
+        issues: rejection
+            .issues
+            .iter()
+            .map(|issue| CompletionSchemaIssue {
+                field: format!("status.{}", issue.field),
+                message: issue.message.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -5405,12 +5720,16 @@ fn control_status_contract_segment() -> ContextSegment {
     }
 }
 
-fn tool_guidance_segment(role: LiveReasonExecutionRole) -> ContextSegment {
+fn tool_guidance_segment(
+    role: LiveReasonExecutionRole,
+    configured_worker: Option<&str>,
+) -> ContextSegment {
     let content = match role {
-        LiveReasonExecutionRole::Master => master_task_orchestration_guidance(),
-        LiveReasonExecutionRole::Worker => worker_execution_guidance(),
-    }
-    .to_owned();
+        LiveReasonExecutionRole::Master => master_task_orchestration_guidance(
+            configured_worker.expect("Master guidance requires configured Worker"),
+        ),
+        LiveReasonExecutionRole::Worker => worker_execution_guidance().to_owned(),
+    };
     ContextSegment {
         segment_id: ContextSegmentId::new("runtime-tool-guidance"),
         kind: ContextSegmentKind::DeveloperPolicy,
@@ -5439,28 +5758,36 @@ fn worker_execution_guidance() -> &'static str {
     )
 }
 
-fn master_task_orchestration_guidance() -> &'static str {
-    concat!(
-        "Use the available Freehand tool registry when it helps the task. Choose the smallest sufficient tool for repository inspection or task bookkeeping, then continue and provide the required Freehand completion schema.\n\n",
-        "Master task orchestration policy:\n",
-        "- Role: you are the master agent. You own the user conversation, task decomposition, worker coordination, review, and final user-facing answer.\n",
-        "- Dispatch when: work targets another cwd/repository, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
-        "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside your current allowed workspace without isolated execution.\n",
-        "- Workspace boundary: do not directly execute work outside your allowed workspace. Create or reuse a worker resource, create a task with target_cwd, assign it, then let the production Worker runner claim and execute it.\n",
-        "- Multi-agent dispatch: split independent repository/slice work into separate worker tasks, keep each worker focused, then review and synthesize typed worker results in the master answer.\n",
-        "- Concurrency control: assign only useful independent subtasks; avoid duplicate dispatch for work already running, recovering, blocked, or review_ready; poll task truth before starting more work.\n",
-        "- Flow control: use task(op=\"list_agents\"), task(op=\"list_tasks\"), task(op=\"query\"), and task(op=\"history\") to inspect current framework truth before dispatching duplicates, retrying, approving, rejecting, or closing work.\n",
-        "- Task tool workflow: create_agent only when needed; create a task with goal, deliverables, acceptance, target_cwd, and priority; assign it; query task/history while the Worker runner claims, heartbeats, and records execution; approve/reject; close only after accepted review.\n",
-        "- Ownership boundary: as Master, do not call claim_next, heartbeat, or record_execution on behalf of a Worker. Those mutations are owned by the Worker runner. Use them only in explicit framework/debug tests, never as normal production orchestration.\n\n",
-        "Master task orchestration examples:\n",
-        "- Use the owner-scoped task tool; do not invent query_task_board, dispatch_subtask, approve_submission, or reject_submission tool names.\n",
-        "- Create worker resources with task(op=\"create_agent\") only when the task needs a worker id that does not exist.\n",
-        "- Create and dispatch work with task(op=\"create\") and task(op=\"assign\"). Keep the same task_id and agent_id while the Worker runner creates and preserves the execution_id.\n",
-        "- Cross-workspace sample: for a request comparing ~/code/codex with ~/code/Deepseek-reasonix, create one task for the Codex repository analysis and one task for the Reasonix repository analysis, each with target_cwd, deliverables, acceptance, and evidence requirements; assign/claim separate workers when available, then synthesize the comparison only after reviewing the worker results.\n",
-        "- Worker success sample: wait for task history to contain Worker-owned review_ready, then task(op=\"approve\"), then task(op=\"close\").\n",
-        "- Worker execution error sample: inspect Worker-owned blocked truth and its evidence. Do not close this as success.\n",
-        "- Worker retry sample: after task(op=\"reject\"), leave the task and requirements in Task Center for Worker-owned retry/recovery; inspect the next review_ready result before approval.\n",
-        "- Tool validation, task transition errors, and worker execution errors are normal model-visible tool results. Use the returned result to decide the next task action instead of treating it as provider failure.\n"
+fn master_task_orchestration_guidance(configured_worker: &str) -> String {
+    format!(
+        "{}Configured paired Worker id: `{configured_worker}`.\n\
+- Current topology: assign production tasks only to this configured Worker id. Historical agents returned by list_agents are persisted history, not eligible production dispatch targets.\n\
+- Worker lifecycle boundary: never put task(...), claim_next, heartbeat, record_execution, approve, reject, or close instructions into Worker task content. The Worker does not receive the task tool. The production Worker runner owns claim/heartbeat and converts the Worker completion schema into TaskReviewSubmitted or TaskBlocked truth.\n\n{}",
+        concat!(
+            "Use the available Freehand tool registry when it helps the task. Choose the smallest sufficient tool for repository inspection or task bookkeeping, then continue and provide the required Freehand completion schema.\n\n",
+            "Master task orchestration policy:\n",
+            "- Role: you are the master agent. You own the user conversation, task decomposition, worker coordination, review, and final user-facing answer.\n",
+            "- Dispatch when: work targets another cwd/repository, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
+            "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside your current allowed workspace without isolated execution.\n",
+            "- Workspace boundary: do not directly execute work outside your allowed workspace. Create or reuse a worker resource, create a task with target_cwd, assign it, then let the production Worker runner claim and execute it.\n",
+            "- Multi-agent dispatch: split independent repository/slice work into separate worker tasks, keep each worker focused, then review and synthesize typed worker results in the master answer.\n",
+            "- Concurrency control: assign only useful independent subtasks; avoid duplicate dispatch for work already running, recovering, blocked, or review_ready; poll task truth before starting more work.\n",
+            "- Flow control: use task(op=\"list_agents\"), task(op=\"list_tasks\"), task(op=\"query\"), and task(op=\"history\") to inspect current framework truth before dispatching duplicates, retrying, approving, rejecting, or closing work.\n",
+            "- Task tool workflow: create_agent only when needed; create a task with goal, deliverables, acceptance, target_cwd, and priority; assign it; query task/history while the Worker runner claims, heartbeats, and records execution; approve/reject; close only after accepted review.\n",
+            "- Task create dispatch: always set dispatch.mode to none and then assign the configured Worker, or set dispatch.mode to agent with the exact configured Worker id. Never omit dispatch and never use auto or self dispatch, because persisted historical agents are not production targets.\n",
+            "- Ownership boundary: as Master, do not call claim_next, heartbeat, or record_execution on behalf of a Worker. Those mutations are owned by the Worker runner. Use them only in explicit framework/debug tests, never as normal production orchestration.\n",
+        ),
+        concat!(
+            "Master task orchestration examples:\n",
+            "- Use the owner-scoped task tool; do not invent query_task_board, dispatch_subtask, approve_submission, or reject_submission tool names.\n",
+            "- Create worker resources with task(op=\"create_agent\") only when the task needs a worker id that does not exist.\n",
+            "- Create and dispatch work with task(op=\"create\") and task(op=\"assign\"). Keep the same task_id and agent_id while the Worker runner creates and preserves the execution_id.\n",
+            "- Cross-workspace sample: for a request comparing ~/code/codex with ~/code/Deepseek-reasonix, create one task for the Codex repository analysis and one task for the Reasonix repository analysis, each with target_cwd, deliverables, acceptance, and evidence requirements; assign/claim separate workers when available, then synthesize the comparison only after reviewing the worker results.\n",
+            "- Worker success sample: wait for task history to contain Worker-owned review_ready, then task(op=\"approve\"), then task(op=\"close\").\n",
+            "- Worker execution error sample: inspect Worker-owned blocked truth and its evidence. Do not close this as success.\n",
+            "- Worker retry sample: after task(op=\"reject\"), leave the task and requirements in Task Center for Worker-owned retry/recovery; inspect the next review_ready result before approval.\n",
+            "- Tool validation, task transition errors, and worker execution errors are normal model-visible tool results. Use the returned result to decide the next task action instead of treating it as provider failure.\n"
+        )
     )
 }
 
@@ -5484,11 +5811,12 @@ fn original_task_segment(prompt: &str) -> ContextSegment {
 fn base_live_context_segments(
     original_prompt: &str,
     role: LiveReasonExecutionRole,
+    configured_worker: Option<&str>,
 ) -> Vec<ContextSegment> {
     vec![
         completion_contract_segment(),
         control_status_contract_segment(),
-        tool_guidance_segment(role),
+        tool_guidance_segment(role, configured_worker),
         original_task_segment(original_prompt),
     ]
 }
@@ -5506,8 +5834,9 @@ fn next_round_segments(
     visible_text: &str,
     rejection_feedback: Option<&str>,
     role: LiveReasonExecutionRole,
+    configured_worker: Option<&str>,
 ) -> Vec<ContextSegment> {
-    let mut segments = base_live_context_segments(original_prompt, role);
+    let mut segments = base_live_context_segments(original_prompt, role, configured_worker);
     if !visible_text.trim().is_empty() {
         let content = format!("Previous round visible output:\n{visible_text}");
         segments.push(ContextSegment {
@@ -5612,6 +5941,7 @@ fn execute_registry_tool_call(
     runtime_home: &Path,
     workspace_root: Option<&Path>,
     role: LiveReasonExecutionRole,
+    configured_worker: Option<&str>,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ExecutedToolResult, RuntimeLiveBridgeError> {
@@ -5635,6 +5965,7 @@ fn execute_registry_tool_call(
                     runtime_home,
                     runtime_home,
                     role,
+                    configured_worker,
                     turn,
                     tool_call,
                 );
@@ -5703,6 +6034,7 @@ fn execute_registry_tool_call(
             runtime_home,
             &root,
             role,
+            configured_worker,
             turn,
             tool_call,
         )
@@ -5753,6 +6085,7 @@ fn execute_registry_tool_call_with_workspace(
     runtime_home: &Path,
     workspace_root: &Path,
     role: LiveReasonExecutionRole,
+    configured_worker: Option<&str>,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ExecutedToolResult, RuntimeLiveBridgeError> {
@@ -5767,6 +6100,13 @@ fn execute_registry_tool_call_with_workspace(
                     "Worker capability boundary: recursive task management is not available."
                         .to_owned(),
                 ),
+                task_truth_changed: false,
+            });
+        }
+        if let Some(message) = configured_worker_task_boundary_failure(tool_call, configured_worker)
+        {
+            return Ok(ExecutedToolResult {
+                result: tool_result_reentry(turn, tool_call, ToolResultStatus::Failed, message),
                 task_truth_changed: false,
             });
         }
@@ -6181,6 +6521,48 @@ fn execute_task_tool(
     }
 }
 
+fn configured_worker_task_boundary_failure(
+    tool_call: &ReasonReq04ToolCall,
+    configured_worker: Option<&str>,
+) -> Option<String> {
+    let configured_worker = configured_worker?;
+    let args = tool_arguments_object(&tool_call.tool_call.arguments);
+    match args.get("op").and_then(Value::as_str) {
+        Some("assign") => args
+            .get("agent_id")
+            .and_then(Value::as_str)
+            .filter(|agent_id| *agent_id != configured_worker)
+            .map(|_| {
+                format!(
+                    "Configured topology boundary: task assignment must target paired Worker `{configured_worker}`."
+                )
+            }),
+        Some("create") => match args.get("dispatch") {
+            None => Some(format!(
+                "Configured topology boundary: task creation must set dispatch.mode to `none` for later assignment, or `agent` with agent_id `{configured_worker}`. Implicit dispatch is not allowed because it can select historical agents."
+            )),
+            Some(Value::Object(dispatch)) => match dispatch.get("mode").and_then(Value::as_str) {
+                Some("none") => None,
+                Some("agent") => dispatch
+                    .get("agent_id")
+                    .and_then(Value::as_str)
+                    .filter(|agent_id| *agent_id != configured_worker)
+                    .map(|_| {
+                        format!(
+                            "Configured topology boundary: task creation may dispatch only to paired Worker `{configured_worker}`."
+                        )
+                    }),
+                Some("auto" | "self") => Some(format!(
+                    "Configured topology boundary: task creation cannot use auto or self dispatch. Use dispatch.mode `none`, then assign paired Worker `{configured_worker}`, or dispatch directly to that Worker."
+                )),
+                _ => None,
+            },
+            Some(_) => None,
+        },
+        _ => None,
+    }
+}
+
 fn task_tool_call_mutates_truth(tool_call: &ReasonReq04ToolCall) -> bool {
     let args = tool_arguments_object(&tool_call.tool_call.arguments);
     let Some(Value::String(op)) = args.get("op") else {
@@ -6388,6 +6770,96 @@ fn tool_result_reentry(
 
 fn is_checkpointable_file_mutation_tool(tool_name: &str) -> bool {
     matches!(tool_name, "write_file" | "edit_file" | "multi_edit")
+}
+
+fn task_decision_boundary_summary(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    boundary: &LiveReasonTaskDecisionBoundary,
+) -> Result<Option<String>, RuntimeLiveBridgeError> {
+    let runtime = TaskRuntime::boot(runtime_home, agent_id.clone())
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+    let task = runtime
+        .query_task(&boundary.task_id)
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+    if task.last_event_seq <= boundary.initial_event_seq {
+        return Ok(None);
+    }
+    let reached = match &boundary.mode {
+        LiveReasonTaskDecisionMode::TargetMutation => true,
+        LiveReasonTaskDecisionMode::TargetStatuses(statuses) => {
+            statuses.iter().any(|status| status == &task.status)
+        }
+    };
+    if reached {
+        Ok(Some(format!(
+            "Task Center decision persisted for `{}` at status `{:?}` with event sequence {}.",
+            task.task_id.as_str(),
+            task.status,
+            task.last_event_seq
+        )))
+    } else {
+        Ok(None)
+    }
+}
+
+fn task_decision_round_budget_reason(
+    boundary: Option<&LiveReasonTaskDecisionBoundary>,
+    round: usize,
+) -> Option<String> {
+    let boundary = boundary?;
+    (round >= boundary.max_rounds).then(|| {
+        format!(
+            "Master lifecycle decision for task `{}` exceeded the {}-round budget without reaching its Task Center decision boundary.",
+            boundary.task_id.as_str(),
+            boundary.max_rounds
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finalize_framework_live_turn<FB, FD>(
+    engine: &ReasonTurnEngine,
+    persistence: &ReasonPersistence,
+    history: &SessionHistory,
+    receiver: &Receiver<ReasonBroadcastEvent>,
+    debug_receiver: &Receiver<DebugEvent>,
+    broadcasts: &mut Vec<ReasonBroadcastEvent>,
+    on_broadcast: &mut FB,
+    on_debug: &mut FD,
+    turn: &mut TurnRecord,
+    finalization: FrameworkLiveTurnFinalization,
+    schema_rejection_count: u32,
+) -> Result<(), RuntimeLiveBridgeError>
+where
+    FB: FnMut(&ReasonBroadcastEvent),
+    FD: FnMut(&DebugEvent),
+{
+    match finalization {
+        FrameworkLiveTurnFinalization::Complete(summary) => {
+            let submission = CompletionSubmission {
+                claim: CompletionClaim::Complete,
+                completion_reason: Some("framework lifecycle decision boundary reached".to_owned()),
+                evidence: Some(summary.clone()),
+                summary: Some(summary),
+                learned: Some("return control to durable EventInbox polling".to_owned()),
+                next_step: None,
+                blocked_reason: None,
+            };
+            let _ = engine
+                .submit_completion(turn, &submission)
+                .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
+        }
+        FrameworkLiveTurnFinalization::Blocked(reason) => {
+            engine.block_turn(turn, reason);
+        }
+    }
+    drain_broadcasts(receiver, broadcasts, on_broadcast);
+    drain_debug_events(debug_receiver, on_debug);
+    persistence
+        .record_turn_closed(history, turn, schema_rejection_count)
+        .map(|_| ())
+        .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))
 }
 
 struct LiveApplyContext<'a, FB>
@@ -6982,6 +7454,357 @@ mod tests {
                 .iter()
                 .any(|item| item.body.contains("final round done"))
         );
+    }
+
+    #[test]
+    fn master_lifecycle_closes_in_same_round_as_target_task_mutation() {
+        let runtime_home = temp_runtime_home();
+        let runtime =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+        create_lifecycle_test_worker(&runtime);
+        let task = create_lifecycle_test_task(&runtime, "lifecycle-target");
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![task_tool_use_response(
+                "toolu_lifecycle_assign",
+                json!({
+                    "op": "assign",
+                    "task_id": task.task_id.as_str(),
+                    "agent_id": "worker"
+                }),
+            )],
+        );
+
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.paired_agent_name = "worker".to_owned();
+        let outcome = run_master_lifecycle_reason_turn(
+            &selected,
+            lifecycle_live_request(&runtime_home, "lifecycle-target-event"),
+            LiveReasonTaskDecisionBoundary {
+                task_id: task.task_id.clone(),
+                initial_event_seq: task.last_event_seq,
+                mode: LiveReasonTaskDecisionMode::TargetMutation,
+                max_rounds: 8,
+            },
+        )
+        .expect("lifecycle decision");
+
+        assert_eq!(outcome.rounds, 1);
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+        assert_eq!(
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live"))
+                .expect("reload task runtime")
+                .query_task(&task.task_id)
+                .expect("assigned task")
+                .assignee
+                .expect("configured worker assignee")
+                .agent_id,
+            AgentId::new("worker")
+        );
+        let history = TaskRuntime::boot(&runtime_home, AgentId::new("agent-live"))
+            .expect("reload task history runtime")
+            .task_history(&task.task_id)
+            .expect("task history");
+        assert_eq!(
+            history
+                .iter()
+                .filter(|event| event.event_type == "TaskAssigned")
+                .count(),
+            1
+        );
+        let _ = rx.recv().expect("single provider request");
+        assert!(
+            rx.try_recv().is_err(),
+            "decision must not request another round"
+        );
+        handle.join().expect("join provider");
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn master_assignment_gate_pairs_failure_then_accepts_configured_worker() {
+        let runtime_home = temp_runtime_home();
+        let runtime =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+        create_lifecycle_test_worker(&runtime);
+        runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: AgentId::new("historical-worker"),
+                capabilities: vec!["workspace".to_owned()],
+                actor: lifecycle_test_actor(),
+                watermark: lifecycle_test_watermark("create-historical-worker"),
+            })
+            .expect("create historical worker");
+        let task = create_lifecycle_test_task(&runtime, "lifecycle-assignment-gate");
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                task_tool_use_response(
+                    "toolu_assign_historical",
+                    json!({
+                        "op": "assign",
+                        "task_id": task.task_id.as_str(),
+                        "agent_id": "historical-worker"
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_assign_configured",
+                    json!({
+                        "op": "assign",
+                        "task_id": task.task_id.as_str(),
+                        "agent_id": "worker"
+                    }),
+                ),
+            ],
+        );
+
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.paired_agent_name = "worker".to_owned();
+        let outcome = run_master_lifecycle_reason_turn(
+            &selected,
+            lifecycle_live_request(&runtime_home, "lifecycle-assignment-gate-event"),
+            LiveReasonTaskDecisionBoundary {
+                task_id: task.task_id.clone(),
+                initial_event_seq: task.last_event_seq,
+                mode: LiveReasonTaskDecisionMode::TargetMutation,
+                max_rounds: 8,
+            },
+        )
+        .expect("corrected lifecycle assignment");
+
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(outcome.tool_executions, 2);
+        let requests = collect_provider_requests(&rx, 2);
+        assert!(requests[1].contains(
+            "Configured topology boundary: task assignment must target paired Worker `worker`."
+        ));
+        let reloaded =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("reload runtime");
+        let assigned = reloaded.query_task(&task.task_id).expect("assigned task");
+        assert_eq!(assigned.status, TaskStatus::Assigned);
+        assert_eq!(
+            assigned.assignee.expect("configured assignee").agent_id,
+            AgentId::new("worker")
+        );
+        let history = reloaded.task_history(&task.task_id).expect("task history");
+        let assigned_events = history
+            .iter()
+            .filter(|event| event.event_type == "TaskAssigned")
+            .collect::<Vec<_>>();
+        assert_eq!(assigned_events.len(), 1);
+        assert_eq!(
+            assigned_events[0]
+                .payload
+                .get("agent_id")
+                .and_then(Value::as_str),
+            Some("worker")
+        );
+
+        handle.join().expect("join provider");
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn master_create_gate_rejects_implicit_dispatch_without_task_mutation() {
+        let runtime_home = temp_runtime_home();
+        let runtime =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+        create_lifecycle_test_worker(&runtime);
+        let task_id = "lifecycle-create-gate";
+        let create_payload = json!({
+            "op": "create",
+            "task_id": task_id,
+            "title": "Lifecycle create gate",
+            "content": "create one task without historical-agent dispatch",
+            "goal": "prove configured Worker creation boundary",
+            "deliverables": ["task truth"],
+            "acceptance": ["only configured Worker is assigned"],
+            "priority": 90,
+            "target_cwd": std::env::temp_dir()
+        });
+        let mut corrected_create_payload = create_payload.clone();
+        corrected_create_payload
+            .as_object_mut()
+            .expect("create payload object")
+            .insert("dispatch".to_owned(), json!({"mode": "none"}));
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                task_tool_use_response("toolu_create_implicit_dispatch", create_payload),
+                task_tool_use_response("toolu_create_explicit_none", corrected_create_payload),
+                task_tool_use_response(
+                    "toolu_assign_configured_after_create",
+                    json!({
+                        "op": "assign",
+                        "task_id": task_id,
+                        "agent_id": "worker"
+                    }),
+                ),
+                complete_single_response("configured Worker task created and assigned"),
+            ],
+        );
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home.clone();
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.paired_agent_name = "worker".to_owned();
+
+        let outcome =
+            run_live_reason_turn(&selected, request).expect("corrected task creation flow");
+        let requests = collect_provider_requests(&rx, 4);
+        assert!(
+            requests[1]
+                .contains("task creation must set dispatch.mode to `none` for later assignment")
+        );
+        assert!(requests[2].contains("Task created"));
+        assert!(requests[3].contains("Task assigned"));
+        assert_eq!(outcome.rounds, 4);
+        assert_eq!(outcome.tool_executions, 3);
+
+        let reloaded =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("reload runtime");
+        let task = reloaded
+            .query_task(&TaskId::new(task_id))
+            .expect("created task");
+        assert_eq!(task.status, TaskStatus::Assigned);
+        assert_eq!(
+            task.assignee.expect("configured assignee").agent_id,
+            AgentId::new("worker")
+        );
+        let event_types = reloaded
+            .task_history(&TaskId::new(task_id))
+            .expect("task history")
+            .into_iter()
+            .map(|event| event.event_type)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            event_types,
+            vec!["TaskCreated", "TaskWaitingAgent", "TaskAssigned"]
+        );
+
+        handle.join().expect("join provider");
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn master_lifecycle_ignores_unrelated_task_mutation() {
+        let runtime_home = temp_runtime_home();
+        let runtime =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+        create_lifecycle_test_worker(&runtime);
+        let target = create_lifecycle_test_task(&runtime, "lifecycle-target");
+        let unrelated = create_lifecycle_test_task(&runtime, "lifecycle-unrelated");
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                task_tool_use_response(
+                    "toolu_lifecycle_assign_unrelated",
+                    json!({
+                        "op": "assign",
+                        "task_id": unrelated.task_id.as_str(),
+                        "agent_id": "worker"
+                    }),
+                ),
+                complete_single_response("unrelated mutation observed"),
+            ],
+        );
+
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.paired_agent_name = "worker".to_owned();
+        let outcome = run_master_lifecycle_reason_turn(
+            &selected,
+            lifecycle_live_request(&runtime_home, "lifecycle-unrelated-event"),
+            LiveReasonTaskDecisionBoundary {
+                task_id: target.task_id.clone(),
+                initial_event_seq: target.last_event_seq,
+                mode: LiveReasonTaskDecisionMode::TargetMutation,
+                max_rounds: 8,
+            },
+        )
+        .expect("lifecycle decision");
+
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live"))
+                .expect("reload target runtime")
+                .query_task(&target.task_id)
+                .expect("target task")
+                .status,
+            TaskStatus::WaitingAgent
+        );
+        assert_eq!(
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live"))
+                .expect("reload unrelated runtime")
+                .query_task(&unrelated.task_id)
+                .expect("unrelated task")
+                .status,
+            TaskStatus::Assigned
+        );
+        let _ = collect_provider_requests(&rx, 2);
+        handle.join().expect("join provider");
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn master_lifecycle_round_budget_closes_blocked_without_mutation() {
+        let runtime_home = temp_runtime_home();
+        let runtime =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+        let target = create_lifecycle_test_task(&runtime, "lifecycle-budget");
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                continue_single_response("keep waiting"),
+                continue_single_response("still waiting"),
+            ],
+        );
+
+        let outcome = run_master_lifecycle_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            lifecycle_live_request(&runtime_home, "lifecycle-budget-event"),
+            LiveReasonTaskDecisionBoundary {
+                task_id: target.task_id.clone(),
+                initial_event_seq: target.last_event_seq,
+                mode: LiveReasonTaskDecisionMode::TargetMutation,
+                max_rounds: 2,
+            },
+        )
+        .expect("budget closeout");
+
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Blocked)
+        );
+        assert!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .expect("terminal")
+                .summary
+                .contains("exceeded the 2-round budget")
+        );
+        assert_eq!(
+            runtime
+                .query_task(&target.task_id)
+                .expect("unchanged target")
+                .status,
+            TaskStatus::WaitingAgent
+        );
+        let _ = collect_provider_requests(&rx, 2);
+        handle.join().expect("join provider");
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
 
     #[test]
@@ -8520,6 +9343,72 @@ provider = "old"
         }
     }
 
+    fn lifecycle_live_request(runtime_home: &Path, event_id: &str) -> LiveReasonTurnRequest {
+        LiveReasonTurnRequest {
+            runtime_home: runtime_home.to_path_buf(),
+            session_id: SessionId::new(format!("master-lifecycle-{event_id}")),
+            turn_id: TurnId::new(format!("master-lifecycle-{event_id}-decision")),
+            trace_id: TraceId::new(format!("master-lifecycle-trace-{event_id}")),
+            prompt: format!("make one Task Center decision for {event_id}"),
+            cwd: Some(runtime_home.to_path_buf()),
+            stream: false,
+            cancel_token: None,
+        }
+    }
+
+    fn create_lifecycle_test_worker(runtime: &TaskRuntime) {
+        runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: AgentId::new("worker"),
+                capabilities: vec!["workspace".to_owned()],
+                actor: lifecycle_test_actor(),
+                watermark: lifecycle_test_watermark("create-worker"),
+            })
+            .expect("create worker");
+    }
+
+    fn create_lifecycle_test_task(runtime: &TaskRuntime, task_id: &str) -> TaskSnapshot {
+        runtime
+            .create_task(TaskCreateRequest {
+                task_id: Some(TaskId::new(task_id)),
+                title: format!("{task_id} title"),
+                content: "lifecycle decision fixture".to_owned(),
+                goal: "persist one target task decision".to_owned(),
+                deliverables: vec!["decision evidence".to_owned()],
+                acceptance: vec!["target task changes".to_owned()],
+                priority: 90,
+                target_cwd: Some(std::env::temp_dir().display().to_string()),
+                dispatch: TaskDispatchRequest::None,
+                parent: TaskParentRef {
+                    session_id: None,
+                    turn_id: None,
+                    trace_id: None,
+                },
+                actor: lifecycle_test_actor(),
+                watermark: lifecycle_test_watermark("create-task"),
+            })
+            .expect("create lifecycle task")
+            .task
+    }
+
+    fn lifecycle_test_actor() -> TaskActor {
+        TaskActor {
+            agent_id: AgentId::new("agent-live"),
+            source: "runtime.master-worker-loop.test".to_owned(),
+            session_id: None,
+            turn_id: None,
+            trace_id: None,
+        }
+    }
+
+    fn lifecycle_test_watermark(hook: &str) -> TaskWatermark {
+        TaskWatermark {
+            metadata_id: None,
+            hook: Some(hook.to_owned()),
+            action_tool_call_id: None,
+        }
+    }
+
     fn with_temp_workspace<F>(test: F)
     where
         F: FnOnce(&Path),
@@ -8951,7 +9840,11 @@ provider = "old"
             .collect()
     }
 
-    fn assert_master_task_request_contract(raw_request: &str, sentinel: &str) {
+    fn assert_master_task_request_contract(
+        raw_request: &str,
+        sentinel: &str,
+        configured_worker: &str,
+    ) {
         assert!(raw_request.contains(sentinel));
         assert!(raw_request.contains("Master task orchestration policy"));
         assert!(raw_request.contains("you are the master agent"));
@@ -8960,6 +9853,15 @@ provider = "old"
         assert!(raw_request.contains("Concurrency control"));
         assert!(raw_request.contains("Flow control"));
         assert!(raw_request.contains("Task tool workflow"));
+        assert!(raw_request.contains(&format!(
+            "Configured paired Worker id: `{configured_worker}`"
+        )));
+        assert!(raw_request.contains("Historical agents returned by list_agents"));
+        assert!(raw_request.contains("never put task(...)"));
+        assert!(raw_request.contains("The Worker does not receive the task tool"));
+        assert!(raw_request.contains(
+            "converts the Worker completion schema into TaskReviewSubmitted or TaskBlocked"
+        ));
         assert!(
             raw_request.contains("do not directly execute work outside your allowed workspace")
         );
@@ -9346,6 +10248,149 @@ provider = "old"
             let encoded = serde_json::to_string(record).expect("metadata json");
             !encoded.contains("<<<freehand_status>>>") && !encoded.contains("pong")
         }));
+    }
+
+    #[test]
+    fn live_bridge_polishes_invalid_control_status_without_provider_failure() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let invalid_status = json!({
+            "content": [{
+                "type": "text",
+                "text": "working\n<<<freehand_status>>>\n{\"schema_version\":1,\"status\":{\"simple_question\":true,\"next_step\":42}}\n<</freehand_status>>>"
+            }],
+            "usage": {"input_tokens": 14, "output_tokens": 40},
+            "stop_reason": "end_turn"
+        })
+        .to_string();
+        let corrected_status = json!({
+            "content": [{
+                "type": "text",
+                "text": "pong\n<<<freehand_status>>>\n{\"schema_version\":1,\"status\":{\"simple_question\":true,\"next_step\":null,\"blocked_reason\":null}}\n<</freehand_status>>>"
+            }],
+            "usage": {"input_tokens": 14, "output_tokens": 40},
+            "stop_reason": "end_turn"
+        })
+        .to_string();
+        let (base_url, rx, handle) =
+            spawn_sequence_server("application/json", vec![invalid_status, corrected_status]);
+        let request = live_request(false);
+        let runtime_home = request.runtime_home.clone();
+        let session_id = request.session_id.clone();
+        let broadcasts = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&broadcasts);
+
+        let outcome = run_live_reason_turn_with_hooks(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+            move |event| {
+                captured.lock().expect("broadcast lock").push(event.clone());
+            },
+            |_| {},
+            |_| {},
+        )
+        .expect("control status should polish and continue");
+        let first_request = rx.recv().expect("first request");
+        let second_request = rx.recv().expect("second request");
+        handle.join().expect("join");
+
+        assert!(!first_request.contains("status schema was rejected"));
+        assert!(second_request.contains("status schema was rejected"));
+        assert!(second_request.contains("next_step"));
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(outcome.schema_rejections.len(), 1);
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+        assert!(
+            broadcasts
+                .lock()
+                .expect("broadcast lock")
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    ReasonBroadcastEvent::CompletionSchemaRejected(rejection)
+                        if rejection.feedback.contains("next_step")
+                ))
+        );
+        let metadata = metadata_ledger_records(&runtime_home, "agent-live", &session_id);
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "control.center"
+                && record.write_node.pipeline_node == "ControlHook03AfterModelResponse"
+                && record.entries.iter().any(|entry| {
+                    entry.key == "control.status_validation" && entry.value == json!("rejected")
+                })
+        }));
+        assert!(metadata.iter().any(|record| {
+            record.owner.feature_id.as_str() == "error.center"
+                && record.entries.iter().any(|entry| {
+                    entry.key == "error.code"
+                        && entry.value == json!("control_status_schema_rejected")
+                })
+                && record.entries.iter().any(|entry| {
+                    entry.key == "error.recovery_action" && entry.value == json!("repair_schema")
+                })
+        }));
+    }
+
+    #[test]
+    fn live_bridge_blocks_after_three_consecutive_invalid_control_statuses() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let invalid_status = || {
+            json!({
+                "content": [{
+                    "type": "text",
+                    "text": "working\n<<<freehand_status>>>\n{\"schema_version\":1,\"status\":{\"simple_question\":true,\"next_step\":42}}\n<</freehand_status>>>"
+                }],
+                "usage": {"input_tokens": 14, "output_tokens": 40},
+                "stop_reason": "end_turn"
+            })
+            .to_string()
+        };
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![invalid_status(), invalid_status(), invalid_status()],
+        );
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            live_request(false),
+        )
+        .expect("schema mismatch exhaustion is blocked truth");
+        for _ in 0..3 {
+            rx.recv().expect("provider request");
+        }
+        handle.join().expect("join");
+
+        assert_eq!(outcome.rounds, 3);
+        assert_eq!(outcome.schema_rejections.len(), 3);
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Blocked)
+        );
+        assert!(outcome.turn.terminal_event.as_ref().is_some_and(|event| {
+            event.summary.contains("3 polishing attempts") && event.summary.contains("next_step")
+        }));
+        assert_eq!(
+            outcome
+                .broadcasts
+                .iter()
+                .filter(|event| matches!(event, ReasonBroadcastEvent::CompletionSchemaRejected(_)))
+                .count(),
+            2
+        );
     }
 
     #[test]
@@ -10117,6 +11162,7 @@ provider = "old"
         assert_master_task_request_contract(
             &raw_request,
             "SENTINEL_MASTER_AUTONOMY_LONG_PROMPT_END",
+            "agent-live-worker",
         );
         let original_task = outcome
             .turn
@@ -10293,15 +11339,14 @@ provider = "old"
         request.runtime_home = runtime_home.clone();
         request.prompt = master_autonomy_prompt(sentinel);
 
-        let outcome = run_live_reason_turn(
-            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            request,
-        )
-        .expect("master autonomy success path");
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.paired_agent_name = worker_id.to_owned();
+        let outcome =
+            run_live_reason_turn(&selected, request).expect("master autonomy success path");
         let requests = collect_provider_requests(&rx, 9);
         handle.join().expect("join provider");
 
-        assert_master_task_request_contract(&requests[0], sentinel);
+        assert_master_task_request_contract(&requests[0], sentinel, worker_id);
         assert!(requests[1].contains("Agent created"));
         assert!(requests.iter().any(|request| {
             request.contains("\"tool_use_id\":\"toolu_success_review_ready\"")
@@ -10431,15 +11476,14 @@ provider = "old"
         request.runtime_home = runtime_home.clone();
         request.prompt = master_autonomy_prompt(sentinel);
 
-        let outcome = run_live_reason_turn(
-            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            request,
-        )
-        .expect("master autonomy execution error path");
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.paired_agent_name = worker_id.to_owned();
+        let outcome =
+            run_live_reason_turn(&selected, request).expect("master autonomy execution error path");
         let requests = collect_provider_requests(&rx, 7);
         handle.join().expect("join provider");
 
-        assert_master_task_request_contract(&requests[0], sentinel);
+        assert_master_task_request_contract(&requests[0], sentinel, worker_id);
         assert!(requests.iter().any(|request| {
             request.contains("\"tool_use_id\":\"toolu_error_blocked\"")
                 && request.contains("TaskBlocked")
@@ -10589,15 +11633,14 @@ provider = "old"
         request.runtime_home = runtime_home.clone();
         request.prompt = master_autonomy_prompt(sentinel);
 
-        let outcome = run_live_reason_turn(
-            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            request,
-        )
-        .expect("master autonomy rejected-review retry path");
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.paired_agent_name = worker_id.to_owned();
+        let outcome = run_live_reason_turn(&selected, request)
+            .expect("master autonomy rejected-review retry path");
         let requests = collect_provider_requests(&rx, 11);
         handle.join().expect("join provider");
 
-        assert_master_task_request_contract(&requests[0], sentinel);
+        assert_master_task_request_contract(&requests[0], sentinel, worker_id);
         assert!(requests.iter().any(|request| {
             request.contains("\"tool_use_id\":\"toolu_retry_reject\"")
                 && request.contains("Task rejected")
@@ -11305,11 +12348,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         request.runtime_home = runtime_home.clone();
         request.cwd = Some(external_workspace.clone());
 
-        let outcome = run_live_reason_turn(
-            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-            request,
-        )
-        .expect("boundary failure must return to model and permit task dispatch");
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.paired_agent_name = agent_id.to_owned();
+        let outcome = run_live_reason_turn(&selected, request)
+            .expect("boundary failure must return to model and permit task dispatch");
         let requests = (0..5)
             .map(|_| rx.recv().expect("provider request"))
             .collect::<Vec<_>>();

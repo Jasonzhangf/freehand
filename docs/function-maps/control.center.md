@@ -19,9 +19,9 @@
 ## Response Mainline
 
 - `ControlHook03AfterModelResponse` parses hidden `<<<freehand_status>>>` blocks from model text after provider response capture
-- `parse_control_status_block` validates schema version, field types, and required fields for simple stop, task completion, blocked, user options, or next step
+- `parse_control_status_block` validates schema version, field types, and required fields for simple stop, task completion, blocked, user options, or next step; explicit JSON `null` on optional fields is treated as absence
 - accepted status writes watermarked metadata with writer owner `control.center`, hook node, status schema version, validation state, decision, and raw/control hashes
-- rejected status writes watermarked metadata with validation failure and field-level issue summary
+- rejected status writes watermarked metadata with validation failure and field-level issue summary, then returns typed polishing feedback to the runtime live loop
 - `ControlHook04BeforeClientReturn` strips hidden control blocks from public projection and records the stripping decision
 - basic stopHook allows terminal stop for `simple_question=true` or `task_complete=true` with `evidence`, while legacy `<freehand_completion>` remains supported when no status block is present
 - `simple_question` is the single standard field for "the previous user input was a simple question/answer request"; `simple_request` is not accepted as an alias and must not allow natural stop
@@ -30,6 +30,8 @@
 
 - malformed status JSON is rejected with field-level feedback
 - missing required fields are rejected explicitly; runtime must not infer the missing semantic intent
+- status schema mismatch is a model-response polishing path, not provider request
+  construction failure; non-null wrong types remain retryable validation errors
 - metadata write failure remains an explicit runtime failure
 - status schema never executes task mutations
 

@@ -12,6 +12,11 @@
 ## White-Box Coverage
 
 - `freehand-control` parses valid `simple_question=true` status and returns `AllowNaturalStop`
+- optional string, boolean, and string-array fields accept explicit JSON `null`
+  as absence; models may emit nullable optional fields without turning an
+  otherwise valid status into a schema mismatch
+- non-null wrong types remain field-level schema mismatches and are never
+  accepted as absent
 - `freehand-control` rejects legacy `simple_request=true` as non-actionable status instead of aliasing it
 - `freehand-control` rejects `task_complete=true` without `evidence`
 - `freehand-control` returns `ContinueWithNextStep` for non-terminal next-step status
@@ -20,6 +25,9 @@
 ## Module Black-Box Coverage
 
 - `freehand-runtime` mock Anthropic turn accepts `simple_question=true` status stop without legacy `<freehand_completion>`
+- invalid control-status field types are returned to the model as a
+  field-level schema-polishing retry, emit observable waiting state, and do
+  not become provider request build failure or failed terminal truth
 - runtime metadata ledger contains `control.center` records for `ControlHook03AfterModelResponse` and `ControlHook04BeforeClientReturn`
 - runtime metadata ledger does not contain raw status block text or assistant content
 - `freehand-ui-protocol` public conversation projection strips hidden status blocks from assistant and terminal text
