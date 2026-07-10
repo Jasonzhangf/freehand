@@ -6,8 +6,9 @@ use freehand_runtime::{
     run_live_reason_turn,
 };
 use freehand_task::{
-    TaskActor, TaskAssignRequest, TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskId,
-    TaskParentRef, TaskReviewSubmission, TaskRuntime, TaskWatermark,
+    ExecutionFact, ExecutionFactKind, TaskActor, TaskAssignRequest, TaskClaimRequest,
+    TaskCreateRequest, TaskDispatchRequest, TaskId, TaskParentRef, TaskReviewRejection,
+    TaskReviewSubmission, TaskRuntime, TaskWatermark,
 };
 use freehand_testkit::{
     ReasonRuntimeSmokeScenario, run_reason_persistence_smoke, run_reason_runtime_smoke,
@@ -63,7 +64,13 @@ fn run() -> Result<String, String> {
         return run_task_lifecycle_sample(args.collect());
     }
     if flag == "task-restart-seed-review" {
-        return run_task_restart_seed_review(args.collect());
+        return run_task_restart_seed(args.collect(), RestartSeedState::Review);
+    }
+    if flag == "task-restart-seed-rejected" {
+        return run_task_restart_seed(args.collect(), RestartSeedState::Rejected);
+    }
+    if flag == "task-restart-seed-blocked" {
+        return run_task_restart_seed(args.collect(), RestartSeedState::Blocked);
     }
     if flag == "phase1-foundation-sample" {
         return run_phase1_foundation_sample(args.collect());
@@ -103,7 +110,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
                 .to_owned(),
         );
     }
@@ -241,10 +248,39 @@ fn run_task_lifecycle_sample(args: Vec<String>) -> Result<String, String> {
     runtime.block_on(run_task_lifecycle_sample_async(url))
 }
 
-fn run_task_restart_seed_review(args: Vec<String>) -> Result<String, String> {
-    let usage =
-        "usage: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>"
-            .to_owned();
+#[derive(Debug, Clone, Copy)]
+enum RestartSeedState {
+    Review,
+    Rejected,
+    Blocked,
+}
+
+impl RestartSeedState {
+    fn command(self) -> &'static str {
+        match self {
+            Self::Review => "task-restart-seed-review",
+            Self::Rejected => "task-restart-seed-rejected",
+            Self::Blocked => "task-restart-seed-blocked",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Review => "review",
+            Self::Rejected => "rejected",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
+fn run_task_restart_seed(
+    args: Vec<String>,
+    seed_state: RestartSeedState,
+) -> Result<String, String> {
+    let usage = format!(
+        "usage: freehand-cli {} --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>",
+        seed_state.command()
+    );
     let mut agent = None::<String>;
     let mut task = None::<String>;
     let mut worker = None::<String>;
@@ -299,8 +335,8 @@ fn run_task_restart_seed_review(args: Vec<String>) -> Result<String, String> {
     let owner = AgentId::new(bootstrap.selected_agent.name.clone());
     let runtime =
         TaskRuntime::boot(&bootstrap.runtime_home, owner.clone()).map_err(|err| err.to_string())?;
-    let actor = cli_task_actor(&owner, "task-restart-seed-review");
-    let watermark = cli_task_watermark("task-restart-seed-review");
+    let actor = cli_task_actor(&owner, seed_state.command());
+    let watermark = cli_task_watermark(seed_state.command());
     let session_id = SessionId::new(format!("cli-restart-seed-{}", live_id_stamp()?));
     let turn_id = TurnId::new(format!("turn-restart-seed-{}", task_id.as_str()));
     let trace_id = TraceId::new(format!("trace-restart-seed-{}", task_id.as_str()));
@@ -310,11 +346,17 @@ fn run_task_restart_seed_review(args: Vec<String>) -> Result<String, String> {
             task_id: Some(task_id.clone()),
             title: format!("Restart seed {}", task_id.as_str()),
             content: summary.clone(),
-            goal: "seed review-ready task while master daemon is stopped".to_owned(),
+            goal: format!(
+                "seed {} task while master daemon is stopped",
+                seed_state.label()
+            ),
             deliverables: vec![summary.clone()],
             acceptance: vec![
-                "master lifecycle runner consumes this review after restart".to_owned(),
-                "task reaches TaskReviewApproved and TaskClosed".to_owned(),
+                format!(
+                    "master lifecycle runner consumes this {} truth after restart",
+                    seed_state.label()
+                ),
+                "task reaches the expected post-restart lifecycle decision".to_owned(),
             ],
             priority: 100,
             target_cwd: Some(target_cwd.clone()),
@@ -341,28 +383,77 @@ fn run_task_restart_seed_review(args: Vec<String>) -> Result<String, String> {
             agent_id: worker_id.clone(),
             execution_id: execution_id.clone(),
             ttl_seconds: 300,
-            actor: cli_task_actor(&worker_id, "task-restart-seed-review"),
+            actor: cli_task_actor(&worker_id, seed_state.command()),
             watermark: watermark.clone(),
         })
         .map_err(|err| err.to_string())?;
-    runtime
-        .submit_review(TaskReviewSubmission {
-            task_id: task_id.clone(),
-            summary: summary.clone(),
-            deliverables: vec![summary],
-            evidence: vec![
-                format!("target_cwd={target_cwd}"),
-                format!("execution_id={execution_id}"),
-            ],
-            actor: cli_task_actor(&worker_id, "task-restart-seed-review"),
-            watermark,
-        })
-        .map_err(|err| err.to_string())?;
+    let worker_actor = cli_task_actor(&worker_id, seed_state.command());
+    match seed_state {
+        RestartSeedState::Review => {
+            runtime
+                .submit_review(TaskReviewSubmission {
+                    task_id: task_id.clone(),
+                    summary: summary.clone(),
+                    deliverables: vec![summary],
+                    evidence: vec![
+                        format!("target_cwd={target_cwd}"),
+                        format!("execution_id={execution_id}"),
+                    ],
+                    actor: worker_actor,
+                    watermark,
+                })
+                .map_err(|err| err.to_string())?;
+        }
+        RestartSeedState::Rejected => {
+            runtime
+                .submit_review(TaskReviewSubmission {
+                    task_id: task_id.clone(),
+                    summary: format!("bad pre-restart review: {summary}"),
+                    deliverables: vec!["pre-restart incomplete deliverable".to_owned()],
+                    evidence: vec![
+                        format!("target_cwd={target_cwd}"),
+                        format!("execution_id={execution_id}"),
+                    ],
+                    actor: worker_actor,
+                    watermark: watermark.clone(),
+                })
+                .map_err(|err| err.to_string())?;
+            runtime
+                .reject_review(TaskReviewRejection {
+                    task_id: task_id.clone(),
+                    reject_reason: format!("pre-restart rejection for {}", task_id.as_str()),
+                    next_requirements: vec![summary],
+                    actor,
+                    watermark,
+                })
+                .map_err(|err| err.to_string())?;
+        }
+        RestartSeedState::Blocked => {
+            runtime
+                .apply_execution_fact(ExecutionFact {
+                    execution_id: execution_id.clone(),
+                    task_id: task_id.clone(),
+                    agent_id: worker_id.clone(),
+                    turn_id: None,
+                    occurred_at: unix_now_seconds()?,
+                    watermark,
+                    kind: ExecutionFactKind::Blocked {
+                        reason: summary.clone(),
+                        evidence: vec![
+                            format!("target_cwd={target_cwd}"),
+                            format!("execution_id={execution_id}"),
+                        ],
+                    },
+                })
+                .map_err(|err| err.to_string())?;
+        }
+    }
     let history = runtime
         .task_history(&task_id)
         .map_err(|err| err.to_string())?;
     Ok(format!(
-        "task_restart_seed_review_ok agent={} task={} worker={} execution={} events={}",
+        "task_restart_seed_{}_ok agent={} task={} worker={} execution={} events={}",
+        seed_state.label(),
         agent,
         task_id.as_str(),
         worker_id.as_str(),
@@ -391,6 +482,13 @@ fn cli_task_watermark(hook: &str) -> TaskWatermark {
         hook: Some(hook.to_owned()),
         action_tool_call_id: None,
     }
+}
+
+fn unix_now_seconds() -> Result<u64, String> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| err.to_string())?
+        .as_secs())
 }
 
 fn run_phase1_foundation_sample(args: Vec<String>) -> Result<String, String> {

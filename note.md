@@ -3504,3 +3504,53 @@ Current real root cause split:
   - final event order: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
 - conclusion:
   - strict pending-review restart recovery is now proven: review truth created while Master daemon was offline was consumed by the restarted Master lifecycle runner
+
+# 2026-07-10 strict rejected and blocked restart recovery proof
+
+- marker:
+  - `strict-rejected-blocked-restart-proof-1783689029`
+- implementation:
+  - extended `freehand-cli task-restart-seed-review` into state-specific seed commands:
+    - `task-restart-seed-review`
+    - `task-restart-seed-rejected`
+    - `task-restart-seed-blocked`
+  - all variants still write through `TaskRuntime` owner API only
+  - rejected seed writes `TaskReviewSubmitted` then `TaskReviewRejected`
+  - blocked seed writes `TaskBlocked` through `apply_execution_fact`
+  - no variant approves, closes, runs ADP, or writes task JSON directly
+- local verification:
+  - `cargo fmt --check` passed
+  - `cargo test -p freehand-cli -- --nocapture` passed: 26 tests
+- strict rejected online proof:
+  - stopped daemonS and workerS with service-scoped `launchctl bootout`
+  - seeded while both services were offline:
+    - task: `task-strict-rejected-1783688577`
+    - first execution: `exec-strict-rejected-1783688577`
+    - target cwd: `/tmp/strict-rejected-1783688577`
+    - seed events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected`
+  - restarted daemonS and workerS through `scripts/install-launchd.sh restartS` and `scripts/install-launchd.sh restartWorkerS`
+  - final TaskHistory reached:
+    - `TaskAssigned`
+    - `TaskResumed`
+    - `TaskReviewSubmitted`
+    - `TaskReviewApproved`
+    - `TaskClosed`
+  - recovered execution: `exec-worker-worker-1783688747254581000-0`
+  - final event order: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+- strict blocked online proof:
+  - stopped daemonS with service-scoped `launchctl bootout`
+  - seeded while daemonS was offline:
+    - task: `task-strict-blocked-1783689029`
+    - execution: `exec-strict-blocked-1783689029`
+    - target cwd: `/tmp/strict-blocked-1783689029`
+    - seed events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked`
+  - restarted daemonS with `scripts/install-launchd.sh restartS`
+  - final TaskHistory reached `TaskProgressed`
+  - `TaskProgressed` payload contained `blocked_decision: external operator decision required...`
+  - final event order: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`
+- final service state:
+  - `curl -4fsS http://127.0.0.1:4042/health` returned `ok`
+  - `~/.freehand/state/agents/worker.json` showed worker `available`
+  - `launchctl print gui/$(id -u)/com.freehand.workerS` showed `state = running`
+- caution:
+  - during restore, daemonS and workerS install commands were started in parallel and waited on Cargo locks; future same-owner/service install validation should be sequential unless explicitly independent
