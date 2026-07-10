@@ -163,17 +163,41 @@ Why it matters:
 UI must remain a projection. It should not be built before the production loop
 has owner truth to project.
 
+## Current Production Loop Truth
+
+Closed:
+
+- `runtime.master-worker-loop` owns one configured Slave Worker runner
+- Slave daemon mode claims assigned tasks, renews heartbeats, runs the real
+  provider/tool loop inside the task cwd, and reports `review_ready` or
+  `blocked`
+- Master prompt ownership is locked to create/assign/query/review; Worker owns
+  claim/heartbeat/execution facts
+- real-provider S-profile task `task-1783657707` produced
+  `/tmp/freehand-worker-e2e-1783657707/result.md`, then Master approved/closed
+- same task/execution/worker history survived explicit Worker restart
+
+Still open:
+
+- managed Worker process auto-start/restart and health projection
+- multiple configured Worker resource allocation/release
+- background Master timeout/poll scheduler outside an active user turn
+- production blocked/reject/retry/reassignment/takeover loops
+- formal current-source research/document task and browser-visible WebUI proof
+
 ## Next Implementation Sequence
 
-### P0: Owner Design And Maps
+### P0: Owner Design And Maps — Completed
 
 Deliverables:
 
-- decide whether production loop ownership belongs in `app.runtime-daemon`,
-  `provider.reason-live-bridge`, a new runtime feature, or a split owner
+- production Worker loop owner is `runtime.master-worker-loop` in
+  `crates/freehand-runtime`; `apps/freehand-daemon` only selects Master UI host
+  or Slave Worker host from configured agent mode
 - update feature map, function map, test design, mainline manifest, and wiki
-- define config fields for enabling the loop and worker pool size/names
-- define runtime status projection and failure behavior
+- first production slice uses existing explicit `agent.mode`; no enable fallback
+  or duplicate startup flag
+- define Worker idle/review-ready/blocked outcomes and failure behavior
 
 Validation:
 
@@ -183,15 +207,16 @@ cargo run -p xtask -- gates check
 git diff --check
 ```
 
-### P1: Daemon-Owned Scheduler/Runner Skeleton
+### P1: Single Configured Worker Runner — Completed
 
 Deliverables:
 
-- daemon/runtime starts the loop only when config enables it
-- master scheduler calls owner-backed poll/query APIs
-- worker runner claims assigned tasks from Task Center
-- loop status survives restart and exposes explicit errors
-- no framework business decision bypasses `task(op=...)` or owner mutation
+- Slave mode starts the Worker runner from explicit agent config
+- Worker claims assigned tasks from Task Center and renews the lease
+- Worker uses task cwd plus Worker-only tool capability policy
+- success writes `review_ready`; runtime/provider failure writes `blocked`
+- synchronous Worker/provider work runs behind one async blocking boundary
+- same task/execution/worker truth survives explicit Worker restart
 
 Validation:
 
@@ -203,16 +228,14 @@ cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```
 
-### P2: Deterministic Production-Loop Fixture Proof
+### P2: Managed Worker Lifecycle And Pool
 
 Deliverables:
 
-- success, execution-error, and reject-retry scenarios through daemon loop
-- proof starts from user input or daemon loop trigger, not direct CLI task
-  mutation
-- TaskBoard, AgentBoard, AgentLifecycle, EventInbox, WorkerControl if used, and
-  TaskHistory all match owner truth
-- same task/execution/agent ids verify after `restartS`
+- Worker processes auto-start from config and restart on failure
+- Worker health/current task/last activity are queryable owner truth
+- configured Worker pool allocation and release are deterministic
+- no orphan Worker process or leaked lease after task completion/failure
 
 Validation:
 
@@ -220,33 +243,33 @@ Validation:
 scripts/install-launchd.sh restartS
 curl -4fsS http://127.0.0.1:4042/health
 freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp
-# production-loop fixture verifier to be added in P2
-scripts/install-launchd.sh restartS
-# same-id verify command from the P2 verifier
+# managed Worker lifecycle verifier to be added in P2
 ```
 
-### P3: Real-Provider Behavioral Smoke
+### P3: Background Master Scheduling And Recovery
 
 Deliverables:
 
-- bounded real-provider task dispatch prompt
-- ADP transcript plus Task Center truth for the same session/task
-- explicit pass/fail that distinguishes model behavior drift from framework
-  failure
-- formal E2E research/document task using the acceptance prompt above
+- background Master poll/timeout scheduling outside an active model turn
+- blocked/reject/retry/reassignment/takeover scenarios with typed owner truth
+- same task/execution/agent ids across recovery and restart
+- deterministic fixtures plus separate real-provider smoke
 
 Validation:
 
 ```bash
 scripts/install-launchd.sh restartS
 freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp
-# formal real-provider E2E verifier to be added in P3
+# recovery-loop verifier to be added in P3
 ```
 
-### P4: UI Projection Only After Runtime Truth
+### P4: Formal Research And UI Evidence
 
 Deliverables:
 
+- formal current-source research/document task using the acceptance prompt above
+- real browser WebUI submission, lifecycle projection, final result, and
+  screenshot evidence for the same task
 - WebUI projection for production-loop status and worker runner state
 - Android proof only if mobile/release surface changes
 - no raw ADP/runtime ids or debug plumbing in default user-facing chrome

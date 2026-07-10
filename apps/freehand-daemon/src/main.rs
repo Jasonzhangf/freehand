@@ -1,7 +1,10 @@
 use std::future::pending;
 use std::sync::Arc;
 
-use freehand_runtime::RuntimeCommandDispatcher;
+use freehand_runtime::{
+    ProductionWorkerRunner, RuntimeAgentBootstrap, RuntimeCommandDispatcher,
+    load_default_runtime_agent,
+};
 use freehand_server::{parse_bind_arg, serve_webui_listener};
 use tokio::net::TcpListener;
 
@@ -32,8 +35,23 @@ async fn run() -> Result<String, String> {
                 return Err(usage());
             }
             let agent_name = args[1].clone();
-            let bind_addr = parse_bind_arg(args.into_iter().skip(2))?;
-            let dispatcher = build_runtime_dispatcher_from_default_config(&agent_name)?;
+            let trailing_args = args.into_iter().skip(2).collect::<Vec<_>>();
+            let bootstrap = load_default_runtime_agent(&agent_name)
+                .map_err(|err| format!("failed to load daemon agent: {err}"))?;
+            if bootstrap.selected_agent.mode.as_str() == "slave" {
+                if !trailing_args.is_empty() {
+                    return Err("slave worker mode does not accept --bind".to_owned());
+                }
+                return run_worker_mode(agent_name, bootstrap).await;
+            }
+            let bind_addr = parse_bind_arg(trailing_args.into_iter())?;
+            let dispatcher = RuntimeCommandDispatcher::from_selected_agent_with_live(
+                &bootstrap.selected_agent,
+                bootstrap.runtime_home,
+                false,
+            )
+            .map(Arc::new)
+            .map_err(|err| format!("failed to build runtime dispatcher: {err}"))?;
             let listener = TcpListener::bind(bind_addr)
                 .await
                 .map_err(|err| format!("failed to bind {bind_addr}: {err}"))?;
@@ -60,16 +78,49 @@ async fn run() -> Result<String, String> {
     }
 }
 
+async fn run_worker_mode(
+    agent_name: String,
+    bootstrap: RuntimeAgentBootstrap,
+) -> Result<String, String> {
+    let runner = ProductionWorkerRunner::from_selected_agent(
+        bootstrap.selected_agent,
+        bootstrap.runtime_home,
+    )
+    .map_err(|err| format!("failed to build production worker runner: {err}"))?;
+    println!("freehand-daemon worker runner started for {agent_name}");
+    run_blocking_worker_service(move || runner.run()).await?;
+    Ok(String::new())
+}
+
+async fn run_blocking_worker_service<F>(service: F) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), freehand_runtime::ProductionWorkerRunnerError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(service)
+        .await
+        .map_err(|error| format!("worker runner task failed: {error}"))?
+        .map_err(|error| format!("worker runner stopped: {error}"))
+}
+
 fn usage() -> String {
     "usage: freehand-daemon serve --agent <name> [--bind HOST:PORT]".to_owned()
 }
 
+#[cfg(test)]
 fn build_runtime_dispatcher_from_default_config(
     agent_name: &str,
 ) -> Result<Arc<RuntimeCommandDispatcher>, String> {
     RuntimeCommandDispatcher::from_default_config(agent_name)
         .map(Arc::new)
         .map_err(|err| format!("failed to build runtime dispatcher: {err}"))
+}
+
+#[cfg(test)]
+fn build_worker_runner_from_default_config(
+    agent_name: &str,
+) -> Result<ProductionWorkerRunner, String> {
+    ProductionWorkerRunner::from_default_config(agent_name)
+        .map_err(|err| format!("failed to build production worker runner: {err}"))
 }
 
 #[cfg(test)]
@@ -1781,7 +1832,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn daemon_bootstrap_rejects_slave_mode_agent() {
+    fn daemon_worker_mode_builds_production_runner_for_slave_agent() {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let home =
             write_test_home(&slave_config_text("https://example.invalid")).expect("test home");
@@ -1790,14 +1841,37 @@ mod tests {
         unsafe { env::set_var("HOME", &home) };
         unsafe { env::set_var("FREEHAND_PAIR_TOKEN_SHARED", "pair-token-shared") };
 
-        let err = match build_runtime_dispatcher_from_default_config("worker") {
-            Ok(_) => panic!("slave-mode agent must be rejected"),
-            Err(err) => err,
-        };
+        build_worker_runner_from_default_config("worker").expect("worker runner");
 
         restore_env(old_home, "FREEHAND_PAIR_TOKEN_SHARED", old_pair_token);
+        fs::remove_dir_all(home).expect("cleanup");
+    }
 
-        assert!(err.contains("runtime host requires a master agent"));
+    #[tokio::test]
+    async fn daemon_worker_service_runs_blocking_runtime_outside_async_context() {
+        run_blocking_worker_service(|| {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("nested blocking runtime");
+            drop(runtime);
+            Ok(())
+        })
+        .await
+        .expect("blocking worker service");
+    }
+
+    #[tokio::test]
+    async fn daemon_worker_service_surfaces_blocking_task_panic() {
+        let error = run_blocking_worker_service(
+            || -> Result<(), freehand_runtime::ProductionWorkerRunnerError> {
+                panic!("worker service panic probe")
+            },
+        )
+        .await
+        .expect_err("blocking task panic must be explicit");
+
+        assert!(error.contains("worker runner task failed"));
     }
 
     #[test]

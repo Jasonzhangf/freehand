@@ -1,5 +1,11 @@
 //! Runtime wiring owner for UI command dispatch.
 
+mod worker_runner;
+
+pub use worker_runner::{
+    ProductionWorkerRunner, ProductionWorkerRunnerError, ProductionWorkerTickOutcome,
+};
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::env;
@@ -52,7 +58,7 @@ use freehand_provider_anthropic::{
 };
 use freehand_provider_core::{
     ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderProtocol,
-    ProviderSemanticOutput, ProviderToolExchange, build_semantic_request,
+    ProviderSemanticOutput, ProviderToolDefinition, ProviderToolExchange, build_semantic_request,
 };
 use freehand_reason::{
     PersistedSessionMetadataEntry, ProviderRawLedgerWrite, ProviderRawScenePosition,
@@ -157,8 +163,48 @@ pub enum RuntimeLiveBridgeError {
     ToolExecutionFailed(String),
     #[error("task projection failed: {0}")]
     TaskProjectionFailed(String),
+    #[error("live bridge role `{expected}` requires matching agent mode, got `{actual}`")]
+    AgentModeMismatch { expected: String, actual: String },
+    #[error("worker live execution requires a target workspace")]
+    WorkerWorkspaceRequired,
     #[error("live turn cancelled")]
     Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveReasonExecutionRole {
+    Master,
+    Worker,
+}
+
+impl LiveReasonExecutionRole {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Master => "master",
+            Self::Worker => "slave",
+        }
+    }
+
+    fn required_agent_mode(self) -> AgentMode {
+        match self {
+            Self::Master => AgentMode::Master,
+            Self::Worker => AgentMode::Slave,
+        }
+    }
+
+    fn tool_definitions(self, registry: &BuiltinToolRegistry) -> Vec<ProviderToolDefinition> {
+        match self {
+            Self::Master => registry.master_implemented_definitions(),
+            Self::Worker => registry.worker_implemented_definitions(),
+        }
+    }
+
+    fn tool_schema_fingerprint(self, registry: &BuiltinToolRegistry) -> String {
+        match self {
+            Self::Master => registry.master_implemented_schema_fingerprint(),
+            Self::Worker => registry.worker_implemented_schema_fingerprint(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -777,7 +823,28 @@ pub fn run_live_reason_turn(
     selected: &SelectedAgentConfig,
     request: LiveReasonTurnRequest,
 ) -> Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError> {
-    run_live_reason_turn_with_hooks(selected, request, |_| {}, |_| {}, |_| {})
+    run_live_reason_turn_with_policy(
+        selected,
+        request,
+        LiveReasonExecutionRole::Master,
+        |_| {},
+        |_| {},
+        |_| {},
+    )
+}
+
+pub fn run_worker_live_reason_turn(
+    selected: &SelectedAgentConfig,
+    request: LiveReasonTurnRequest,
+) -> Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError> {
+    run_live_reason_turn_with_policy(
+        selected,
+        request,
+        LiveReasonExecutionRole::Worker,
+        |_| {},
+        |_| {},
+        |_| {},
+    )
 }
 
 pub fn run_live_reason_turn_with_hooks<FB, FD, FT>(
@@ -792,11 +859,44 @@ where
     FD: FnMut(&DebugEvent),
     FT: FnMut(&UiTaskListProjection),
 {
+    run_live_reason_turn_with_policy(
+        selected,
+        request,
+        LiveReasonExecutionRole::Master,
+        on_broadcast,
+        on_debug,
+        on_task_list_projection,
+    )
+}
+
+fn run_live_reason_turn_with_policy<FB, FD, FT>(
+    selected: &SelectedAgentConfig,
+    request: LiveReasonTurnRequest,
+    role: LiveReasonExecutionRole,
+    on_broadcast: FB,
+    on_debug: FD,
+    on_task_list_projection: FT,
+) -> Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError>
+where
+    FB: FnMut(&ReasonBroadcastEvent),
+    FD: FnMut(&DebugEvent),
+    FT: FnMut(&UiTaskListProjection),
+{
+    if selected.mode != role.required_agent_mode() {
+        return Err(RuntimeLiveBridgeError::AgentModeMismatch {
+            expected: role.as_str().to_owned(),
+            actual: selected.mode.as_str().to_owned(),
+        });
+    }
+    if role == LiveReasonExecutionRole::Worker && request.cwd.is_none() {
+        return Err(RuntimeLiveBridgeError::WorkerWorkspaceRequired);
+    }
     match (selected.provider.provider_type, selected.provider.protocol) {
         (ProviderType::Anthropic, ConfigProviderProtocol::Messages) => {
             run_live_anthropic_reason_turn(
                 selected,
                 request,
+                role,
                 on_broadcast,
                 on_debug,
                 on_task_list_projection,
@@ -812,6 +912,7 @@ where
 fn run_live_anthropic_reason_turn<FB, FD, FT>(
     selected: &SelectedAgentConfig,
     request: LiveReasonTurnRequest,
+    role: LiveReasonExecutionRole,
     mut on_broadcast: FB,
     mut on_debug: FD,
     mut on_task_list_projection: FT,
@@ -952,11 +1053,11 @@ where
     let mut round = 0usize;
     let mut tool_executions = 0usize;
     let mut next_prompt = request.prompt.clone();
-    let mut carryover_segments = base_live_context_segments(&request.prompt);
+    let mut carryover_segments = base_live_context_segments(&request.prompt, role);
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
-    let tool_schema_fingerprint = tool_registry.master_implemented_schema_fingerprint();
+    let tool_schema_fingerprint = role.tool_schema_fingerprint(&tool_registry);
 
     loop {
         ensure_live_not_cancelled(&request)?;
@@ -994,7 +1095,7 @@ where
             debug_hub.is_enabled(),
         )
         .map_err(|err| RuntimeLiveBridgeError::ProviderRequestBuildFailed(err.to_string()))?;
-        semantic_request.tools = tool_registry.master_implemented_definitions();
+        semantic_request.tools = role.tool_definitions(&tool_registry);
         semantic_request.tool_choice = None;
         semantic_request.tool_exchanges = tool_exchanges.clone();
         write_control_hook_metadata(
@@ -1310,6 +1411,7 @@ where
                     &tool_registry,
                     &request.runtime_home,
                     request.cwd.as_deref(),
+                    role,
                     &turn,
                     &tool_call,
                 )?;
@@ -1494,7 +1596,7 @@ where
             broadcasts.push(wait_event);
             next_prompt = "The tool result has been returned. Use it to continue the task, then provide the required Freehand completion schema when done.".to_owned();
             carryover_segments =
-                next_round_segments(&request.prompt, &collect_turn_text(&turn), None);
+                next_round_segments(&request.prompt, &collect_turn_text(&turn), None, role);
             turns.push(turn);
             continue;
         }
@@ -1709,7 +1811,7 @@ where
                     consecutive_schema_rejections = 0;
                     next_prompt = next_step;
                     carryover_segments =
-                        next_round_segments(&request.prompt, &public_provider_text, None);
+                        next_round_segments(&request.prompt, &public_provider_text, None, role);
                     turns.push(turn);
                     continue;
                 }
@@ -1808,7 +1910,8 @@ where
                 CompletionDecision::ContinueWithNextStep { next_step } => {
                     consecutive_schema_rejections = 0;
                     next_prompt = next_step;
-                    carryover_segments = next_round_segments(&request.prompt, &visible_text, None);
+                    carryover_segments =
+                        next_round_segments(&request.prompt, &visible_text, None, role);
                     turns.push(turn);
                 }
             },
@@ -1953,8 +2056,12 @@ where
                 on_broadcast(&retry_event);
                 broadcasts.push(retry_event);
                 next_prompt = feedback.clone();
-                carryover_segments =
-                    next_round_segments(&request.prompt, &visible_text, Some(feedback.as_str()));
+                carryover_segments = next_round_segments(
+                    &request.prompt,
+                    &visible_text,
+                    Some(feedback.as_str()),
+                    role,
+                );
                 turns.push(turn);
             }
         }
@@ -1980,6 +2087,83 @@ pub struct RuntimeLiveDispatcherConfig {
     pub selected_agent: SelectedAgentConfig,
     pub runtime_home: PathBuf,
     pub stream: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeAgentBootstrap {
+    pub selected_agent: SelectedAgentConfig,
+    pub runtime_home: PathBuf,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RuntimeAgentBootstrapError {
+    #[error("agent name must not be empty")]
+    EmptyAgentName,
+    #[error("config load failed: {0}")]
+    ConfigLoad(String),
+    #[error("agent selection failed: {0}")]
+    AgentSelection(String),
+    #[error("paired agent `{paired_agent_name}` environment variable `{env_var}` is not set")]
+    MissingPairedTokenEnv {
+        paired_agent_name: String,
+        env_var: String,
+    },
+    #[error("paired agent `{paired_agent_name}` environment variable `{env_var}` is empty")]
+    EmptyPairedTokenEnv {
+        paired_agent_name: String,
+        env_var: String,
+    },
+    #[error(
+        "agent `{agent_name}` pair token does not match paired agent `{paired_agent_name}` pair token"
+    )]
+    PairTokenMismatch {
+        agent_name: String,
+        paired_agent_name: String,
+    },
+}
+
+pub fn load_default_runtime_agent(
+    agent_name: &str,
+) -> Result<RuntimeAgentBootstrap, RuntimeAgentBootstrapError> {
+    if agent_name.trim().is_empty() {
+        return Err(RuntimeAgentBootstrapError::EmptyAgentName);
+    }
+    let config = load_default_config()
+        .map_err(|err| RuntimeAgentBootstrapError::ConfigLoad(err.to_string()))?;
+    let selected = config
+        .select_agent(agent_name)
+        .map_err(|err| RuntimeAgentBootstrapError::AgentSelection(err.to_string()))?;
+    let paired_pair_token = env::var(&selected.paired_pair_token_env).map_err(|_| {
+        RuntimeAgentBootstrapError::MissingPairedTokenEnv {
+            paired_agent_name: selected.paired_agent_name.clone(),
+            env_var: selected.paired_pair_token_env.clone(),
+        }
+    })?;
+    if paired_pair_token.trim().is_empty() {
+        return Err(RuntimeAgentBootstrapError::EmptyPairedTokenEnv {
+            paired_agent_name: selected.paired_agent_name.clone(),
+            env_var: selected.paired_pair_token_env.clone(),
+        });
+    }
+    if paired_pair_token != selected.pair_token {
+        return Err(RuntimeAgentBootstrapError::PairTokenMismatch {
+            agent_name: selected.name.clone(),
+            paired_agent_name: selected.paired_agent_name.clone(),
+        });
+    }
+    let runtime_home = default_config_path()
+        .map_err(|err| RuntimeAgentBootstrapError::ConfigLoad(err.to_string()))?
+        .parent()
+        .ok_or_else(|| {
+            RuntimeAgentBootstrapError::ConfigLoad(
+                "default config path has no runtime home parent".to_owned(),
+            )
+        })?
+        .to_path_buf();
+    Ok(RuntimeAgentBootstrap {
+        selected_agent: selected,
+        runtime_home,
+    })
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -2029,6 +2213,41 @@ pub enum RuntimeCommandDispatcherError {
     CheckpointProjectionBootstrap(String),
 }
 
+fn runtime_dispatcher_bootstrap_error(
+    error: RuntimeAgentBootstrapError,
+) -> RuntimeCommandDispatcherError {
+    match error {
+        RuntimeAgentBootstrapError::EmptyAgentName => RuntimeCommandDispatcherError::EmptyAgentName,
+        RuntimeAgentBootstrapError::ConfigLoad(message) => {
+            RuntimeCommandDispatcherError::ConfigLoad(message)
+        }
+        RuntimeAgentBootstrapError::AgentSelection(message) => {
+            RuntimeCommandDispatcherError::AgentSelection(message)
+        }
+        RuntimeAgentBootstrapError::MissingPairedTokenEnv {
+            paired_agent_name,
+            env_var,
+        } => RuntimeCommandDispatcherError::MissingPairedTokenEnv {
+            paired_agent_name,
+            env_var,
+        },
+        RuntimeAgentBootstrapError::EmptyPairedTokenEnv {
+            paired_agent_name,
+            env_var,
+        } => RuntimeCommandDispatcherError::EmptyPairedTokenEnv {
+            paired_agent_name,
+            env_var,
+        },
+        RuntimeAgentBootstrapError::PairTokenMismatch {
+            agent_name,
+            paired_agent_name,
+        } => RuntimeCommandDispatcherError::PairTokenMismatch {
+            agent_name,
+            paired_agent_name,
+        },
+    }
+}
+
 struct RuntimeCommandDispatcherState {
     config: RuntimeCommandDispatcherConfig,
     reason_engine: ReasonTurnEngine,
@@ -2070,42 +2289,13 @@ pub struct RuntimeCommandDispatcher {
 
 impl RuntimeCommandDispatcher {
     pub fn from_default_config(agent_name: &str) -> Result<Self, RuntimeCommandDispatcherError> {
-        if agent_name.trim().is_empty() {
-            return Err(RuntimeCommandDispatcherError::EmptyAgentName);
-        }
-        let config = load_default_config()
-            .map_err(|err| RuntimeCommandDispatcherError::ConfigLoad(err.to_string()))?;
-        let selected = config
-            .select_agent(agent_name)
-            .map_err(|err| RuntimeCommandDispatcherError::AgentSelection(err.to_string()))?;
-        let paired_pair_token = env::var(&selected.paired_pair_token_env).map_err(|_| {
-            RuntimeCommandDispatcherError::MissingPairedTokenEnv {
-                paired_agent_name: selected.paired_agent_name.clone(),
-                env_var: selected.paired_pair_token_env.clone(),
-            }
-        })?;
-        if paired_pair_token.trim().is_empty() {
-            return Err(RuntimeCommandDispatcherError::EmptyPairedTokenEnv {
-                paired_agent_name: selected.paired_agent_name.clone(),
-                env_var: selected.paired_pair_token_env.clone(),
-            });
-        }
-        if paired_pair_token != selected.pair_token {
-            return Err(RuntimeCommandDispatcherError::PairTokenMismatch {
-                agent_name: selected.name.clone(),
-                paired_agent_name: selected.paired_agent_name.clone(),
-            });
-        }
-        let runtime_home = default_config_path()
-            .map_err(|err| RuntimeCommandDispatcherError::ConfigLoad(err.to_string()))?
-            .parent()
-            .ok_or_else(|| {
-                RuntimeCommandDispatcherError::ConfigLoad(
-                    "default config path has no runtime home parent".to_owned(),
-                )
-            })?
-            .to_path_buf();
-        Self::from_selected_agent_with_live(&selected, runtime_home, false)
+        let bootstrap =
+            load_default_runtime_agent(agent_name).map_err(runtime_dispatcher_bootstrap_error)?;
+        Self::from_selected_agent_with_live(
+            &bootstrap.selected_agent,
+            bootstrap.runtime_home,
+            false,
+        )
     }
 
     pub fn from_selected_agent(
@@ -5215,8 +5405,12 @@ fn control_status_contract_segment() -> ContextSegment {
     }
 }
 
-fn tool_guidance_segment() -> ContextSegment {
-    let content = master_task_orchestration_guidance().to_owned();
+fn tool_guidance_segment(role: LiveReasonExecutionRole) -> ContextSegment {
+    let content = match role {
+        LiveReasonExecutionRole::Master => master_task_orchestration_guidance(),
+        LiveReasonExecutionRole::Worker => worker_execution_guidance(),
+    }
+    .to_owned();
     ContextSegment {
         segment_id: ContextSegmentId::new("runtime-tool-guidance"),
         kind: ContextSegmentKind::DeveloperPolicy,
@@ -5232,6 +5426,19 @@ fn tool_guidance_segment() -> ContextSegment {
     }
 }
 
+fn worker_execution_guidance() -> &'static str {
+    concat!(
+        "Use the available Freehand tool registry to complete the assigned Worker task inside the locked task workspace, then provide the required Freehand completion schema.\n\n",
+        "Worker execution policy:\n",
+        "- Role: you are a Worker executing one task assigned by the Master through Task Center.\n",
+        "- Stay inside the provided workspace and satisfy the task goal, deliverables, and acceptance criteria.\n",
+        "- Use repository read/search/write and shell tools when needed; report concrete evidence in the final completion schema.\n",
+        "- Do not create, assign, claim, approve, reject, close, or delegate tasks. Task lifecycle is owned by the framework and Master.\n",
+        "- Do not invent task-management tools or attempt recursive subagent delegation.\n",
+        "- Tool validation and execution failures are model-visible results. Correct the call and continue when possible; mark the completion blocked only when the assigned work cannot proceed.\n"
+    )
+}
+
 fn master_task_orchestration_guidance() -> &'static str {
     concat!(
         "Use the available Freehand tool registry when it helps the task. Choose the smallest sufficient tool for repository inspection or task bookkeeping, then continue and provide the required Freehand completion schema.\n\n",
@@ -5239,19 +5446,20 @@ fn master_task_orchestration_guidance() -> &'static str {
         "- Role: you are the master agent. You own the user conversation, task decomposition, worker coordination, review, and final user-facing answer.\n",
         "- Dispatch when: work targets another cwd/repository, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
         "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside your current allowed workspace without isolated execution.\n",
-        "- Workspace boundary: do not directly execute work outside your allowed workspace. Create or reuse a worker resource, create a task with target_cwd, assign it, claim it, then inspect the worker result.\n",
+        "- Workspace boundary: do not directly execute work outside your allowed workspace. Create or reuse a worker resource, create a task with target_cwd, assign it, then let the production Worker runner claim and execute it.\n",
         "- Multi-agent dispatch: split independent repository/slice work into separate worker tasks, keep each worker focused, then review and synthesize typed worker results in the master answer.\n",
         "- Concurrency control: assign only useful independent subtasks; avoid duplicate dispatch for work already running, recovering, blocked, or review_ready; poll task truth before starting more work.\n",
         "- Flow control: use task(op=\"list_agents\"), task(op=\"list_tasks\"), task(op=\"query\"), and task(op=\"history\") to inspect current framework truth before dispatching duplicates, retrying, approving, rejecting, or closing work.\n",
-        "- Task tool workflow: create_agent only when needed; create a task with goal, deliverables, acceptance, target_cwd, and priority; assign; claim_next with execution_id; record_execution as running, blocked, recovering, or review_ready; approve/reject; close only after accepted review.\n\n",
+        "- Task tool workflow: create_agent only when needed; create a task with goal, deliverables, acceptance, target_cwd, and priority; assign it; query task/history while the Worker runner claims, heartbeats, and records execution; approve/reject; close only after accepted review.\n",
+        "- Ownership boundary: as Master, do not call claim_next, heartbeat, or record_execution on behalf of a Worker. Those mutations are owned by the Worker runner. Use them only in explicit framework/debug tests, never as normal production orchestration.\n\n",
         "Master task orchestration examples:\n",
         "- Use the owner-scoped task tool; do not invent query_task_board, dispatch_subtask, approve_submission, or reject_submission tool names.\n",
         "- Create worker resources with task(op=\"create_agent\") only when the task needs a worker id that does not exist.\n",
-        "- Create and dispatch work with task(op=\"create\"), task(op=\"assign\"), and task(op=\"claim_next\"). Keep the same task_id, agent_id, and execution_id across later worker-result calls.\n",
+        "- Create and dispatch work with task(op=\"create\") and task(op=\"assign\"). Keep the same task_id and agent_id while the Worker runner creates and preserves the execution_id.\n",
         "- Cross-workspace sample: for a request comparing ~/code/codex with ~/code/Deepseek-reasonix, create one task for the Codex repository analysis and one task for the Reasonix repository analysis, each with target_cwd, deliverables, acceptance, and evidence requirements; assign/claim separate workers when available, then synthesize the comparison only after reviewing the worker results.\n",
-        "- Worker success sample: task(op=\"record_execution\", status=\"review_ready\", task_id=..., agent_id=..., execution_id=..., summary=..., deliverables=[...], evidence=[...]), then task(op=\"approve\"), then task(op=\"close\").\n",
-        "- Worker execution error sample: task(op=\"record_execution\", status=\"blocked\", task_id=..., agent_id=..., execution_id=..., phase=\"execution_error\", summary=\"what failed\", evidence=[...]). Do not close this as success.\n",
-        "- Worker retry sample: after task(op=\"reject\"), use task(op=\"record_execution\", status=\"recovering\", retry_count=1, task_id=..., agent_id=..., execution_id=..., summary=..., evidence=[...]), then submit a corrected status=\"review_ready\" result.\n",
+        "- Worker success sample: wait for task history to contain Worker-owned review_ready, then task(op=\"approve\"), then task(op=\"close\").\n",
+        "- Worker execution error sample: inspect Worker-owned blocked truth and its evidence. Do not close this as success.\n",
+        "- Worker retry sample: after task(op=\"reject\"), leave the task and requirements in Task Center for Worker-owned retry/recovery; inspect the next review_ready result before approval.\n",
         "- Tool validation, task transition errors, and worker execution errors are normal model-visible tool results. Use the returned result to decide the next task action instead of treating it as provider failure.\n"
     )
 }
@@ -5273,11 +5481,14 @@ fn original_task_segment(prompt: &str) -> ContextSegment {
     }
 }
 
-fn base_live_context_segments(original_prompt: &str) -> Vec<ContextSegment> {
+fn base_live_context_segments(
+    original_prompt: &str,
+    role: LiveReasonExecutionRole,
+) -> Vec<ContextSegment> {
     vec![
         completion_contract_segment(),
         control_status_contract_segment(),
-        tool_guidance_segment(),
+        tool_guidance_segment(role),
         original_task_segment(original_prompt),
     ]
 }
@@ -5294,8 +5505,9 @@ fn next_round_segments(
     original_prompt: &str,
     visible_text: &str,
     rejection_feedback: Option<&str>,
+    role: LiveReasonExecutionRole,
 ) -> Vec<ContextSegment> {
-    let mut segments = base_live_context_segments(original_prompt);
+    let mut segments = base_live_context_segments(original_prompt, role);
     if !visible_text.trim().is_empty() {
         let content = format!("Previous round visible output:\n{visible_text}");
         segments.push(ContextSegment {
@@ -5399,6 +5611,7 @@ fn execute_registry_tool_call(
     registry: &BuiltinToolRegistry,
     runtime_home: &Path,
     workspace_root: Option<&Path>,
+    role: LiveReasonExecutionRole,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ExecutedToolResult, RuntimeLiveBridgeError> {
@@ -5414,51 +5627,85 @@ fn execute_registry_tool_call(
         });
     }
     let tool_name = tool_call.tool_call.tool_name.as_str();
-    if tool_name == "task" {
-        return execute_registry_tool_call_with_workspace(
+    let root = match role {
+        LiveReasonExecutionRole::Master => {
+            if tool_name == "task" {
+                return execute_registry_tool_call_with_workspace(
+                    registry,
+                    runtime_home,
+                    runtime_home,
+                    role,
+                    turn,
+                    tool_call,
+                );
+            }
+            if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Shell) {
+                return Ok(master_workspace_denied_result(
+                    turn,
+                    tool_call,
+                    runtime_home,
+                    workspace_root,
+                    "unsandboxed shell execution is not available to the master",
+                ));
+            }
+            let root = fs::canonicalize(runtime_home).map_err(|err| {
+                RuntimeLiveBridgeError::ToolExecutionFailed(format!(
+                    "cannot canonicalize master runtime home `{}`: {err}",
+                    runtime_home.display()
+                ))
+            })?;
+            if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Workspace)
+                && let Some(requested_root) = workspace_root
+            {
+                let requested_root = fs::canonicalize(requested_root).map_err(|err| {
+                    RuntimeLiveBridgeError::ToolExecutionFailed(format!(
+                        "cannot canonicalize requested workspace `{}`: {err}",
+                        requested_root.display()
+                    ))
+                })?;
+                if !requested_root.starts_with(&root) {
+                    return Ok(master_workspace_denied_result(
+                        turn,
+                        tool_call,
+                        &root,
+                        Some(&requested_root),
+                        "requested workspace is outside the master runtime home",
+                    ));
+                }
+            }
+            root
+        }
+        LiveReasonExecutionRole::Worker => {
+            if tool_name == "task" {
+                return Ok(ExecutedToolResult {
+                    result: tool_result_reentry(
+                        turn,
+                        tool_call,
+                        ToolResultStatus::Failed,
+                        "Worker capability boundary: recursive task management is not available. Complete only the assigned task inside the locked workspace.".to_owned(),
+                    ),
+                    task_truth_changed: false,
+                });
+            }
+            let requested_root =
+                workspace_root.ok_or(RuntimeLiveBridgeError::WorkerWorkspaceRequired)?;
+            fs::canonicalize(requested_root).map_err(|err| {
+                RuntimeLiveBridgeError::ToolExecutionFailed(format!(
+                    "cannot canonicalize worker workspace `{}`: {err}",
+                    requested_root.display()
+                ))
+            })?
+        }
+    };
+    with_workspace_root(&root, || {
+        execute_registry_tool_call_with_workspace(
             registry,
             runtime_home,
-            runtime_home,
+            &root,
+            role,
             turn,
             tool_call,
-        );
-    }
-    if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Shell) {
-        return Ok(master_workspace_denied_result(
-            turn,
-            tool_call,
-            runtime_home,
-            workspace_root,
-            "unsandboxed shell execution is not available to the master",
-        ));
-    }
-    let root = fs::canonicalize(runtime_home).map_err(|err| {
-        RuntimeLiveBridgeError::ToolExecutionFailed(format!(
-            "cannot canonicalize master runtime home `{}`: {err}",
-            runtime_home.display()
-        ))
-    })?;
-    if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Workspace)
-        && let Some(requested_root) = workspace_root
-    {
-        let requested_root = fs::canonicalize(requested_root).map_err(|err| {
-            RuntimeLiveBridgeError::ToolExecutionFailed(format!(
-                "cannot canonicalize requested workspace `{}`: {err}",
-                requested_root.display()
-            ))
-        })?;
-        if !requested_root.starts_with(&root) {
-            return Ok(master_workspace_denied_result(
-                turn,
-                tool_call,
-                &root,
-                Some(&requested_root),
-                "requested workspace is outside the master runtime home",
-            ));
-        }
-    }
-    with_workspace_root(&root, || {
-        execute_registry_tool_call_with_workspace(registry, runtime_home, &root, turn, tool_call)
+        )
     })
     .map_err(|err| RuntimeLiveBridgeError::ToolExecutionFailed(err.to_string()))?
 }
@@ -5487,11 +5734,16 @@ fn master_workspace_denied_result(
     }
 }
 
-fn master_registry_error_text(error: &ToolRegistryError) -> String {
+fn registry_error_text(role: LiveReasonExecutionRole, error: &ToolRegistryError) -> String {
     match error {
-        ToolRegistryError::WorkspaceBoundaryViolation { root, target, .. } => format!(
-            "Master workspace boundary: requested target `{target}` is outside `{root}`. Use task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{target}\"), and task(op=\"assign\") so a worker performs the external work."
-        ),
+        ToolRegistryError::WorkspaceBoundaryViolation { root, target, .. } => match role {
+            LiveReasonExecutionRole::Master => format!(
+                "Master workspace boundary: requested target `{target}` is outside `{root}`. Use task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{target}\"), and task(op=\"assign\") so a worker performs the external work."
+            ),
+            LiveReasonExecutionRole::Worker => format!(
+                "Worker workspace boundary: requested target `{target}` is outside locked task workspace `{root}`."
+            ),
+        },
         _ => format!("Tool execution failed: {error}"),
     }
 }
@@ -5500,11 +5752,24 @@ fn execute_registry_tool_call_with_workspace(
     registry: &BuiltinToolRegistry,
     runtime_home: &Path,
     workspace_root: &Path,
+    role: LiveReasonExecutionRole,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ExecutedToolResult, RuntimeLiveBridgeError> {
     let tool_name = tool_call.tool_call.tool_name.as_str();
     if tool_name == "task" {
+        if role == LiveReasonExecutionRole::Worker {
+            return Ok(ExecutedToolResult {
+                result: tool_result_reentry(
+                    turn,
+                    tool_call,
+                    ToolResultStatus::Failed,
+                    "Worker capability boundary: recursive task management is not available."
+                        .to_owned(),
+                ),
+                task_truth_changed: false,
+            });
+        }
         let (status, output, task_truth_changed) =
             match execute_task_tool(runtime_home, turn, tool_call) {
                 Ok(output) => (
@@ -5539,7 +5804,7 @@ fn execute_registry_tool_call_with_workspace(
                         turn,
                         tool_call,
                         ToolResultStatus::Failed,
-                        master_registry_error_text(&err),
+                        registry_error_text(role, &err),
                     ),
                     task_truth_changed: false,
                 });
@@ -5561,7 +5826,7 @@ fn execute_registry_tool_call_with_workspace(
             Ok(output) => (ToolResultStatus::Success, output.text),
             Err(err) => {
                 let _ = store.mark_failed(&manifest, &err.to_string());
-                (ToolResultStatus::Failed, master_registry_error_text(&err))
+                (ToolResultStatus::Failed, registry_error_text(role, &err))
             }
         };
         if status == ToolResultStatus::Success {
@@ -5576,7 +5841,7 @@ fn execute_registry_tool_call_with_workspace(
     }
     let (status, output) = match registry.execute(tool_call) {
         Ok(output) => (ToolResultStatus::Success, output.text),
-        Err(err) => (ToolResultStatus::Failed, master_registry_error_text(&err)),
+        Err(err) => (ToolResultStatus::Failed, registry_error_text(role, &err)),
     };
     Ok(ExecutedToolResult {
         result: tool_result_reentry(turn, tool_call, status, output),
@@ -8954,6 +9219,73 @@ provider = "old"
             let encoded = serde_json::to_string(event).expect("encode debug event");
             !encoded.contains("reply exactly pong")
         }));
+    }
+
+    #[test]
+    fn worker_live_bridge_exposes_shell_excludes_task_and_locks_task_workspace() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (base_url, rx, handle) = spawn_mock_server(
+            200,
+            "application/json",
+            complete_single_response("worker complete"),
+        );
+        let runtime_home = temp_runtime_home();
+        let workspace = temp_runtime_home();
+        fs::create_dir_all(&workspace).expect("create worker workspace");
+        let canonical_workspace = fs::canonicalize(&workspace).expect("canonical workspace");
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home.clone();
+        request.cwd = Some(canonical_workspace.clone());
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.name = "worker-live".to_owned();
+        selected.mode = AgentMode::Slave;
+        selected.paired_agent_name = "master-live".to_owned();
+        selected.paired_agent_mode = AgentMode::Master;
+
+        let outcome = run_worker_live_reason_turn(&selected, request).expect("worker live bridge");
+        let raw_request = rx.recv().expect("provider request");
+        handle.join().expect("join provider");
+
+        assert!(raw_request.contains("\"name\":\"bash\""));
+        assert!(raw_request.contains("\"name\":\"read_file\""));
+        assert!(!raw_request.contains("\"name\":\"task\""));
+        assert!(raw_request.contains("Worker execution policy"));
+        assert_eq!(
+            outcome.turn.cwd.as_deref(),
+            Some(canonical_workspace.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+        fs::remove_dir_all(workspace).expect("cleanup workspace");
+    }
+
+    #[test]
+    fn worker_live_bridge_rejects_master_mode_and_missing_workspace() {
+        let selected = selected_master_agent();
+        let mut request = live_request(false);
+        request.cwd = Some(temp_runtime_home());
+        assert!(matches!(
+            run_worker_live_reason_turn(&selected, request),
+            Err(RuntimeLiveBridgeError::AgentModeMismatch { .. })
+        ));
+
+        let mut worker = selected;
+        worker.mode = AgentMode::Slave;
+        worker.paired_agent_mode = AgentMode::Master;
+        assert_eq!(
+            run_worker_live_reason_turn(&worker, live_request(false)),
+            Err(RuntimeLiveBridgeError::WorkerWorkspaceRequired)
+        );
     }
 
     #[test]

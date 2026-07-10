@@ -3329,3 +3329,52 @@ Current real root cause split:
   - Master direct read was rejected with `allowed_root=/Users/fanzhang/.freehand` and requested target `/Volumes/extension/code/freehand`; the persisted model context confirms no file content was returned.
   - The same live turn used `task` to create/assign/claim `task-1783650293` under the external target CWD and ended successfully after 11 rounds.
   - Task history is `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat`; this is boundary/delegation proof only. Production daemon-owned Worker execution and completion remain the existing separate gap.
+
+# 2026-07-10 production Worker online closeout
+
+- marker:
+  - `production-worker-online-closeout-1783657707`
+- first online failure:
+  - S-profile Master was healthy on `127.0.0.1:4042`.
+  - Configured Worker started in Slave mode and claimed the first real task, then panicked:
+    - `Cannot drop a runtime in a context where blocking is not allowed`
+    - panic originated while the synchronous Worker/provider path was running directly inside daemon's Tokio async runtime.
+  - first task `task-1783657410` ended `interrupted`; this was treated as red evidence, not success.
+- root fix:
+  - `run_worker_mode` is async and enters `run_blocking_worker_service`.
+  - `run_blocking_worker_service` owns one `tokio::task::spawn_blocking` boundary around `ProductionWorkerRunner::run`.
+  - positive daemon test creates and drops a nested Tokio runtime inside that blocking service.
+  - negative daemon test proves a blocking-task panic returns explicit `worker runner task failed`.
+  - Worker runner source was split:
+    - `crates/freehand-runtime/src/worker_runner.rs` = 460 lines
+    - `crates/freehand-runtime/src/worker_runner/heartbeat.rs`
+    - `crates/freehand-runtime/src/worker_runner/tests.rs`
+- real-provider S-profile proof:
+  - Master command ingress session: `production-worker-e2e-1783657707`.
+  - external target cwd: `/tmp/freehand-worker-e2e-1783657707`.
+  - task: `task-1783657707`.
+  - Worker: `worker`.
+  - execution: `exec-worker-worker-1783657761743691000-81`.
+  - Worker turn: `worker-turn-exec-worker-worker-1783657761743691000-81-r4`.
+  - deliverable: `/tmp/freehand-worker-e2e-1783657707/result.md`.
+  - result file contains the source fields, calculation `13 + 29 = 42`, literal `sum=42`, and verification evidence after Worker re-read.
+  - ordered TaskHistory:
+    - `TaskCreated`
+    - `TaskAssigned`
+    - `TaskResumed`
+    - `TaskHeartbeat`
+    - periodic `TaskHeartbeat`
+    - `TaskReviewSubmitted`
+    - `TaskReviewApproved`
+    - `TaskClosed`
+  - after explicit Worker stop/restart, the same task/execution/agent history remained queryable.
+- validation:
+  - `cargo test -p freehand-runtime production_worker_runner -- --nocapture` -> 5 passed.
+  - `cargo test -p freehand-runtime -- --nocapture` -> 97 passed.
+  - `cargo test -p freehand-tools -- --nocapture` -> 31 passed.
+  - `cargo test -p freehand-daemon worker_service -- --nocapture` -> 2 passed.
+  - `cargo test -p freehand-daemon -- --nocapture` -> 19 passed.
+  - `make ci` -> passed after `cargo run -p xtask -- mainlines generate`.
+- remaining proof gap:
+  - browser runtime discovery returned an empty browser list, so no real WebUI page operation or screenshot was captured.
+  - the completed proof used the real daemon HTTP command ingress and owner truth; it must not be reported as browser-visible WebUI verification.

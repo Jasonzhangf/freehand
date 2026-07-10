@@ -6,6 +6,8 @@
 - owner entry symbols:
   - `main`
   - `run`
+  - `run_worker_mode`
+  - `run_blocking_worker_service`
   - `build_runtime_dispatcher_from_default_config`
   - `parse_bind_arg`
 
@@ -14,6 +16,7 @@
 - daemon process accepts a host command to start the UI transport
 - daemon process may be started by macOS launchd through the installed `freehand-daemon-launchd` wrapper
 - daemon bootstrap selects one agent from default config and creates one runtime dispatcher
+- daemon bootstrap routes Master mode to the runtime-backed UI host and Slave mode to `runtime.master-worker-loop`
 - runtime bootstrap consumes configured local/paired node topology before daemon transport starts
 - if persisted runtime turn truth exists, daemon bootstrap restores it through the injected runtime owner before serving query/SSE routes
 - daemon injects the runtime dispatcher and its shared UI state into the protocol-only HTTP/SSE transport
@@ -35,6 +38,7 @@
 - daemon SSE subscriptions stay open across later runtime turn updates and observe the same protocol-owned projections as query consumers
 - daemon can rewind a previously checkpointed writable-tool mutation through runtime owner dispatch while leaving turn/session/UI truth untouched
 - daemon remains a host process and does not own reason or node semantics itself
+- Slave daemon runs the production Worker claim/execute/report loop without binding WebUI/ADP transport
 
 ## Error Mainline
 
@@ -46,7 +50,8 @@
 - ADP command/query/subscribe misuse returns explicit protocol failure frames on the WebSocket connection
 - task query misses, task subscription initial query failures, and error-center query/projection failures return explicit ADP failure frames from the runtime query bridge
 - missing checkpoint rewind manifests surface protocol-mapped target-not-found failure over the same HTTP command ingress
-- slave-mode agent selection returns explicit daemon startup error
+- Slave mode rejects UI bind arguments and starts only the configured Worker runner
+- Slave Worker service executes behind a blocking boundary; blocking-task panic/join failure returns an explicit daemon error instead of unwinding the async runtime
 - async command ingress does not execute injected synchronous provider/runtime work inline; it returns explicit transport failure if the dispatch task itself fails
 
 ## Shared Multi-Reference Functions
@@ -63,12 +68,18 @@
   - allowed callers: runtime host apps and runtime tests
   - related tests: runtime dispatch receipt smoke
   - why shared: keeps reason/node command execution outside app boundary
-- `RuntimeCommandDispatcher::from_default_config`
+  - `RuntimeCommandDispatcher::from_default_config`
   - owner: `crates/freehand-runtime/src/lib.rs`
   - purpose: load default config and bootstrap runtime dispatcher for one selected agent
   - allowed callers: runtime host app and bootstrap tests
   - related tests: config-selected bootstrap smoke
   - why shared: keeps startup config selection out of app host glue while preserving one-process-one-agent flow
+- `ProductionWorkerRunner::from_default_config`
+  - owner: `crates/freehand-runtime/src/worker_runner.rs`
+  - purpose: bootstrap one configured Slave process against the paired Master's Task Center namespace
+  - allowed callers: daemon Slave host and runtime tests
+  - related tests: daemon Worker mode bootstrap, production Worker runner tests
+  - why shared: keeps claim/execute/report semantics out of daemon app glue
 
 ## Function Call Table
 
@@ -84,6 +95,8 @@
 | 07 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | `~/.freehand/daemon.env` | daemon process exec | macOS launchd | `FREEHAND_DAEMON_BIN serve` | bound |
 | 07a | `default_daemon_bind` / `detect_tailscale_ip` | `scripts/install-launchd.sh` | choose launchd default bind as the local Tailscale IPv4 on the fixed release/S port when Tailscale is available, otherwise fall back to loopback | install/restart profile | `<tailscale-ip>:4041` / `<tailscale-ip>:4042` or loopback fallback | launchd installer | `tailscale ip -4` | bound |
 | 08 | `handle_adp_socket` / `RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs` / `crates/freehand-runtime/src/lib.rs` | serve daemon ADP error-center query and initial subscription snapshots from runtime metadata truth | ADP error-center query or subscribe frame | ADP error-center query result or initial subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime metadata projection owner | bound |
+| 09 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | route configured Slave mode into the production Worker runner without UI transport | selected Slave bootstrap | long-running Worker service | daemon CLI | `run_blocking_worker_service` | bound |
+| 10 | `run_blocking_worker_service` | `apps/freehand-daemon/src/main.rs` | isolate the synchronous Worker/provider loop from the daemon async runtime thread | Worker service closure | Worker service result or explicit join failure | `run_worker_mode` | `tokio::task::spawn_blocking` | bound |
 
 ## Sync Status Against Code
 
@@ -95,4 +108,5 @@
 - ADP task list/history query control is covered through the daemon app boundary
 - ADP error-center metadata query control is covered through the daemon app boundary
 - config-selected bootstrap is now bound in code and uses configured peer topology
+- configured Slave startup now binds `runtime.master-worker-loop` instead of failing the app host
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

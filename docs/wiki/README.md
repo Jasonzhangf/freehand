@@ -26,6 +26,7 @@ Generated wiki artifacts from machine-readable mainline call source files. Do no
 - [reason.session-history](./reason.session-history.md) mainline call source `docs/mainline-calls/reason.session-history.json`
 - [reason.turn](./reason.turn.md) mainline call source `docs/mainline-calls/reason.turn.json`
 - [runtime.checkpoint-rewind](./runtime.checkpoint-rewind.md) mainline call source `docs/mainline-calls/runtime.checkpoint-rewind.json`
+- [runtime.master-worker-loop](./runtime.master-worker-loop.md) mainline call source `docs/mainline-calls/runtime.master-worker-loop.json`
 - [runtime.ui-command-dispatch](./runtime.ui-command-dispatch.md) mainline call source `docs/mainline-calls/runtime.ui-command-dispatch.json`
 - [task.orchestration](./task.orchestration.md) mainline call source `docs/mainline-calls/task.orchestration.json`
 - [tool.display](./tool.display.md) mainline call source `docs/mainline-calls/tool.display.json`

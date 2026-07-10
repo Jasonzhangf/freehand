@@ -63,6 +63,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | master/slave pairing, node status, delegation, slave turn publication | `node.master-slave` | `crates/freehand-node` | `docs/function-maps/node.master-slave.md` | `docs/testing/node.master-slave.md` |
 | UI commands, query/subscribe, UI projections | `ui.protocol` | `crates/freehand-ui-protocol` | `docs/function-maps/ui.protocol.md` | `docs/testing/ui.protocol.md` |
 | runtime wiring for UI command dispatch into owner modules | `runtime.ui-command-dispatch` | `crates/freehand-runtime` | `docs/function-maps/runtime.ui-command-dispatch.md` | `docs/testing/runtime.ui-command-dispatch.md` |
+| production slave worker claim/execute/report loop | `runtime.master-worker-loop` | `crates/freehand-runtime` | `docs/function-maps/runtime.master-worker-loop.md` | `docs/testing/runtime.master-worker-loop.md` |
 | writable-tool checkpoints, restore manifests, and runtime rewind | `runtime.checkpoint-rewind` | `crates/freehand-runtime` | `docs/function-maps/runtime.checkpoint-rewind.md` | `docs/testing/runtime.checkpoint-rewind.md` |
 | CLI reason smoke and config-selected runtime harness | `app.cli-runtime-smoke` | `apps/freehand-cli` | `docs/function-maps/app.cli-runtime-smoke.md` | `docs/testing/app.cli-runtime-smoke.md` |
 | CLI live provider turn and completion loop smoke | `app.cli-live-turn` | `apps/freehand-cli` | `docs/function-maps/app.cli-live-turn.md` | `docs/testing/app.cli-live-turn.md` |
@@ -651,7 +652,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon ADP task list/history query smoke
   - daemon ADP query-as-command rejection smoke
   - daemon direct-message dispatch smoke
-  - daemon slave-mode startup rejection smoke
+  - daemon slave-mode production Worker runner bootstrap smoke
 - required_project_black_box_tests:
   - real runtime owner injection over shared HTTP/SSE/command and ADP WebSocket transport without app-owned business logic
 - test_design_doc: `docs/testing/app.runtime-daemon.md`
@@ -674,7 +675,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon depends on `freehand-runtime`, not directly on reason/node/provider/config owners
   - app transport remains shared and protocol-only
   - runtime dispatch and UI projection stay closed-loop through one shared state handle
-  - config-selected bootstrap remains one-process-one-agent and rejects slave-mode UI host startup explicitly
+  - config-selected bootstrap remains one-process-one-agent; Master hosts UI transport and Slave hosts the production Worker runner
   - migrated mainline call source and generated wiki stay in sync with the function map
 ### `app.android-client`
 
@@ -1508,6 +1509,63 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - reason turn truth mutation still stays inside `freehand-reason`
   - node direct-message/task semantics still stay inside `freehand-node`
   - task truth and filtering stay inside `freehand-task`
+
+### `runtime.master-worker-loop`
+
+- owner: `crates/freehand-runtime`
+- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-tools/**`, `apps/freehand-daemon/**` for startup wiring only, `docs/function-maps/runtime.master-worker-loop.md`, `docs/testing/runtime.master-worker-loop.md`, `docs/mainline-calls/runtime.master-worker-loop.json`, `docs/wiki/runtime.master-worker-loop.md`, `docs/function-maps/app.runtime-daemon.md`, `docs/testing/app.runtime-daemon.md`, `docs/mainline-calls/app.runtime-daemon.json`, `docs/architecture/**`, `docs/goals/**`, `MEMORY.md`, `note.md`
+- forbidden_paths: `crates/freehand-task/**` lifecycle semantics except through existing public APIs, provider wire DTO internals, UI app-local worker execution, daemon-owned business logic
+- required_checks:
+  - `cargo test -p freehand-tools worker_implemented -- --nocapture`
+  - `cargo test -p freehand-runtime production_worker_runner -- --nocapture`
+  - `cargo test -p freehand-daemon worker_mode -- --nocapture`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - worker tool schema includes workspace and shell tools but excludes recursive `task`
+  - no assigned task returns an explicit idle outcome without mutating task truth
+  - assigned task claims exactly once with one execution id and lease heartbeat
+  - successful worker turn records `review_ready` against the claimed task/execution/agent
+  - provider/runtime failure records `blocked` and never projects success
+  - missing/invalid worker target cwd blocks before model execution
+  - master live-turn tool policy remains runtime-home locked and shell-denied
+- required_module_black_box_tests:
+  - production worker runner uses shared Task Center owner namespace and worker execution identity
+  - worker live turn persists under worker agent/session truth while task result persists under master-owned Task Center truth
+  - slave daemon mode runs the worker loop and does not expose the Master UI dispatcher
+  - restart can query the same task, execution, agent, and history truth
+- required_project_black_box_tests:
+  - S-profile Master creates and assigns external-cwd work; separate Slave daemon claims, executes, heartbeats, and reports `review_ready` or `blocked`
+  - TaskHistory contains `TaskResumed`, `TaskHeartbeat`, and terminal execution fact for the same task/execution/agent ids
+- test_design_doc: `docs/testing/runtime.master-worker-loop.md`
+- function_map_doc: `docs/function-maps/runtime.master-worker-loop.md`
+- mainline_call_doc: `docs/mainline-calls/runtime.master-worker-loop.json`
+- generated_wiki_doc: `docs/wiki/runtime.master-worker-loop.md`
+- debug_artifacts:
+  - worker reason ledger
+  - master-owned task history
+  - worker daemon stdout/stderr
+- runtime_paths:
+  - `~/.freehand/state/tasks`
+  - `~/.freehand/state/agents`
+  - `~/.freehand/state/turns`
+  - `~/.freehand/ledgers/tasks`
+  - `~/.freehand/ledgers/reason`
+  - `~/.freehand/logs`
+- update_triggers:
+  - worker claim/heartbeat/report lifecycle changes
+  - worker tool capability policy changes
+  - slave daemon startup or polling cadence changes
+  - task-owner namespace or worker execution identity changes
+  - production worker online E2E contract changes
+- lifecycle_checks:
+  - one process runs one configured agent
+  - daemon only selects mode and hosts the runtime owner
+  - Task Center remains the only task/agent/lease truth owner
+  - worker does not receive recursive task-delegation capability
+  - provider/runtime errors become explicit blocked execution facts
+  - no assigned task is an idle no-op, not an invented success
+  - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `runtime.checkpoint-rewind`
 

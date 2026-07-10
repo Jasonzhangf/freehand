@@ -1,0 +1,161 @@
+{
+  "feature_id": "runtime.master-worker-loop",
+  "owner_crate": "crates/freehand-runtime",
+  "owner_module": "crates/freehand-runtime/src/worker_runner.rs",
+  "function_map_doc": "docs/function-maps/runtime.master-worker-loop.md",
+  "test_design_doc": "docs/testing/runtime.master-worker-loop.md",
+  "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+  "generated_wiki_doc": "docs/wiki/runtime.master-worker-loop.md",
+  "request_mainline": [
+    "one daemon process selects one configured agent",
+    "Slave mode constructs a production Worker runner instead of a Master UI dispatcher",
+    "Worker opens the paired Master's Task Center namespace and uses its own configured agent id as execution identity",
+    "each Worker tick claims the highest-priority Assigned task for that Worker",
+    "claim persists one execution id and lease heartbeat",
+    "task target cwd becomes the canonical locked Worker execution root",
+    "Worker provider requests expose implemented workspace/shell tools but exclude recursive `task`"
+  ],
+  "response_mainline": [
+    "no Assigned task returns an explicit idle outcome without task mutation",
+    "successful Worker completion writes one review-ready execution fact",
+    "provider/runtime failure writes one blocked execution fact",
+    "Worker reason/session truth persists under Worker agent identity",
+    "task/execution/lease/agent truth persists under the paired Master's Task Center namespace",
+    "periodic Worker ticks continue after idle, success, or blocked outcomes"
+  ],
+  "error_mainline": [
+    "Master-selected config is rejected by the Worker runner",
+    "missing or invalid target cwd records blocked truth before model execution",
+    "claim or heartbeat persistence failure stops before provider execution",
+    "failure to persist a blocked execution fact remains an explicit runner error",
+    "Worker cannot call recursive `task` through schema or execution policy",
+    "Worker failure never becomes review-ready, approved, closed, or successful UI truth"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "run_live_reason_turn_with_policy",
+      "owner": "crates/freehand-runtime/src/lib.rs",
+      "purpose": "share provider/reason loop mechanics while applying explicit Master or Worker tool/workspace policy",
+      "allowed_callers": [
+        "run_live_reason_turn",
+        "run_worker_live_reason_turn",
+        "runtime tests"
+      ],
+      "related_tests": [
+        "Master boundary tests",
+        "Worker tool-policy tests"
+      ],
+      "why_shared": "provider/reason lifecycle must not be copied for Worker execution"
+    },
+    {
+      "symbol": "BuiltinToolRegistry::worker_implemented_definitions",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "expose implemented Worker tools while excluding recursive `task`",
+      "allowed_callers": [
+        "runtime live bridge",
+        "tool-registry tests"
+      ],
+      "related_tests": [
+        "Worker schema inclusion/exclusion tests"
+      ],
+      "why_shared": "Worker capability policy must have one registry owner"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "ProductionWorkerRunner::from_default_config",
+      "file_path": "crates/freehand-runtime/src/worker_runner.rs",
+      "responsibility": "load selected Slave config and bind paired Master Task Center namespace",
+      "input_semantic": "configured agent name",
+      "output_semantic": "Worker runner",
+      "caller": "daemon Slave startup",
+      "callee": "config and runtime owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "ProductionWorkerRunner::run",
+      "file_path": "crates/freehand-runtime/src/worker_runner.rs",
+      "responsibility": "run periodic Worker ticks with explicit cadence",
+      "input_semantic": "runner and interval",
+      "output_semantic": "long-running Worker service",
+      "caller": "daemon Slave mode",
+      "callee": "ProductionWorkerRunner::run_once",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "ProductionWorkerRunner::run_once",
+      "file_path": "crates/freehand-runtime/src/worker_runner.rs",
+      "responsibility": "claim one Assigned task, heartbeat, execute, and report",
+      "input_semantic": "Task Center and Worker identity",
+      "output_semantic": "idle, review-ready, or blocked outcome",
+      "caller": "Worker service loop and tests",
+      "callee": "task owner and live bridge",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "TaskRuntime::claim_next_task",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "choose and claim the highest-priority Assigned task for Worker",
+      "input_semantic": "Worker id, execution id, and lease TTL",
+      "output_semantic": "claimed task plus TaskResumed and heartbeat truth",
+      "caller": "ProductionWorkerRunner::run_once",
+      "callee": "task owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "WorkerHeartbeat::start",
+      "file_path": "crates/freehand-runtime/src/worker_runner/heartbeat.rs",
+      "responsibility": "renew the claimed task lease while provider execution remains active",
+      "input_semantic": "claimed task, execution, and Worker identity",
+      "output_semantic": "periodic TaskHeartbeat truth or explicit heartbeat error",
+      "caller": "ProductionWorkerRunner::run_once",
+      "callee": "task owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "run_worker_live_reason_turn",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "execute one Worker task in task cwd with Worker tool policy",
+      "input_semantic": "selected Worker config and live request",
+      "output_semantic": "closed live reason outcome",
+      "caller": "ProductionWorkerRunner::run_once",
+      "callee": "provider/reason live bridge",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "TaskRuntime::apply_execution_fact",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "persist review-ready or blocked result for the same execution",
+      "input_semantic": "typed execution fact",
+      "output_semantic": "terminal task mutation",
+      "caller": "ProductionWorkerRunner::run_once",
+      "callee": "task owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "run_worker_mode",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "select Slave host path without constructing Master UI dispatcher",
+      "input_semantic": "daemon agent selection",
+      "output_semantic": "Worker service process",
+      "caller": "daemon CLI",
+      "callee": "ProductionWorkerRunner::run",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "Task Center claim, heartbeat, execution fact, persistence, and recovery APIs are already bound",
+    "Master workspace boundary and external-cwd delegation are already bound",
+    "production Worker runner, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound",
+    "deterministic positive and negative tests cover idle, review-ready, blocked, missing workspace, role mismatch, and Worker tool capability boundaries",
+    "generated wiki must be regenerated whenever this mainline changes"
+  ]
+}

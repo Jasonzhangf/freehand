@@ -1,0 +1,460 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use freehand_config::{AgentMode, SelectedAgentConfig};
+use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
+use freehand_task::{
+    AgentCreateRequest, ExecutionFact, ExecutionFactKind, TaskActor, TaskClaimRequest, TaskError,
+    TaskId, TaskRuntime, TaskSnapshot, TaskWatermark,
+};
+use thiserror::Error;
+
+use super::{
+    LiveReasonTurnRequest, RuntimeAgentBootstrapError, load_default_runtime_agent,
+    run_worker_live_reason_turn,
+};
+
+mod heartbeat;
+#[cfg(test)]
+mod tests;
+
+use heartbeat::WorkerHeartbeat;
+
+const DEFAULT_LEASE_TTL_SECONDS: u64 = 30;
+const DEFAULT_POLL_INTERVAL_MILLIS: u64 = 1_000;
+
+static EXECUTION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProductionWorkerTickOutcome {
+    Idle,
+    ReviewReady {
+        task_id: TaskId,
+        execution_id: String,
+        turn_id: TurnId,
+        summary: String,
+    },
+    Blocked {
+        task_id: TaskId,
+        execution_id: String,
+        turn_id: Option<TurnId>,
+        reason: String,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum ProductionWorkerRunnerError {
+    #[error("worker bootstrap failed: {0}")]
+    Bootstrap(#[from] RuntimeAgentBootstrapError),
+    #[error("worker runner requires a slave agent, got `{mode}` for `{agent_name}`")]
+    RequiresSlaveMode { agent_name: String, mode: String },
+    #[error("worker runner requires a paired master, got `{mode}` for `{agent_name}`")]
+    RequiresPairedMaster { agent_name: String, mode: String },
+    #[error("worker Task Center failed: {0}")]
+    TaskCenter(String),
+    #[error("worker heartbeat failed: {0}")]
+    Heartbeat(String),
+    #[error("worker execution failed and blocked fact could not be persisted: {0}")]
+    BlockedFactPersistence(String),
+}
+
+#[derive(Debug, Clone)]
+struct WorkerTurnExecution {
+    status: TerminalStatus,
+    summary: String,
+    turn_id: TurnId,
+}
+
+trait WorkerTurnExecutor: Send + Sync {
+    fn execute(
+        &self,
+        selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+    ) -> Result<WorkerTurnExecution, String>;
+}
+
+struct LiveWorkerTurnExecutor;
+
+impl WorkerTurnExecutor for LiveWorkerTurnExecutor {
+    fn execute(
+        &self,
+        selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+    ) -> Result<WorkerTurnExecution, String> {
+        let outcome =
+            run_worker_live_reason_turn(selected, request).map_err(|error| error.to_string())?;
+        let terminal = outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .ok_or_else(|| "worker live turn closed without terminal event".to_owned())?;
+        Ok(WorkerTurnExecution {
+            status: terminal.status.clone(),
+            summary: terminal.summary.clone(),
+            turn_id: outcome.turn.request.turn_id.clone(),
+        })
+    }
+}
+
+pub struct ProductionWorkerRunner {
+    selected: SelectedAgentConfig,
+    runtime_home: PathBuf,
+    task_owner_agent_id: AgentId,
+    worker_agent_id: AgentId,
+    executor: Arc<dyn WorkerTurnExecutor>,
+}
+
+impl ProductionWorkerRunner {
+    pub fn from_default_config(agent_name: &str) -> Result<Self, ProductionWorkerRunnerError> {
+        let bootstrap = load_default_runtime_agent(agent_name)?;
+        Self::from_selected_agent(bootstrap.selected_agent, bootstrap.runtime_home)
+    }
+
+    pub fn from_selected_agent(
+        selected: SelectedAgentConfig,
+        runtime_home: PathBuf,
+    ) -> Result<Self, ProductionWorkerRunnerError> {
+        Self::from_selected_agent_with_executor(
+            selected,
+            runtime_home,
+            Arc::new(LiveWorkerTurnExecutor),
+        )
+    }
+
+    fn from_selected_agent_with_executor(
+        selected: SelectedAgentConfig,
+        runtime_home: PathBuf,
+        executor: Arc<dyn WorkerTurnExecutor>,
+    ) -> Result<Self, ProductionWorkerRunnerError> {
+        if selected.mode != AgentMode::Slave {
+            return Err(ProductionWorkerRunnerError::RequiresSlaveMode {
+                agent_name: selected.name.clone(),
+                mode: selected.mode.as_str().to_owned(),
+            });
+        }
+        if selected.paired_agent_mode != AgentMode::Master {
+            return Err(ProductionWorkerRunnerError::RequiresPairedMaster {
+                agent_name: selected.paired_agent_name.clone(),
+                mode: selected.paired_agent_mode.as_str().to_owned(),
+            });
+        }
+        fs::create_dir_all(&runtime_home)
+            .map_err(|error| ProductionWorkerRunnerError::TaskCenter(error.to_string()))?;
+        let runner = Self {
+            task_owner_agent_id: AgentId::new(selected.paired_agent_name.clone()),
+            worker_agent_id: AgentId::new(selected.name.clone()),
+            selected,
+            runtime_home,
+            executor,
+        };
+        runner.ensure_worker_registered()?;
+        Ok(runner)
+    }
+
+    pub fn run_once(&self) -> Result<ProductionWorkerTickOutcome, ProductionWorkerRunnerError> {
+        let task_runtime = Arc::new(self.open_task_center()?);
+        self.ensure_worker_registered_in(&task_runtime)?;
+        let execution_id = next_execution_id(&self.worker_agent_id);
+        let actor = worker_actor(&self.worker_agent_id, None);
+        let claim = task_runtime
+            .claim_next_task(TaskClaimRequest {
+                agent_id: self.worker_agent_id.clone(),
+                execution_id: execution_id.clone(),
+                ttl_seconds: DEFAULT_LEASE_TTL_SECONDS,
+                actor,
+                watermark: worker_watermark(&execution_id, "claim"),
+            })
+            .map_err(task_center_error)?;
+        let Some(task) = claim.task else {
+            return Ok(ProductionWorkerTickOutcome::Idle);
+        };
+        let execution_id = claim.execution_id.ok_or_else(|| {
+            ProductionWorkerRunnerError::TaskCenter(
+                "claimed task did not return an execution id".to_owned(),
+            )
+        })?;
+
+        let Some(target_cwd) = task.target_cwd.as_deref() else {
+            return self.report_blocked(
+                &task_runtime,
+                &task,
+                &execution_id,
+                None,
+                "assigned worker task is missing target_cwd".to_owned(),
+            );
+        };
+        let workspace = match canonical_worker_workspace(target_cwd) {
+            Ok(workspace) => workspace,
+            Err(reason) => {
+                return self.report_blocked(&task_runtime, &task, &execution_id, None, reason);
+            }
+        };
+
+        let heartbeat = WorkerHeartbeat::start(
+            Arc::clone(&task_runtime),
+            task.task_id.clone(),
+            self.worker_agent_id.clone(),
+            execution_id.clone(),
+        );
+        let request = worker_live_request(&self.runtime_home, &task, &execution_id, workspace);
+        let execution = self.executor.execute(&self.selected, request);
+        if let Err(error) = heartbeat.stop() {
+            return self.report_blocked(
+                &task_runtime,
+                &task,
+                &execution_id,
+                None,
+                error.to_string(),
+            );
+        }
+
+        match execution {
+            Ok(execution) if execution.status == TerminalStatus::Success => {
+                let summary = execution.summary.clone();
+                task_runtime
+                    .apply_execution_fact(ExecutionFact {
+                        execution_id: execution_id.clone(),
+                        task_id: task.task_id.clone(),
+                        agent_id: self.worker_agent_id.clone(),
+                        turn_id: Some(execution.turn_id.clone()),
+                        occurred_at: now_unix_seconds(),
+                        kind: ExecutionFactKind::ReviewReady {
+                            summary: summary.clone(),
+                            deliverables: task.deliverables.clone(),
+                            evidence: vec![
+                                format!("worker_turn_id={}", execution.turn_id.as_str()),
+                                format!("target_cwd={target_cwd}"),
+                            ],
+                        },
+                        watermark: worker_watermark(&execution_id, "review_ready"),
+                    })
+                    .map_err(task_center_error)?;
+                Ok(ProductionWorkerTickOutcome::ReviewReady {
+                    task_id: task.task_id,
+                    execution_id,
+                    turn_id: execution.turn_id,
+                    summary,
+                })
+            }
+            Ok(execution) => self.report_blocked(
+                &task_runtime,
+                &task,
+                &execution_id,
+                Some(execution.turn_id),
+                format!(
+                    "worker turn ended with status {:?}: {}",
+                    execution.status, execution.summary
+                ),
+            ),
+            Err(reason) => self.report_blocked(
+                &task_runtime,
+                &task,
+                &execution_id,
+                None,
+                format!("worker live execution failed: {reason}"),
+            ),
+        }
+    }
+
+    pub fn run(&self) -> Result<(), ProductionWorkerRunnerError> {
+        let interval = Duration::from_millis(DEFAULT_POLL_INTERVAL_MILLIS);
+        loop {
+            match self.run_once()? {
+                ProductionWorkerTickOutcome::Idle => {}
+                outcome => println!("worker runner outcome: {outcome:?}"),
+            }
+            thread::sleep(interval);
+        }
+    }
+
+    fn open_task_center(&self) -> Result<TaskRuntime, ProductionWorkerRunnerError> {
+        TaskRuntime::boot(&self.runtime_home, self.task_owner_agent_id.clone())
+            .map_err(task_center_error)
+    }
+
+    fn ensure_worker_registered(&self) -> Result<(), ProductionWorkerRunnerError> {
+        let task_runtime = self.open_task_center()?;
+        self.ensure_worker_registered_in(&task_runtime)
+    }
+
+    fn ensure_worker_registered_in(
+        &self,
+        task_runtime: &TaskRuntime,
+    ) -> Result<(), ProductionWorkerRunnerError> {
+        match task_runtime.query_agent(&self.worker_agent_id) {
+            Ok(_) => Ok(()),
+            Err(TaskError::AgentNotFound(_)) => {
+                task_runtime
+                    .create_agent(AgentCreateRequest {
+                        agent_id: self.worker_agent_id.clone(),
+                        capabilities: vec![
+                            "workspace".to_owned(),
+                            "shell".to_owned(),
+                            "provider".to_owned(),
+                        ],
+                        actor: worker_actor(&self.worker_agent_id, None),
+                        watermark: worker_watermark("bootstrap", "register"),
+                    })
+                    .map_err(task_center_error)?;
+                Ok(())
+            }
+            Err(error) => Err(task_center_error(error)),
+        }
+    }
+
+    fn report_blocked(
+        &self,
+        task_runtime: &TaskRuntime,
+        task: &TaskSnapshot,
+        execution_id: &str,
+        turn_id: Option<TurnId>,
+        reason: String,
+    ) -> Result<ProductionWorkerTickOutcome, ProductionWorkerRunnerError> {
+        task_runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: self.worker_agent_id.clone(),
+                turn_id: turn_id.clone(),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: reason.clone(),
+                    evidence: vec![reason.clone()],
+                },
+                watermark: worker_watermark(execution_id, "blocked"),
+            })
+            .map_err(|error| {
+                ProductionWorkerRunnerError::BlockedFactPersistence(error.to_string())
+            })?;
+        Ok(ProductionWorkerTickOutcome::Blocked {
+            task_id: task.task_id.clone(),
+            execution_id: execution_id.to_owned(),
+            turn_id,
+            reason,
+        })
+    }
+}
+
+fn worker_live_request(
+    runtime_home: &Path,
+    task: &TaskSnapshot,
+    execution_id: &str,
+    workspace: PathBuf,
+) -> LiveReasonTurnRequest {
+    let task_key = sanitize_identifier(task.task_id.as_str());
+    let execution_key = sanitize_identifier(execution_id);
+    LiveReasonTurnRequest {
+        runtime_home: runtime_home.to_path_buf(),
+        session_id: SessionId::new(format!("worker-task-{task_key}")),
+        turn_id: TurnId::new(format!("worker-turn-{execution_key}")),
+        trace_id: TraceId::new(format!("worker-trace-{execution_key}")),
+        prompt: worker_task_prompt(task),
+        cwd: Some(workspace),
+        stream: false,
+        cancel_token: None,
+    }
+}
+
+fn worker_task_prompt(task: &TaskSnapshot) -> String {
+    format!(
+        "Execute the assigned Task Center task.\n\
+Task ID: {}\n\
+Title: {}\n\
+Goal: {}\n\
+Content: {}\n\
+Deliverables:\n{}\n\
+Acceptance criteria:\n{}\n\
+Work only inside the locked target workspace. Complete the implementation and verification, then return the required Freehand completion schema.",
+        task.task_id.as_str(),
+        task.title,
+        task.goal,
+        task.content,
+        render_lines(&task.deliverables),
+        render_lines(&task.acceptance),
+    )
+}
+
+fn render_lines(values: &[String]) -> String {
+    if values.is_empty() {
+        return "- none specified".to_owned();
+    }
+    values
+        .iter()
+        .map(|value| format!("- {value}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn canonical_worker_workspace(target_cwd: &str) -> Result<PathBuf, String> {
+    if target_cwd.trim().is_empty() {
+        return Err("assigned worker task target_cwd is empty".to_owned());
+    }
+    let workspace = fs::canonicalize(target_cwd).map_err(|error| {
+        format!("cannot canonicalize worker target_cwd `{target_cwd}`: {error}")
+    })?;
+    if !workspace.is_dir() {
+        return Err(format!(
+            "worker target_cwd `{}` is not a directory",
+            workspace.display()
+        ));
+    }
+    Ok(workspace)
+}
+
+fn next_execution_id(worker_agent_id: &AgentId) -> String {
+    let counter = EXECUTION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time")
+        .as_nanos();
+    format!(
+        "exec-worker-{}-{nanos}-{counter}",
+        sanitize_identifier(worker_agent_id.as_str())
+    )
+}
+
+fn sanitize_identifier(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn worker_actor(worker_agent_id: &AgentId, turn_id: Option<TurnId>) -> TaskActor {
+    TaskActor {
+        agent_id: worker_agent_id.clone(),
+        source: "runtime.master-worker-loop".to_owned(),
+        session_id: None,
+        turn_id,
+        trace_id: None,
+    }
+}
+
+fn worker_watermark(execution_id: &str, stage: &str) -> TaskWatermark {
+    TaskWatermark {
+        metadata_id: None,
+        hook: Some(format!("runtime.master-worker-loop.{stage}")),
+        action_tool_call_id: Some(execution_id.to_owned()),
+    }
+}
+
+fn task_center_error(error: TaskError) -> ProductionWorkerRunnerError {
+    ProductionWorkerRunnerError::TaskCenter(error.to_string())
+}
+
+fn now_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time")
+        .as_secs()
+}

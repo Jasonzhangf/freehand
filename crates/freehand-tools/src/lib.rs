@@ -152,6 +152,14 @@ impl BuiltinToolRegistry {
             .collect()
     }
 
+    pub fn worker_implemented_definitions(&self) -> Vec<ProviderToolDefinition> {
+        self.tools
+            .values()
+            .filter(|spec| spec.implemented && spec.definition.name != "task")
+            .map(|spec| spec.definition.clone())
+            .collect()
+    }
+
     pub fn implemented_schema_fingerprint(&self) -> String {
         self.implemented_definitions()
             .iter()
@@ -162,6 +170,14 @@ impl BuiltinToolRegistry {
 
     pub fn master_implemented_schema_fingerprint(&self) -> String {
         self.master_implemented_definitions()
+            .iter()
+            .map(canonicalize_tool_definition)
+            .collect::<Vec<_>>()
+            .join("\n--\n")
+    }
+
+    pub fn worker_implemented_schema_fingerprint(&self) -> String {
+        self.worker_implemented_definitions()
             .iter()
             .map(canonicalize_tool_definition)
             .collect::<Vec<_>>()
@@ -1862,6 +1878,23 @@ mod tests {
             registry.execution_scope("task"),
             Some(BuiltinToolExecutionScope::Framework)
         );
+    }
+
+    #[test]
+    fn worker_implemented_tool_surface_includes_shell_and_excludes_recursive_task() {
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        let names = registry
+            .worker_implemented_definitions()
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"bash".to_owned()));
+        assert!(names.contains(&"read_file".to_owned()));
+        assert!(names.contains(&"write_file".to_owned()));
+        assert!(names.contains(&"todo_write".to_owned()));
+        assert!(!names.contains(&"task".to_owned()));
+        assert!(!registry.worker_implemented_schema_fingerprint().is_empty());
     }
 
     #[test]

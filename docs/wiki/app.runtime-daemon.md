@@ -13,6 +13,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - daemon process accepts a host command to start the UI transport
 - daemon process may be started by macOS launchd through the installed freehand-daemon-launchd wrapper
 - daemon bootstrap selects one agent from default config and creates one runtime dispatcher
+- daemon bootstrap routes Master mode to the runtime-backed UI host and Slave mode to the production Worker runner
 - runtime bootstrap consumes configured local and paired node topology before daemon transport starts
 - if persisted runtime turn truth exists, daemon bootstrap restores it through the injected runtime owner before serving query and SSE routes
 - daemon injects the runtime dispatcher and its shared UI state into the protocol-only HTTP and SSE transport
@@ -40,6 +41,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - daemon serves task list subscription events from runtime-published task projections after task tool mutations
 - daemon serves error-center initial subscription snapshots from runtime metadata projection
 - daemon ADP session management can create, rename, archive, list archived sessions, restore, submit turns, rollback latest effective turn, and query the resulting effective transcript
+- Slave daemon runs the production Worker claim/execute/report loop without binding WebUI or ADP transport
 
 ## Error Mainline
 
@@ -53,7 +55,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - task query misses return explicit ADP target-not-found failure frames from the runtime query bridge
 - error-center query/projection failures return explicit ADP failure frames from the runtime query bridge
 - missing checkpoint rewind manifests surface protocol-mapped target-not-found failure over the same HTTP command ingress
-- slave-mode agent selection returns explicit daemon startup error
+- Slave mode rejects UI bind arguments instead of starting a mixed Worker and UI host
 - async command ingress does not execute injected synchronous provider or runtime work inline; it returns explicit transport failure if the dispatch task itself fails
 - task and error-center subscription initial query/projection failures surface explicit ADP failure frames
 - session rollback failures surface explicit ADP failure frames instead of app-owned transcript mutation
@@ -107,6 +109,8 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 | 09 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | ~/.freehand/daemon.env | daemon process exec | macOS launchd | FREEHAND_DAEMON_BIN serve | bound |
 | 09 | `handle_adp_socket / RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP task list/error-center query and subscribe surfaces from runtime owner truth | ADP task or error-center query/subscribe frame | ADP task/error-center query result or subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime query/projection owner | bound |
 | 10 | `handle_adp_socket / RuntimeCommandDispatcher::dispatch` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP session CRUD and rollback commands through shared protocol transport and runtime owner dispatch | ADP session management command or session transcript query frame | ADP command receipt plus active/archived/effective transcript query projection | daemon-hosted ADP client | shared WebUI transport plus runtime.ui-command-dispatch | bound |
+| 11 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | route configured Slave mode into the production Worker runner without UI transport | selected Slave bootstrap | long-running Worker service | daemon CLI | run_blocking_worker_service | bound |
+| 12 | `run_blocking_worker_service` | `apps/freehand-daemon/src/main.rs` | isolate the synchronous Worker and provider loop from the daemon async runtime thread | Worker service closure | Worker service result or explicit blocking-task join failure | run_worker_mode | tokio::task::spawn_blocking | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -118,4 +122,5 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - ADP error-center metadata query control is covered through the daemon app boundary
 - checkpoint query projection is covered through daemon HTTP after writable mutation and after rewind
 - config-selected bootstrap is now bound in code and uses configured peer topology
+- configured Slave startup binds runtime.master-worker-loop instead of failing the app host
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes
