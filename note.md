@@ -3427,3 +3427,52 @@ Current real root cause split:
 - remaining lifecycle gaps:
   - this validates terminal stale-write protection only
   - full one-Master/one-Worker lifecycle closure still needs online proof for success close, reject retry, crash/interrupted recovery, blocked decision, and restart recovery under the current topology
+
+# 2026-07-10 one-master-one-worker manual lifecycle online proof
+
+- marker:
+  - `manual-lifecycle-online-proof-1783684556`
+- scope:
+  - S-profile only, endpoint `127.0.0.1:4042`
+  - user-facing goal: determine what can be manually started and completed today
+  - release 4041 was not touched
+- service state:
+  - health returned `ok`
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` returned `adp_smoke_ok`
+  - final `~/.freehand/state/agents/worker.json` showed worker `available`
+  - `launchctl print gui/$(id -u)/com.freehand.workerS` showed `state = running`, PID `87164`, and previous `last terminating signal = Terminated: 15` from the interruption test
+- happy path proof:
+  - task: `task-manual-happy-1783683798565`
+  - target cwd: `/tmp/manual-happy-1783683798565`
+  - result: `/tmp/manual-happy-1783683798565/result.md`
+  - final event order: `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+  - result content contained `freehand_manual_happy_ok` and evidence that `input.txt` token was read
+- reject retry proof:
+  - direct bad first review task: `task-manual-reject-direct-1783684045392`
+  - target cwd: `/tmp/manual-reject-direct-1783684045392`
+  - first execution: `exec-first-manual-reject-direct-1783684045392`
+  - retry execution: `exec-worker-worker-1783684063797699000-1019`
+  - final result content: `FH-MANUAL-REJECT-DIRECT-1783684045392`
+  - final event order: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+  - rejected sample attempted first with natural prompt only (`task-manual-reject-1783683914712`) but that was invalid reject evidence because the model corrected within one execution and no `TaskReviewRejected` event appeared
+- blocked decision proof:
+  - task: `task-manual-blocked-1783684186916`
+  - missing target cwd: `/tmp/manual-blocked-1783684186916-missing-cwd`
+  - final event order: `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`
+  - `TaskProgressed` payload included `blocked_decision:` explaining the missing cwd and required external action; no silent infinite retry was observed
+- interrupted recovery proof:
+  - task: `task-manual-interrupt-1783684433320`
+  - target cwd: `/tmp/manual-interrupt-1783684433320`
+  - worker service was interrupted with service-scoped `launchctl kill TERM gui/$(id -u)/com.freehand.workerS`; no broad kill was used
+  - initial execution: `exec-worker-worker-1783684433462971000-1337`
+  - recovered execution: `exec-worker-worker-1783684523540461000-22`
+  - final event order: `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+  - `TaskInterrupted` reason was `missing_or_expired_lease`
+- restart review observation:
+  - task: `task-restart-review-1783684249797`
+  - after `scripts/install-launchd.sh restartS`, TaskHistory was still queryable and ended `TaskClosed`
+  - this is not a strict pending-review recovery proof because the review may have been processed before restart completed
+- updated manual-use conclusion:
+  - current one-Master/one-Worker task lifecycle can complete happy path, reject retry after a persisted bad review, blocked decision note, and worker interrupted recovery online
+  - remaining important gap is the user operation surface: WebUI must expose task creation/status/control/review truth cleanly enough for Jason to run these flows manually without raw ADP scripts
+  - strict restart recovery still needs a deterministic test where pending review/blocked/rejected truth is created while Master is stopped or before the lifecycle runner can consume it
