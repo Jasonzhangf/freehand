@@ -214,6 +214,7 @@ dependencies = [
  "freehand-node",
  "freehand-reason",
  "freehand-runtime",
+ "freehand-task",
  "freehand-testkit",
  "freehand-ui-protocol",
  "futures-util",

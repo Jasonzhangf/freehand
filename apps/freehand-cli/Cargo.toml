@@ -10,6 +10,7 @@ freehand-config = { path = "../../crates/freehand-config" }
 freehand-contracts = { path = "../../crates/freehand-contracts" }
 freehand-runtime = { path = "../../crates/freehand-runtime" }
 freehand-reason = { path = "../../crates/freehand-reason" }
+freehand-task = { path = "../../crates/freehand-task" }
 freehand-node = { path = "../../crates/freehand-node" }
 freehand-testkit = { path = "../../crates/freehand-testkit" }
 freehand-ui-protocol = { path = "../../crates/freehand-ui-protocol" }

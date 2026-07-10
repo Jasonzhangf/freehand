@@ -3476,3 +3476,31 @@ Current real root cause split:
   - current one-Master/one-Worker task lifecycle can complete happy path, reject retry after a persisted bad review, blocked decision note, and worker interrupted recovery online
   - remaining important gap is the user operation surface: WebUI must expose task creation/status/control/review truth cleanly enough for Jason to run these flows manually without raw ADP scripts
   - strict restart recovery still needs a deterministic test where pending review/blocked/rejected truth is created while Master is stopped or before the lifecycle runner can consume it
+
+# 2026-07-10 strict master restart recovery proof
+
+- marker:
+  - `strict-master-restart-review-proof-1783686325`
+- implementation:
+  - added `freehand-cli task-restart-seed-review`
+  - command loads the selected Master config and writes Task Center truth through `TaskRuntime` API only
+  - command creates task, assigns configured Worker, claims an execution, and submits review-ready truth
+  - command does not approve/close, does not use ADP, and does not write task JSON directly
+- local verification:
+  - `cargo test -p freehand-cli -- --nocapture` passed: 26 tests
+- online S-profile proof:
+  - installed updated S-profile with `scripts/install-launchd.sh restartS`
+  - stopped daemonS with service-scoped `launchctl bootout gui/$(id -u)/com.freehand.daemonS`
+  - verified `curl -4fsS http://127.0.0.1:4042/health` failed while daemon was offline
+  - first offline seed attempt failed explicitly because `FREEHAND_PAIR_TOKEN_SHARED` was not loaded; no task was written
+  - loaded `~/.freehand/daemonS.env` and seeded:
+    - task: `task-strict-restart-1783686325`
+    - execution: `exec-strict-restart-1783686325`
+    - target cwd: `/tmp/strict-restart-1783686325`
+    - seeded event order: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted`
+  - restarted daemonS with `scripts/install-launchd.sh restartS`
+  - health returned `ok`
+  - ADP TaskHistory for `task-strict-restart-1783686325` reached `TaskReviewApproved,TaskClosed`
+  - final event order: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+- conclusion:
+  - strict pending-review restart recovery is now proven: review truth created while Master daemon was offline was consumed by the restarted Master lifecycle runner
