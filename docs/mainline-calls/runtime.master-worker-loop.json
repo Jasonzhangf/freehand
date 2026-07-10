@@ -1,35 +1,67 @@
 {
   "feature_id": "runtime.master-worker-loop",
   "owner_crate": "crates/freehand-runtime",
-  "owner_module": "crates/freehand-runtime/src/worker_runner.rs",
+  "owner_module": "crates/freehand-runtime/src/lib.rs",
   "function_map_doc": "docs/function-maps/runtime.master-worker-loop.md",
   "test_design_doc": "docs/testing/runtime.master-worker-loop.md",
   "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
   "generated_wiki_doc": "docs/wiki/runtime.master-worker-loop.md",
   "request_mainline": [
     "one daemon process selects one configured agent",
+    "Master mode starts the WebUI/ADP host plus a background lifecycle runner over Task Center EventInbox truth",
+    "the Master lifecycle runner drains events after its durable cursor and invokes the Master model only for current review-ready, blocked, or interrupted truth",
+    "each actionable event attempt uses a deterministic event-and-attempt-isolated reason session with an explicit target-task decision boundary",
     "Slave mode constructs a production Worker runner instead of a Master UI dispatcher",
     "Worker opens the paired Master's Task Center namespace and uses its own configured agent id as execution identity",
     "each Worker tick claims the highest-priority Assigned task for that Worker",
     "claim persists one execution id and lease heartbeat",
     "task target cwd becomes the canonical locked Worker execution root",
-    "Worker provider requests expose implemented workspace/shell tools but exclude recursive `task`"
+    "Worker provider requests expose implemented workspace/shell tools but exclude recursive `task`",
+    "Master provider guidance binds dispatch to the configured paired Worker id, excludes historical AgentBoard entries as production targets, and forbids task lifecycle calls in Worker task content",
+    "Master task-tool execution independently rejects assignment to any non-configured Worker before Task Center mutation",
+    "Master task creation rejects omitted, auto, self, or non-configured-agent dispatch before persisted historical agents can be selected"
   ],
   "response_mainline": [
     "no Assigned task returns an explicit idle outcome without task mutation",
+    "Master review-ready handling must reject or approve and close before the lifecycle cursor advances",
+    "reaching the event-specific target-task decision boundary closes the reason turn in the same tool-result round and returns control to EventInbox polling",
+    "lifecycle decision rounds are finite and exhaustion closes blocked while leaving the event cursor retryable",
+    "retryable lifecycle executor and missing-decision failures keep the durable cursor unchanged, persist the next attempt id, apply bounded exponential backoff, and do not stop the daemon",
+    "approved review-ready truth remains retryable until Master closes the task",
+    "blocked truth remains retryable until Master reassigns it or persists a blocked-decision note through task(op=append)",
+    "interrupted truth remains retryable until it leaves Interrupted",
+    "interrupted and rejected tasks previously bound to the configured Worker are requeued with a new execution id",
+    "blocked tasks remain explicit Master decisions and are never silently retried by the Worker",
     "successful Worker completion writes one review-ready execution fact",
     "provider/runtime failure writes one blocked execution fact",
     "Worker reason/session truth persists under Worker agent identity",
     "task/execution/lease/agent truth persists under the paired Master's Task Center namespace",
-    "periodic Worker ticks continue after idle, success, or blocked outcomes"
+    "periodic Worker ticks continue after idle, success, or blocked outcomes",
+    "blocked Worker execution releases the configured Worker resource to Available while preserving TaskBlocked for Master decision",
+    "Worker heartbeat and result reporting are rejected when paired Task Center truth has externally terminalized the task",
+    "Worker startup repairs legacy paused snapshots only when Task Center truth has no explicitly paused assigned task"
   ],
   "error_mainline": [
     "Master-selected config is rejected by the Worker runner",
+    "Slave-selected config is rejected by the Master lifecycle runner",
+    "Master review prose without a Task Center mutation returns MissingReviewDecision and leaves the event retryable",
+    "Master approval without close returns IncompleteReviewDecision and leaves the event retryable",
+    "nullable unused response-status fields remain valid and non-null response-status type mismatches are polished without killing the lifecycle runner",
+    "Master blocked prose without a persisted task(op=append) TaskProgressed decision returns MissingBlockedDecision and leaves the event retryable",
+    "Master interrupted prose without reassignment returns MissingInterruptedDecision and leaves the event retryable",
+    "unrelated task mutation cannot satisfy the current event decision boundary",
+    "assignment to a historical or non-configured Worker returns a paired failed tool result and writes no TaskAssigned event",
+    "task creation with omitted, auto, self, or non-configured-agent dispatch returns a paired failed tool result and writes no task truth",
+    "lifecycle decision round-budget exhaustion is explicit blocked reason truth rather than an indefinitely active turn",
+    "Task Center and lifecycle-state failures stop the Master runner while lifecycle executor and missing-decision failures remain retryable",
+    "Master lifecycle cursor parse or write failure stops the loop explicitly",
     "missing or invalid target cwd records blocked truth before model execution",
     "claim or heartbeat persistence failure stops before provider execution",
+    "heartbeat or result reporting after external cancel returns explicit Task Center failure and does not append Worker lifecycle truth",
     "failure to persist a blocked execution fact remains an explicit runner error",
     "Worker cannot call recursive `task` through schema or execution policy",
-    "Worker failure never becomes review-ready, approved, closed, or successful UI truth"
+    "Worker failure never becomes review-ready, approved, closed, or successful UI truth",
+    "explicitly paused Worker task remains unavailable for unrelated assignment and must not be auto-repaired on startup"
   ],
   "shared_functions": [
     {
@@ -112,7 +144,7 @@
       "file_path": "crates/freehand-runtime/src/worker_runner/heartbeat.rs",
       "responsibility": "renew the claimed task lease while provider execution remains active",
       "input_semantic": "claimed task, execution, and Worker identity",
-      "output_semantic": "periodic TaskHeartbeat truth or explicit heartbeat error",
+      "output_semantic": "periodic TaskHeartbeat truth or explicit heartbeat error without overwriting external terminal truth",
       "caller": "ProductionWorkerRunner::run_once",
       "callee": "task owner",
       "binding_status": "bound"
@@ -132,7 +164,7 @@
       "step": "07",
       "symbol_path": "TaskRuntime::apply_execution_fact",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "persist review-ready or blocked result for the same execution",
+      "responsibility": "persist review-ready or blocked result for the same execution unless Task Center truth is externally terminal",
       "input_semantic": "typed execution fact",
       "output_semantic": "terminal task mutation",
       "caller": "ProductionWorkerRunner::run_once",
@@ -149,13 +181,103 @@
       "caller": "daemon CLI",
       "callee": "ProductionWorkerRunner::run",
       "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "ProductionMasterRunner::from_default_config",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "responsibility": "load selected Master config and bind the Master Task Center namespace",
+      "input_semantic": "configured agent name",
+      "output_semantic": "Master lifecycle runner",
+      "caller": "daemon Master startup",
+      "callee": "config and runtime owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "ProductionMasterRunner::run_until",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "responsibility": "poll Task Center lifecycle events, retry model/provider decision failures with bounded backoff, and stop on owner-truth failure or daemon shutdown",
+      "input_semantic": "runner and cancellation signal",
+      "output_semantic": "long-running Master lifecycle service",
+      "caller": "daemon Master mode",
+      "callee": "ProductionMasterRunner::run_once",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11",
+      "symbol_path": "ProductionMasterRunner::run_once",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "responsibility": "drain new Task Center events from the durable lifecycle cursor",
+      "input_semantic": "Task Center and cursor",
+      "output_semantic": "idle or task decision outcome",
+      "caller": "Master lifecycle service and tests",
+      "callee": "TaskRuntime::query_event_inbox and ProductionMasterRunner::handle_event",
+      "binding_status": "bound"
+    },
+    {
+      "step": "12",
+      "symbol_path": "ProductionMasterRunner::handle_event",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "responsibility": "invoke the Master model only for current review-ready, blocked, or interrupted truth",
+      "input_semantic": "task snapshot and trigger event",
+      "output_semantic": "task advanced, blocked observed, or explicit error",
+      "caller": "ProductionMasterRunner::run_once",
+      "callee": "run_master_lifecycle_reason_turn and task owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "run_master_lifecycle_reason_turn",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "execute one event-isolated lifecycle decision with a target-task boundary and finite round budget",
+      "input_semantic": "selected Master config, typed lifecycle prompt, and decision boundary",
+      "output_semantic": "closed Master turn and target Task Center mutation",
+      "caller": "ProductionMasterRunner::handle_event",
+      "callee": "provider and reason live bridge",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "configured_worker_task_boundary_failure",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "validate Master task create and assign routing against the configured Worker topology",
+      "input_semantic": "task tool call and configured Worker id",
+      "output_semantic": "explicit topology failure or allowed mutation path",
+      "caller": "execute_registry_tool_call_with_workspace",
+      "callee": "pure boundary validator",
+      "binding_status": "bound"
+    },
+    {
+      "step": "15",
+      "symbol_path": "execute_registry_tool_call_with_workspace",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "enforce configured Worker task routing before task-tool mutation",
+      "input_semantic": "Master task create or assign call and configured Worker id",
+      "output_semantic": "paired failed result or owner-routed task mutation",
+      "caller": "provider and reason live bridge",
+      "callee": "configured_worker_task_boundary_failure and task tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "16",
+      "symbol_path": "run_master_mode",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "run WebUI/ADP host and Master lifecycle runner under one daemon lifetime",
+      "input_semantic": "Master bootstrap and bind",
+      "output_semantic": "supervised Master daemon",
+      "caller": "daemon CLI",
+      "callee": "server host and ProductionMasterRunner::run_until",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
     "Task Center claim, heartbeat, execution fact, persistence, and recovery APIs are already bound",
     "Master workspace boundary and external-cwd delegation are already bound",
-    "production Worker runner, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound",
-    "deterministic positive and negative tests cover idle, review-ready, blocked, missing workspace, role mismatch, and Worker tool capability boundaries",
-    "generated wiki must be regenerated whenever this mainline changes"
+    "production Master lifecycle runner, durable cursor, and supervised Master daemon startup are code-bound",
+    "production Worker runner, retryable interrupted/rejected requeue, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound",
+    "deterministic positive and negative tests cover Master review close/reject/missing-decision plus Worker idle/review-ready/blocked/retry/missing-workspace/role boundaries",
+    "generated wiki must be regenerated whenever this mainline changes",
+    "Worker startup and Task Center boot now recover historical blocked-task paused snapshots without erasing explicit pause truth"
   ]
 }

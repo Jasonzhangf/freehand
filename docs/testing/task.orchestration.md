@@ -10,6 +10,10 @@
   - running state is lease-backed and heartbeat-refreshable
   - boot recovery interrupts running tasks whose lease is missing or expired
   - agent registry persists and recovers worker snapshots
+  - blocked task truth releases the Worker resource back to `Available`;
+    `AgentStatus::Paused` is reserved for an explicitly paused task
+  - boot reconciles legacy paused Worker snapshots against authoritative task
+    truth: no assigned `Paused` task means the idle Worker becomes `Available`
   - waiting tasks can be assigned to an available agent
   - assigned worker queue can claim the highest-priority task into running state
   - worker claim binds a durable execution id that survives restart and is visible on task snapshot, claim outcome, ledger payload, and UI projection
@@ -19,6 +23,12 @@
     resource state so restart verify can query the last typed lifecycle state
   - task ledger history can be queried as ordered lifecycle events
   - cancellation releases assigned agent state
+  - cancellation and other terminal task truth are authoritative across
+    multiple `TaskRuntime` instances; an older in-memory runtime must re-read
+    persisted task truth before heartbeat or execution-fact mutation
+  - stale heartbeat or execution-fact writes after `Cancelled` return explicit
+    invalid transition and do not append ledger events, recreate leases, or
+    overwrite terminal snapshots
   - query returns persisted task truth
   - list_tasks returns task snapshots for queue and UI projection queries
   - agent registry exposes self agent
@@ -59,7 +69,17 @@
 - task_history for unknown task returns explicit task-not-found
 - list_tasks filters by status and assignee
 - cancel releases the assignee and prevents later resume
+- stale runtime heartbeat after cancel is rejected without terminal overwrite:
+  `stale_runtime_heartbeat_after_cancel_is_rejected_without_terminal_overwrite`
+- stale runtime execution fact after cancel is rejected without terminal overwrite:
+  `stale_runtime_execution_fact_after_cancel_is_rejected_without_terminal_overwrite`
 - close_agent rejects busy agents
+- blocked execution releases the Worker resource and permits a different task
+  assignment
+- explicit task pause keeps the Worker `Paused` and rejects unrelated task
+  assignment
+- boot repairs a legacy paused Worker snapshot left by a blocked task while
+  preserving pause when an assigned task is actually `Paused`
 - TaskBoard query returns blocked/review/stale filtered views and agent/task binding summaries
 - implemented owner test: `task_board_projects_owner_truth_with_filtered_views`
 - ExecutionFact recovering keeps task non-terminal:
@@ -108,6 +128,8 @@
 - runtime task tool review submission, approval, and close return event-backed success
 - runtime task tool resume plus heartbeat persists a running lease
 - runtime task tool create_agent/assign/cancel/close_agent covers agent lifecycle and busy-close rejection
+- runtime/task-owner stale instance protection rejects heartbeat and
+  execution-fact writes after terminal owner truth from another runtime
 - runtime task tool claim_next returns the highest-priority assigned task and running lease
 - runtime task tool record_execution writes semantic worker execution progress
 - runtime task tool history returns task ledger timeline JSON
@@ -146,6 +168,8 @@ cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --n
 cargo test -p freehand-runtime task_tool_review_lifecycle_rejects_early_close_and_closes_after_approval -- --nocapture
 cargo test -p freehand-runtime task_tool_resume_and_heartbeat_persist_running_lease -- --nocapture
 cargo test -p freehand-runtime task_tool_agent_assign_cancel_close_lifecycle -- --nocapture
+cargo test -p freehand-task stale_runtime_heartbeat_after_cancel_is_rejected_without_terminal_overwrite -- --nocapture
+cargo test -p freehand-task stale_runtime_execution_fact_after_cancel_is_rejected_without_terminal_overwrite -- --nocapture
 cargo test -p freehand-runtime task_tool_claim_next_runs_highest_priority_task -- --nocapture
 cargo test -p freehand-runtime task_tool_record_execution_requires_running_task -- --nocapture
 cargo test -p freehand-runtime task_tool_history_returns_ordered_execution_timeline -- --nocapture

@@ -25,6 +25,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - lifecycle actions use explicit task mutation requests and validate state transitions before writing truth
 - `TaskRuntime::resume_task` enters `Running` and creates a lease-backed heartbeat record
 - `TaskRuntime::heartbeat_task` refreshes the lease for the assigned running agent
+- `TaskRuntime` mutation, heartbeat, and execution-fact writes re-read persisted task truth before appending ledger or snapshot state
 - Phase 1 TaskBoard query reads task snapshots, agent registry state, blocked items, review queue, and current skeleton stale projection
 - Phase 1 ExecutionFact sync admits typed running/recovering/blocked/review_ready facts into Task Center truth without parsing raw prose
 - Phase 1 SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without making business decisions
@@ -34,6 +35,8 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - Phase 2B EventInbox accepts legacy three-part cursors by skipping all events with the matching legacy prefix, so duplicated historical cursor rows do not replay as new events
 - Phase 2B replay_from_start=true makes MasterPoll ignore a stale persisted cursor for closeout and recovery proof; omitted EventInbox/MasterPoll limit drains all pending rows, while explicit finite limits remain pagination only
 - Phase 2B master poll loads TaskBoard, AgentBoard, EventInbox cursor, and persisted processed cursor, then classifies states without applying business mutations
+- Blocked task truth releases the assigned Worker resource to Available while preserving the blocked task for Master decision
+- TaskRuntime boot repairs legacy paused Worker snapshots only when no authoritative assigned task is explicitly Paused
 
 ## Response Mainline
 
@@ -43,6 +46,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - `TaskRuntime::list_agents` returns current in-memory agent registry projection
 - `TaskRuntime::query_agent` returns one agent snapshot
 - append, pause, resume, heartbeat, assign, cancel, submit_review, approve, reject, and close return event-backed mutation results
+- stale in-memory runtimes cannot overwrite terminal task truth with heartbeat or execution-fact writes
 - claim_next returns either the claimed running task plus execution_id or an explicit no-task result
 - record_execution returns an event-backed worker progress mutation summary
 - create_agent and close_agent return persisted agent snapshot summaries
@@ -54,6 +58,8 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - EventInbox query returns ordered master-visible events after the requested or persisted cursor
 - MasterPoll returns EventInbox events, TaskBoard, AgentBoard, compact classifications, recommended semantic action labels, and the persisted next cursor
 - MasterPoll closeout advances the cursor only after the requested window is read; same-cursor recovery proof must use replay_from_start=true plus unlimited drain so stale persisted cursors and unprocessed backlog cannot remain hidden
+- Blocked execution facts leave the task Blocked and make the Worker available for unrelated future assignments
+- explicit task pause keeps the Worker resource Paused until the paused task is resumed or terminalized
 
 ## Error Mainline
 
@@ -62,6 +68,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - unknown agent id returns explicit agent-not-found
 - invalid lifecycle transitions return explicit invalid-transition errors
 - heartbeat for non-running or unassigned tasks returns invalid-transition and writes no lease
+- heartbeat or execution facts from a stale runtime after terminal task mutation return invalid-transition and write no ledger, lease, or snapshot truth
 - assigning to unavailable agents and closing busy agents return explicit errors without mutating task or agent truth
 - claiming with an empty agent queue returns no-task without mutating truth
 - claiming with an empty execution id returns explicit missing-field and writes no truth
@@ -78,6 +85,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - Phase 2B legacy three-part event cursors match only existing event prefixes; unknown legacy prefixes still return explicit cursor-not-found
 - Phase 2B replay_from_start combined with after_cursor returns an explicit cursor-mode error and does not advance the persisted master cursor
 - Phase 2B master poll cursor persistence failure returns explicit task runtime error and must not pretend events were processed
+- a Paused Worker with an explicitly Paused assigned task rejects unrelated assignment
 
 ## Shared Multi-Reference Functions
 
@@ -89,15 +97,15 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
   - why shared: keeps startup recovery in task owner, not UI/runtime glue
 - `TaskRuntime::mutate_task`
   - owner: `crates/freehand-task/src/lib.rs`
-  - purpose: validate lifecycle transitions, write ledger and snapshot, and update memory state
+  - purpose: re-read persisted task truth, validate lifecycle transitions, write ledger and snapshot, and update memory state
   - allowed callers: TaskRuntime lifecycle methods
   - related tests: review_reject_resume_submit_approve_close_lifecycle_persists, close_before_review_approval_is_rejected
   - why shared: keeps lifecycle mutation sequencing single-sourced
 - `TaskRuntime::heartbeat_task`
   - owner: `crates/freehand-task/src/lib.rs`
-  - purpose: refresh active running task lease and persist heartbeat event
+  - purpose: re-read persisted task and lease truth, refresh active running task lease, and persist heartbeat event
   - allowed callers: runtime task tool bridge
-  - related tests: resume_creates_lease_and_heartbeat_extends_it, heartbeat_for_assigned_task_is_rejected_without_lease_write, task_tool_resume_and_heartbeat_persist_running_lease
+  - related tests: resume_creates_lease_and_heartbeat_extends_it, heartbeat_for_assigned_task_is_rejected_without_lease_write, stale_runtime_heartbeat_after_cancel_is_rejected_without_terminal_overwrite, task_tool_resume_and_heartbeat_persist_running_lease
   - why shared: keeps task execution liveness truth in task owner
 - `TaskRuntime::assign_task`
   - owner: `crates/freehand-task/src/lib.rs`
@@ -131,9 +139,9 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
   - why shared: keeps TaskBoard truth in Task Center instead of UI-local state
 - `TaskRuntime::apply_execution_fact`
   - owner: `crates/freehand-task/src/lib.rs`
-  - purpose: admit typed execution facts into Task Center transition/event truth
+  - purpose: admit typed execution facts into Task Center transition/event truth after persisted task truth refresh
   - allowed callers: Agent Lifecycle sync, runtime task bridge, tests
-  - related tests: execution_fact_recovering_keeps_running_and_writes_event, execution_fact_blocked_and_review_ready_update_board_truth, execution_fact_validation_failure_writes_no_truth, phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id
+  - related tests: execution_fact_recovering_keeps_running_and_writes_event, execution_fact_blocked_and_review_ready_update_board_truth, execution_fact_validation_failure_writes_no_truth, stale_runtime_execution_fact_after_cancel_is_rejected_without_terminal_overwrite, phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id
   - why shared: keeps worker execution state changes in Task Center rather than scattered runtime/UI logic
 - `TaskRuntime::run_scheduler_tick`
   - owner: `crates/freehand-task/src/lib.rs`
@@ -212,3 +220,4 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - Phase 2C worker-control truth is implemented under worker.control and S-profile verified with same-id restart proof
 - Phase 2D WebUI task/agent/control projection is implemented through app.webui-smoke; Android true-device proof is separate and not implied by task.orchestration
 - remaining gap is production non-smoke master/worker orchestration: daemon-owned scheduler/worker runner activation, configured worker resource recycling, and non-fixture real-provider behavioral evaluation
+- Worker resource release semantics now distinguish blocked task truth from explicit task pause truth, with boot repair for legacy paused blocked snapshots

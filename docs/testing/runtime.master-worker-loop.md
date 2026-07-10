@@ -8,38 +8,156 @@
 
 1. Master Task Center has a registered Worker and an Assigned task.
 2. Slave daemon selects the configured Worker and starts the production runner.
-3. Runner opens the paired Master's Task Center namespace.
-4. Runner claims one task for its Worker identity and persists lease heartbeat.
-5. Runner canonicalizes `task.target_cwd`.
-6. Runner executes one provider/reason turn under Worker identity and Worker tool policy.
-7. Runner writes `review_ready` on successful completion or `blocked` on provider/runtime failure.
-8. Runner returns to polling without inventing task truth while idle.
-9. Restart reads the same task/execution/agent/history truth.
+3. Worker LaunchAgent starts at login, stays alive, and restarts the same
+   configured Worker process after an unexpected exit.
+4. Runner opens the paired Master's Task Center namespace.
+5. Runner claims one task for its Worker identity and persists lease heartbeat.
+6. Runner canonicalizes `task.target_cwd`.
+7. Runner executes one provider/reason turn under Worker identity and Worker tool policy.
+8. Runner writes `review_ready` on successful completion or `blocked` on provider/runtime failure.
+9. Runner returns to polling without inventing task truth while idle.
+10. Restart reads the same task/execution/agent/history truth.
+11. Each Master lifecycle event attempt runs in an event-and-attempt-isolated
+    reason session; prior events and failed attempts must not enter the next
+    model context.
+12. A successful target-task mutation is evaluated against an explicit
+    event-specific decision boundary. Once reached, the framework closes the
+    lifecycle turn immediately instead of asking the model to wait for future
+    Worker events inside the same turn.
+13. A lifecycle decision has a finite round budget. Exhaustion becomes an
+    explicit blocked lifecycle turn and leaves the EventInbox cursor retryable;
+    it must never remain as an unbounded active reason turn.
+14. Retryable Master decision failures keep the same durable event cursor,
+    back off, and retry without terminating the daemon. Task Center/state
+    persistence failures remain fatal because owner truth is unavailable.
+
+## Current-Configuration Closure Matrix
+
+The production acceptance target is the configured one-Master/one-Worker
+topology in `~/.freehand/config.toml`. More workers and multiple independent
+BigTasks remain out of scope until every row below is closed.
+
+| branch | required owner truth | required next action |
+| --- | --- | --- |
+| success | `TaskReviewSubmitted` with deliverables and evidence | Master approves and closes, or rejects with requirements |
+| review rejected | `TaskReviewRejected` remains durable | same Worker receives a new execution with rejection requirements |
+| provider/tool terminal failure | `TaskBlocked` with paired reason/evidence | Master explicitly retries/reassigns or leaves the task blocked |
+| Worker process crash | boot writes `TaskInterrupted` for missing/expired lease | task is requeued to the configured Worker with a new execution |
+| daemon restart while idle | task/agent/cursor truth reloads unchanged | loops resume without duplicate task mutation |
+| daemon restart while review is pending | review truth reloads unchanged | Master review loop continues from durable task truth |
+
+Lifecycle closure must not rely on a user sending another chat message. The
+Master loop is event/board driven, and every retry/review decision must write
+Task Center truth before another execution starts.
 
 ## White-Box Coverage
 
 - runner lifecycle tests live in `crates/freehand-runtime/src/worker_runner/tests.rs`
+- Master lifecycle tests live in `crates/freehand-runtime/src/master_runner/tests.rs`
 - lease renewal ownership lives in `crates/freehand-runtime/src/worker_runner/heartbeat.rs`
 
 ### Positive
 
 - Worker tool definitions include `bash`, workspace read/write/search tools, and local planning tools.
 - Worker tool definitions exclude `task`.
+- Master guidance names the configured paired Worker and forbids assigning
+  production tasks to historical AgentBoard entries.
+- Master task execution accepts `task(op="assign")` only when `agent_id`
+  exactly matches the configured paired Worker; the accepted assignment writes
+  one `TaskAssigned` event for that Worker.
+- Master task creation accepts only `dispatch.mode="none"` or
+  `dispatch.mode="agent"` targeting the configured paired Worker. Omitted,
+  `auto`, and `self` dispatch cannot select from persisted historical agents.
+- Master guidance forbids embedding `task(...)` lifecycle calls in Worker task
+  content; the Worker runner owns claim, heartbeat, review submission, and
+  blocked execution facts.
 - Assigned task is claimed once with one execution id.
 - Claim writes `TaskResumed` and `TaskHeartbeat`.
 - Successful model completion writes `TaskReviewSubmitted` with matching task/execution/agent ids.
 - Worker session id and turn id are deterministic from task/execution identity.
 - no-task tick returns `Idle` and leaves task history unchanged.
+- interrupted tasks assigned to the configured Worker are requeued once and
+  claimed with a new execution id.
+- rejected submissions are requeued to the same Worker and the next prompt
+  contains the persisted rejection requirements.
+- Master review processing converts `ReviewSubmitted` into either
+  `Rejected` or `Approved -> Closed`.
+- Master lifecycle cursor advances only after the matching task decision is
+  accepted.
+- review-ready decision boundary closes only after the target task reaches
+  `Rejected` or `Closed`; `Approved` alone remains incomplete and retryable.
+- blocked decision boundary closes after the target task records a new
+  Master-owned task event, including `task(op="append")` with a concise
+  `blocked_decision` note or reassignment.
+- interrupted decision boundary closes after the target task leaves
+  `Interrupted`.
+- reaching a lifecycle decision boundary closes the reason turn in the same
+  round as the successful task tool result; no extra provider request is made
+  merely to emit completion prose.
+- each event uses a deterministic event-scoped lifecycle session id, so prior
+  task event transcripts cannot pollute the current decision context.
+- retrying the same event increments a persisted attempt id and uses a fresh
+  deterministic lifecycle session, so a failed schema/tool/prose attempt cannot
+  poison the next attempt or restart recovery.
+- Master lifecycle model responses containing nullable unused status fields
+  remain valid; a non-null status type mismatch is polished in another model
+  round instead of killing the lifecycle runner.
+- provider/executor failure during one Master lifecycle decision leaves the
+  event cursor unchanged and is retried by the long-running runner.
+- missing/incomplete Master decisions leave the event cursor unchanged and are
+  retried by the long-running runner with bounded exponential backoff.
+- approved review truth remains retryable until the Master closes it.
+- blocked truth remains retryable until the Master either reassigns it or
+  persists a `blocked_decision` note through `task(op="append")`.
+- interrupted truth remains retryable until it leaves `Interrupted`.
 
 ### Negative
 
 - Master config cannot construct `ProductionWorkerRunner`.
 - Worker cannot execute `task` even if a malformed/provider-injected call bypasses schema exposure.
+- Master task content must not instruct the Worker to call `task`; doing so is
+  a prompt-contract failure because the Worker schema physically excludes it.
+- Master assignment to a historical or otherwise non-configured Worker returns
+  a paired failed tool result, writes no `TaskAssigned` event, and remains
+  available to the model for a corrected assignment in the next round.
+- Master task creation with omitted/auto/self dispatch, or explicit dispatch to
+  a non-configured Worker, returns a paired failed tool result and writes no
+  `TaskCreated` or `TaskAssigned` event.
 - missing `target_cwd` records `Blocked`; model execution does not start.
 - non-canonicalizable `target_cwd` records `Blocked`; model execution does not start.
 - provider/runtime failure records `Blocked`; it never writes `ReviewReady`.
+- reporting `Blocked` releases the Worker resource to `Available`; task blocked
+  truth must not globally pause the configured Worker
+- a deliberately paused task keeps the Worker resource `Paused`; Worker startup
+  and Task Center boot must not erase an active pause
+- startup recovery repairs legacy `Paused` agent snapshots only when no
+  authoritative assigned task is actually `Paused`
 - claim or heartbeat failure stops before provider execution.
+- heartbeat from an older Worker-owned `TaskRuntime` after an external cancel
+  is rejected by Task Center truth and must not append `TaskHeartbeat`, recreate
+  a lease, or overwrite `TaskCancelled`.
+- Worker result reporting after an external cancel is rejected by Task Center
+  truth and must not write `TaskReviewSubmitted` or `TaskBlocked` over terminal
+  task truth.
 - failure to persist the blocked fact remains an explicit runner error.
+- blocked tasks are not silently retried by the Worker.
+- an interrupted/rejected retry never reuses the previous execution id.
+- Master review failure does not approve or close the task.
+- review prose without task mutation leaves the event retryable and returns an
+  explicit `MissingReviewDecision`.
+- approve without close leaves the review event retryable.
+- blocked prose without a persisted Task Center decision leaves the event
+  retryable.
+- interrupted prose without reassignment leaves the event retryable.
+- a successful mutation of another task does not satisfy the current event's
+  decision boundary.
+- a `continue` response without a target-task decision cannot run forever;
+  round-budget exhaustion closes the reason turn as blocked and leaves the
+  lifecycle event cursor unchanged.
+- Task Center and lifecycle-state read/write failures stop the Master runner
+  explicitly instead of being treated as retryable model/provider failures.
+- historical lifecycle turns from another event or earlier attempt are absent
+  from the current provider request.
 - existing Master shell denial and runtime-home boundary tests remain green.
 
 ## Module Black-Box Coverage
@@ -48,6 +166,25 @@
   - idle
   - successful completion
   - provider/runtime failure
+- deterministic Master executor drives:
+  - review approve and close
+  - review rejection with persisted requirements
+  - blocked decision persisted through `task(op="append")`
+  - missing review decision and same-event retry
+- live provider fixture drives:
+  - an invalid historical-Worker assignment followed by a corrected configured
+    Worker assignment; the second provider request must contain the paired
+    failed tool result, and Task Center must contain only the corrected
+    `TaskAssigned`
+  - an omitted-dispatch create followed by corrected `dispatch.mode="none"`
+    create and configured Worker assignment; the same task id must be reusable,
+    proving the rejected create wrote no Task Center truth
+  - a target-task mutation followed by `continue` semantics and proves the
+    lifecycle turn closes after the mutation without issuing another request
+  - an unrelated task mutation and proves it does not satisfy the boundary
+  - repeated `continue` without a decision and proves finite blocked closeout
+  - two different lifecycle events and proves their reason sessions do not
+    share historical turn context
 - real live bridge test proves Worker schema excludes `task` and workspace root is task cwd.
 - daemon test proves:
   - Master mode creates UI host
@@ -59,6 +196,8 @@
 
 - start S-profile Master daemon on fixed port 4042
 - start a separate configured Slave daemon process
+- install the S-profile Worker LaunchAgent and prove `RunAtLoad`, `KeepAlive`,
+  no `--bind`, shared pair token, and stable running PID
 - submit a real Master request that creates and assigns work outside `~/.freehand`
 - verify Worker TaskHistory contains:
   - `TaskAssigned`
@@ -80,8 +219,9 @@
 ## Known Non-Goals
 
 - multi-task context switching inside one Worker process
+- more than one concurrently executing task
 - recursive Worker-created subagents
-- automatic task approval/close by the Worker
+- task approval/close by the Worker
 - UI projection changes
 - remote node transport; first production slice uses the shared local Task Center runtime home
 
@@ -92,6 +232,8 @@
 - `cargo test -p freehand-tools worker_implemented -- --nocapture`
 - `cargo test -p freehand-runtime production_worker_runner -- --nocapture`
 - `cargo test -p freehand-daemon worker_mode -- --nocapture`
+- `cargo test -p xtask ci_cd -- --nocapture`
+- `bash -n scripts/install-launchd.sh`
 - `cargo run -p xtask -- mainlines generate`
 - `cargo run -p xtask -- mainlines check`
 - `cargo run -p xtask -- gates check`

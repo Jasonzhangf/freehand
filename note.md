@@ -3378,3 +3378,52 @@ Current real root cause split:
 - remaining proof gap:
   - browser runtime discovery returned an empty browser list, so no real WebUI page operation or screenshot was captured.
   - the completed proof used the real daemon HTTP command ingress and owner truth; it must not be reported as browser-visible WebUI verification.
+
+# 2026-07-10 current-topology lifecycle closeout start
+
+- marker:
+  - `current-topology-lifecycle-closeout-20260710`
+- scope lock:
+  - close every task lifecycle branch for the configured one-Master/one-Worker topology before adding worker concurrency, multiple BigTasks, or UI work
+  - success must reach Master review and close or rejection
+  - rejection must produce a new Worker execution with persisted requirements
+  - Worker crash must persist `TaskInterrupted` and requeue with a new execution
+  - terminal execution failure must stay `TaskBlocked` until an explicit Master decision
+  - restart must resume loops from Task Center truth without requiring new user input
+- first confirmed gap:
+  - production Worker claims only `Assigned`
+  - `Interrupted`, `Rejected`, and `Blocked` persist correctly but the current daemon loops do not close their next transitions autonomously
+
+# 2026-07-10 stale runtime terminal overwrite online validation
+
+- marker:
+  - `stale-runtime-terminal-overwrite-online-1783682850768`
+- scope:
+  - S-profile only: daemon/worker restarted through `scripts/install-launchd.sh restartS` and `scripts/install-launchd.sh restartWorkerS`
+  - release port 4041 was not touched; online validation used `127.0.0.1:4042`
+- health:
+  - `curl -4fsS http://127.0.0.1:4042/health` returned `ok`
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` returned `adp_smoke_ok`
+  - `launchctl print gui/$(id -u)/com.freehand.workerS` showed `state = running`
+  - `~/.freehand/state/agents/worker.json` showed worker `available` after the cancel test
+- local verification after online proof:
+  - `git diff --check` passed
+  - `cargo test -p freehand-task -- --nocapture` passed: 46 tests
+  - `cargo test -p freehand-runtime production_worker_runner -- --nocapture` passed: 9 tests
+- online task:
+  - task: `task-cancel-running-1783682850768`
+  - execution: `exec-worker-worker-1783682851141101000-1177`
+  - target cwd: `/tmp/cancel-running-1783682850768`
+  - final event order:
+    - `TaskCreated`
+    - `TaskAssigned`
+    - `TaskResumed`
+    - `TaskHeartbeat`
+    - `TaskCancelled`
+  - after `TaskCancelled`, there were no later `TaskHeartbeat`, `TaskReviewSubmitted`, `TaskBlocked`, `TaskInterrupted`, `TaskAssigned`, or `TaskResumed`
+- decisive log evidence:
+  - `~/.freehand/logs/workerS.stderr.log` recorded `worker runner stopped: worker execution failed and blocked fact could not be persisted: invalid task transition from `Cancelled` using `TaskBlocked``
+  - this proves stale Worker-side result/error reporting was rejected against persisted terminal task truth instead of overwriting cancellation
+- remaining lifecycle gaps:
+  - this validates terminal stale-write protection only
+  - full one-Master/one-Worker lifecycle closure still needs online proof for success close, reject retry, crash/interrupted recovery, blocked decision, and restart recovery under the current topology

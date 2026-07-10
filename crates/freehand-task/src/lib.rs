@@ -768,6 +768,7 @@ impl TaskRuntime {
         }
         state.leases = store.load_leases()?;
         reconcile_running_leases(&store, &mut state, now_unix_seconds())?;
+        reconcile_paused_agents(&store, &mut state, now_unix_seconds())?;
         state.scheduler_facts = store.load_scheduler_facts(state.tasks.keys())?;
         Ok(Self {
             store,
@@ -1232,30 +1233,42 @@ impl TaskRuntime {
             .state
             .lock()
             .map_err(|err| TaskError::Persistence(err.to_string()))?;
-        let mut task = state
-            .tasks
-            .get(&request.task_id)
-            .cloned()
-            .ok_or_else(|| TaskError::TaskNotFound(request.task_id.as_str().to_owned()))?;
+        let mut task = self.refresh_task_from_store_locked(&mut state, &request.task_id)?;
         if !matches!(
             task.status,
-            TaskStatus::WaitingAgent | TaskStatus::Created | TaskStatus::Interrupted
+            TaskStatus::WaitingAgent
+                | TaskStatus::Created
+                | TaskStatus::Interrupted
+                | TaskStatus::Blocked
+                | TaskStatus::Rejected
         ) {
             return Err(TaskError::InvalidTransition {
                 from: task.status,
                 event_type: "TaskAssigned",
             });
         }
+        let reactivating_same_agent = matches!(
+            task.status,
+            TaskStatus::Interrupted | TaskStatus::Blocked | TaskStatus::Rejected
+        ) && task
+            .assignee
+            .as_ref()
+            .map(|assignee| assignee.agent_id == request.agent_id)
+            .unwrap_or(false);
         let agent = state
             .agents
             .get_mut(&request.agent_id)
             .ok_or_else(|| TaskError::AgentNotFound(request.agent_id.as_str().to_owned()))?;
-        if !matches!(agent.status, AgentStatus::Available | AgentStatus::Busy) {
+        let agent_can_accept_assignment =
+            matches!(agent.status, AgentStatus::Available | AgentStatus::Busy)
+                || reactivating_same_agent && matches!(agent.status, AgentStatus::Paused);
+        if !agent_can_accept_assignment {
             return Err(TaskError::AgentUnavailable(
                 request.agent_id.as_str().to_owned(),
             ));
         }
         let from = task.status.clone();
+        task.active_execution_id = None;
         task.assignee = Some(TaskAssignee {
             agent_id: request.agent_id.clone(),
             assignment_id: format!(
@@ -1796,11 +1809,7 @@ impl TaskRuntime {
             .state
             .lock()
             .map_err(|err| TaskError::Persistence(err.to_string()))?;
-        let mut task = state
-            .tasks
-            .get(task_id)
-            .cloned()
-            .ok_or_else(|| TaskError::TaskNotFound(task_id.as_str().to_owned()))?;
+        let mut task = self.refresh_task_from_store_locked(&mut state, task_id)?;
         let from = task.status.clone();
         let target = to_status.unwrap_or_else(|| task.status.clone());
         validate_transition(&from, &target, event_type)?;
@@ -1894,11 +1903,8 @@ impl TaskRuntime {
             .state
             .lock()
             .map_err(|err| TaskError::Persistence(err.to_string()))?;
-        let mut task = state
-            .tasks
-            .get(task_id)
-            .cloned()
-            .ok_or_else(|| TaskError::TaskNotFound(task_id.as_str().to_owned()))?;
+        let mut task = self.refresh_task_from_store_locked(&mut state, task_id)?;
+        state.leases = self.store.load_leases()?;
         if !matches!(task.status, TaskStatus::Running) {
             return Err(TaskError::InvalidTransition {
                 from: task.status,
@@ -1959,6 +1965,16 @@ impl TaskRuntime {
         state.leases.insert(task_id.clone(), lease);
         state.tasks.insert(task_id.clone(), task.clone());
         Ok(TaskMutationOutcome { task, event })
+    }
+
+    fn refresh_task_from_store_locked(
+        &self,
+        state: &mut TaskRuntimeState,
+        task_id: &TaskId,
+    ) -> Result<TaskSnapshot, TaskError> {
+        let task = self.store.load_task_snapshot(task_id)?;
+        state.tasks.insert(task_id.clone(), task.clone());
+        Ok(task)
     }
 
     fn ensure_execution_binding(&self, fact: &ExecutionFact) -> Result<(), TaskError> {
@@ -2157,6 +2173,14 @@ impl TaskStore {
             }
         }
         Ok(tasks)
+    }
+
+    fn load_task_snapshot(&self, task_id: &TaskId) -> Result<TaskSnapshot, TaskError> {
+        let path = self.task_snapshot_path(task_id);
+        if !path.is_file() {
+            return Err(TaskError::TaskNotFound(task_id.as_str().to_owned()));
+        }
+        read_json(&path)
     }
 
     fn load_task_ledger(&self, task_id: &TaskId) -> Result<Vec<TaskLedgerEvent>, TaskError> {
@@ -2637,12 +2661,12 @@ fn release_agent_task(agent: &mut AgentSnapshot, task_status: &TaskStatus) {
     agent.current_execution_id = None;
     agent.current_cwd = None;
     match task_status {
-        TaskStatus::Paused | TaskStatus::Blocked => {
+        TaskStatus::Paused => {
             agent.status = AgentStatus::Paused;
             agent.running_tasks = 0;
             agent.queued_tasks = 0;
         }
-        TaskStatus::ReviewSubmitted | TaskStatus::Approved => {
+        TaskStatus::Blocked | TaskStatus::ReviewSubmitted | TaskStatus::Approved => {
             agent.status = AgentStatus::Available;
             agent.running_tasks = 0;
             agent.queued_tasks = 0;
@@ -2657,6 +2681,65 @@ fn release_agent_task(agent: &mut AgentSnapshot, task_status: &TaskStatus) {
         }
         _ => {}
     }
+}
+
+fn reconcile_paused_agents(
+    store: &TaskStore,
+    state: &mut TaskRuntimeState,
+    now: u64,
+) -> Result<(), TaskError> {
+    let paused_agent_ids = state
+        .agents
+        .values()
+        .filter(|agent| matches!(agent.status, AgentStatus::Paused))
+        .map(|agent| agent.agent_id.clone())
+        .collect::<Vec<_>>();
+
+    for agent_id in paused_agent_ids {
+        let has_explicitly_paused_task = state.tasks.values().any(|task| {
+            matches!(task.status, TaskStatus::Paused)
+                && task
+                    .assignee
+                    .as_ref()
+                    .map(|assignee| assignee.agent_id == agent_id)
+                    .unwrap_or(false)
+        });
+        if has_explicitly_paused_task {
+            continue;
+        }
+
+        let lifecycle = {
+            let agent = state
+                .agents
+                .get_mut(&agent_id)
+                .expect("paused agent id came from agent registry");
+            agent.status = AgentStatus::Available;
+            agent.current_task_id = None;
+            agent.current_execution_id = None;
+            agent.current_cwd = None;
+            agent.running_tasks = 0;
+            agent.queued_tasks = 0;
+            agent.last_seen_at = now;
+            store.write_agent_snapshot(agent)?;
+
+            let mut lifecycle = state
+                .lifecycle
+                .get(&agent_id)
+                .cloned()
+                .unwrap_or_else(|| lifecycle_from_agent_snapshot(agent, now));
+            lifecycle.state = AgentLifecycleState::Idle;
+            lifecycle.state_entered_at = now;
+            lifecycle.elapsed_ms = 0;
+            lifecycle.current_task_id = None;
+            lifecycle.current_turn_id = None;
+            lifecycle.last_activity = lifecycle.current_activity.take();
+            lifecycle.last_seen_at = now;
+            lifecycle
+        };
+        store.write_agent_lifecycle_snapshot(&lifecycle)?;
+        state.lifecycle.insert(agent_id, lifecycle);
+    }
+    Ok(())
 }
 
 fn validate_worker_control_request(request: &WorkerControlRequest) -> Result<(), TaskError> {
@@ -4232,6 +4315,148 @@ mod tests {
     }
 
     #[test]
+    fn stale_runtime_heartbeat_after_cancel_is_rejected_without_terminal_overwrite() {
+        let runtime_home = temp_runtime_home("stale-heartbeat-after-cancel");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-stale-heartbeat");
+        let execution_id = "exec-stale-heartbeat";
+        let stale_runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot stale");
+        create_worker_agent(&stale_runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &stale_runtime,
+            &owner_id,
+            &worker_id,
+            "task-stale-heartbeat",
+            execution_id,
+            80,
+        );
+
+        let cancelling_runtime =
+            TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot canceller");
+        cancelling_runtime
+            .cancel_task(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("cancel from second runtime");
+        let cancelled_history_len = cancelling_runtime
+            .task_history(&task.task_id)
+            .expect("cancelled history")
+            .len();
+
+        let error = stale_runtime
+            .heartbeat_task(TaskHeartbeatRequest {
+                task_id: task.task_id.clone(),
+                ttl_seconds: 300,
+                actor: sample_actor(worker_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect_err("stale heartbeat after cancel must fail");
+
+        assert!(matches!(
+            error,
+            TaskError::InvalidTransition {
+                from: TaskStatus::Cancelled,
+                event_type: "TaskHeartbeat",
+            }
+        ));
+        let recovered = TaskRuntime::boot(&runtime_home, owner_id).expect("recover");
+        let recovered_task = recovered.query_task(&task.task_id).expect("query");
+        assert_eq!(recovered_task.status, TaskStatus::Cancelled);
+        assert_eq!(recovered_task.last_event_seq, cancelled_history_len as u64);
+        let history = recovered.task_history(&task.task_id).expect("history");
+        assert_eq!(history.len(), cancelled_history_len);
+        assert_eq!(
+            history.last().map(|event| event.event_type.as_str()),
+            Some("TaskCancelled")
+        );
+        assert!(
+            !runtime_home
+                .join("state/task-runtime/master/leases.json")
+                .is_file()
+                || read_json::<Vec<TaskLease>>(
+                    &runtime_home.join("state/task-runtime/master/leases.json")
+                )
+                .expect("leases")
+                .is_empty()
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn stale_runtime_execution_fact_after_cancel_is_rejected_without_terminal_overwrite() {
+        let runtime_home = temp_runtime_home("stale-execution-fact-after-cancel");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-stale-execution-fact");
+        let execution_id = "exec-stale-execution-fact";
+        let stale_runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot stale");
+        create_worker_agent(&stale_runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &stale_runtime,
+            &owner_id,
+            &worker_id,
+            "task-stale-execution-fact",
+            execution_id,
+            80,
+        );
+
+        let cancelling_runtime =
+            TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot canceller");
+        cancelling_runtime
+            .cancel_task(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("cancel from second runtime");
+        let cancelled_history_len = cancelling_runtime
+            .task_history(&task.task_id)
+            .expect("cancelled history")
+            .len();
+
+        let error = stale_runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id,
+                turn_id: Some(TurnId::new("turn-stale-execution-fact")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::ReviewReady {
+                    summary: "stale success".to_owned(),
+                    deliverables: vec!["stale artifact".to_owned()],
+                    evidence: vec!["stale evidence".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect_err("stale execution fact after cancel must fail");
+
+        assert!(matches!(
+            error,
+            TaskError::InvalidTransition {
+                from: TaskStatus::Cancelled,
+                event_type: "TaskReviewSubmitted" | "TaskExecutionRecorded",
+            }
+        ));
+        let recovered = TaskRuntime::boot(&runtime_home, owner_id).expect("recover");
+        let recovered_task = recovered.query_task(&task.task_id).expect("query");
+        assert_eq!(recovered_task.status, TaskStatus::Cancelled);
+        assert_eq!(recovered_task.last_event_seq, cancelled_history_len as u64);
+        let history = recovered.task_history(&task.task_id).expect("history");
+        assert_eq!(history.len(), cancelled_history_len);
+        assert!(
+            !history
+                .iter()
+                .any(|event| event.event_type == "TaskReviewSubmitted")
+        );
+        assert_eq!(
+            history.last().map(|event| event.event_type.as_str()),
+            Some("TaskCancelled")
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
     fn close_busy_agent_is_rejected() {
         let runtime_home = temp_runtime_home("task-agent-close-busy");
         let agent_id = AgentId::new("master");
@@ -4870,6 +5095,185 @@ mod tests {
         assert_eq!(board.blocked[0].task_id, blocked_task.task_id);
         assert_eq!(board.review_ready.len(), 1);
         assert_eq!(board.review_ready[0].task_id, review_task.task_id);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn blocked_execution_releases_worker_for_new_assignment() {
+        let runtime_home = temp_runtime_home("blocked-worker-release");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-blocked-release");
+        let execution_id = "exec-worker-blocked-release";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let blocked_task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-blocked-release",
+            execution_id,
+            80,
+        );
+
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: blocked_task.task_id,
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-worker-blocked-release")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "provider unavailable".to_owned(),
+                    evidence: vec!["provider error".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("block worker task");
+
+        assert_eq!(
+            runtime.query_agent(&worker_id).expect("worker").status,
+            AgentStatus::Available
+        );
+        let mut next_request = sample_create_request(owner_id.clone());
+        next_request.task_id = Some(TaskId::new("task-worker-after-block"));
+        next_request.dispatch = TaskDispatchRequest::None;
+        let next_task = runtime
+            .create_task(next_request)
+            .expect("create next task")
+            .task;
+        let assigned = runtime
+            .assign_task(TaskAssignRequest {
+                task_id: next_task.task_id,
+                agent_id: worker_id,
+                actor: sample_actor(owner_id),
+                watermark: sample_watermark(),
+            })
+            .expect("assign released worker");
+        assert_eq!(assigned.task.status, TaskStatus::Assigned);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn explicit_pause_keeps_worker_unavailable_for_unrelated_assignment() {
+        let runtime_home = temp_runtime_home("explicit-worker-pause");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-explicit-pause");
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let paused_task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-explicit-pause",
+            "exec-worker-explicit-pause",
+            80,
+        );
+        runtime
+            .pause_task(TaskMutationRequest {
+                task_id: paused_task.task_id,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("pause task");
+        assert_eq!(
+            runtime.query_agent(&worker_id).expect("worker").status,
+            AgentStatus::Paused
+        );
+
+        let mut next_request = sample_create_request(owner_id.clone());
+        next_request.task_id = Some(TaskId::new("task-worker-while-paused"));
+        next_request.dispatch = TaskDispatchRequest::None;
+        let next_task = runtime
+            .create_task(next_request)
+            .expect("create next task")
+            .task;
+        let error = runtime
+            .assign_task(TaskAssignRequest {
+                task_id: next_task.task_id,
+                agent_id: worker_id.clone(),
+                actor: sample_actor(owner_id),
+                watermark: sample_watermark(),
+            })
+            .expect_err("paused worker must reject unrelated assignment");
+        assert!(matches!(
+            error,
+            TaskError::AgentUnavailable(ref agent_id) if agent_id == worker_id.as_str()
+        ));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn boot_repairs_legacy_blocked_pause_and_preserves_explicit_pause() {
+        let runtime_home = temp_runtime_home("legacy-blocked-worker-pause");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-legacy-blocked-pause");
+        let execution_id = "exec-worker-legacy-blocked-pause";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let blocked_task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-legacy-blocked-pause",
+            execution_id,
+            80,
+        );
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: blocked_task.task_id,
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-worker-legacy-blocked-pause")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "legacy blocked state".to_owned(),
+                    evidence: vec!["legacy evidence".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("block task");
+        let mut legacy_snapshot = runtime.query_agent(&worker_id).expect("worker");
+        legacy_snapshot.status = AgentStatus::Paused;
+        runtime
+            .store
+            .write_agent_snapshot(&legacy_snapshot)
+            .expect("write legacy paused snapshot");
+        drop(runtime);
+
+        let recovered =
+            TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("recover legacy state");
+        assert_eq!(
+            recovered.query_agent(&worker_id).expect("worker").status,
+            AgentStatus::Available
+        );
+        drop(recovered);
+        let _ = fs::remove_dir_all(runtime_home);
+
+        let runtime_home = temp_runtime_home("preserve-explicit-worker-pause");
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let paused_task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-preserve-explicit-pause",
+            "exec-worker-preserve-explicit-pause",
+            80,
+        );
+        runtime
+            .pause_task(TaskMutationRequest {
+                task_id: paused_task.task_id,
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("pause task");
+        drop(runtime);
+
+        let recovered = TaskRuntime::boot(&runtime_home, owner_id).expect("recover explicit pause");
+        assert_eq!(
+            recovered.query_agent(&worker_id).expect("worker").status,
+            AgentStatus::Paused
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 

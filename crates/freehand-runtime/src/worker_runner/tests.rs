@@ -10,15 +10,18 @@ use freehand_config::{
 };
 use freehand_contracts::{AgentId, TerminalStatus, TurnId};
 use freehand_task::{
-    TaskCreateRequest, TaskDispatchRequest, TaskId, TaskListQuery, TaskParentRef, TaskRuntime,
-    TaskStatus,
+    AgentStatus, ExecutionFact, ExecutionFactKind, TaskActor, TaskClaimRequest, TaskCreateRequest,
+    TaskDispatchRequest, TaskId, TaskListQuery, TaskMutationRequest, TaskParentRef,
+    TaskReviewRejection, TaskRuntime, TaskStatus, TaskWatermark,
 };
+use serde_json::Value;
 
 use super::*;
 
 struct StubExecutor {
     result: Mutex<Option<Result<WorkerTurnExecution, String>>>,
     calls: AtomicUsize,
+    prompts: Mutex<Vec<String>>,
 }
 
 impl StubExecutor {
@@ -26,7 +29,12 @@ impl StubExecutor {
         Self {
             result: Mutex::new(Some(result)),
             calls: AtomicUsize::new(0),
+            prompts: Mutex::new(Vec::new()),
         }
+    }
+
+    fn prompts(&self) -> Vec<String> {
+        self.prompts.lock().expect("lock prompts").clone()
     }
 }
 
@@ -34,14 +42,65 @@ impl WorkerTurnExecutor for StubExecutor {
     fn execute(
         &self,
         _selected: &SelectedAgentConfig,
-        _request: LiveReasonTurnRequest,
+        request: LiveReasonTurnRequest,
     ) -> Result<WorkerTurnExecution, String> {
         self.calls.fetch_add(1, Ordering::Relaxed);
+        self.prompts
+            .lock()
+            .expect("lock prompts")
+            .push(request.prompt);
         self.result
             .lock()
             .expect("lock stub result")
             .take()
             .expect("stub result")
+    }
+}
+
+struct CancelDuringExecutionExecutor {
+    runtime_home: PathBuf,
+    task_id: Mutex<Option<TaskId>>,
+}
+
+impl CancelDuringExecutionExecutor {
+    fn new(runtime_home: PathBuf) -> Self {
+        Self {
+            runtime_home,
+            task_id: Mutex::new(None),
+        }
+    }
+
+    fn set_task_id(&self, task_id: TaskId) {
+        *self.task_id.lock().expect("lock task id") = Some(task_id);
+    }
+}
+
+impl WorkerTurnExecutor for CancelDuringExecutionExecutor {
+    fn execute(
+        &self,
+        _selected: &SelectedAgentConfig,
+        _request: LiveReasonTurnRequest,
+    ) -> Result<WorkerTurnExecution, String> {
+        let task_id = self
+            .task_id
+            .lock()
+            .expect("lock task id")
+            .clone()
+            .expect("task id set");
+        let runtime =
+            TaskRuntime::boot(&self.runtime_home, AgentId::new("master")).expect("task runtime");
+        runtime
+            .cancel_task(TaskMutationRequest {
+                task_id,
+                actor: test_actor("master"),
+                watermark: test_watermark("external-cancel"),
+            })
+            .expect("external cancel");
+        Ok(WorkerTurnExecution {
+            status: TerminalStatus::Success,
+            summary: "stale success after external cancel".to_owned(),
+            turn_id: TurnId::new("worker-turn-after-external-cancel"),
+        })
     }
 }
 
@@ -110,6 +169,39 @@ fn production_worker_runner_success_claims_heartbeats_and_submits_review() {
 }
 
 #[test]
+fn production_worker_runner_rejects_result_after_external_cancel_without_terminal_overwrite() {
+    let runtime_home = temp_path("external-cancel-during-execution");
+    let workspace = temp_path("external-cancel-during-execution-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let executor = Arc::new(CancelDuringExecutionExecutor::new(runtime_home.clone()));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+    executor.set_task_id(task_id.clone());
+
+    let error = runner
+        .run_once()
+        .expect_err("stale worker result after cancel must fail");
+    assert!(matches!(error, ProductionWorkerRunnerError::TaskCenter(_)));
+
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    let task = runtime.query_task(&task_id).expect("task");
+    assert_eq!(task.status, TaskStatus::Cancelled);
+    let history = runtime.task_history(&task_id).expect("history");
+    assert_eq!(
+        history.last().map(|event| event.event_type.as_str()),
+        Some("TaskCancelled")
+    );
+    assert!(
+        !history
+            .iter()
+            .any(|event| event.event_type == "TaskReviewSubmitted")
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
 fn production_worker_runner_provider_error_records_blocked_not_review_ready() {
     let runtime_home = temp_path("blocked");
     let workspace = temp_path("blocked-workspace");
@@ -147,6 +239,172 @@ fn production_worker_runner_provider_error_records_blocked_not_review_ready() {
             .iter()
             .any(|event| event.event_type == "TaskReviewSubmitted")
     );
+    let retry_executor = Arc::new(StubExecutor::new(Err("must not execute".to_owned())));
+    let retry_runner = test_runner(runtime_home.clone(), retry_executor.clone());
+    assert_eq!(
+        retry_runner.run_once().expect("blocked follow-up tick"),
+        ProductionWorkerTickOutcome::Idle
+    );
+    assert_eq!(retry_executor.calls.load(Ordering::Relaxed), 0);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn production_worker_runner_startup_repairs_legacy_blocked_pause() {
+    let runtime_home = temp_path("startup-repairs-legacy-blocked-pause");
+    let workspace = temp_path("startup-repairs-legacy-blocked-pause-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let runner = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubExecutor::new(Err("provider unavailable".to_owned()))),
+    );
+    let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+    let outcome = runner.run_once().expect("blocked worker tick");
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::Blocked { .. }
+    ));
+
+    let agent_path = runtime_home.join("state/agents/worker.json");
+    let mut agent_json: Value =
+        serde_json::from_slice(&fs::read(&agent_path).expect("read agent snapshot"))
+            .expect("parse agent snapshot");
+    agent_json["status"] = Value::String("paused".to_owned());
+    fs::write(
+        &agent_path,
+        serde_json::to_vec_pretty(&agent_json).expect("serialize legacy agent snapshot"),
+    )
+    .expect("write legacy paused agent snapshot");
+
+    let restarted = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubExecutor::new(Err("must not execute".to_owned()))),
+    );
+    assert_eq!(
+        restarted.run_once().expect("idle startup tick"),
+        ProductionWorkerTickOutcome::Idle
+    );
+    let recovered =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("recover task center");
+    assert_eq!(
+        recovered
+            .query_agent(&AgentId::new("worker"))
+            .expect("worker")
+            .status,
+        AgentStatus::Available
+    );
+    assert_eq!(
+        recovered.query_task(&task_id).expect("blocked task").status,
+        TaskStatus::Blocked
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn production_worker_runner_requeues_interrupted_with_new_execution() {
+    let runtime_home = temp_path("interrupted-retry");
+    let workspace = temp_path("interrupted-retry-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let executor = Arc::new(StubExecutor::new(Ok(WorkerTurnExecution {
+        status: TerminalStatus::Success,
+        summary: "recovered and verified".to_owned(),
+        turn_id: TurnId::new("worker-turn-after-crash"),
+    })));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+    let old_execution_id = "exec-before-crash".to_owned();
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    runtime
+        .claim_next_task(TaskClaimRequest {
+            agent_id: AgentId::new("worker"),
+            execution_id: old_execution_id.clone(),
+            ttl_seconds: 1,
+            actor: test_actor("worker"),
+            watermark: test_watermark("old-claim"),
+        })
+        .expect("claim before crash");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    drop(runtime);
+
+    let outcome = runner.run_once().expect("recovery tick");
+    let new_execution_id = match outcome {
+        ProductionWorkerTickOutcome::ReviewReady {
+            execution_id,
+            task_id: ref outcome_task_id,
+            ..
+        } => {
+            assert_eq!(outcome_task_id, &task_id);
+            execution_id
+        }
+        other => panic!("expected review ready, got {other:?}"),
+    };
+    assert_ne!(new_execution_id, old_execution_id);
+    assert!(executor.prompts()[0].contains("previous execution was interrupted"));
+    let recovered = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("recover");
+    let history = recovered.task_history(&task_id).expect("history");
+    assert!(
+        history
+            .iter()
+            .any(|event| event.event_type == "TaskInterrupted")
+    );
+    assert_eq!(
+        history
+            .iter()
+            .filter(|event| event.event_type == "TaskAssigned")
+            .count(),
+        2
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn production_worker_runner_requeues_rejected_with_review_requirements() {
+    let runtime_home = temp_path("rejected-retry");
+    let workspace = temp_path("rejected-retry-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let first_executor = Arc::new(StubExecutor::new(Ok(WorkerTurnExecution {
+        status: TerminalStatus::Success,
+        summary: "first submission".to_owned(),
+        turn_id: TurnId::new("worker-turn-first"),
+    })));
+    let first_runner = test_runner(runtime_home.clone(), first_executor);
+    let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+    let first_execution_id = match first_runner.run_once().expect("first tick") {
+        ProductionWorkerTickOutcome::ReviewReady { execution_id, .. } => execution_id,
+        other => panic!("expected review ready, got {other:?}"),
+    };
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    runtime
+        .reject_review(TaskReviewRejection {
+            task_id: task_id.clone(),
+            reject_reason: "missing regression evidence".to_owned(),
+            next_requirements: vec!["run the restart regression".to_owned()],
+            actor: test_actor("master"),
+            watermark: test_watermark("reject"),
+        })
+        .expect("reject review");
+    drop(runtime);
+
+    let retry_executor = Arc::new(StubExecutor::new(Ok(WorkerTurnExecution {
+        status: TerminalStatus::Success,
+        summary: "retry complete".to_owned(),
+        turn_id: TurnId::new("worker-turn-retry"),
+    })));
+    let retry_runner = test_runner(runtime_home.clone(), retry_executor.clone());
+    let retry_execution_id = match retry_runner.run_once().expect("retry tick") {
+        ProductionWorkerTickOutcome::ReviewReady { execution_id, .. } => execution_id,
+        other => panic!("expected retry review ready, got {other:?}"),
+    };
+    assert_ne!(retry_execution_id, first_execution_id);
+    let retry_prompt = &retry_executor.prompts()[0];
+    assert!(retry_prompt.contains("missing regression evidence"));
+    assert!(retry_prompt.contains("run the restart regression"));
 
     fs::remove_dir_all(runtime_home).expect("cleanup runtime");
     fs::remove_dir_all(workspace).expect("cleanup workspace");
@@ -237,6 +495,24 @@ fn seed_assigned_task(runtime_home: &Path, workspace: Option<&Path>) -> TaskId {
         })
         .expect("create assigned task");
     task_id
+}
+
+fn test_actor(agent_id: &str) -> TaskActor {
+    TaskActor {
+        agent_id: AgentId::new(agent_id),
+        source: "runtime.master-worker-loop.test".to_owned(),
+        session_id: None,
+        turn_id: None,
+        trace_id: None,
+    }
+}
+
+fn test_watermark(hook: &str) -> TaskWatermark {
+    TaskWatermark {
+        metadata_id: None,
+        hook: Some(hook.to_owned()),
+        action_tool_call_id: None,
+    }
 }
 
 fn selected_worker() -> SelectedAgentConfig {

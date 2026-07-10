@@ -48,6 +48,10 @@
 - `record_execution` writes worker execution progress only for running tasks
 - `create_agent` and `close_agent` manage persisted worker agent snapshots
 - `cancel_task` moves a non-terminal task to `Cancelled` and releases assignee state
+- `Blocked` releases the assignee resource to `Available`; `Paused` is reserved
+  for explicit task pause truth
+- boot reconciles legacy paused agent snapshots against loaded task truth and
+  preserves `Paused` only when an assigned task is actually paused
 - lifecycle actions use explicit mutation request types and validate allowed transitions before writing ledger/snapshot truth
 - `resume_task` enters `Running` and creates a lease-backed heartbeat record
 - `heartbeat_task` refreshes the lease for the assigned running agent
@@ -86,6 +90,8 @@
 - task tool result returns semantic task ids, status, event counts, or JSON snapshots
 - review lifecycle actions return event-backed mutation summaries
 - heartbeat returns event-backed running-state mutation summary
+- heartbeat and execution-fact mutation re-read persisted task truth before
+  writing so older `TaskRuntime` instances cannot overwrite terminal owner truth
 - claim_next returns either the claimed running task plus `execution_id` or an explicit no-task result
 - record_execution returns an event-backed worker progress mutation summary
 - agent create/close returns persisted agent snapshot summaries
@@ -114,6 +120,8 @@
 - persistence failures return explicit task persistence errors
 - invalid lifecycle transitions return explicit `InvalidTransition` errors and do not write ledger/snapshot truth
 - heartbeat for non-running or unassigned tasks returns explicit invalid transition and writes no lease
+- heartbeat or execution facts from a stale runtime after a terminal mutation
+  return explicit invalid transition and write no ledger, lease, or snapshot truth
 - assigning to unavailable agents and closing busy agents return explicit errors without mutating task/agent truth
 - claiming with an empty agent queue returns no-task without mutating truth
 - claiming with an empty execution id returns explicit missing-field and writes no truth

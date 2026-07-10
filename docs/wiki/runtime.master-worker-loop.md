@@ -3,7 +3,7 @@
 Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edit by hand.
 
 - owner crate: `crates/freehand-runtime`
-- owner module: `crates/freehand-runtime/src/worker_runner.rs`
+- owner module: `crates/freehand-runtime/src/lib.rs`
 - function map: `docs/function-maps/runtime.master-worker-loop.md`
 - generated wiki: `docs/wiki/runtime.master-worker-loop.md`
 - test design: `docs/testing/runtime.master-worker-loop.md`
@@ -11,30 +11,62 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 ## Request Mainline
 
 - one daemon process selects one configured agent
+- Master mode starts the WebUI/ADP host plus a background lifecycle runner over Task Center EventInbox truth
+- the Master lifecycle runner drains events after its durable cursor and invokes the Master model only for current review-ready, blocked, or interrupted truth
+- each actionable event attempt uses a deterministic event-and-attempt-isolated reason session with an explicit target-task decision boundary
 - Slave mode constructs a production Worker runner instead of a Master UI dispatcher
 - Worker opens the paired Master's Task Center namespace and uses its own configured agent id as execution identity
 - each Worker tick claims the highest-priority Assigned task for that Worker
 - claim persists one execution id and lease heartbeat
 - task target cwd becomes the canonical locked Worker execution root
 - Worker provider requests expose implemented workspace/shell tools but exclude recursive `task`
+- Master provider guidance binds dispatch to the configured paired Worker id, excludes historical AgentBoard entries as production targets, and forbids task lifecycle calls in Worker task content
+- Master task-tool execution independently rejects assignment to any non-configured Worker before Task Center mutation
+- Master task creation rejects omitted, auto, self, or non-configured-agent dispatch before persisted historical agents can be selected
 
 ## Response Mainline
 
 - no Assigned task returns an explicit idle outcome without task mutation
+- Master review-ready handling must reject or approve and close before the lifecycle cursor advances
+- reaching the event-specific target-task decision boundary closes the reason turn in the same tool-result round and returns control to EventInbox polling
+- lifecycle decision rounds are finite and exhaustion closes blocked while leaving the event cursor retryable
+- retryable lifecycle executor and missing-decision failures keep the durable cursor unchanged, persist the next attempt id, apply bounded exponential backoff, and do not stop the daemon
+- approved review-ready truth remains retryable until Master closes the task
+- blocked truth remains retryable until Master reassigns it or persists a blocked-decision note through task(op=append)
+- interrupted truth remains retryable until it leaves Interrupted
+- interrupted and rejected tasks previously bound to the configured Worker are requeued with a new execution id
+- blocked tasks remain explicit Master decisions and are never silently retried by the Worker
 - successful Worker completion writes one review-ready execution fact
 - provider/runtime failure writes one blocked execution fact
 - Worker reason/session truth persists under Worker agent identity
 - task/execution/lease/agent truth persists under the paired Master's Task Center namespace
 - periodic Worker ticks continue after idle, success, or blocked outcomes
+- blocked Worker execution releases the configured Worker resource to Available while preserving TaskBlocked for Master decision
+- Worker heartbeat and result reporting are rejected when paired Task Center truth has externally terminalized the task
+- Worker startup repairs legacy paused snapshots only when Task Center truth has no explicitly paused assigned task
 
 ## Error Mainline
 
 - Master-selected config is rejected by the Worker runner
+- Slave-selected config is rejected by the Master lifecycle runner
+- Master review prose without a Task Center mutation returns MissingReviewDecision and leaves the event retryable
+- Master approval without close returns IncompleteReviewDecision and leaves the event retryable
+- nullable unused response-status fields remain valid and non-null response-status type mismatches are polished without killing the lifecycle runner
+- Master blocked prose without a persisted task(op=append) TaskProgressed decision returns MissingBlockedDecision and leaves the event retryable
+- Master interrupted prose without reassignment returns MissingInterruptedDecision and leaves the event retryable
+- unrelated task mutation cannot satisfy the current event decision boundary
+- assignment to a historical or non-configured Worker returns a paired failed tool result and writes no TaskAssigned event
+- task creation with omitted, auto, self, or non-configured-agent dispatch returns a paired failed tool result and writes no task truth
+- lifecycle decision round-budget exhaustion is explicit blocked reason truth rather than an indefinitely active turn
+- Task Center and lifecycle-state failures stop the Master runner while lifecycle executor and missing-decision failures remain retryable
+- Master lifecycle cursor parse or write failure stops the loop explicitly
 - missing or invalid target cwd records blocked truth before model execution
 - claim or heartbeat persistence failure stops before provider execution
+- heartbeat or result reporting after external cancel returns explicit Task Center failure and does not append Worker lifecycle truth
 - failure to persist a blocked execution fact remains an explicit runner error
 - Worker cannot call recursive `task` through schema or execution policy
 - Worker failure never becomes review-ready, approved, closed, or successful UI truth
+- explicitly paused Worker task remains unavailable for unrelated assignment and must not be auto-repaired on startup
 
 ## Shared Multi-Reference Functions
 
@@ -59,15 +91,25 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 | 02 | `ProductionWorkerRunner::run` | `crates/freehand-runtime/src/worker_runner.rs` | run periodic Worker ticks with explicit cadence | runner and interval | long-running Worker service | daemon Slave mode | ProductionWorkerRunner::run_once | bound |
 | 03 | `ProductionWorkerRunner::run_once` | `crates/freehand-runtime/src/worker_runner.rs` | claim one Assigned task, heartbeat, execute, and report | Task Center and Worker identity | idle, review-ready, or blocked outcome | Worker service loop and tests | task owner and live bridge | bound |
 | 04 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | choose and claim the highest-priority Assigned task for Worker | Worker id, execution id, and lease TTL | claimed task plus TaskResumed and heartbeat truth | ProductionWorkerRunner::run_once | task owner | bound |
-| 05 | `WorkerHeartbeat::start` | `crates/freehand-runtime/src/worker_runner/heartbeat.rs` | renew the claimed task lease while provider execution remains active | claimed task, execution, and Worker identity | periodic TaskHeartbeat truth or explicit heartbeat error | ProductionWorkerRunner::run_once | task owner | bound |
+| 05 | `WorkerHeartbeat::start` | `crates/freehand-runtime/src/worker_runner/heartbeat.rs` | renew the claimed task lease while provider execution remains active | claimed task, execution, and Worker identity | periodic TaskHeartbeat truth or explicit heartbeat error without overwriting external terminal truth | ProductionWorkerRunner::run_once | task owner | bound |
 | 06 | `run_worker_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one Worker task in task cwd with Worker tool policy | selected Worker config and live request | closed live reason outcome | ProductionWorkerRunner::run_once | provider/reason live bridge | bound |
-| 07 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | persist review-ready or blocked result for the same execution | typed execution fact | terminal task mutation | ProductionWorkerRunner::run_once | task owner | bound |
+| 07 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | persist review-ready or blocked result for the same execution unless Task Center truth is externally terminal | typed execution fact | terminal task mutation | ProductionWorkerRunner::run_once | task owner | bound |
 | 08 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | select Slave host path without constructing Master UI dispatcher | daemon agent selection | Worker service process | daemon CLI | ProductionWorkerRunner::run | bound |
+| 09 | `ProductionMasterRunner::from_default_config` | `crates/freehand-runtime/src/master_runner.rs` | load selected Master config and bind the Master Task Center namespace | configured agent name | Master lifecycle runner | daemon Master startup | config and runtime owner | bound |
+| 10 | `ProductionMasterRunner::run_until` | `crates/freehand-runtime/src/master_runner.rs` | poll Task Center lifecycle events, retry model/provider decision failures with bounded backoff, and stop on owner-truth failure or daemon shutdown | runner and cancellation signal | long-running Master lifecycle service | daemon Master mode | ProductionMasterRunner::run_once | bound |
+| 11 | `ProductionMasterRunner::run_once` | `crates/freehand-runtime/src/master_runner.rs` | drain new Task Center events from the durable lifecycle cursor | Task Center and cursor | idle or task decision outcome | Master lifecycle service and tests | TaskRuntime::query_event_inbox and ProductionMasterRunner::handle_event | bound |
+| 12 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke the Master model only for current review-ready, blocked, or interrupted truth | task snapshot and trigger event | task advanced, blocked observed, or explicit error | ProductionMasterRunner::run_once | run_master_lifecycle_reason_turn and task owner | bound |
+| 13 | `run_master_lifecycle_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one event-isolated lifecycle decision with a target-task boundary and finite round budget | selected Master config, typed lifecycle prompt, and decision boundary | closed Master turn and target Task Center mutation | ProductionMasterRunner::handle_event | provider and reason live bridge | bound |
+| 14 | `configured_worker_task_boundary_failure` | `crates/freehand-runtime/src/lib.rs` | validate Master task create and assign routing against the configured Worker topology | task tool call and configured Worker id | explicit topology failure or allowed mutation path | execute_registry_tool_call_with_workspace | pure boundary validator | bound |
+| 15 | `execute_registry_tool_call_with_workspace` | `crates/freehand-runtime/src/lib.rs` | enforce configured Worker task routing before task-tool mutation | Master task create or assign call and configured Worker id | paired failed result or owner-routed task mutation | provider and reason live bridge | configured_worker_task_boundary_failure and task tool owner | bound |
+| 16 | `run_master_mode` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP host and Master lifecycle runner under one daemon lifetime | Master bootstrap and bind | supervised Master daemon | daemon CLI | server host and ProductionMasterRunner::run_until | bound |
 
 ## Sync Status Against Mainline Call
 
 - Task Center claim, heartbeat, execution fact, persistence, and recovery APIs are already bound
 - Master workspace boundary and external-cwd delegation are already bound
-- production Worker runner, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound
-- deterministic positive and negative tests cover idle, review-ready, blocked, missing workspace, role mismatch, and Worker tool capability boundaries
+- production Master lifecycle runner, durable cursor, and supervised Master daemon startup are code-bound
+- production Worker runner, retryable interrupted/rejected requeue, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound
+- deterministic positive and negative tests cover Master review close/reject/missing-decision plus Worker idle/review-ready/blocked/retry/missing-workspace/role boundaries
 - generated wiki must be regenerated whenever this mainline changes
+- Worker startup and Task Center boot now recover historical blocked-task paused snapshots without erasing explicit pause truth
