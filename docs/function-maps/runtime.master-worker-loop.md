@@ -34,12 +34,16 @@
 - Worker opens the paired Master's Task Center namespace and uses its own configured agent id as execution identity
 - each worker tick queries the highest-priority Assigned task for that worker
 - a selected task is claimed with one execution id and lease heartbeat
-- the task target cwd is canonicalized and becomes the worker's locked execution root
-- worker live reasoning receives task goal, content, deliverables, and acceptance criteria
+- the task target cwd expands a leading `~`, canonicalizes through symlinks, and becomes the worker's locked execution root
+- worker live reasoning receives task goal, content, deliverables, acceptance criteria, the requested `target_cwd`, the canonical locked workspace, and path-preflight instructions
 - worker provider requests expose implemented workspace/shell tools but exclude recursive `task`
 - Master provider guidance binds dispatch to the configured paired Worker id,
   rejects historical AgentBoard entries as production dispatch targets, and
   forbids putting `task(...)` lifecycle instructions into Worker task content
+- Master provider guidance tells the model to preserve user-supplied paths,
+  avoid repeated Master-side probes outside runtime home, require Worker
+  symlink/canonical-path evidence, and never invent `/workspace`, `/tmp`, or
+  sibling output dirs when the user supplied a repository path
 - Master task-tool execution independently enforces the configured paired
   Worker id; a non-configured assignment becomes a paired failed tool result
   and cannot mutate Task Center truth
@@ -110,7 +114,7 @@
 - Task Center and lifecycle-state failures are fatal owner-truth failures;
   lifecycle executor and missing/incomplete decision failures are retryable
 - missing paired Master identity or invalid provider config blocks runner bootstrap
-- missing or non-canonicalizable target cwd records blocked task truth before model execution
+- missing or non-canonicalizable target cwd records blocked task truth before model execution, including the original and expanded path when `~` was used
 - claim/heartbeat persistence failure returns an explicit runner error and does not start the model
 - heartbeat or result reporting after external cancel returns explicit Task
   Center failure and does not append Worker lifecycle truth
@@ -142,10 +146,10 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `ProductionWorkerRunner::from_default_config` | `crates/freehand-runtime/src/worker_runner.rs` | load selected Slave config and bind paired Master Task Center namespace | configured agent name | Worker runner | daemon Slave startup | config + runtime owner | bound |
 | 02 | `ProductionWorkerRunner::run` | `crates/freehand-runtime/src/worker_runner.rs` | run periodic Worker ticks with explicit cadence | runner + interval | long-running Worker service | daemon Slave mode | `run_once` | bound |
-| 03 | `ProductionWorkerRunner::run_once` | `crates/freehand-runtime/src/worker_runner.rs` | claim one Assigned task, heartbeat, execute, and report | Task Center + Worker identity | idle/review-ready/blocked outcome | Worker service loop/tests | task owner + live bridge | bound |
+| 03 | `ProductionWorkerRunner::run_once` | `crates/freehand-runtime/src/worker_runner.rs` | claim one Assigned task, canonicalize target cwd with `~` expansion and symlink resolution, heartbeat, execute, and report | Task Center + Worker identity | idle/review-ready/blocked outcome | Worker service loop/tests | task owner + live bridge | bound |
 | 04 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | choose and claim highest-priority Assigned task for Worker | worker id + execution id + lease TTL | claimed task + TaskResumed/heartbeat truth | Worker runner | task owner | bound |
 | 05 | `WorkerHeartbeat::start` | `crates/freehand-runtime/src/worker_runner/heartbeat.rs` | renew the claimed task lease while provider execution remains active | claimed task/execution/worker identity | periodic TaskHeartbeat truth or explicit heartbeat error | `ProductionWorkerRunner::run_once` | task owner | bound |
-| 06 | `run_worker_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one worker task in task cwd with Worker tool policy | selected Worker config + live request | closed live reason outcome | Worker runner | provider/reason live bridge | bound |
+| 06 | `run_worker_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one worker task in canonical task cwd with Worker tool policy and path-preflight prompt contract | selected Worker config + live request | closed live reason outcome | Worker runner | provider/reason live bridge | bound |
 | 07 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | persist review-ready or blocked result for same execution | typed execution fact | terminal task mutation | Worker runner | task owner | bound |
 | 08 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | select Slave host path without constructing Master UI dispatcher | daemon agent selection | Worker service process | daemon CLI | runtime Worker runner | bound |
 | 09 | `ProductionMasterRunner::from_default_config` | `crates/freehand-runtime/src/master_runner.rs` | load selected Master config and bind the Master Task Center namespace | configured agent name | Master lifecycle runner | daemon Master startup | config + runtime owner | bound |
@@ -160,7 +164,7 @@
 ## Sync Status Against Code
 
 - Task Center claim, heartbeat, execution fact, persistence, and recovery APIs are already bound
-- Master workspace boundary and external-cwd delegation are already bound
+- Master workspace boundary, external-cwd delegation, and path/symlink dispatch guidance are already bound
 - production Worker runner, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound
 - deterministic positive/negative tests cover idle, review-ready, blocked, missing workspace, role mismatch, and Worker tool capability boundaries
 - generated wiki must be regenerated whenever this mainline changes

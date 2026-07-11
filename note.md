@@ -1,5 +1,33 @@
 # note.md
 
+# 2026-07-11 master/worker path and symlink contract closeout
+
+- user report: Master and Worker both mishandled external paths and symlinked paths; Master searched outside its responsibility before delegating, and Worker did not show enough requested/canonical path evidence.
+- owner: `runtime.master-worker-loop`.
+- implementation:
+  - strengthened Master task orchestration guidance for external paths, `~`, symlinks, target_cwd preservation, and no invented `/workspace`/`/tmp`/sibling output dirs.
+  - strengthened Worker execution guidance for path preflight, symlink evidence, and blocked missing-path reporting.
+  - Worker runner expands leading `~`, canonicalizes the locked workspace through symlinks, preserves requested `target_cwd`, and injects requested/canonical path preflight into the Worker prompt.
+  - added Worker runner tests for `~/...` symlink success and missing `~/...` blocked-before-model behavior.
+  - updated function map, test design, mainline manifest, and generated wiki.
+- local verification:
+  - `cargo test -p freehand-runtime production_worker_runner_ -- --nocapture` -> 11 passed.
+  - `cargo fmt --check`.
+  - `cargo clippy -p freehand-runtime --all-targets -- -D warnings`.
+  - `cargo run -p xtask -- mainlines generate`.
+  - `cargo run -p xtask -- mainlines check`.
+  - `cargo run -p xtask -- gates check`.
+  - `git diff --check`.
+- online verification:
+  - S-profile health `http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` -> master/worker, minimax, MiniMax-M3.
+  - task `task-verify-path-1783740443` history via `freehand-cliS adp-task-query --history` -> 49 events ending `TaskReviewSubmitted,TaskReviewApproved,TaskClosed`.
+  - Worker evidence preserved requested `/Users/fanzhang/github/xiaozhi-esp32-2.2.4`, canonical `/Users/fanzhang/Documents/github/xiaozhi-esp32-2.2.4`, and `symlink_detected=true`.
+  - Worker metadata showed 9 rounds, 22 tool executions, one provider retry, one failed tool result re-entered to model, then terminal success.
+- conclusion:
+  - path/symlink contract is fixed and online closed for this live sample.
+  - long `running + heartbeat` was a long Worker execution with periodic heartbeat until review submission, not lifecycle deadlock.
+
 # 2026-07-09 master-worker autonomy online closeout
 
 - user requirement: prove master model/tool-loop autonomy, not command-driven ADP task mutation. The proof must cover worker success, execution error, and rejected-review retry/close.

@@ -405,19 +405,24 @@ fn worker_live_request(
 ) -> LiveReasonTurnRequest {
     let task_key = sanitize_identifier(task.task_id.as_str());
     let execution_key = sanitize_identifier(execution_id);
+    let prompt = worker_task_prompt(task, &workspace, retry_kind);
     LiveReasonTurnRequest {
         runtime_home: runtime_home.to_path_buf(),
         session_id: SessionId::new(format!("worker-task-{task_key}")),
         turn_id: TurnId::new(format!("worker-turn-{execution_key}")),
         trace_id: TraceId::new(format!("worker-trace-{execution_key}")),
-        prompt: worker_task_prompt(task, retry_kind),
+        prompt,
         cwd: Some(workspace),
         stream: false,
         cancel_token: None,
     }
 }
 
-fn worker_task_prompt(task: &TaskSnapshot, retry_kind: Option<WorkerRetryKind>) -> String {
+fn worker_task_prompt(
+    task: &TaskSnapshot,
+    canonical_workspace: &Path,
+    retry_kind: Option<WorkerRetryKind>,
+) -> String {
     let retry_context = match retry_kind {
         Some(WorkerRetryKind::Interrupted) => {
             "\nRetry context:\nThe previous execution was interrupted. Inspect persisted workspace state, continue safely, and re-run verification before submission.".to_owned()
@@ -434,14 +439,23 @@ fn worker_task_prompt(task: &TaskSnapshot, retry_kind: Option<WorkerRetryKind>) 
 Task ID: {}\n\
 Title: {}\n\
 Goal: {}\n\
-Content: {}\n\
-Deliverables:\n{}\n\
-Acceptance criteria:\n{}\n\
-Work only inside the locked target workspace. Complete the implementation and verification, then return the required Freehand completion schema.{}",
+	Content: {}\n\
+	Requested target_cwd: {}\n\
+	Canonical locked workspace: {}\n\
+	Deliverables:\n{}\n\
+	Acceptance criteria:\n{}\n\
+	Path preflight:\n\
+	- Treat the requested target_cwd as the user-facing path and the canonical locked workspace as execution truth.\n\
+	- Before path-sensitive work, verify whether relevant paths are absolute, whether they contain a leading ~, and whether the requested path or any parent is a symlink.\n\
+	- If a symlink is present, report both requested and canonical paths in evidence.\n\
+	- If a required path is missing, block with the exact path and canonicalization error; do not invent alternate directories.\n\
+	Work only inside the locked target workspace. Complete the implementation and verification, then return the required Freehand completion schema.{}",
         task.task_id.as_str(),
         task.title,
         task.goal,
         task.content,
+        task.target_cwd.as_deref().unwrap_or("(missing)"),
+        canonical_workspace.display(),
         render_lines(&task.deliverables),
         render_lines(&task.acceptance),
         retry_context,
@@ -460,11 +474,16 @@ fn render_lines(values: &[String]) -> String {
 }
 
 fn canonical_worker_workspace(target_cwd: &str) -> Result<PathBuf, String> {
-    if target_cwd.trim().is_empty() {
+    let trimmed = target_cwd.trim();
+    if trimmed.is_empty() {
         return Err("assigned worker task target_cwd is empty".to_owned());
     }
-    let workspace = fs::canonicalize(target_cwd).map_err(|error| {
-        format!("cannot canonicalize worker target_cwd `{target_cwd}`: {error}")
+    let expanded = expand_leading_tilde(trimmed);
+    let workspace = fs::canonicalize(&expanded).map_err(|error| {
+        format!(
+            "cannot canonicalize worker target_cwd `{target_cwd}` (expanded `{}`): {error}",
+            expanded.display()
+        )
     })?;
     if !workspace.is_dir() {
         return Err(format!(
@@ -473,6 +492,24 @@ fn canonical_worker_workspace(target_cwd: &str) -> Result<PathBuf, String> {
         ));
     }
     Ok(workspace)
+}
+
+fn expand_leading_tilde(path: &str) -> PathBuf {
+    if path == "~" {
+        return home_dir().unwrap_or_else(|| PathBuf::from(path));
+    }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = home_dir()
+    {
+        return home.join(rest);
+    }
+    PathBuf::from(path)
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
 }
 
 fn next_execution_id(worker_agent_id: &AgentId) -> String {

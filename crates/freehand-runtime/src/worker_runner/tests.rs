@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_config::{
@@ -17,6 +17,11 @@ use freehand_task::{
 use serde_json::Value;
 
 use super::*;
+
+fn home_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 struct StubExecutor {
     result: Mutex<Option<Result<WorkerTurnExecution, String>>>,
@@ -438,6 +443,111 @@ fn production_worker_runner_missing_workspace_blocks_before_model_execution() {
 }
 
 #[test]
+fn production_worker_runner_expands_tilde_and_prompts_canonical_symlink_preflight() {
+    let _home_lock = home_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let original_home = std::env::var_os("HOME");
+    let runtime_home = temp_path("tilde-symlink-runtime");
+    let fake_home = temp_path("tilde-symlink-home");
+    let canonical_parent = temp_path("tilde-symlink-canonical-parent");
+    let canonical_workspace = canonical_parent.join("repo");
+    let symlink_parent = fake_home.join("github");
+    let requested_workspace = "~/github/repo";
+    fs::create_dir_all(&canonical_workspace).expect("canonical workspace");
+    fs::create_dir_all(&fake_home).expect("fake home");
+    create_dir_symlink(&canonical_parent, &symlink_parent);
+    unsafe {
+        std::env::set_var("HOME", &fake_home);
+    }
+    let executor = Arc::new(StubExecutor::new(Ok(WorkerTurnExecution {
+        status: TerminalStatus::Success,
+        summary: "symlink path verified".to_owned(),
+        turn_id: TurnId::new("worker-turn-tilde-symlink"),
+    })));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let expected_task_id =
+        seed_assigned_task_with_target(&runtime_home, Some(requested_workspace.to_owned()));
+
+    let outcome = runner.run_once().expect("worker tick");
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::ReviewReady { ref task_id, .. }
+            if task_id == &expected_task_id
+    ));
+    let prompt = &executor.prompts()[0];
+    assert!(prompt.contains("Requested target_cwd: ~/github/repo"));
+    assert!(prompt.contains("Canonical locked workspace:"));
+    assert!(prompt.contains("Path preflight"));
+    assert!(prompt.contains("whether the requested path or any parent is a symlink"));
+    assert!(prompt.contains("report both requested and canonical paths"));
+    assert!(prompt.contains(&canonical_workspace.to_string_lossy().to_string()));
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let task = task_runtime
+        .query_task(&expected_task_id)
+        .expect("query task");
+    assert_eq!(task.status, TaskStatus::ReviewSubmitted);
+    assert_eq!(task.target_cwd.as_deref(), Some(requested_workspace));
+
+    restore_home(original_home);
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(fake_home).expect("cleanup fake home");
+    fs::remove_dir_all(canonical_parent).expect("cleanup canonical parent");
+}
+
+#[test]
+fn production_worker_runner_missing_tilde_path_blocks_before_model_execution() {
+    let _home_lock = home_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let original_home = std::env::var_os("HOME");
+    let runtime_home = temp_path("missing-tilde-runtime");
+    let fake_home = temp_path("missing-tilde-home");
+    fs::create_dir_all(&fake_home).expect("fake home");
+    unsafe {
+        std::env::set_var("HOME", &fake_home);
+    }
+    let executor = Arc::new(StubExecutor::new(Err("must not execute".to_owned())));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let expected_task_id =
+        seed_assigned_task_with_target(&runtime_home, Some("~/github/missing".to_owned()));
+
+    let outcome = runner.run_once().expect("worker tick");
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::Blocked { ref task_id, ref reason, .. }
+            if task_id == &expected_task_id
+                && reason.contains("target_cwd `~/github/missing`")
+                && reason.contains("expanded")
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let task = task_runtime
+        .query_task(&expected_task_id)
+        .expect("query task");
+    assert_eq!(task.status, TaskStatus::Blocked);
+    let history = task_runtime
+        .task_history(&expected_task_id)
+        .expect("task history");
+    assert!(
+        history
+            .iter()
+            .any(|event| event.event_type == "TaskBlocked")
+    );
+    assert!(
+        !history
+            .iter()
+            .any(|event| event.event_type == "TaskReviewSubmitted")
+    );
+
+    restore_home(original_home);
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(fake_home).expect("cleanup fake home");
+}
+
+#[test]
 fn production_worker_runner_rejects_master_mode() {
     let runtime_home = temp_path("master-rejected");
     let mut selected = selected_worker();
@@ -469,6 +579,13 @@ fn test_runner(
 }
 
 fn seed_assigned_task(runtime_home: &Path, workspace: Option<&Path>) -> TaskId {
+    seed_assigned_task_with_target(
+        runtime_home,
+        workspace.map(|path| path.display().to_string()),
+    )
+}
+
+fn seed_assigned_task_with_target(runtime_home: &Path, target_cwd: Option<String>) -> TaskId {
     let task_runtime =
         TaskRuntime::boot(runtime_home, AgentId::new("master")).expect("task runtime");
     let task_id = TaskId::new(format!("task-{}", now_unix_seconds()));
@@ -481,7 +598,7 @@ fn seed_assigned_task(runtime_home: &Path, workspace: Option<&Path>) -> TaskId {
             deliverables: vec!["implementation".to_owned()],
             acceptance: vec!["tests pass".to_owned()],
             priority: 80,
-            target_cwd: workspace.map(|path| path.display().to_string()),
+            target_cwd,
             dispatch: TaskDispatchRequest::Agent {
                 agent_id: AgentId::new("worker"),
             },
@@ -495,6 +612,26 @@ fn seed_assigned_task(runtime_home: &Path, workspace: Option<&Path>) -> TaskId {
         })
         .expect("create assigned task");
     task_id
+}
+
+#[cfg(unix)]
+fn create_dir_symlink(source: &Path, link: &Path) {
+    std::os::unix::fs::symlink(source, link).expect("create dir symlink");
+}
+
+#[cfg(windows)]
+fn create_dir_symlink(source: &Path, link: &Path) {
+    std::os::windows::fs::symlink_dir(source, link).expect("create dir symlink");
+}
+
+fn restore_home(original_home: Option<std::ffi::OsString>) {
+    unsafe {
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+    }
 }
 
 fn test_actor(agent_id: &str) -> TaskActor {

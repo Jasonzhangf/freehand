@@ -12,7 +12,7 @@
    configured Worker process after an unexpected exit.
 4. Runner opens the paired Master's Task Center namespace.
 5. Runner claims one task for its Worker identity and persists lease heartbeat.
-6. Runner canonicalizes `task.target_cwd`.
+6. Runner expands a leading `~`, canonicalizes `task.target_cwd` through symlinks, and locks the Worker to that canonical workspace.
 7. Runner executes one provider/reason turn under Worker identity and Worker tool policy.
 8. Runner writes `review_ready` on successful completion or `blocked` on provider/runtime failure.
 9. Runner returns to polling without inventing task truth while idle.
@@ -79,6 +79,8 @@ Task Center truth before another execution starts.
 - Claim writes `TaskResumed` and `TaskHeartbeat`.
 - Successful model completion writes `TaskReviewSubmitted` with matching task/execution/agent ids.
 - Worker session id and turn id are deterministic from task/execution identity.
+- Worker prompt includes both requested `target_cwd` and canonical locked workspace, and requires path preflight for absolute paths, `~`, and symlinks.
+- Symlinked `~/...` target cwd can execute: the runner expands `~`, follows the symlink to the canonical workspace, preserves the requested path in task truth, and asks the Worker to report both paths.
 - no-task tick returns `Idle` and leaves task history unchanged.
 - interrupted tasks assigned to the configured Worker are requeued once and
   claimed with a new execution id.
@@ -129,6 +131,7 @@ Task Center truth before another execution starts.
   `TaskCreated` or `TaskAssigned` event.
 - missing `target_cwd` records `Blocked`; model execution does not start.
 - non-canonicalizable `target_cwd` records `Blocked`; model execution does not start.
+- missing `~/...` target cwd records `Blocked` with both original and expanded path; model execution does not start.
 - provider/runtime failure records `Blocked`; it never writes `ReviewReady`.
 - reporting `Blocked` releases the Worker resource to `Available`; task blocked
   truth must not globally pause the configured Worker
@@ -190,6 +193,7 @@ Task Center truth before another execution starts.
   - two different lifecycle events and proves their reason sessions do not
     share historical turn context
 - real live bridge test proves Worker schema excludes `task` and workspace root is task cwd.
+- runner tests prove `~/...` plus symlink target cwd resolves to a canonical Worker workspace and missing `~/...` blocks before model execution.
 - daemon test proves:
   - Master mode creates UI host
   - Slave mode creates Worker runner
