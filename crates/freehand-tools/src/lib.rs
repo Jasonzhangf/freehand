@@ -155,7 +155,12 @@ impl BuiltinToolRegistry {
     pub fn worker_implemented_definitions(&self) -> Vec<ProviderToolDefinition> {
         self.tools
             .values()
-            .filter(|spec| spec.implemented && spec.definition.name != "task")
+            .filter(|spec| {
+                spec.implemented
+                    && spec.definition.name != "task"
+                    && self.execution_scope(&spec.definition.name)
+                        != Some(BuiltinToolExecutionScope::Shell)
+            })
             .map(|spec| spec.definition.clone())
             .collect()
     }
@@ -793,7 +798,7 @@ fn execute_complete_step(
 fn execute_read_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
     let path = required_string(arguments, "read_file", "path")?;
     let root = locked_workspace_root("read_file")?;
-    let path = resolve_locked_path(&root, path, "read_file", "path")?;
+    let path = resolve_read_path(&root, path, "read_file", "path")?;
     let metadata = fs::metadata(&path).map_err(|err| ToolRegistryError::ExecutionFailed {
         tool: "read_file".to_owned(),
         message: format!("cannot stat `{}`: {err}", path.display()),
@@ -1214,7 +1219,7 @@ fn execute_grep(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolR
         .unwrap_or(".")
         .trim();
     let root = locked_workspace_root("grep")?;
-    let target = resolve_locked_path(&root, target, "grep", "path")?;
+    let target = resolve_read_path(&root, target, "grep", "path")?;
     let metadata = fs::metadata(&target).map_err(|err| ToolRegistryError::ExecutionFailed {
         tool: "grep".to_owned(),
         message: format!("cannot stat `{}`: {err}", target.display()),
@@ -1278,7 +1283,7 @@ fn execute_ls(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolReg
         .trim();
     let recursive = optional_bool(arguments, "ls", "recursive")?.unwrap_or(false);
     let root = locked_workspace_root("ls")?;
-    let path = resolve_locked_path(&root, raw_path, "ls", "path")?;
+    let path = resolve_read_path(&root, raw_path, "ls", "path")?;
     let metadata = fs::metadata(&path).map_err(|err| ToolRegistryError::ExecutionFailed {
         tool: "ls".to_owned(),
         message: format!("cannot stat `{}`: {err}", path.display()),
@@ -1514,6 +1519,23 @@ fn resolve_locked_path(
         });
     }
     Ok(canonical)
+}
+
+fn resolve_read_path(
+    root: &Path,
+    raw: &str,
+    tool: &str,
+    field: &str,
+) -> Result<PathBuf, ToolRegistryError> {
+    let candidate = if Path::new(raw).is_absolute() {
+        PathBuf::from(raw)
+    } else {
+        root.join(raw)
+    };
+    fs::canonicalize(&candidate).map_err(|err| ToolRegistryError::ExecutionFailed {
+        tool: tool.to_owned(),
+        message: format!("cannot resolve `{field}` `{raw}`: {err}"),
+    })
 }
 
 fn resolve_locked_write_path(
@@ -1881,7 +1903,7 @@ mod tests {
     }
 
     #[test]
-    fn worker_implemented_tool_surface_includes_shell_and_excludes_recursive_task() {
+    fn worker_implemented_tool_surface_excludes_shell_and_recursive_task() {
         let registry = BuiltinToolRegistry::reasonix_aligned();
         let names = registry
             .worker_implemented_definitions()
@@ -1889,7 +1911,7 @@ mod tests {
             .map(|definition| definition.name)
             .collect::<Vec<_>>();
 
-        assert!(names.contains(&"bash".to_owned()));
+        assert!(!names.contains(&"bash".to_owned()));
         assert!(names.contains(&"read_file".to_owned()));
         assert!(names.contains(&"write_file".to_owned()));
         assert!(names.contains(&"todo_write".to_owned()));
@@ -2646,26 +2668,23 @@ beta
     }
 
     #[test]
-    fn read_file_rejects_path_outside_workspace_root() {
+    fn read_file_allows_reading_outside_workspace_root() {
         with_temp_workspace(|root| {
             let parent = root.parent().expect("parent");
-            fs::write(parent.join("outside.txt"), "secret\n").expect("write outside");
+            let outside = parent.join("outside.txt");
+            fs::write(&outside, "outside-readable\n").expect("write outside");
             let registry = BuiltinToolRegistry::reasonix_aligned();
-            let result = registry.execute(&tool_call(
-                "read_file",
-                vec![ToolArgument {
-                    name: "path".to_owned(),
-                    value: json!("../outside.txt"),
-                }],
-            ));
-            assert!(matches!(
-                result,
-                Err(ToolRegistryError::WorkspaceBoundaryViolation {
-                    tool,
-                    field,
-                    ..
-                }) if tool == "read_file" && field == "path"
-            ));
+            let output = registry
+                .execute(&tool_call(
+                    "read_file",
+                    vec![ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("../outside.txt"),
+                    }],
+                ))
+                .expect("read outside workspace");
+            assert!(output.text.contains("outside-readable"));
+            assert!(output.text.contains(&outside.to_string_lossy().to_string()));
         });
     }
 
@@ -2727,6 +2746,32 @@ beta
     }
 
     #[test]
+    fn grep_allows_reading_outside_workspace_root() {
+        with_temp_workspace(|root| {
+            let parent = root.parent().expect("parent");
+            let outside = parent.join("outside-grep.txt");
+            fs::write(&outside, "needle outside\n").expect("write outside");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let output = registry
+                .execute(&tool_call(
+                    "grep",
+                    vec![
+                        ToolArgument {
+                            name: "pattern".to_owned(),
+                            value: json!("needle"),
+                        },
+                        ToolArgument {
+                            name: "path".to_owned(),
+                            value: json!(outside.to_string_lossy().to_string()),
+                        },
+                    ],
+                ))
+                .expect("grep outside workspace");
+            assert!(output.text.contains("outside-grep.txt:1:needle outside"));
+        });
+    }
+
+    #[test]
     fn ls_lists_entries_and_recursive_tree() {
         with_temp_workspace(|root| {
             fs::create_dir_all(root.join("docs/specs")).expect("create docs");
@@ -2764,6 +2809,27 @@ beta
             assert!(recursive.text.contains("docs/specs/"));
             assert!(recursive.text.contains("docs/specs/tool.md"));
             assert!(!recursive.text.contains("target/debug/skip.me"));
+        });
+    }
+
+    #[test]
+    fn ls_allows_reading_outside_workspace_root() {
+        with_temp_workspace(|root| {
+            let parent = root.parent().expect("parent");
+            let outside_dir = parent.join("outside-list");
+            fs::create_dir_all(&outside_dir).expect("create outside dir");
+            fs::write(outside_dir.join("visible.txt"), "visible\n").expect("write outside file");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let output = registry
+                .execute(&tool_call(
+                    "ls",
+                    vec![ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!(outside_dir.to_string_lossy().to_string()),
+                    }],
+                ))
+                .expect("ls outside workspace");
+            assert!(output.text.contains("visible.txt"));
         });
     }
 

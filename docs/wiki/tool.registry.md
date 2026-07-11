@@ -16,7 +16,9 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner
 - registry classifies registered tools as framework, workspace, shell, or network execution scope
 - the master-safe export excludes unrestricted shell scope while retaining framework and workspace-scoped tools
-- path-based tools resolve against one owner-supplied locked workspace root
+- relative path-based tools resolve from one owner-supplied current workspace root
+- read-only path tools may inspect readable external absolute or parent paths
+- file-mutation tools remain locked to the current workspace root
 - writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`
 - provider adapters render schemas; they do not own tool registry truth
 
@@ -36,7 +38,7 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - unknown tool names return `ToolRegistryError::UnknownTool`
 - registered but not implemented tools return `ToolRegistryError::UnimplementedTool`
 - invalid tool arguments return `ToolRegistryError::InvalidArguments`
-- path escape returns typed `ToolRegistryError::WorkspaceBoundaryViolation`
+- writable path escape returns typed `ToolRegistryError::WorkspaceBoundaryViolation`
 - foreground `bash` timeout and non-zero exit return `ToolRegistryError::ExecutionFailed`
 - runtime and filesystem failures return `ToolRegistryError::ExecutionFailed`
 
@@ -44,22 +46,22 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 
 - `locked_workspace_root`
   - owner: `crates/freehand-tools/src/lib.rs`
-  - purpose: derive the canonical locked workspace root for all first-version path tools, respecting the explicit per-call workspace context installed by `with_workspace_root`
+  - purpose: derive the canonical current workspace root for relative path resolution and writable path locking, respecting the explicit per-call workspace context installed by `with_workspace_root`
   - allowed callers: execute_read_file, execute_glob, execute_grep, execute_ls
-  - related tests: read-file path-lock test, runtime live tool loop test
-  - why shared: keeps directory-lock truth in one owner helper instead of per-tool duplication
+  - related tests: read-file external-read test, runtime live tool loop test
+  - why shared: keeps current-cwd truth in one owner helper instead of per-tool duplication
 - `with_workspace_root`
   - owner: `crates/freehand-tools/src/lib.rs`
   - purpose: install an explicit thread-local workspace root for one registry tool execution
   - allowed callers: runtime live bridge
   - related tests: runtime live tool execution with requested session cwd
   - why shared: keeps session workspace execution in the tool owner instead of process-global env switching in runtime
-- `resolve_locked_path`
+- `resolve_read_path`
   - owner: `crates/freehand-tools/src/lib.rs`
-  - purpose: resolve path arguments and reject escapes outside the locked workspace root
+  - purpose: resolve read-only path arguments from current cwd for relative paths while allowing readable absolute or parent paths
   - allowed callers: execute_read_file, execute_grep, execute_ls
-  - related tests: read-file path-lock test
-  - why shared: keeps path-boundary enforcement single-sourced
+  - related tests: read-file, grep, and ls external-read tests
+  - why shared: keeps read path resolution single-sourced without confusing read access with write permission
 - `resolve_locked_write_path`
   - owner: `crates/freehand-tools/src/lib.rs`
   - purpose: resolve writable path targets inside the locked workspace root even when the target file does not yet exist
@@ -113,13 +115,13 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 | 04 | `BuiltinToolRegistry::master_implemented_schema_fingerprint` | `crates/freehand-tools/src/lib.rs` | export deterministic master-safe tool schema fingerprint for planner/cache diagnostics | registry | stable master tool-schema fingerprint string | runtime live bridge | tool owner | bound |
 | 05 | `BuiltinToolRegistry::execute` | `crates/freehand-tools/src/lib.rs` | dispatch completed tool calls into the single owner implementation set | ReasonReq04ToolCall | tool execution output | runtime live bridge | tool owner | bound |
 | 06 | `execute_bash` | `crates/freehand-tools/src/lib.rs` | run one foreground shell command from the locked workspace root with timeout and explicit failure reporting | command plus optional timeout_seconds | combined stdout/stderr text | registry execute | command tool owner | bound |
-| 07 | `execute_read_file` | `crates/freehand-tools/src/lib.rs` | read UTF-8 text from one locked in-root file with line-windowing | path plus optional offset plus optional limit | numbered text window | registry execute | read-only file tool owner | bound |
+| 07 | `execute_read_file` | `crates/freehand-tools/src/lib.rs` | read UTF-8 text from one readable file, resolving relative paths from cwd and permitting external readable paths | path plus optional offset plus optional limit | numbered text window | registry execute | read-only file tool owner | bound |
 | 08 | `execute_write_file` | `crates/freehand-tools/src/lib.rs` | create or overwrite one UTF-8 text file inside the locked root | path plus content | write summary | registry execute | file-mutation tool owner | bound |
 | 09 | `execute_edit_file` | `crates/freehand-tools/src/lib.rs` | replace one exact text occurrence in one locked in-root file | path plus old_string plus new_string | edit summary | registry execute | file-mutation tool owner | bound |
 | 10 | `execute_multi_edit` | `crates/freehand-tools/src/lib.rs` | apply ordered exact text edits and write once at the end | path plus ordered edits | edit summary | registry execute | file-mutation tool owner | bound |
 | 11 | `execute_glob` | `crates/freehand-tools/src/lib.rs` | match in-root files by glob pattern with recursive filename fallback | pattern | newline-separated match list | registry execute | read-only search tool owner | bound |
-| 12 | `execute_grep` | `crates/freehand-tools/src/lib.rs` | search in-root UTF-8 text files by regex | pattern plus optional path | path:line:text matches | registry execute | read-only search tool owner | bound |
-| 13 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list directory entries or recursive tree under locked root | optional path plus optional recursive | newline-separated directory listing | registry execute | read-only file tool owner | bound |
+| 12 | `execute_grep` | `crates/freehand-tools/src/lib.rs` | search readable UTF-8 text files by regex, resolving relative paths from cwd and permitting external readable paths | pattern plus optional path | path:line:text matches | registry execute | read-only search tool owner | bound |
+| 13 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list readable directory entries or recursive tree, resolving relative paths from cwd and permitting external readable paths | optional path plus optional recursive | newline-separated directory listing | registry execute | read-only file tool owner | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -127,7 +129,8 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - current implemented tool set is: `bash`, `read_file`, `write_file`, `edit_file`, `multi_edit`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`
 - generic and master-safe implemented tool schema fingerprints are bound in `freehand-tools`; the runtime master bridge consumes only the master-safe fingerprint
 - tool execution scopes are bound in the registry owner and master exposure excludes shell scope
-- path tools are locked to the owner-supplied workspace root and return typed workspace-boundary violations on escape
+- read-only path tools use the owner-supplied workspace root only as current cwd for relative paths and may read/query external readable paths
+- file-mutation tools are locked to the owner-supplied workspace root and return typed workspace-boundary violations on write escape
 - first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing
 - first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path
 - checkpointed live writable execution now depends on the code-bound `tool.preview` and `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts

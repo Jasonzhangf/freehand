@@ -36,7 +36,7 @@
 - a selected task is claimed with one execution id and lease heartbeat
 - the task target cwd expands a leading `~`, canonicalizes through symlinks, and becomes the worker's locked execution root
 - worker live reasoning receives task goal, content, deliverables, acceptance criteria, the requested `target_cwd`, the canonical locked workspace, and path-preflight instructions
-- worker provider requests expose implemented workspace/shell tools but exclude recursive `task`
+- worker provider requests expose governed workspace tools but exclude recursive `task` and unrestricted shell tools
 - Master provider guidance binds dispatch to the configured paired Worker id,
   rejects historical AgentBoard entries as production dispatch targets, and
   forbids putting `task(...)` lifecycle instructions into Worker task content
@@ -135,10 +135,10 @@
   - why shared: provider/reason lifecycle must not be copied for Worker execution
 - `BuiltinToolRegistry::worker_implemented_definitions`
   - owner: `crates/freehand-tools/src/lib.rs`
-  - purpose: expose implemented Worker tools while physically excluding recursive `task`
+  - purpose: expose implemented Worker tools while physically excluding recursive `task` and unrestricted shell tools
   - allowed callers: runtime live bridge and tool-registry tests
-  - related tests: Worker schema inclusion/exclusion tests
-  - why shared: Worker capability policy must have one registry owner
+  - related tests: Worker schema inclusion/exclusion tests and shell rejection test
+  - why shared: Worker capability and write-boundary policy must have one registry owner
 
 ## Function Call Table
 

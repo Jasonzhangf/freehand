@@ -20,7 +20,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 - claim persists one execution id and lease heartbeat
 - task target cwd expands a leading ~, canonicalizes through symlinks, and becomes the locked Worker execution root
 - Worker live reasoning receives the requested target_cwd, canonical locked workspace, and path-preflight instructions for absolute paths, ~, and symlinks
-- Worker provider requests expose implemented workspace/shell tools but exclude recursive `task`
+- Worker provider requests expose governed workspace tools but exclude recursive `task` and unrestricted shell tools
 - Master provider guidance binds dispatch to the configured paired Worker id, excludes historical AgentBoard entries as production targets, forbids task lifecycle calls in Worker task content, and requires path/symlink/canonical evidence for external cwd delegation
 - Master task-tool execution independently rejects assignment to any non-configured Worker before Task Center mutation
 - Master task creation rejects omitted, auto, self, or non-configured-agent dispatch before persisted historical agents can be selected
@@ -79,10 +79,10 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
   - why shared: provider/reason lifecycle must not be copied for Worker execution
 - `BuiltinToolRegistry::worker_implemented_definitions`
   - owner: `crates/freehand-tools/src/lib.rs`
-  - purpose: expose implemented Worker tools while excluding recursive `task`
+  - purpose: expose implemented Worker tools while excluding recursive `task` and unrestricted shell tools
   - allowed callers: runtime live bridge, tool-registry tests
-  - related tests: Worker schema inclusion/exclusion tests
-  - why shared: Worker capability policy must have one registry owner
+  - related tests: Worker schema inclusion/exclusion tests, Worker shell rejection test
+  - why shared: Worker capability and write-boundary policy must have one registry owner
 
 ## Function Call Table
 

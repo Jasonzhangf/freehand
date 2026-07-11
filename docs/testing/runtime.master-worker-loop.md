@@ -62,8 +62,8 @@ Task Center truth before another execution starts.
 
 ### Positive
 
-- Worker tool definitions include `bash`, workspace read/write/search tools, and local planning tools.
-- Worker tool definitions exclude `task`.
+- Worker tool definitions include governed read/write/search tools and local planning tools.
+- Worker tool definitions exclude `task` and unrestricted shell tools.
 - Master guidance names the configured paired Worker and forbids assigning
   production tasks to historical AgentBoard entries.
 - Master task execution accepts `task(op="assign")` only when `agent_id`
@@ -193,7 +193,7 @@ Task Center truth before another execution starts.
   - repeated `continue` without a decision and proves finite blocked closeout
   - two different lifecycle events and proves their reason sessions do not
     share historical turn context
-- real live bridge test proves Worker schema excludes `task` and workspace root is task cwd.
+- real live bridge test proves Worker schema excludes `task` and unrestricted shell tools, read-only tools may inspect readable external paths, and mutation tools keep workspace root as task cwd.
 - runner tests prove `~/...` plus symlink target cwd resolves to a canonical Worker workspace and missing `~/...` blocks before model execution.
 - daemon test proves:
   - Master mode creates UI host

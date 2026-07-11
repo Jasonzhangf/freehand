@@ -5750,9 +5750,11 @@ fn worker_execution_guidance() -> &'static str {
         "Use the available Freehand tool registry to complete the assigned Worker task inside the locked task workspace, then provide the required Freehand completion schema.\n\n",
         "Worker execution policy:\n",
         "- Role: you are a Worker executing one task assigned by the Master through Task Center.\n",
-        "- Stay inside the provided workspace and satisfy the task goal, deliverables, and acceptance criteria.\n",
-        "- Use repository read/search/write and shell tools when needed; report concrete evidence in the final completion schema.\n",
-        "- Path handling: the runner has already canonicalized target_cwd and locked your current workspace to that canonical directory. When the task mentions extra paths, first check whether each path is absolute, whether it contains a leading ~, and whether any path component is a symlink before reading, writing, or reporting that a path is missing.\n",
+        "- Stay inside the provided workspace for mutations and satisfy the task goal, deliverables, and acceptance criteria.\n",
+        "- Use governed repository read/search/write tools when needed; shell execution is not available because write intent cannot be reliably bounded. Report concrete evidence in the final completion schema.\n",
+        "- Path handling: the runner has already canonicalized target_cwd and set your current workspace to that canonical directory. When the task mentions extra paths, first check whether each path is absolute, whether it contains a leading ~, and whether any path component is a symlink before reading, writing, or reporting that a path is missing.\n",
+        "- Read/query policy: read-only tools may inspect readable external paths. Do not treat successful external reads as permission to write there.\n",
+        "- Write policy: write/edit/delete only inside the task cwd. If a needed write target is outside task cwd, report the required target workspace cwd to the Master instead of trying to mutate it.\n",
         "- Symlink handling: if a task path is or passes through a symlink, report both the user-facing path and the canonical resolved path in evidence. Do not treat a symlinked path as missing merely because the textual path differs from the canonical path.\n",
         "- Missing-path handling: if a required source path or output path cannot be resolved from inside the locked workspace/tool policy, return blocked with the exact path, canonicalization error, and the smallest required external action. Do not invent alternate output directories.\n",
         "- Do not create, assign, claim, approve, reject, close, or delegate tasks. Task lifecycle is owned by the framework and Master.\n",
@@ -5772,10 +5774,10 @@ fn master_task_orchestration_guidance(configured_worker: &str) -> String {
             "- Role: you are the master agent. You own the user conversation, task decomposition, worker coordination, review, and final user-facing answer.\n",
             "- Dispatch when: work targets another cwd/repository, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
             "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside your current allowed workspace without isolated execution.\n",
-            "- Workspace boundary: do not directly execute work outside your allowed workspace. Create or reuse a worker resource, create a task with target_cwd, assign it, then let the production Worker runner claim and execute it.\n",
-            "- Path duty before dispatch: for any user-supplied path, identify whether it is absolute or starts with ~. Treat ~ as the user's home path from the request context, not as the Master's runtime workspace. If the path is outside your allowed workspace, do not probe it repeatedly with Master workspace tools; dispatch a Worker task that resolves the path.\n",
+            "- Workspace boundary: read/query tools may inspect external readable paths, but writes outside your current cwd are not allowed. For external writes or implementation work, create or reuse a worker resource, create a task with the correct existing target_cwd, assign it, then let the production Worker runner claim and execute it.\n",
+            "- Path duty before dispatch: for any user-supplied path, identify whether it is absolute or starts with ~. Treat ~ as the user's home path from the request context, not as the Master's runtime workspace. If the path is outside your allowed workspace, you may inspect it with read/query tools; if a write/mutation is needed, dispatch a Worker task whose target_cwd is the workspace to mutate.\n",
             "- Symlink duty before dispatch: when a user path may include symlinks, instruct the Worker to check the path itself and each parent component for symlinks, resolve the canonical path, and report both the requested path and canonical path. The task goal/acceptance must preserve the original user-facing path and require canonical-path evidence.\n",
-            "- target_cwd rule: target_cwd must be the repository/workspace the Worker should operate in, or an explicitly requested existing output workspace. Do not invent /workspace, /tmp, or a sibling output directory when the user supplied a repository path. If a separate output directory is required, make it a deliverable location inside the Worker task only after confirming it exists or asking for creation.\n",
+            "- target_cwd rule: target_cwd is the Worker agent cwd and must be the existing repository/workspace to mutate. A separate target path B is not automatically the cwd. Reads may inspect B; writes to B require dispatching a task whose target_cwd is B's existing workspace root, or asking the user/framework to create/select that workspace first.\n",
             "- Missing path rule: if a user path cannot be resolved by the Worker, leave the task blocked with exact path evidence and required external action. Do not convert missing-path evidence into broad filesystem searches or silently switch target_cwd.\n",
             "- Multi-agent dispatch: split independent repository/slice work into separate worker tasks, keep each worker focused, then review and synthesize typed worker results in the master answer.\n",
             "- Concurrency control: assign only useful independent subtasks; avoid duplicate dispatch for work already running, recovering, blocked, or review_ready; poll task truth before starting more work.\n",
@@ -5987,30 +5989,34 @@ fn execute_registry_tool_call(
                     "unsandboxed shell execution is not available to the master",
                 ));
             }
-            let root = fs::canonicalize(runtime_home).map_err(|err| {
+            let mut root = fs::canonicalize(runtime_home).map_err(|err| {
                 RuntimeLiveBridgeError::ToolExecutionFailed(format!(
                     "cannot canonicalize master runtime home `{}`: {err}",
                     runtime_home.display()
                 ))
             })?;
             if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Workspace)
-                && let Some(requested_root) = workspace_root
+                && let Some(requested_workspace_root) = workspace_root
             {
-                let requested_root = fs::canonicalize(requested_root).map_err(|err| {
-                    RuntimeLiveBridgeError::ToolExecutionFailed(format!(
-                        "cannot canonicalize requested workspace `{}`: {err}",
-                        requested_root.display()
-                    ))
-                })?;
-                if !requested_root.starts_with(&root) {
+                let requested_workspace_root =
+                    fs::canonicalize(requested_workspace_root).map_err(|err| {
+                        RuntimeLiveBridgeError::ToolExecutionFailed(format!(
+                            "cannot canonicalize requested workspace `{}`: {err}",
+                            requested_workspace_root.display()
+                        ))
+                    })?;
+                if !registry.read_only(tool_name).unwrap_or(false)
+                    && !requested_workspace_root.starts_with(&root)
+                {
                     return Ok(master_workspace_denied_result(
                         turn,
                         tool_call,
                         &root,
-                        Some(&requested_root),
+                        Some(&requested_workspace_root),
                         "requested workspace is outside the master runtime home",
                     ));
                 }
+                root = requested_workspace_root;
             }
             root
         }
@@ -6022,6 +6028,18 @@ fn execute_registry_tool_call(
                         tool_call,
                         ToolResultStatus::Failed,
                         "Worker capability boundary: recursive task management is not available. Complete only the assigned task inside the locked workspace.".to_owned(),
+                    ),
+                    task_truth_changed: false,
+                });
+            }
+            if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Shell) {
+                return Ok(ExecutedToolResult {
+                    result: tool_result_reentry(
+                        turn,
+                        tool_call,
+                        ToolResultStatus::Failed,
+                        "Worker capability boundary: shell execution is not available because write intent cannot be reliably bounded to the worker task cwd. Use governed read/query tools for external inspection and governed file-mutation tools only inside the task cwd."
+                            .to_owned(),
                     ),
                     task_truth_changed: false,
                 });
@@ -6078,10 +6096,10 @@ fn registry_error_text(role: LiveReasonExecutionRole, error: &ToolRegistryError)
     match error {
         ToolRegistryError::WorkspaceBoundaryViolation { root, target, .. } => match role {
             LiveReasonExecutionRole::Master => format!(
-                "Master workspace boundary denied direct access: requested target `{target}` is outside `{root}`. This is a Master scope/permission boundary, not evidence that `{target}` is missing. Preserve the requested path and delegate with task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{target}\"), and task(op=\"assign\") so a worker performs the external work."
+                "Write boundary denied: tool attempted to write `{target}` outside the current agent cwd `{root}`. This is a workspace write-permission boundary, not evidence that `{target}` is missing. Read/query operations may inspect external paths, but writes must be performed by an agent whose task cwd is the target workspace. Confirm the correct existing cwd for that work, then delegate with task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"<existing target workspace cwd>\"), and task(op=\"assign\")."
             ),
             LiveReasonExecutionRole::Worker => format!(
-                "Worker workspace boundary: requested target `{target}` is outside locked task workspace `{root}`."
+                "Write boundary denied: tool attempted to write `{target}` outside the worker task cwd `{root}`. This is a workspace write-permission boundary, not evidence that `{target}` is missing. Read/query operations may inspect external paths, but this worker cannot mutate outside its task cwd. Report the required target workspace cwd back to the master so the master can delegate a task to an agent whose cwd is that workspace."
             ),
         },
         _ => format!("Tool execution failed: {error}"),
@@ -9177,7 +9195,7 @@ provider = "old"
     }
 
     #[test]
-    fn live_master_tool_execution_rejects_external_session_cwd() {
+    fn live_master_tool_execution_allows_external_session_cwd_read() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -9228,10 +9246,9 @@ provider = "old"
                 .dispatch_status
                 .contains("reason_live_turn_completed")
         );
-        assert!(reentry_request.contains("Master workspace boundary"));
-        assert!(reentry_request.contains("scope/permission boundary"));
-        assert!(reentry_request.contains("task(op=\\\"create\\\""));
-        assert!(!reentry_request.contains("session cwd content"));
+        assert!(reentry_request.contains("\"type\":\"tool_result\""));
+        assert!(!reentry_request.contains("\"is_error\":true"));
+        assert!(reentry_request.contains("session cwd content"));
         match runtime
             .ui_state()
             .lock()
@@ -9871,9 +9888,8 @@ provider = "old"
         assert!(raw_request.contains(
             "converts the Worker completion schema into TaskReviewSubmitted or TaskBlocked"
         ));
-        assert!(
-            raw_request.contains("do not directly execute work outside your allowed workspace")
-        );
+        assert!(raw_request.contains("read/query tools may inspect external readable paths"));
+        assert!(raw_request.contains("writes outside your current cwd are not allowed"));
         assert!(raw_request.contains("assign only useful independent subtasks"));
         assert!(raw_request.contains("task(op=\\\"list_agents\\\")"));
         assert!(raw_request.contains("Master task orchestration examples"));
@@ -10133,7 +10149,7 @@ provider = "old"
     }
 
     #[test]
-    fn worker_live_bridge_exposes_shell_excludes_task_and_locks_task_workspace() {
+    fn worker_live_bridge_excludes_shell_task_and_locks_task_workspace() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -10159,7 +10175,7 @@ provider = "old"
         let raw_request = rx.recv().expect("provider request");
         handle.join().expect("join provider");
 
-        assert!(raw_request.contains("\"name\":\"bash\""));
+        assert!(!raw_request.contains("\"name\":\"bash\""));
         assert!(raw_request.contains("\"name\":\"read_file\""));
         assert!(!raw_request.contains("\"name\":\"task\""));
         assert!(raw_request.contains("Worker execution policy"));
@@ -10174,6 +10190,51 @@ provider = "old"
                 .as_ref()
                 .map(|event| event.status.clone()),
             Some(TerminalStatus::Success)
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+        fs::remove_dir_all(workspace).expect("cleanup workspace");
+    }
+
+    #[test]
+    fn worker_live_bridge_returns_injected_shell_as_failed_tool_result() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let shell_target = temp_runtime_home().join("must-not-run");
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_bash_response(&format!("touch {}", shell_target.display())),
+                complete_single_response("worker recovered after forbidden shell"),
+            ],
+        );
+        let runtime_home = temp_runtime_home();
+        let workspace = temp_runtime_home();
+        fs::create_dir_all(&workspace).expect("create worker workspace");
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home.clone();
+        request.cwd = Some(fs::canonicalize(&workspace).expect("canonical workspace"));
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.name = "worker-live".to_owned();
+        selected.mode = AgentMode::Slave;
+        selected.paired_agent_name = "master-live".to_owned();
+        selected.paired_agent_mode = AgentMode::Master;
+
+        let outcome = run_worker_live_reason_turn(&selected, request).expect("worker live bridge");
+        let _first_request = rx.recv().expect("first provider request");
+        let second_request = rx.recv().expect("second provider request");
+        handle.join().expect("join provider");
+
+        assert!(second_request.contains("\"type\":\"tool_result\""));
+        assert!(second_request.contains("\"tool_use_id\":\"toolu_bash_1\""));
+        assert!(second_request.contains("\"is_error\":true"));
+        assert!(second_request.contains("shell execution is not available"));
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(outcome.tool_executions, 1);
+        assert!(
+            !shell_target.exists(),
+            "forbidden shell command must not execute"
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
@@ -12299,14 +12360,21 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
-    fn live_bridge_blocks_external_master_work_then_accepts_worker_dispatch() {
+    fn live_bridge_allows_external_master_read_then_accepts_worker_dispatch_for_write() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let runtime_home = temp_runtime_home();
-        let external_workspace = temp_runtime_home().join("external-repo");
+        let external_workspace = runtime_home.with_file_name(format!(
+            "{}-external-repo",
+            runtime_home
+                .file_name()
+                .expect("runtime home file name")
+                .to_string_lossy()
+        ));
         fs::create_dir_all(&runtime_home).expect("create runtime home");
         fs::create_dir_all(&external_workspace).expect("create external workspace");
+        assert!(!external_workspace.starts_with(&runtime_home));
         fs::write(external_workspace.join("secret.txt"), "must-not-be-read")
             .expect("write external fixture");
         let task_id = "task-cross-workspace-boundary";
@@ -12360,7 +12428,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
         selected.paired_agent_name = agent_id.to_owned();
         let outcome = run_live_reason_turn(&selected, request)
-            .expect("boundary failure must return to model and permit task dispatch");
+            .expect("external read result must return to model and still permit task dispatch");
         let requests = (0..5)
             .map(|_| rx.recv().expect("provider request"))
             .collect::<Vec<_>>();
@@ -12368,10 +12436,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
         assert!(!requests[0].contains("\"name\":\"bash\""));
         assert!(requests[0].contains("\"name\":\"task\""));
-        assert!(requests[1].contains("Master workspace boundary"));
-        assert!(requests[1].contains("not evidence that"));
-        assert!(requests[1].contains("task(op=\\\"create\\\""));
-        assert!(!requests[1].contains("must-not-be-read"));
+        assert!(requests[1].contains("\"type\":\"tool_result\""));
+        assert!(requests[1].contains("\"tool_use_id\":\"toolu_external_read\""));
+        assert!(!requests[1].contains("\"is_error\":true"));
+        assert!(requests[1].contains("must-not-be-read"));
         assert!(requests[2].contains("Agent created"));
         assert!(requests[3].contains("Task created"));
         assert!(requests[4].contains("Task assigned"));
@@ -12396,6 +12464,68 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             Some(&AgentId::new(agent_id))
         );
         assert_eq!(task.target_cwd.as_deref(), external_workspace.to_str());
+        let _ = fs::remove_dir_all(runtime_home);
+        let _ = fs::remove_dir_all(
+            external_workspace
+                .parent()
+                .expect("external workspace parent"),
+        );
+    }
+
+    #[test]
+    fn live_bridge_returns_external_write_boundary_as_tool_result_guidance() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let external_workspace = runtime_home.with_file_name(format!(
+            "{}-external-write-repo",
+            runtime_home
+                .file_name()
+                .expect("runtime home file name")
+                .to_string_lossy()
+        ));
+        fs::create_dir_all(&runtime_home).expect("create runtime home");
+        fs::create_dir_all(&external_workspace).expect("create external workspace");
+        assert!(!external_workspace.starts_with(&runtime_home));
+        let outside_file = external_workspace.join("notes.txt");
+        fs::write(&outside_file, "original").expect("write external fixture");
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                tool_use_named_response(
+                    "toolu_external_write",
+                    "write_file",
+                    json!({"path": outside_file.to_string_lossy().to_string(), "content": "mutated"}),
+                ),
+                complete_single_response("external write boundary observed"),
+            ],
+        );
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home.clone();
+        request.cwd = Some(runtime_home.clone());
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect("external write boundary should return to model");
+        let _first_request = rx.recv().expect("first provider request");
+        let second_request = rx.recv().expect("second provider request");
+        handle.join().expect("join");
+
+        assert!(second_request.contains("\"type\":\"tool_result\""));
+        assert!(second_request.contains("\"tool_use_id\":\"toolu_external_write\""));
+        assert!(second_request.contains("\"is_error\":true"));
+        assert!(second_request.contains("Write boundary denied"));
+        assert!(second_request.contains("task(op=\\\"create\\\""));
+        assert_eq!(
+            fs::read_to_string(&outside_file).expect("read external file"),
+            "original"
+        );
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(outcome.tool_executions, 1);
+
         let _ = fs::remove_dir_all(runtime_home);
         let _ = fs::remove_dir_all(
             external_workspace

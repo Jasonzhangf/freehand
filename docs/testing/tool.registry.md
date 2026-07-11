@@ -17,20 +17,21 @@
     task and workspace-scoped file/search tools
   - tool execution scope classification distinguishes framework, workspace, and
     unrestricted process tools in the registry owner
-  - path escape returns a typed workspace-boundary error instead of an
-    unstructured invalid-argument string
+  - read-only path tools may inspect readable external absolute or parent paths
+  - writable path escape returns a typed workspace-boundary error instead of
+    an unstructured invalid-argument string
 - `read_only` metadata tests
 - task-management semantic action names are not exposed as standalone tools
 - `task` remains the task-management tool surface and requires typed `op`
 - `bash` success-path, workspace-cwd, explicit workspace root, timeout, and non-zero-exit tests
 - live runtime checkpoint routing must not treat non-file-mutation tools such as `bash` as preview/checkpointable file mutations
-  - `read_file` line-window and path-lock tests
+  - `read_file` line-window and external-read tests
   - `write_file` create/overwrite/path-lock tests
   - `edit_file` exact-single-match and rejection tests
   - `multi_edit` ordered apply and replace-all tests
   - `glob` recursive and simple-filename pattern tests
-  - `grep` recursive match tests
-  - `ls` flat and recursive listing tests
+  - `grep` recursive match and external-read tests
+  - `ls` flat, recursive listing, and external-read tests
   - `todo_write` argument validation and success tests
   - `complete_step` argument validation and success tests
   - unknown/unimplemented tool error tests
@@ -42,8 +43,8 @@
 - project black-box impact:
   - master live turns cannot receive or execute unsandboxed `bash`; cross-workspace
     work must enter through `task` and a worker
-  - master workspace-scoped tools execute only inside the runtime home
-    (`~/.freehand` in production)
+  - master and worker read-only path tools may inspect readable external paths,
+    but file-mutation tools remain locked to the current agent cwd
   - generic registry coverage retains foreground `bash`, but the master live tool
     surface neither advertises nor executes it
   - provider live turn tool loop no longer depends on `echo_json` or forced `todo_write`
@@ -59,7 +60,7 @@
 - known gaps:
   - `bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
 - sync status between design and implementation:
-  - registry-backed foreground `bash`, read-only file/search, and first text-mutation tools are landed
+  - registry-backed foreground `bash`, read-only file/search with external-read support, and first text-mutation tools are landed
   - explicit per-call workspace root support is landed through `with_workspace_root`
   - generic and master-safe implemented tool schema exports and fingerprints are landed for their respective consumers
   - writable tool live exposure is routed through the code-bound `tool.preview` plus `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts

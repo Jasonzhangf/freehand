@@ -409,7 +409,8 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
             root.join("docs/function-maps/tool.registry.md"),
             &[
                 "the master-safe export excludes unrestricted shell scope",
-                "path-based tools resolve against one owner-supplied locked workspace root",
+                "read-only path tools may inspect readable external absolute or parent paths",
+                "file-mutation tools remain locked to the current workspace root",
                 "WorkspaceBoundaryViolation",
                 "first real read-only execution set is",
                 "ExecutionFailed",
@@ -436,21 +437,22 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
         (
             root.join("docs/testing/tool.registry.md"),
             &[
-                "`read_file` line-window and path-lock tests",
+                "`read_file` line-window and external-read tests",
                 "`glob` recursive and simple-filename pattern tests",
-                "`grep` recursive match tests",
-                "`ls` flat and recursive listing tests",
-                "runtime live bridge can execute a real implemented read-only registry tool inside the master runtime home and re-enter the result",
-                "runtime live bridge returns a paired failed result for an external requested session cwd",
+                "`grep` recursive match and external-read tests",
+                "`ls` flat, recursive listing, and external-read tests",
+                "read-only path tools may inspect readable external paths",
+                "file-mutation tools remain locked to the current agent cwd",
                 "wiki generated from mainline call",
             ],
         ),
         (
             root.join("docs/design/tool-registry-design.md"),
             &[
-                "first real file/search batch is read-only and workspace-locked",
+                "first real file/search batch is read-only",
                 "Current first implemented set",
-                "first-version path tools are directory-locked to the canonical process current working directory",
+                "readable external absolute or parent paths are allowed",
+                "unrestricted shell is not exposed to Worker provider turns",
             ],
         ),
         (

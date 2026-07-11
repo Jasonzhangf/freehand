@@ -3716,6 +3716,36 @@ Current real root cause split:
   - current S-profile is ready for Jason's normal WebUI testing on `http://127.0.0.1:4042`
   - remaining non-dev promotion gaps are release `4041` and Android true-device verification if the target surface is release/phone
 
+# 2026-07-11 cwd read/write boundary contract correction
+
+- marker:
+  - `cwd-read-write-boundary-contract-closeout-1783751556`
+- corrected contract:
+  - agent cwd/workspace root is `A`
+  - target path `B` is not automatically a new cwd
+  - read/query tools may inspect readable external absolute paths or parent paths outside `A`
+  - write/edit/delete outside `A` must return a paired failed tool result to the model
+  - write-boundary feedback must say the write target is outside current cwd and must be handled by confirming/selecting the correct target workspace cwd, then delegating through task/worker
+  - boundary feedback must not say or imply that the path is missing
+- implementation:
+  - `freehand-tools` added read-path resolution for `read_file`, `grep`, and `ls`; file-mutation tools still use locked write resolution
+  - Worker provider tool surface excludes unrestricted `bash`; injected Worker shell calls return paired failed tool results instead of executing
+  - runtime Master path policy allows external read/query and denies external writes with `Write boundary denied`
+  - Master/Worker prompts now describe read/write split, target cwd semantics, symlink checks, and worker shell unavailability
+  - function maps, test designs, design docs, mainline manifests, generated wiki, gates, and local skill were updated
+- validation:
+  - focused local runtime test: `cargo test -p freehand-runtime live_bridge_ -- --nocapture` -> 40 passed
+  - prior local suite from handoff: `cargo test -p freehand-tools -- --nocapture`, `cargo test -p freehand-runtime -- --nocapture`, `cargo test -p xtask -- --nocapture`, `cargo fmt --check`, targeted clippy, mainlines generate/check, gates check, and `git diff --check` passed before the final test-path hardening
+  - online S-profile fixture used real external path `/tmp/freehand-path-policy-online-1783751533-96433`, not `~/.freehand/tmp`
+  - online session `path-policy-online-1783751556` returned `reason_live_turn_completed rounds=3 schema_rejections=0 tool_executions=2`
+  - reason ledger `~/.freehand/ledgers/reason/master/path-policy-online-1783751556.jsonl` contains `toolu_path_read` success with `external-readable`, then `toolu_path_write` failed with `Write boundary denied`
+  - external file `/tmp/freehand-path-policy-online-1783751533-96433/external-write/target.txt` remained `original`
+  - no checkpoint ledger existed for the session, so no external write `Applied` checkpoint was produced
+  - mock provider log showed third provider request had `hasWriteBoundary=true`, proving the failed write result was paired back to the model
+  - post-proof config restored: `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` returned `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`
+- invalidated evidence:
+  - earlier online write attempt `path-policy-write-1783751078` is not valid external-write proof because its fixture path lived under `~/.freehand/tmp`, inside the master runtime home
+
 # 2026-07-11 target_cwd preflight error classification
 
 - marker:
