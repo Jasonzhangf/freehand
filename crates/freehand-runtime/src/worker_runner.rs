@@ -268,13 +268,19 @@ impl ProductionWorkerRunner {
                     execution.status, execution.summary
                 ),
             ),
-            Err(reason) => self.report_blocked(
-                &task_runtime,
-                &task,
-                &execution_id,
-                None,
-                format!("worker live execution failed: {reason}"),
-            ),
+            Err(reason) => {
+                let message = format!("worker live execution failed: {reason}");
+                if worker_execution_error_is_retryable_system_failure(&reason) {
+                    return self.report_interrupted(
+                        &task_runtime,
+                        &task,
+                        &execution_id,
+                        None,
+                        message,
+                    );
+                }
+                self.report_blocked(&task_runtime, &task, &execution_id, None, message)
+            }
         }
     }
 
@@ -401,6 +407,50 @@ impl ProductionWorkerRunner {
             reason,
         })
     }
+
+    fn report_interrupted(
+        &self,
+        task_runtime: &TaskRuntime,
+        task: &TaskSnapshot,
+        execution_id: &str,
+        turn_id: Option<TurnId>,
+        reason: String,
+    ) -> Result<ProductionWorkerTickOutcome, ProductionWorkerRunnerError> {
+        task_runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: self.worker_agent_id.clone(),
+                turn_id: turn_id.clone(),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Interrupted {
+                    reason: reason.clone(),
+                    evidence: vec![reason.clone()],
+                },
+                watermark: worker_watermark(execution_id, "interrupted"),
+            })
+            .map_err(task_center_error)?;
+        Ok(ProductionWorkerTickOutcome::Blocked {
+            task_id: task.task_id.clone(),
+            execution_id: execution_id.to_owned(),
+            turn_id,
+            reason,
+        })
+    }
+}
+
+fn worker_execution_error_is_retryable_system_failure(reason: &str) -> bool {
+    reason.contains("anthropic_http_request_failed")
+        || reason.contains("anthropic_stream_read_failed")
+        || reason.contains("anthropic_http_status_408")
+        || reason.contains("anthropic_http_status_409")
+        || reason.contains("anthropic_http_status_425")
+        || reason.contains("anthropic_http_status_429")
+        || reason.contains("anthropic_http_status_500")
+        || reason.contains("anthropic_http_status_502")
+        || reason.contains("anthropic_http_status_503")
+        || reason.contains("anthropic_http_status_504")
+        || reason.contains("anthropic_http_status_5")
 }
 
 fn worker_live_request(

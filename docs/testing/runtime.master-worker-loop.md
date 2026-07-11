@@ -14,7 +14,10 @@
 5. Runner claims one task for its Worker identity and persists lease heartbeat.
 6. Runner expands a leading `~`, canonicalizes `task.target_cwd` through symlinks, and locks the Worker to that canonical workspace.
 7. Runner executes one provider/reason turn under Worker identity and Worker tool policy.
-8. Runner writes `review_ready` on successful completion or `blocked` on provider/runtime failure.
+8. Runner writes `review_ready` on successful completion, `interrupted` on
+   provider/network system failure after provider-owned retry exhaustion, or
+   `blocked` on task-content, path-preflight, model-terminal, or other
+   non-provider execution failure.
 9. Runner returns to polling without inventing task truth while idle.
 10. Restart reads the same task/execution/agent/history truth.
 11. Each Master lifecycle event attempt runs in a task-scoped internal
@@ -41,7 +44,8 @@ BigTasks remain out of scope until every row below is closed.
 | --- | --- | --- |
 | success | `TaskReviewSubmitted` with deliverables and evidence | Master approves and closes, or rejects with requirements |
 | review rejected | `TaskReviewRejected` remains durable | same Worker receives a new execution with rejection requirements |
-| provider/tool terminal failure | `TaskBlocked` with paired reason/evidence | Master explicitly retries/reassigns or leaves the task blocked |
+| provider/network system failure after internal retries | `TaskInterrupted` with paired reason/evidence | same task is requeued to the configured Worker with a new execution |
+| task-content, path-preflight, or model-terminal failure | `TaskBlocked` with paired reason/evidence | Master explicitly retries/reassigns or leaves the task blocked |
 | Worker process crash | boot writes `TaskInterrupted` for missing/expired lease | task is requeued to the configured Worker with a new execution |
 | daemon restart while idle | task/agent/cursor truth reloads unchanged | loops resume without duplicate task mutation |
 | daemon restart while review is pending | review truth reloads unchanged | Master review loop continues from durable task truth |
@@ -134,7 +138,11 @@ Task Center truth before another execution starts.
 - non-canonicalizable `target_cwd` records `Blocked`; model execution does not start.
 - missing `~/...` target cwd records `Blocked` with both original and expanded path; model execution does not start.
 - missing target cwd under an existing parent records `Blocked` as workspace-preflight failure that explicitly says this is not a repository permission denial and likely means `target_cwd` was misused for a not-yet-created output directory.
-- provider/runtime failure records `Blocked`; it never writes `ReviewReady`.
+- provider/network system failure after internal provider retry exhaustion records
+  `Interrupted`, reuses the same task on the next Worker tick, and never writes
+  `ReviewReady` for the failed execution.
+- non-provider task execution failure records `Blocked`; it is not silently
+  retried by the Worker and never writes `ReviewReady`.
 - reporting `Blocked` releases the Worker resource to `Available`; task blocked
   truth must not globally pause the configured Worker
 - a deliberately paused task keeps the Worker resource `Paused`; Worker startup
@@ -175,7 +183,7 @@ Task Center truth before another execution starts.
 - deterministic fake executor drives `run_once` through:
   - idle
   - successful completion
-  - provider/runtime failure
+- provider/network system failure and non-provider task execution failure
 - deterministic Master executor drives:
   - review approve and close
   - review rejection with persisted requirements
@@ -218,7 +226,7 @@ Task Center truth before another execution starts.
   - `TaskAssigned`
   - `TaskResumed`
   - `TaskHeartbeat`
-  - `TaskReviewSubmitted` or `TaskBlocked`
+- `TaskReviewSubmitted`, `TaskInterrupted`, or `TaskBlocked`
 - verify the same task/execution/agent ids after Worker restart
 - only claim production closure when the Worker produced a real deliverable or an explicit real-provider blocked result
 

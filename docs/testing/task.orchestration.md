@@ -33,7 +33,8 @@
   - list_tasks returns task snapshots for queue and UI projection queries
   - agent registry exposes self agent
   - Phase 1 TaskBoard query projects owner-backed board truth
-  - Phase 1 ExecutionFact sync admits typed worker execution facts into Task Center
+- Phase 1 ExecutionFact sync admits typed worker execution facts into Task Center,
+  including interrupted system-retry truth that keeps the same task retryable
   - Phase 1 SchedulerTick emits elapsed/stale/timeout facts without business decisions
   - Phase 2B EventInbox projects master-visible ledger events after a globally
     unique cursor
@@ -86,6 +87,8 @@
   `execution_fact_recovering_keeps_running_and_writes_event`
 - ExecutionFact blocked creates a master-visible event:
   `execution_fact_blocked_and_review_ready_update_board_truth`
+- ExecutionFact interrupted creates retryable task truth:
+  `execution_fact_interrupted_marks_task_retryable_without_blocked_truth`
 - ExecutionFact review_ready enters review queue:
   `execution_fact_blocked_and_review_ready_update_board_truth`
 - malformed ExecutionFact writes no Task Center truth:

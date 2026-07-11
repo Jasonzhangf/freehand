@@ -9,6 +9,7 @@ cli_path="${FREEHAND_PROVIDER_RETRY_CLI:-$HOME/.local/bin/freehand-cliS}"
 port="${FREEHAND_PROVIDER_RETRY_FIXTURE_PORT:-18081}"
 fixture_key_name="FREEHAND_PROVIDER_RETRY_FIXTURE_KEY"
 fixture_key_value="test-provider-retry-key"
+fixture_backoff_name="FREEHAND_PROVIDER_RETRY_BACKOFF_MS"
 config_path="$runtime_home/config.toml"
 env_path="$runtime_home/daemonS.env"
 backup_dir="$runtime_home/tmp/provider-retry-online-$(date +%Y%m%dT%H%M%S)-$$"
@@ -110,7 +111,9 @@ NODE
     exit 2
   fi
 
-  printf '\n%s="%s"\n' "$fixture_key_name" "$fixture_key_value" >>"$env_path"
+  printf '\n%s="%s"\n%s="0"\n' \
+    "$fixture_key_name" "$fixture_key_value" \
+    "$fixture_backoff_name" >>"$env_path"
   scripts/install-launchd.sh restartS >/dev/null
   curl -4fsS "$health_url" >/dev/null
 
@@ -138,9 +141,9 @@ NODE
   session_output="$("$cli_path" adp-session-query --url "$adp_url" --session "$session_id")"
   mock_count="$(grep -c '"url":"/v1/messages"' "$mock_log" || true)"
 
-  if [[ "$mock_count" != "5" ]]; then
+  if [[ "$mock_count" != "10" ]]; then
     cat "$mock_log" >&2
-    echo "expected 5 provider attempts, got $mock_count" >&2
+    echo "expected 10 provider attempts, got $mock_count" >&2
     exit 1
   fi
   if ! grep -q "provider_retries=1" <<<"$sample_output"; then
@@ -148,9 +151,9 @@ NODE
     echo "provider retry sample did not report provider retry evidence" >&2
     exit 1
   fi
-  if ! grep -q "count=5" <<<"$error_output"; then
+  if ! grep -q "count=10" <<<"$error_output"; then
     echo "$error_output" >&2
-    echo "error-center query did not return five provider rows" >&2
+    echo "error-center query did not return ten provider rows" >&2
     exit 1
   fi
   if ! grep -q "retry_same_step" <<<"$error_output" || ! grep -q "fail_turn" <<<"$error_output"; then

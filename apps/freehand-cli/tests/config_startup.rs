@@ -1196,6 +1196,7 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 UiExecutionFactKind::Running { .. } => "TaskExecutionRecorded",
                                 UiExecutionFactKind::Recovering { .. } => "TaskExecutionRecovering",
                                 UiExecutionFactKind::Blocked { .. } => "TaskBlocked",
+                                UiExecutionFactKind::Interrupted { .. } => "TaskInterrupted",
                                 UiExecutionFactKind::ReviewReady { .. } => "TaskReviewSubmitted",
                             };
                             events
@@ -1815,6 +1816,7 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                                 UiExecutionFactKind::Running { .. } => "TaskExecutionRecorded",
                                 UiExecutionFactKind::Recovering { .. } => "TaskExecutionRecovering",
                                 UiExecutionFactKind::Blocked { .. } => "TaskBlocked",
+                                UiExecutionFactKind::Interrupted { .. } => "TaskInterrupted",
                                 UiExecutionFactKind::ReviewReady { .. } => "TaskReviewSubmitted",
                             };
                             events

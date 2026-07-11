@@ -107,9 +107,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 
-const PROVIDER_EXECUTOR_RETRY_CAP: u32 = 5;
+const PROVIDER_EXECUTOR_RETRY_CAP: u32 = 10;
 const PROVIDER_EXECUTOR_INITIAL_BACKOFF_MS: u64 = 1_000;
-const PROVIDER_EXECUTOR_MAX_BACKOFF_MS: u64 = 16_000;
+const PROVIDER_EXECUTOR_MAX_BACKOFF_MS: u64 = 20_000;
 
 #[derive(Debug, Clone)]
 pub struct LiveReasonTurnRequest {
@@ -277,12 +277,16 @@ impl ProviderExecutorRetryPlan {
     }
 
     fn backoff_duration(self, retry_index: u32) -> Duration {
+        if self.initial_backoff_ms == self.max_backoff_ms {
+            return Duration::from_millis(self.initial_backoff_ms);
+        }
         let exponent = retry_index.saturating_sub(1).min(31);
         let multiplier = 1_u64.checked_shl(exponent).unwrap_or(u64::MAX);
-        let millis = self
-            .initial_backoff_ms
-            .saturating_mul(multiplier)
-            .min(self.max_backoff_ms);
+        let exponential = self.initial_backoff_ms.saturating_mul(multiplier);
+        let stagger = u64::from(retry_index)
+            .saturating_sub(1)
+            .saturating_mul(self.initial_backoff_ms / 2);
+        let millis = exponential.saturating_add(stagger).min(self.max_backoff_ms);
         Duration::from_millis(millis)
     }
 }
@@ -4668,6 +4672,9 @@ fn ui_execution_fact_to_task_fact(fact: UiExecutionFactCommand) -> ExecutionFact
             UiExecutionFactKind::Blocked { reason, evidence } => {
                 ExecutionFactKind::Blocked { reason, evidence }
             }
+            UiExecutionFactKind::Interrupted { reason, evidence } => {
+                ExecutionFactKind::Interrupted { reason, evidence }
+            }
             UiExecutionFactKind::ReviewReady {
                 summary,
                 deliverables,
@@ -6399,6 +6406,10 @@ fn execute_task_tool(
                         retry_count: required_json_u32(&args, "retry_count")?,
                     },
                     "blocked" => ExecutionFactKind::Blocked {
+                        reason: summary,
+                        evidence,
+                    },
+                    "interrupted" => ExecutionFactKind::Interrupted {
                         reason: summary,
                         evidence,
                     },
@@ -9071,7 +9082,7 @@ provider = "old"
     }
 
     #[test]
-    fn live_bridge_fails_after_five_provider_retries_with_error_code() {
+    fn live_bridge_fails_after_ten_provider_retries_with_error_code() {
         let runtime_home = temp_runtime_home();
         let responses = (0..PROVIDER_EXECUTOR_RETRY_CAP)
             .map(|index| {
@@ -9101,7 +9112,7 @@ provider = "old"
         assert!(err.to_string().contains("anthropic_http_status_500"));
         assert_eq!(
             rx.iter().take(PROVIDER_EXECUTOR_RETRY_CAP as usize).count(),
-            5
+            PROVIDER_EXECUTOR_RETRY_CAP as usize
         );
         handle.join().expect("join provider");
         let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
@@ -9126,7 +9137,7 @@ provider = "old"
             .filter_map(|row| metadata_entry_u64(row, "error.retry_index"))
             .collect::<Vec<_>>();
         assert!(retry_indexes.contains(&1));
-        assert!(retry_indexes.contains(&5));
+        assert!(retry_indexes.contains(&(PROVIDER_EXECUTOR_RETRY_CAP as u64)));
         let recovery_actions = metadata
             .iter()
             .filter_map(|row| metadata_entry_string(row, "error.recovery_action"))

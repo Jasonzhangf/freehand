@@ -18,7 +18,7 @@ restart recovery.
   returned to the model as a paired tool result.
 - Completion schema mismatch is handled as response polishing, not task/turn
   failure.
-- Recoverable provider errors retry exactly five attempts with exponential
+- Recoverable provider errors retry exactly ten attempts with exponential
   backoff starting at one second before terminal provider failure.
 - UI shows every lifecycle phase from submit through terminal state and never
   leaves blank/fake running rows.

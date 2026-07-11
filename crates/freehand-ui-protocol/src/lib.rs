@@ -754,6 +754,10 @@ pub enum UiExecutionFactKind {
         reason: String,
         evidence: Vec<String>,
     },
+    Interrupted {
+        reason: String,
+        evidence: Vec<String>,
+    },
     ReviewReady {
         summary: String,
         deliverables: Vec<String>,

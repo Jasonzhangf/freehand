@@ -24,7 +24,7 @@
     "`TaskRuntime::heartbeat_task` refreshes the lease for the assigned running agent",
     "`TaskRuntime` mutation, heartbeat, and execution-fact writes re-read persisted task truth before appending ledger or snapshot state",
     "Phase 1 TaskBoard query reads task snapshots, agent registry state, blocked items, review queue, and current skeleton stale projection",
-    "Phase 1 ExecutionFact sync admits typed running/recovering/blocked/review_ready facts into Task Center truth without parsing raw prose",
+    "Phase 1 ExecutionFact sync admits typed running/recovering/blocked/interrupted/review_ready facts into Task Center truth without parsing raw prose",
     "Phase 1 SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without making business decisions",
     "Phase 2A worker loop keeps execution_id attached to claim/start, progress, blocked, recovering, review, reject, retry, approve, and close evidence",
     "Phase 2A close requires approved review; blocked or rejected tasks cannot be closed as a shortcut around review acceptance",

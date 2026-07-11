@@ -1,5 +1,13 @@
 # CACHE
 
+- Current provider retry + Worker task recovery closeout:
+  - Marker: `provider-retry-worker-interrupted-closeout-1783761041`.
+  - Recoverable non-stream provider failures now retry internally 10 attempts. Production backoff varies between 1s and 20s; test/fixture proof can set `FREEHAND_PROVIDER_RETRY_BACKOFF_MS=0` only to avoid waiting while preserving retry cap/classification.
+  - Provider retry attempts remain provider/error-center internal evidence until final exhaustion. Final provider/network exhaustion in a Worker task writes `TaskInterrupted`, not `TaskBlocked`, so the same task is requeued to the configured Worker with a new execution id. Non-provider task-content/path/model-terminal failures still write `TaskBlocked` and are not silently retried by Worker.
+  - `scripts/verify-provider-retry-online.sh` passed on S-profile `127.0.0.1:4042`: session `cli-adp-sample-provider-retry-1783760766062266000`, `mock_attempts=10`, error-center rows `retry_same_step` x9 then `fail_turn` x1 for `anthropic_http_status_500`; post-proof config/env restored to minimax/MiniMax-M3 and no fixture env remains.
+  - `scripts/verify-normal-master-worker-e2e.sh` passed after fixing the autonomy fixture to create tasks with a real temporary `target_cwd`. Proof includes success without `TaskBlocked`, execution-error blocked, reject-retry close, blocked-decision progress, and crash recovery same-task history `TaskInterrupted,TaskAssigned,...,TaskClosed` for `task-normal-crash-1781783761126`.
+  - Local proof: task owner interrupted fact test passed; runtime Worker provider-interrupted and non-provider-blocked tests passed; provider retry success/exhaustion tests passed; `cargo test -p freehand-runtime` passed 125 tests; `cargo test -p freehand-task` passed 47 tests; `cargo test -p freehand-ui-protocol` passed 54 tests; `cargo test -p freehand-cli` passed 26 tests; `cargo test -p freehand-control` passed 8 tests; daemon error-center focused test passed; targeted clippy, fmt, mainlines check, gates check, and `git diff --check` passed.
+
 - Current master workspace boundary closeout:
   - Marker: `master-runtime-home-boundary-closeout-20260710`.
   - Master direct workspace and checkpoint truth are locked to `~/.freehand`; release and S launchd profiles default their workdir to the same runtime home.

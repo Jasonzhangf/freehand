@@ -174,7 +174,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `cargo test -p freehand-control`
   - `cargo test -p freehand-runtime live_bridge_records_error_center_metadata_for_schema_repair -- --nocapture`
   - `cargo test -p freehand-runtime live_bridge_retries_recoverable_provider_errors_then_succeeds -- --nocapture`
-  - `cargo test -p freehand-runtime live_bridge_fails_after_five_provider_retries_with_error_code -- --nocapture`
+  - `cargo test -p freehand-runtime live_bridge_fails_after_ten_provider_retries_with_error_code -- --nocapture`
   - `cargo test -p freehand-runtime live_bridge_returns_unknown_tool_as_failed_tool_result_without_terminalizing -- --nocapture`
   - `cargo test -p freehand-runtime live_bridge_writes_provider_error_metadata_on_executor_failure -- --nocapture`
   - `cargo test -p freehand-runtime runtime_query_reads_error_center_metadata_without_raw_text -- --nocapture`
@@ -1526,7 +1526,9 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - no assigned task returns an explicit idle outcome without mutating task truth
   - assigned task claims exactly once with one execution id and lease heartbeat
   - successful worker turn records `review_ready` against the claimed task/execution/agent
-  - provider/runtime failure records `blocked` and never projects success
+  - provider/network system failure after internal retries records `interrupted`
+    for same-task retry; non-provider task failure records `blocked`; neither
+    projects success
   - missing/invalid worker target cwd blocks before model execution
   - master live-turn tool policy remains runtime-home locked and shell-denied
 - required_module_black_box_tests:
@@ -1535,7 +1537,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - slave daemon mode runs the worker loop and does not expose the Master UI dispatcher
   - restart can query the same task, execution, agent, and history truth
 - required_project_black_box_tests:
-  - S-profile Master creates and assigns external-cwd work; separate Slave daemon claims, executes, heartbeats, and reports `review_ready` or `blocked`
+  - S-profile Master creates and assigns external-cwd work; separate Slave daemon claims, executes, heartbeats, and reports `review_ready`, `interrupted`, or `blocked`
   - TaskHistory contains `TaskResumed`, `TaskHeartbeat`, and terminal execution fact for the same task/execution/agent ids
 - test_design_doc: `docs/testing/runtime.master-worker-loop.md`
 - function_map_doc: `docs/function-maps/runtime.master-worker-loop.md`

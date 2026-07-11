@@ -14,6 +14,7 @@ env_path="$runtime_home/daemonS.env"
 backup_dir="$runtime_home/tmp/master-autonomy-online-$(date +%Y%m%dT%H%M%S)-$$"
 mock_log="$backup_dir/mock-provider.log"
 mock_pid=""
+fixture_target_cwd="$backup_dir/worker-target"
 
 cd "$repo_root"
 
@@ -69,8 +70,10 @@ run_master_worker_autonomy_online() {
   fi
 
   mkdir -p "$backup_dir"
+  mkdir -p "$fixture_target_cwd"
   cp "$config_path" "$backup_dir/config.toml"
   cp "$env_path" "$backup_dir/daemonS.env"
+  export FREEHAND_MASTER_AUTONOMY_TARGET_CWD="$fixture_target_cwd"
 
   node - "$port" >"$mock_log" 2>&1 <<'NODE' &
 const http = require("http");
@@ -127,6 +130,8 @@ function complete(text) {
 
 function sequenceFor(ids) {
   const { scenario, taskId, workerId, executionId } = ids;
+  const targetCwd = process.env.FREEHAND_MASTER_AUTONOMY_TARGET_CWD;
+  if (!targetCwd) throw new Error("missing FREEHAND_MASTER_AUTONOMY_TARGET_CWD");
   const common = [
     toolUse(`toolu_${scenario}_create`, {
       op: "create",
@@ -136,6 +141,7 @@ function sequenceFor(ids) {
       goal: `Prove master worker autonomy ${scenario}`,
       deliverables: ["worker result"],
       acceptance: ["owner task truth matches scenario"],
+      target_cwd: targetCwd,
       dispatch: { mode: "none" },
       priority: scenario === "success" ? 90 : scenario === "execution-error" ? 80 : 85,
     }),

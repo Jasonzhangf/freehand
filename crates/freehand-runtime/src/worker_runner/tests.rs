@@ -207,14 +207,14 @@ fn production_worker_runner_rejects_result_after_external_cancel_without_termina
 }
 
 #[test]
-fn production_worker_runner_provider_error_records_blocked_not_review_ready() {
-    let runtime_home = temp_path("blocked");
-    let workspace = temp_path("blocked-workspace");
+fn production_worker_runner_provider_error_records_interrupted_and_requeues_same_task() {
+    let runtime_home = temp_path("provider-interrupted");
+    let workspace = temp_path("provider-interrupted-workspace");
     fs::create_dir_all(&workspace).expect("workspace");
     let runner = test_runner(
         runtime_home.clone(),
         Arc::new(StubExecutor::new(Err(
-            "provider unavailable after retries".to_owned()
+            "anthropic_http_request_failed: error sending request for url".to_owned(),
         ))),
     );
     let expected_task_id = seed_assigned_task(&runtime_home, Some(&workspace));
@@ -230,7 +230,86 @@ fn production_worker_runner_provider_error_records_blocked_not_review_ready() {
     let task = task_runtime
         .query_task(&expected_task_id)
         .expect("query task");
-    assert_eq!(task.status, TaskStatus::Blocked);
+    assert_eq!(task.status, TaskStatus::Interrupted);
+    let history = task_runtime
+        .task_history(&expected_task_id)
+        .expect("task history");
+    assert!(
+        history
+            .iter()
+            .any(|event| event.event_type == "TaskInterrupted")
+    );
+    assert!(
+        !history
+            .iter()
+            .any(|event| event.event_type == "TaskBlocked")
+    );
+    assert!(
+        !history
+            .iter()
+            .any(|event| event.event_type == "TaskReviewSubmitted")
+    );
+    let retry_executor = Arc::new(StubExecutor::new(Ok(WorkerTurnExecution {
+        status: TerminalStatus::Success,
+        summary: "recovered after provider interruption".to_owned(),
+        turn_id: TurnId::new("worker-turn-provider-recovered"),
+    })));
+    let retry_runner = test_runner(runtime_home.clone(), retry_executor.clone());
+    let retry_execution_id = match retry_runner.run_once().expect("interrupted retry tick") {
+        ProductionWorkerTickOutcome::ReviewReady {
+            task_id,
+            execution_id,
+            ..
+        } => {
+            assert_eq!(task_id, expected_task_id);
+            execution_id
+        }
+        other => panic!("expected same task review after interruption retry, got {other:?}"),
+    };
+    assert!(retry_executor.prompts()[0].contains("previous execution was interrupted"));
+    assert!(
+        task_runtime
+            .task_history(&expected_task_id)
+            .expect("task history after retry")
+            .iter()
+            .any(|event| {
+                event.event_type == "TaskReviewSubmitted"
+                    && event.payload["execution_id"] == retry_execution_id
+            })
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn production_worker_runner_non_provider_execution_error_records_blocked_not_retryable() {
+    let runtime_home = temp_path("blocked");
+    let workspace = temp_path("blocked-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let runner = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubExecutor::new(Err(
+            "worker produced invalid deliverable".to_owned(),
+        ))),
+    );
+    let expected_task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+
+    let outcome = runner.run_once().expect("worker tick");
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::Blocked { ref task_id, .. }
+            if task_id == &expected_task_id
+    ));
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    assert_eq!(
+        task_runtime
+            .query_task(&expected_task_id)
+            .expect("query task")
+            .status,
+        TaskStatus::Blocked
+    );
     let history = task_runtime
         .task_history(&expected_task_id)
         .expect("task history");
@@ -242,7 +321,7 @@ fn production_worker_runner_provider_error_records_blocked_not_review_ready() {
     assert!(
         !history
             .iter()
-            .any(|event| event.event_type == "TaskReviewSubmitted")
+            .any(|event| event.event_type == "TaskInterrupted")
     );
     let retry_executor = Arc::new(StubExecutor::new(Err("must not execute".to_owned())));
     let retry_runner = test_runner(runtime_home.clone(), retry_executor.clone());

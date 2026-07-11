@@ -3844,6 +3844,47 @@ Current real root cause split:
   - `make verify-webui-online` -> passed; artifact `artifacts/webui-online/20260711-verify-4042-1783757223354/summary.json`
   - new online checks true: `scrollLockHasScrollableTranscript`, `scrollLockPreservesManualReadPosition`, `bottomPinnedRefreshKeepsLatestVisible`, `composerClearanceApplied`, `sessionListHidesInternalLifecycle`; `all_false=[]`
   - post-proof config query restored to `provider=minimax`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`
-- remaining:
+  - remaining:
   - old internal lifecycle session truth is not physically deleted; it is hidden from user-facing lists and remains directly queryable for debug/replay.
   - `output/` remains an unrelated untracked directory and was not touched.
+
+# 2026-07-11 provider retry and Worker same-task interruption closeout
+
+- marker:
+  - `provider-retry-worker-interrupted-closeout-1783761041`
+- user requirement:
+  - provider failures retry automatically 10 times.
+  - retry waits vary between 1 and 20 seconds in production.
+  - retries before final exhaustion should not become task/user-visible state.
+  - task problems should not create new tasks; retry/recovery must stay in the same task lifecycle.
+- implementation:
+  - provider retry cap changed from 5 to 10.
+  - production provider backoff now has bounded varied timing from 1s to 20s.
+  - `TaskRuntime::apply_execution_fact` now supports `ExecutionFactKind::Interrupted`, writing `TaskInterrupted`.
+  - Worker provider/network executor exhaustion is mapped to `TaskInterrupted`, not `TaskBlocked`.
+  - non-provider Worker errors still map to `TaskBlocked` and are not silently retried.
+  - `UiExecutionFactKind::Interrupted` was added so protocol/task harnesses can express the same owner truth.
+  - provider retry online fixture now sets `FREEHAND_PROVIDER_RETRY_BACKOFF_MS=0` only for proof speed; config/env restoration removes the fixture env.
+  - master-worker autonomy online fixture now creates a real temporary `target_cwd` so production workerS cannot correctly block a no-cwd deterministic fixture task.
+- validation:
+  - `cargo test -p freehand-task execution_fact_interrupted_marks_task_retryable_without_blocked_truth -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_worker_runner_provider_error_records_interrupted_and_requeues_same_task -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_worker_runner_non_provider_execution_error_records_blocked_not_retryable -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_fails_after_ten_provider_retries_with_error_code -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_retries_recoverable_provider_errors_then_succeeds -- --nocapture` passed.
+  - `cargo test -p freehand-runtime -- --nocapture` passed 125 tests.
+  - `cargo test -p freehand-task -- --nocapture` passed 47 tests.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` passed 54 tests.
+  - `cargo test -p freehand-cli -- --nocapture` passed 26 tests.
+  - `cargo test -p freehand-control -- --nocapture` passed 8 tests.
+  - `cargo test -p freehand-daemon daemon_adp_queries_runtime_error_center_truth -- --nocapture` passed.
+  - `cargo clippy -p freehand-runtime -p freehand-task -p freehand-ui-protocol --all-targets -- -D warnings` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+  - `scripts/verify-provider-retry-online.sh` passed on S-profile `127.0.0.1:4042`: session `cli-adp-sample-provider-retry-1783760766062266000`, `mock_attempts=10`, error-center rows `retry_same_step` x9 then `fail_turn` x1.
+  - post provider proof config query returned minimax/MiniMax-M3 inline auth; `~/.freehand/daemonS.env` had no provider retry fixture env.
+  - first `scripts/verify-normal-master-worker-e2e.sh` run failed because the autonomy fixture created a no-cwd task while production workerS was online; ledger showed `TaskBlocked` reason `assigned worker task is missing target_cwd`.
+  - after fixture target_cwd repair, `scripts/verify-normal-master-worker-e2e.sh` passed with autonomy `mock_attempts=24`; success had no `TaskBlocked`; production branches covered rejected retry, blocked decision, and same-task crash recovery.
+  - crash recovery online proof: `task-normal-crash-1781783761126` history included `TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`.
+  - final config query returned minimax/MiniMax-M3 inline auth; no provider/master fixture env remained.
+- remaining:
+  - WorkerTurnExecutor still returns `String` errors, so Worker provider-system classification uses explicit provider code substrings. A later cleanup should carry structured runtime error info across that boundary.

@@ -38,7 +38,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 - interrupted and rejected tasks previously bound to the configured Worker are requeued with a new execution id
 - blocked tasks remain explicit Master decisions and are never silently retried by the Worker
 - successful Worker completion writes one review-ready execution fact
-- provider/runtime failure writes one blocked execution fact
+- provider/network system failure after internal provider retries writes one interrupted execution fact for same-task retry; non-provider task execution failure writes one blocked execution fact
 - Worker reason/session truth persists under Worker agent identity
 - task/execution/lease/agent truth persists under the paired Master's Task Center namespace
 - periodic Worker ticks continue after idle, success, or blocked outcomes

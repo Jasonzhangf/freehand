@@ -57,7 +57,7 @@
 - `heartbeat_task` refreshes the lease for the assigned running agent
 - TaskBoard query reads task snapshots, agent registry state, blocked items,
   review queue, and current skeleton stale projection
-- ExecutionFact sync admits typed running/recovering/blocked/review_ready
+- ExecutionFact sync admits typed running/recovering/blocked/interrupted/review_ready
   facts into Task Center truth without parsing raw prose
 - Phase 2A worker loop keeps `execution_id` attached to claim/start,
   progress, blocked, recovering, review, reject, retry, approve, and close
@@ -98,7 +98,8 @@
 - TaskBoard query returns board-level task, blocker, review, stale, and agent
   binding summaries
 - ExecutionFact sync returns event-backed Task Center updates while preserving
-  recovering as non-terminal
+  recovering as non-terminal; interrupted execution facts preserve same-task
+  retryability instead of creating replacement task truth
 - review rejection remains non-terminal task lifecycle truth; a later execution
   fact may resume the rejected task into running retry and submit review again
 - SchedulerTick returns durable/replayable fact events and recommendations only
@@ -223,7 +224,7 @@
 | 16 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal task and release assignee state | task mutation request | cancelled task snapshot + released agent | runtime task bridge | task owner | bound |
 | 17 | `TaskRuntime::create_agent` / `close_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents and close only idle agents | agent mutation request | agent snapshot | runtime task bridge | task owner | bound |
 | 18 | `TaskRuntime::query_task_board` | `crates/freehand-task/src/lib.rs` | project TaskBoard truth for master, scheduler, UI, and headless query | task snapshots + execution facts + agent registry | TaskBoard projection | runtime query dispatch | task owner | bound |
-| 19 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | admit typed ExecutionFact state into Task Center without raw prose parsing | ExecutionFact | task snapshot + event | Agent Lifecycle sync / runtime | task owner | bound |
+| 19 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | admit typed ExecutionFact state into Task Center without raw prose parsing, including interrupted system-retry truth | ExecutionFact | task snapshot + event | Agent Lifecycle sync / runtime | task owner | bound |
 | 20 | `TaskRuntime::run_scheduler_tick` | `crates/freehand-task/src/lib.rs` | compute elapsed/stale/timeout facts without business decisions | scheduler tick request + task snapshots | durable scheduler facts | runtime scheduler / CLI sample | task owner | bound |
 | 21 | `TaskRuntime::claim_next_task` / `TaskRuntime::apply_execution_fact` / `TaskRuntime::reject_review` / `TaskRuntime::approve_review` / `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | execute Phase 2A worker lifecycle from assigned queue through review rejection, retry, approval, and close | worker claim/execution/review commands | ordered task snapshot and ledger truth with stable execution id | runtime ADP command dispatch / CLI sample | task owner | bound |
 | 22 | `TaskStore::write_agent_lifecycle_snapshot` / `TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and restore typed agent lifecycle projection separately from releasable agent resource state | agent lifecycle snapshot | restart-queryable lifecycle truth | task event projection / boot | lifecycle owner storage | bound |

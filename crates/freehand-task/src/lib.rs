@@ -282,6 +282,10 @@ pub enum ExecutionFactKind {
         reason: String,
         evidence: Vec<String>,
     },
+    Interrupted {
+        reason: String,
+        evidence: Vec<String>,
+    },
     ReviewReady {
         summary: String,
         deliverables: Vec<String>,
@@ -1454,6 +1458,21 @@ impl TaskRuntime {
                 &fact.task_id,
                 "TaskBlocked",
                 Some(TaskStatus::Blocked),
+                &actor,
+                &fact.watermark,
+                json!({
+                    "execution_id": fact.execution_id,
+                    "agent_id": fact.agent_id.as_str(),
+                    "turn_id": fact.turn_id.as_ref().map(TurnId::as_str),
+                    "occurred_at": fact.occurred_at,
+                    "reason": reason,
+                    "evidence": evidence
+                }),
+            ),
+            ExecutionFactKind::Interrupted { reason, evidence } => self.mutate_task(
+                &fact.task_id,
+                "TaskInterrupted",
+                Some(TaskStatus::Interrupted),
                 &actor,
                 &fact.watermark,
                 json!({
@@ -3600,6 +3619,10 @@ fn validate_execution_fact(fact: &ExecutionFact) -> Result<(), TaskError> {
             require_text(reason, "reason")?;
             require_non_empty(evidence, "evidence")
         }
+        ExecutionFactKind::Interrupted { reason, evidence } => {
+            require_text(reason, "reason")?;
+            require_non_empty(evidence, "evidence")
+        }
         ExecutionFactKind::ReviewReady {
             summary,
             deliverables,
@@ -5095,6 +5118,63 @@ mod tests {
         assert_eq!(board.blocked[0].task_id, blocked_task.task_id);
         assert_eq!(board.review_ready.len(), 1);
         assert_eq!(board.review_ready[0].task_id, review_task.task_id);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn execution_fact_interrupted_marks_task_retryable_without_blocked_truth() {
+        let runtime_home = temp_runtime_home("execution-fact-interrupted");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-interrupted");
+        let execution_id = "exec-worker-interrupted";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-interrupted",
+            execution_id,
+            80,
+        );
+
+        let interrupted = runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: None,
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Interrupted {
+                    reason: "provider retry exhausted".to_owned(),
+                    evidence: vec!["anthropic_http_request_failed".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("interrupted fact");
+        assert_eq!(interrupted.task.status, TaskStatus::Interrupted);
+        let history = runtime.task_history(&task.task_id).expect("history");
+        assert!(
+            history
+                .iter()
+                .any(|event| event.event_type == "TaskInterrupted")
+        );
+        assert!(
+            !history
+                .iter()
+                .any(|event| event.event_type == "TaskBlocked")
+        );
+
+        let reassigned = runtime
+            .assign_task(TaskAssignRequest {
+                task_id: task.task_id.clone(),
+                agent_id: worker_id,
+                actor: sample_actor(owner_id),
+                watermark: sample_watermark(),
+            })
+            .expect("reassign interrupted task");
+        assert_eq!(reassigned.task.status, TaskStatus::Assigned);
+        assert_eq!(reassigned.task.task_id, task.task_id);
         let _ = fs::remove_dir_all(runtime_home);
     }
 

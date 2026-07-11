@@ -75,7 +75,11 @@
   `Rejected` tasks previously bound to that Worker
 - claim persists `TaskResumed` and `TaskHeartbeat` before provider execution
 - successful worker completion writes one `ExecutionFactKind::ReviewReady`
-- provider/runtime/tool-loop terminal failure writes one `ExecutionFactKind::Blocked`
+- provider/network system failure after internal provider retry exhaustion writes one
+  `ExecutionFactKind::Interrupted`, keeping the same task retryable with a new
+  execution id instead of creating a replacement task
+- task-content, path-preflight, model-terminal, or non-provider execution
+  failure writes one `ExecutionFactKind::Blocked`
 - blocked execution releases the Worker resource to `Available`; task blockage
   and Worker resource pause are distinct owner truths
 - Worker startup relies on Task Center boot reconciliation to repair historical
@@ -120,7 +124,9 @@
 - claim/heartbeat persistence failure returns an explicit runner error and does not start the model
 - heartbeat or result reporting after external cancel returns explicit Task
   Center failure and does not append Worker lifecycle truth
-- provider/runtime failure is paired to the claimed task/execution as blocked truth
+- provider/network system failure is paired to the claimed task/execution as
+  interrupted truth after internal provider retries are exhausted; task-content
+  and path/preflight failures remain blocked truth
 - failure to persist the blocked fact is returned as a combined explicit runner error
 - worker cannot call `task`; schema excludes it and execution policy rejects it if received
 - Worker failure never becomes `review_ready`, approved, closed, or successful UI truth
@@ -152,7 +158,7 @@
 | 04 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | choose and claim highest-priority Assigned task for Worker | worker id + execution id + lease TTL | claimed task + TaskResumed/heartbeat truth | Worker runner | task owner | bound |
 | 05 | `WorkerHeartbeat::start` | `crates/freehand-runtime/src/worker_runner/heartbeat.rs` | renew the claimed task lease while provider execution remains active | claimed task/execution/worker identity | periodic TaskHeartbeat truth or explicit heartbeat error | `ProductionWorkerRunner::run_once` | task owner | bound |
 | 06 | `run_worker_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one worker task in canonical task cwd with Worker tool policy and path-preflight prompt contract | selected Worker config + live request | closed live reason outcome | Worker runner | provider/reason live bridge | bound |
-| 07 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | persist review-ready or blocked result for same execution | typed execution fact | terminal task mutation | Worker runner | task owner | bound |
+| 07 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | persist review-ready, interrupted, or blocked result for same execution | typed execution fact | terminal task mutation | Worker runner | task owner | bound |
 | 08 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | select Slave host path without constructing Master UI dispatcher | daemon agent selection | Worker service process | daemon CLI | runtime Worker runner | bound |
 | 09 | `ProductionMasterRunner::from_default_config` | `crates/freehand-runtime/src/master_runner.rs` | load selected Master config and bind the Master Task Center namespace | configured agent name | Master lifecycle runner | daemon Master startup | config + runtime owner | bound |
 | 10 | `ProductionMasterRunner::run_until` | `crates/freehand-runtime/src/master_runner.rs` | poll Task Center lifecycle events, retry model/provider decision failures with bounded backoff, and stop on owner-truth failure or daemon shutdown | runner + cancellation signal | long-running Master lifecycle service | daemon Master mode | `ProductionMasterRunner::run_once` | bound |

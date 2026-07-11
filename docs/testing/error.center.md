@@ -43,7 +43,7 @@ cargo test -p freehand-control
 cargo test -p freehand-runtime live_bridge_records_error_center_metadata_for_schema_repair -- --nocapture
 cargo test -p freehand-runtime live_bridge_retries_missing_completion_schema_then_completes -- --nocapture
 cargo test -p freehand-runtime live_bridge_retries_recoverable_provider_errors_then_succeeds -- --nocapture
-cargo test -p freehand-runtime live_bridge_fails_after_five_provider_retries_with_error_code -- --nocapture
+cargo test -p freehand-runtime live_bridge_fails_after_ten_provider_retries_with_error_code -- --nocapture
 cargo test -p freehand-runtime live_bridge_returns_unknown_tool_as_failed_tool_result_without_terminalizing -- --nocapture
 cargo test -p freehand-runtime live_bridge_writes_provider_error_metadata_on_executor_failure -- --nocapture
 cargo test -p freehand-runtime runtime_query_reads_error_center_metadata_without_raw_text -- --nocapture

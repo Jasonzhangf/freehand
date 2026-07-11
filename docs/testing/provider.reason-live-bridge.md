@@ -92,7 +92,7 @@
     next provider request, then a corrected status can close the same logical
     turn successfully
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
-  - recoverable non-stream provider HTTP/executor failure retries five attempts with exponential backoff starting at 1 second before explicit dispatch failure, materializes failed terminal/error truth with a concrete provider error code, and leaves no active turn hanging
+  - recoverable non-stream provider HTTP/executor failure retries ten attempts with exponential backoff starting at 1 second before explicit dispatch failure, materializes failed terminal/error truth with a concrete provider error code, and leaves no active turn hanging
   - recoverable non-stream provider HTTP/executor failure can succeed after earlier attempts; metadata records `retry_same_step` attempts without terminal `fail_turn`
   - tool execution result failure returns a paired failed tool result to the model, emits runtime-owned model-continuation waiting status, and can still end with a successful terminal schema
   - repaired failed-tool logical turn remains fully visible in persisted/UI truth while future prompt context admits only the final repaired round by default
@@ -128,7 +128,7 @@
   - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
   - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
   - runtime white-box coverage now explicitly locks failed tool-result multi-round continuation, including incomplete `tool_use` as paired failed tool-result truth with zero schema retries, proving execution failures become paired `ToolResultStatus::Failed` re-entry truth and provider/system errors remain explicit bridge failures
-  - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes concrete provider error codes such as `anthropic_http_status_500`, retries recoverable non-stream failures up to five attempts, closes the active turn as failed only after exhaustion, and restores with no active turn
+  - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes concrete provider error codes such as `anthropic_http_status_500`, retries recoverable non-stream failures up to ten attempts, closes the active turn as failed only after exhaustion, and restores with no active turn
   - runtime white-box coverage now explicitly locks context economy for repaired logical turns: superseded failed repair attempts do not leak into rebuilt future prompt context
   - runtime white-box coverage now locks long operator task admission through the live bridge: `original-task` budget scales with actual prompt content and the provider request preserves the prompt tail sentinel
   - runtime white-box coverage now locks `original-task` as a `TaskContract` segment and proves second-round requests still carry control status and runtime tool guidance
