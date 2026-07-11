@@ -114,7 +114,7 @@
 - Task Center and lifecycle-state failures are fatal owner-truth failures;
   lifecycle executor and missing/incomplete decision failures are retryable
 - missing paired Master identity or invalid provider config blocks runner bootstrap
-- missing or non-canonicalizable target cwd records blocked task truth before model execution, including the original and expanded path when `~` was used
+- missing or non-canonicalizable target cwd records blocked task truth before model execution, with classified wording for missing parent, likely output-directory misuse, permission denial, and generic canonicalization failure
 - claim/heartbeat persistence failure returns an explicit runner error and does not start the model
 - heartbeat or result reporting after external cancel returns explicit Task
   Center failure and does not append Worker lifecycle truth

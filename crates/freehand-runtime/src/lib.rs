@@ -6066,7 +6066,7 @@ fn master_workspace_denied_result(
             tool_call,
             ToolResultStatus::Failed,
             format!(
-                "Master workspace boundary: {reason}. allowed_root={} requested_target={requested}. Use task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{requested}\"), and task(op=\"assign\") so a worker performs the external work.",
+                "Master workspace boundary denied direct access: {reason}. allowed_root={} requested_target={requested}. This is a Master scope/permission boundary, not evidence that the external path is missing. Preserve the requested path and delegate with task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{requested}\"), and task(op=\"assign\") so a worker performs the external work.",
                 allowed_root.display()
             ),
         ),
@@ -6078,7 +6078,7 @@ fn registry_error_text(role: LiveReasonExecutionRole, error: &ToolRegistryError)
     match error {
         ToolRegistryError::WorkspaceBoundaryViolation { root, target, .. } => match role {
             LiveReasonExecutionRole::Master => format!(
-                "Master workspace boundary: requested target `{target}` is outside `{root}`. Use task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{target}\"), and task(op=\"assign\") so a worker performs the external work."
+                "Master workspace boundary denied direct access: requested target `{target}` is outside `{root}`. This is a Master scope/permission boundary, not evidence that `{target}` is missing. Preserve the requested path and delegate with task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{target}\"), and task(op=\"assign\") so a worker performs the external work."
             ),
             LiveReasonExecutionRole::Worker => format!(
                 "Worker workspace boundary: requested target `{target}` is outside locked task workspace `{root}`."
@@ -9229,6 +9229,7 @@ provider = "old"
                 .contains("reason_live_turn_completed")
         );
         assert!(reentry_request.contains("Master workspace boundary"));
+        assert!(reentry_request.contains("scope/permission boundary"));
         assert!(reentry_request.contains("task(op=\\\"create\\\""));
         assert!(!reentry_request.contains("session cwd content"));
         match runtime
@@ -12368,6 +12369,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         assert!(!requests[0].contains("\"name\":\"bash\""));
         assert!(requests[0].contains("\"name\":\"task\""));
         assert!(requests[1].contains("Master workspace boundary"));
+        assert!(requests[1].contains("not evidence that"));
         assert!(requests[1].contains("task(op=\\\"create\\\""));
         assert!(!requests[1].contains("must-not-be-read"));
         assert!(requests[2].contains("Agent created"));

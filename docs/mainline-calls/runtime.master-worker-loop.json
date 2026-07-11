@@ -56,7 +56,7 @@
     "lifecycle decision round-budget exhaustion is explicit blocked reason truth rather than an indefinitely active turn",
     "Task Center and lifecycle-state failures stop the Master runner while lifecycle executor and missing-decision failures remain retryable",
     "Master lifecycle cursor parse or write failure stops the loop explicitly",
-    "missing or invalid target cwd records blocked truth before model execution, including original and expanded path when ~ was used",
+    "missing or invalid target cwd records blocked truth before model execution, with classified wording for missing parent, likely output-directory misuse, permission denial, and generic canonicalization failure",
     "claim or heartbeat persistence failure stops before provider execution",
     "heartbeat or result reporting after external cancel returns explicit Task Center failure and does not append Worker lifecycle truth",
     "failure to persist a blocked execution fact remains an explicit runner error",

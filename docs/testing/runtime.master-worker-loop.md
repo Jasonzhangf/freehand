@@ -132,6 +132,7 @@ Task Center truth before another execution starts.
 - missing `target_cwd` records `Blocked`; model execution does not start.
 - non-canonicalizable `target_cwd` records `Blocked`; model execution does not start.
 - missing `~/...` target cwd records `Blocked` with both original and expanded path; model execution does not start.
+- missing target cwd under an existing parent records `Blocked` as workspace-preflight failure that explicitly says this is not a repository permission denial and likely means `target_cwd` was misused for a not-yet-created output directory.
 - provider/runtime failure records `Blocked`; it never writes `ReviewReady`.
 - reporting `Blocked` releases the Worker resource to `Available`; task blocked
   truth must not globally pause the configured Worker

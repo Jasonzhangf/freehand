@@ -519,7 +519,7 @@ fn production_worker_runner_missing_tilde_path_blocks_before_model_execution() {
         ProductionWorkerTickOutcome::Blocked { ref task_id, ref reason, .. }
             if task_id == &expected_task_id
                 && reason.contains("target_cwd `~/github/missing`")
-                && reason.contains("expanded")
+                && reason.contains("path cannot be resolved because one of its parent directories does not exist")
     ));
     assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
     let task_runtime =
@@ -545,6 +545,44 @@ fn production_worker_runner_missing_tilde_path_blocks_before_model_execution() {
     restore_home(original_home);
     fs::remove_dir_all(runtime_home).expect("cleanup runtime");
     fs::remove_dir_all(fake_home).expect("cleanup fake home");
+}
+
+#[test]
+fn production_worker_runner_missing_workspace_under_existing_parent_explains_target_cwd_misuse() {
+    let _home_lock = home_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let runtime_home = temp_path("missing-output-like-runtime");
+    let existing_parent = temp_path("missing-output-like-parent");
+    fs::create_dir_all(&existing_parent).expect("existing parent");
+    let missing_workspace = existing_parent.join("analysis-output");
+    let executor = Arc::new(StubExecutor::new(Err("must not execute".to_owned())));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let expected_task_id = seed_assigned_task_with_target(
+        &runtime_home,
+        Some(missing_workspace.display().to_string()),
+    );
+
+    let outcome = runner.run_once().expect("worker tick");
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::Blocked { ref task_id, ref reason, .. }
+            if task_id == &expected_task_id
+                && reason.contains("does not exist")
+                && reason.contains("not a repository-permission denial")
+                && reason.contains("used target_cwd for a not-yet-created output directory")
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let task = task_runtime
+        .query_task(&expected_task_id)
+        .expect("query task");
+    assert_eq!(task.status, TaskStatus::Blocked);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(existing_parent).expect("cleanup existing parent");
 }
 
 #[test]

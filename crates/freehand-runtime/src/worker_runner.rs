@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -195,7 +196,13 @@ impl ProductionWorkerRunner {
         let workspace = match canonical_worker_workspace(target_cwd) {
             Ok(workspace) => workspace,
             Err(reason) => {
-                return self.report_blocked(&task_runtime, &task, &execution_id, None, reason);
+                return self.report_blocked(
+                    &task_runtime,
+                    &task,
+                    &execution_id,
+                    None,
+                    reason.into_reason(),
+                );
             }
         };
 
@@ -473,23 +480,100 @@ fn render_lines(values: &[String]) -> String {
         .join("\n")
 }
 
-fn canonical_worker_workspace(target_cwd: &str) -> Result<PathBuf, String> {
+enum WorkerWorkspacePreflightError {
+    Empty,
+    MissingWorkspace {
+        requested: String,
+        expanded: PathBuf,
+        parent_exists: bool,
+    },
+    PermissionDenied {
+        requested: String,
+        expanded: PathBuf,
+        error: String,
+    },
+    CanonicalizeFailed {
+        requested: String,
+        expanded: PathBuf,
+        error: String,
+    },
+    NotDirectory {
+        canonical: PathBuf,
+    },
+}
+
+impl WorkerWorkspacePreflightError {
+    fn into_reason(self) -> String {
+        match self {
+            Self::Empty => "assigned worker task target_cwd is empty".to_owned(),
+            Self::MissingWorkspace {
+                requested,
+                expanded,
+                parent_exists,
+            } => {
+                if parent_exists {
+                    format!(
+                        "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but that workspace path does not exist. This is not a repository-permission denial. It usually means the task used target_cwd for a not-yet-created output directory or the wrong workspace root. target_cwd must point to an existing workspace/repository; create output directories later from inside that workspace.",
+                        expanded.display()
+                    )
+                } else {
+                    format!(
+                        "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but the path cannot be resolved because one of its parent directories does not exist. This is not proof that the intended repository is unavailable; it means the assigned workspace path itself is invalid and must be corrected before execution.",
+                        expanded.display()
+                    )
+                }
+            }
+            Self::PermissionDenied {
+                requested,
+                expanded,
+                error,
+            } => format!(
+                "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but access was denied during workspace resolution: {error}. This is a path-access or boundary problem, not evidence that the repository is missing.",
+                expanded.display()
+            ),
+            Self::CanonicalizeFailed {
+                requested,
+                expanded,
+                error,
+            } => format!(
+                "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but canonical workspace resolution failed: {error}.",
+                expanded.display()
+            ),
+            Self::NotDirectory { canonical } => format!(
+                "worker task workspace preflight failed: canonical target_cwd `{}` is not a directory",
+                canonical.display()
+            ),
+        }
+    }
+}
+
+fn canonical_worker_workspace(target_cwd: &str) -> Result<PathBuf, WorkerWorkspacePreflightError> {
     let trimmed = target_cwd.trim();
     if trimmed.is_empty() {
-        return Err("assigned worker task target_cwd is empty".to_owned());
+        return Err(WorkerWorkspacePreflightError::Empty);
     }
     let expanded = expand_leading_tilde(trimmed);
-    let workspace = fs::canonicalize(&expanded).map_err(|error| {
-        format!(
-            "cannot canonicalize worker target_cwd `{target_cwd}` (expanded `{}`): {error}",
-            expanded.display()
-        )
+    let workspace = fs::canonicalize(&expanded).map_err(|error| match error.kind() {
+        ErrorKind::NotFound => WorkerWorkspacePreflightError::MissingWorkspace {
+            requested: target_cwd.to_owned(),
+            parent_exists: expanded.parent().is_some_and(Path::exists),
+            expanded: expanded.clone(),
+        },
+        ErrorKind::PermissionDenied => WorkerWorkspacePreflightError::PermissionDenied {
+            requested: target_cwd.to_owned(),
+            expanded: expanded.clone(),
+            error: error.to_string(),
+        },
+        _ => WorkerWorkspacePreflightError::CanonicalizeFailed {
+            requested: target_cwd.to_owned(),
+            expanded: expanded.clone(),
+            error: error.to_string(),
+        },
     })?;
     if !workspace.is_dir() {
-        return Err(format!(
-            "worker target_cwd `{}` is not a directory",
-            workspace.display()
-        ));
+        return Err(WorkerWorkspacePreflightError::NotDirectory {
+            canonical: workspace,
+        });
     }
     Ok(workspace)
 }

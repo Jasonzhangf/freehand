@@ -3716,6 +3716,35 @@ Current real root cause split:
   - current S-profile is ready for Jason's normal WebUI testing on `http://127.0.0.1:4042`
   - remaining non-dev promotion gaps are release `4041` and Android true-device verification if the target surface is release/phone
 
+# 2026-07-11 target_cwd preflight error classification
+
+- marker:
+  - `target-cwd-preflight-classified-error-closeout-1783745289`
+- issue:
+  - Master/Worker path handling collapsed different meanings into path-not-found style feedback:
+    - Master own cwd/runtime-home boundary
+    - Worker task `target_cwd` workspace root
+    - not-yet-created deliverable/output directory
+  - This misled the model into thinking an existing user repo was missing.
+- implementation:
+  - `ProductionWorkerRunner` now classifies worker workspace preflight errors before model execution:
+    - empty target
+    - missing parent path
+    - missing workspace under an existing parent, likely output-directory misuse
+    - permission denied
+    - generic canonicalization failure
+    - canonical path is not a directory
+  - Master workspace-boundary tool results now say direct access is denied by Master scope/permission and is not evidence that the external path is missing.
+  - Local skill now records that `target_cwd` is an existing workspace/repository root, not an output directory.
+- online proof:
+  - first online task `task-preflight-message-1783745178` still showed old wording because `com.freehand.workerS` was stale after `restartS`.
+  - service-scoped restart used `launchctl kickstart -k gui/$(id -u)/com.freehand.workerS`.
+  - second online task `task-preflight-message-1783745289` reached history:
+    - `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`
+  - persisted blocked reason says `target_cwd` under existing parent does not exist, is not a repository-permission denial, and likely means `target_cwd` was used for a not-yet-created output directory or wrong workspace root.
+- remaining design gap:
+  - `TaskCreateRequest` still has only `target_cwd`; first-class `output_dir` / artifact destination contract is still needed before we can support "repo exists, create output elsewhere" without overloading `target_cwd`.
+
 # 2026-07-10 normal master/worker E2E gate closeout
 
 - marker:
