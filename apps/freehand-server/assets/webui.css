@@ -899,7 +899,7 @@ body.theme-dark .conversation-region {
   gap: 14px;
   width: min(980px, 100%);
   margin: 0 auto;
-  padding: 8px 0 24px;
+  padding: 8px 0 var(--composer-clearance, 24px);
 }
 
 .chat-message {
@@ -2190,11 +2190,11 @@ body[data-layout-shape="phone_landscape"] .composer-card {
 body[data-layout-shape="phone_portrait"] .conversation-region,
 body[data-layout-shape="tall_phone"] .conversation-region,
 body[data-layout-shape="tablet_portrait"] .conversation-region {
-  padding-bottom: calc(118px + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--composer-clearance, 118px) + env(safe-area-inset-bottom));
 }
 
 body[data-layout-shape="phone_landscape"] .conversation-region {
-  padding-bottom: min(62svh, 260px);
+  padding-bottom: min(calc(var(--composer-clearance, 190px) + 18px), 62svh);
 }
 
 body[data-layout-shape="phone_portrait"] .composer-input,
@@ -2232,7 +2232,7 @@ body[data-layout-shape="phone_landscape"] .conversation-region {
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
-  padding: 8px 10px min(48svh, 190px);
+  padding: 8px 10px min(calc(var(--composer-clearance, 172px) + 10px), 48svh);
   overflow: hidden;
 }
 

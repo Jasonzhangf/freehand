@@ -28,8 +28,10 @@
   runner over Task Center EventInbox truth
 - the Master lifecycle runner keeps a durable event cursor and invokes the
   Master model only for current review-ready, blocked, or interrupted truth
-- each actionable event attempt uses a deterministic event-and-attempt-isolated
-  reason session and an explicit target-task decision boundary
+- each actionable event attempt uses the task-scoped internal
+  `master-lifecycle-<task>` reason session, plus deterministic
+  event-and-attempt-isolated turn and trace ids, and an explicit target-task
+  decision boundary
 - Slave mode constructs a production Worker runner instead of a Master UI dispatcher
 - Worker opens the paired Master's Task Center namespace and uses its own configured agent id as execution identity
 - each worker tick queries the highest-priority Assigned task for that worker

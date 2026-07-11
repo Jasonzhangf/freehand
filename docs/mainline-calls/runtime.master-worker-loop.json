@@ -10,7 +10,7 @@
     "one daemon process selects one configured agent",
     "Master mode starts the WebUI/ADP host plus a background lifecycle runner over Task Center EventInbox truth",
     "the Master lifecycle runner drains events after its durable cursor and invokes the Master model only for current review-ready, blocked, or interrupted truth",
-    "each actionable event attempt uses a deterministic event-and-attempt-isolated reason session with an explicit target-task decision boundary",
+    "each actionable event attempt uses a task-scoped internal master-lifecycle reason session, deterministic event-and-attempt-isolated turn and trace ids, and an explicit target-task decision boundary",
     "Slave mode constructs a production Worker runner instead of a Master UI dispatcher",
     "Worker opens the paired Master's Task Center namespace and uses its own configured agent id as execution identity",
     "each Worker tick claims the highest-priority Assigned task for that Worker",

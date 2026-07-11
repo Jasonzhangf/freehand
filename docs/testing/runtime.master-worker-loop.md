@@ -17,9 +17,9 @@
 8. Runner writes `review_ready` on successful completion or `blocked` on provider/runtime failure.
 9. Runner returns to polling without inventing task truth while idle.
 10. Restart reads the same task/execution/agent/history truth.
-11. Each Master lifecycle event attempt runs in an event-and-attempt-isolated
-    reason session; prior events and failed attempts must not enter the next
-    model context.
+11. Each Master lifecycle event attempt runs in a task-scoped internal
+    lifecycle session with event-and-attempt-isolated turn and trace ids; the
+    session name is reused per task to avoid user-facing session explosion.
 12. A successful target-task mutation is evaluated against an explicit
     event-specific decision boundary. Once reached, the framework closes the
     lifecycle turn immediately instead of asking the model to wait for future
@@ -100,11 +100,12 @@ Task Center truth before another execution starts.
 - reaching a lifecycle decision boundary closes the reason turn in the same
   round as the successful task tool result; no extra provider request is made
   merely to emit completion prose.
-- each event uses a deterministic event-scoped lifecycle session id, so prior
-  task event transcripts cannot pollute the current decision context.
+- each event uses the same deterministic task-scoped lifecycle session id but a
+  distinct event-scoped turn and trace id, so session names stay bounded while
+  event audit remains separable.
 - retrying the same event increments a persisted attempt id and uses a fresh
-  deterministic lifecycle session, so a failed schema/tool/prose attempt cannot
-  poison the next attempt or restart recovery.
+  deterministic lifecycle turn and trace id, so retry attempts remain auditable
+  without creating a new user-visible session name.
 - Master lifecycle model responses containing nullable unused status fields
   remain valid; a non-null status type mismatch is polished in another model
   round instead of killing the lifecycle runner.
@@ -164,8 +165,9 @@ Task Center truth before another execution starts.
   lifecycle event cursor unchanged.
 - Task Center and lifecycle-state read/write failures stop the Master runner
   explicitly instead of being treated as retryable model/provider failures.
-- historical lifecycle turns from another event or earlier attempt are absent
-  from the current provider request.
+- historical lifecycle turns from another task are absent from the current
+  provider request; same-task lifecycle turns remain internal framework truth
+  and must not appear in user-facing session lists.
 - existing Master shell denial and runtime-home boundary tests remain green.
 
 ## Module Black-Box Coverage
@@ -191,8 +193,8 @@ Task Center truth before another execution starts.
     lifecycle turn closes after the mutation without issuing another request
   - an unrelated task mutation and proves it does not satisfy the boundary
   - repeated `continue` without a decision and proves finite blocked closeout
-  - two different lifecycle events and proves their reason sessions do not
-    share historical turn context
+  - two different lifecycle events and proves their lifecycle session name is
+    task-scoped while turn and trace ids remain event-scoped
 - real live bridge test proves Worker schema excludes `task` and unrestricted shell tools, read-only tools may inspect readable external paths, and mutation tools keep workspace root as task cwd.
 - runner tests prove `~/...` plus symlink target cwd resolves to a canonical Worker workspace and missing `~/...` blocks before model execution.
 - daemon test proves:

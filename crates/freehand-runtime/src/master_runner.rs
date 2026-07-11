@@ -432,12 +432,17 @@ fn master_live_request(
     let event_json = serde_json::to_string_pretty(event)
         .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
     let event_key = sanitize_identifier(&event.event_id);
-    let lifecycle_session_id = format!("master-lifecycle-{event_key}-attempt-{attempt}");
+    let task_key = sanitize_identifier(task.task_id.as_str());
+    let lifecycle_session_id = format!("master-lifecycle-{task_key}");
     Ok(LiveReasonTurnRequest {
         runtime_home: runtime_home.to_path_buf(),
         session_id: SessionId::new(lifecycle_session_id),
-        turn_id: TurnId::new(format!("master-lifecycle-{event_key}-decision")),
-        trace_id: TraceId::new(format!("master-lifecycle-trace-{event_key}")),
+        turn_id: TurnId::new(format!(
+            "master-lifecycle-{event_key}-attempt-{attempt}-decision"
+        )),
+        trace_id: TraceId::new(format!(
+            "master-lifecycle-trace-{event_key}-attempt-{attempt}"
+        )),
         prompt: format!(
             "You are the production Master lifecycle coordinator.\n\
 Use the task tool and Task Center truth; do not answer with prose-only status.\n\

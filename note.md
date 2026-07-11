@@ -3812,3 +3812,38 @@ Current real root cause split:
   - production rejected retry `task-normal-rejected-1781783700382`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
   - production blocked decision `task-normal-blocked-1781783700459`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`
   - production worker crash recovery `task-normal-crash-1781783700473`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+# 2026-07-11 WebUI scroll/composer and internal lifecycle session closeout
+
+- marker:
+  - `webui-scroll-lifecycle-session-closeout-1783757223354`
+- issues fixed:
+  - WebUI live render updates forced the operator back to the bottom while reading older transcript content.
+  - Fixed/sticky composer could overlap the latest transcript row because bottom padding used fixed estimates instead of the real composer height.
+  - Master lifecycle decisions created event/attempt-scoped internal sessions, producing many `master-lifecycle-*` sessions and polluting user-facing session lists.
+- implementation:
+  - `apps/freehand-server/assets/webui.js` now tracks `state.userScrollLocked`; `renderMessages()` follows bottom only when already near bottom or an explicit local submit forces it.
+  - ordinary render updates no longer call `scrollIntoView`; scroll movement is constrained to the conversation scroll host.
+  - WebUI measures `.composer-card` and writes `--composer-clearance`; CSS uses that variable for `.message-list` and fixed mobile composer layouts.
+  - `crates/freehand-ui-protocol` filters `master-lifecycle-*` from user-facing `QuerySessionList` / archived list projections while keeping direct `QuerySessionTurns` queryable for debug truth.
+  - Master lifecycle reason session naming is now task-scoped `master-lifecycle-<task>`; event/attempt isolation remains in turn id and trace id.
+  - `scripts/webui_verify_online.mjs` now captures `scrollProof` screenshots/JSON for upward-scroll preservation, bottom-pinned visibility, composer clearance, and user-facing session-list internal-id hiding.
+- validation:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `node --check scripts/webui_verify_online.mjs`
+  - `cargo test -p freehand-server -- --nocapture` -> 13 passed
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 54 passed
+  - `cargo test -p freehand-runtime production_master -- --nocapture` -> 11 passed
+  - `cargo fmt --check`
+  - `git diff --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `scripts/install-launchd.sh restartS`
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` -> `adp_smoke_ok`
+  - `make verify-webui-online` -> passed; artifact `artifacts/webui-online/20260711-verify-4042-1783757223354/summary.json`
+  - new online checks true: `scrollLockHasScrollableTranscript`, `scrollLockPreservesManualReadPosition`, `bottomPinnedRefreshKeepsLatestVisible`, `composerClearanceApplied`, `sessionListHidesInternalLifecycle`; `all_false=[]`
+  - post-proof config query restored to `provider=minimax`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`
+- remaining:
+  - old internal lifecycle session truth is not physically deleted; it is hidden from user-facing lists and remains directly queryable for debug/replay.
+  - `output/` remains an unrelated untracked directory and was not touched.

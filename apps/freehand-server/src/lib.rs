@@ -1579,10 +1579,15 @@ mod tests {
         assert!(js_body.contains("turn.session_id !== state.selectedSessionId"));
         assert!(js_body.contains("scrollMessagesToBottom"));
         assert!(js_body.contains("messageListIsNearBottom"));
-        assert!(js_body.contains("window.scrollY"));
+        assert!(js_body.contains("userScrollLocked"));
+        assert!(js_body.contains("syncUserScrollLock"));
+        assert!(js_body.contains("scrollHostForConversation"));
+        assert!(js_body.contains("updateComposerClearance"));
+        assert!(js_body.contains("--composer-clearance"));
         assert!(js_body.contains("forceScrollToBottom"));
         assert!(js_body.contains("const streamStage = document.querySelector(\".stream-stage\")"));
-        assert!(js_body.contains("streamStage.scrollTop = streamStage.scrollHeight"));
+        assert!(js_body.contains("host.scrollTop = host.scrollHeight"));
+        assert!(!js_body.contains("scrollIntoView"));
         assert!(!js_body.contains("window.scrollTo({ top: document.documentElement.scrollHeight"));
         assert!(js_body.contains("function conversationTurnsForRender"));
         assert!(js_body.contains("if (!state.selectedSessionId)"));

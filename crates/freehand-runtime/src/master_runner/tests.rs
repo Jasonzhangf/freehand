@@ -135,7 +135,7 @@ fn production_master_runner_rejects_review_with_requirements() {
 }
 
 #[test]
-fn production_master_request_isolates_reason_session_by_event() {
+fn production_master_request_reuses_task_lifecycle_session_and_isolates_turns_by_event() {
     let runtime_home = temp_path("event-session-isolation");
     let task_id = seed_review_ready_task(&runtime_home);
     let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
@@ -155,16 +155,24 @@ fn production_master_request_isolates_reason_session_by_event() {
     let last_request =
         master_live_request(&runtime_home, "worker", &task, last, 0).expect("last request");
 
-    assert_ne!(first_request.session_id, last_request.session_id);
+    assert_eq!(first_request.session_id, last_request.session_id);
     assert!(
         first_request
             .session_id
             .as_str()
-            .contains(&sanitize_identifier(&first.event_id))
+            .contains(&sanitize_identifier(task_id.as_str()))
+    );
+    assert_ne!(first_request.turn_id, last_request.turn_id);
+    assert_ne!(first_request.trace_id, last_request.trace_id);
+    assert!(
+        !first_request
+            .turn_id
+            .as_str()
+            .contains(&sanitize_identifier(&last.event_id))
     );
     assert!(
         last_request
-            .session_id
+            .turn_id
             .as_str()
             .contains(&sanitize_identifier(&last.event_id))
     );
@@ -173,19 +181,20 @@ fn production_master_request_isolates_reason_session_by_event() {
 }
 
 #[test]
-fn production_master_retry_uses_fresh_persisted_attempt_session() {
+fn production_master_retry_reuses_task_session_with_fresh_attempt_turn() {
     let runtime_home = temp_path("event-attempt-isolation");
     bootstrap_runner(&runtime_home);
     let task_id = seed_review_ready_task(&runtime_home);
-    let request_sessions = Arc::new(Mutex::new(Vec::new()));
-    let observed_sessions = Arc::clone(&request_sessions);
+    let request_keys = Arc::new(Mutex::new(Vec::new()));
+    let observed_keys = Arc::clone(&request_keys);
     let action_task_id = task_id.clone();
     let executor = Arc::new(StubMasterExecutor::new(move |request| {
-        observed_sessions
-            .lock()
-            .expect("sessions")
-            .push(request.session_id.as_str().to_owned());
-        if observed_sessions.lock().expect("sessions").len() == 1 {
+        observed_keys.lock().expect("request keys").push((
+            request.session_id.as_str().to_owned(),
+            request.turn_id.as_str().to_owned(),
+            request.trace_id.as_str().to_owned(),
+        ));
+        if observed_keys.lock().expect("request keys").len() == 1 {
             return Ok("missing decision".to_owned());
         }
         let runtime =
@@ -210,13 +219,14 @@ fn production_master_retry_uses_fresh_persisted_attempt_session() {
     let restarted = test_runner(
         runtime_home.clone(),
         Arc::new(StubMasterExecutor::new({
-            let request_sessions = Arc::clone(&request_sessions);
+            let request_keys = Arc::clone(&request_keys);
             let action_task_id = task_id.clone();
             move |request| {
-                request_sessions
-                    .lock()
-                    .expect("sessions")
-                    .push(request.session_id.as_str().to_owned());
+                request_keys.lock().expect("request keys").push((
+                    request.session_id.as_str().to_owned(),
+                    request.turn_id.as_str().to_owned(),
+                    request.trace_id.as_str().to_owned(),
+                ));
                 let runtime = TaskRuntime::boot(&request.runtime_home, AgentId::new("master"))
                     .map_err(to_string)?;
                 runtime
@@ -239,11 +249,13 @@ fn production_master_retry_uses_fresh_persisted_attempt_session() {
             ..
         }
     ));
-    let sessions = request_sessions.lock().expect("sessions");
-    assert_eq!(sessions.len(), 2);
-    assert_ne!(sessions[0], sessions[1]);
-    assert!(sessions[0].ends_with("-attempt-0"));
-    assert!(sessions[1].ends_with("-attempt-1"));
+    let request_keys = request_keys.lock().expect("request keys");
+    assert_eq!(request_keys.len(), 2);
+    assert_eq!(request_keys[0].0, request_keys[1].0);
+    assert_ne!(request_keys[0].1, request_keys[1].1);
+    assert_ne!(request_keys[0].2, request_keys[1].2);
+    assert!(request_keys[0].1.contains("-attempt-0-decision"));
+    assert!(request_keys[1].1.contains("-attempt-1-decision"));
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }

@@ -218,6 +218,7 @@ const state = {
   attachmentsPreviewOpen: true,
   debugDetailsVisible: false,
   forceScrollToBottom: false,
+  userScrollLocked: false,
   rollbackArmedAt: 0,
   composerFocused: false,
   newSessionKind: "conversation",
@@ -2848,7 +2849,10 @@ function renderCommandStatus() {
 }
 
 function renderMessages() {
-  const shouldStickToBottom = state.forceScrollToBottom || messageListIsNearBottom();
+  updateComposerClearance();
+  const wasNearBottom = messageListIsNearBottom();
+  const shouldStickToBottom =
+    state.forceScrollToBottom || (!state.userScrollLocked && wasNearBottom);
   state.forceScrollToBottom = false;
   messageList.replaceChildren();
   const fragments = [];
@@ -2914,24 +2918,43 @@ function uniqueChatFragments(fragments) {
 }
 
 function messageListIsNearBottom() {
-  const listRemaining = messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight;
-  if (messageList.scrollHeight > messageList.clientHeight + 2 && listRemaining >= 96) {
-    return false;
-  }
-  const pageRemaining =
-    document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
-  return pageRemaining < 160;
+  return scrollHostRemaining(scrollHostForConversation()) < 96;
 }
 
 function scrollMessagesToBottom() {
   window.requestAnimationFrame(() => {
-    const streamStage = document.querySelector(".stream-stage");
-    if (streamStage) {
-      streamStage.scrollTop = streamStage.scrollHeight;
-    }
+    const host = scrollHostForConversation();
+    host.scrollTop = host.scrollHeight;
     messageList.scrollTop = messageList.scrollHeight;
-    messageList.lastElementChild?.scrollIntoView({ block: "end" });
+    state.userScrollLocked = false;
   });
+}
+
+function scrollHostForConversation() {
+  const streamStage = document.querySelector(".stream-stage");
+  if (streamStage && streamStage.scrollHeight > streamStage.clientHeight + 2) {
+    return streamStage;
+  }
+  return document.scrollingElement || document.documentElement;
+}
+
+function scrollHostRemaining(host) {
+  return Math.max(0, host.scrollHeight - host.scrollTop - host.clientHeight);
+}
+
+function syncUserScrollLock() {
+  state.userScrollLocked = scrollHostRemaining(scrollHostForConversation()) >= 96;
+}
+
+function updateComposerClearance() {
+  const composerCard = document.querySelector(".composer-card");
+  if (!composerCard || !shell) {
+    return;
+  }
+  const height = Math.ceil(composerCard.getBoundingClientRect().height);
+  const clearance = Math.max(96, height + 28);
+  shell.style.setProperty("--composer-clearance", `${clearance}px`);
+  document.documentElement.style.setProperty("--composer-clearance", `${clearance}px`);
 }
 
 function isDraftSessionId(sessionId) {
@@ -4597,19 +4620,36 @@ taskCwdInput.addEventListener("change", () => {
 applyLayoutShape();
 syncMobileDrawerForLayout();
 installMobileSessionSwipeGesture();
+updateComposerClearance();
 window.addEventListener("resize", () => {
   applyLayoutShape();
   syncMobileDrawerForLayout();
+  updateComposerClearance();
 });
 window.addEventListener("orientationchange", () => {
   applyLayoutShape();
   syncMobileDrawerForLayout();
+  updateComposerClearance();
 });
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", () => {
     applyLayoutShape();
     syncMobileDrawerForLayout();
+    updateComposerClearance();
   });
+  window.visualViewport.addEventListener("scroll", updateComposerClearance, { passive: true });
+}
+const streamStageForScrollLock = document.querySelector(".stream-stage");
+if (streamStageForScrollLock) {
+  streamStageForScrollLock.addEventListener("scroll", syncUserScrollLock, { passive: true });
+}
+window.addEventListener("scroll", syncUserScrollLock, { passive: true });
+if (window.ResizeObserver) {
+  const composerResizeObserver = new ResizeObserver(updateComposerClearance);
+  const composerCard = document.querySelector(".composer-card");
+  if (composerCard) {
+    composerResizeObserver.observe(composerCard);
+  }
 }
 
 document.addEventListener("keydown", (event) => {

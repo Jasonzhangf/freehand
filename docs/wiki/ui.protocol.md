@@ -58,6 +58,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed public tool bodies expose protocol-projected tool result detail
 - cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn
 - session list and transcript projections expose cwd bound by runtime/session truth
+- session list projections hide internal framework lifecycle sessions such as `master-lifecycle-*` from user-facing active and archived lists while explicit transcript queries remain queryable for debug truth
 - task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
 - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
 - session list and transcript projections expose owner-supplied session title, archived state, cwd, and effective transcript projections after rollback

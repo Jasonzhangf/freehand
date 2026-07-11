@@ -94,7 +94,8 @@
   - command ingress accept/reject smoke
   - selected-session submit command smoke
   - selected-session cwd projection smoke
-  - session metadata projection smoke covers created empty sessions, renamed sessions, archived sessions being hidden from the active list, and restored sessions becoming visible again
+- session metadata projection smoke covers created empty sessions, renamed sessions, archived sessions being hidden from the active list, and restored sessions becoming visible again
+- session list projection smoke covers internal `master-lifecycle-*` sessions being absent from user-facing active/archived lists while explicit `QuerySessionTurns` for that id remains queryable
   - command dispatch envelope owner-routing smoke
   - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
   - debug-state snapshot/query by `turn_id`

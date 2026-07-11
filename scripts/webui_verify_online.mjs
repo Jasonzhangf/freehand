@@ -171,6 +171,7 @@ try {
   );
   const refreshed = await captureState(cdp, '08-after-refresh');
   const settingsProof = await captureSettingsProof(cdp);
+  const scrollProof = await captureScrollProof(cdp);
   const viewportSnapshots = await captureViewportMatrix(cdp);
   const mobileDrawerProof = await captureMobileDrawerProof(cdp);
   const mobileComposerProof = await captureMobileComposerProof(cdp);
@@ -236,6 +237,18 @@ try {
         !settingsProof.afterClose.state.settingsShellVisible &&
         settingsProof.afterClose.state.messageText.includes(prompt1) &&
         settingsProof.afterClose.state.messageText.includes('definitely-missing-freehand-file.txt'),
+      scrollLockHasScrollableTranscript: scrollProof.before.state.scrollProofScrollable,
+      scrollLockPreservesManualReadPosition:
+        scrollProof.before.state.scrollProofScrollable &&
+        Math.abs(scrollProof.afterRefreshWhileUp.state.scrollHostTop - scrollProof.afterScrollUp.state.scrollHostTop) <= 8,
+      bottomPinnedRefreshKeepsLatestVisible:
+        scrollProof.afterBottomRefresh.state.scrollHostRemaining <= 8 &&
+        scrollProof.afterBottomRefresh.state.lastMessageAboveComposer,
+      composerClearanceApplied:
+        scrollProof.afterBottomRefresh.state.composerClearancePx >=
+        Math.max(96, Math.ceil(scrollProof.afterBottomRefresh.state.composerCardRect?.height || 0) + 20),
+      sessionListHidesInternalLifecycle:
+        !scrollProof.afterBottomRefresh.state.sessionListText.includes('master-lifecycle-'),
       viewportComposerVisible: viewportSnapshots.every((entry) => entry.state.composerVisible),
       viewportMessageListVisible: viewportSnapshots.every((entry) => entry.state.messageListVisible),
       mobileNoLeftEdgeIndicators: viewportSnapshots
@@ -330,6 +343,7 @@ try {
       terminal2,
       refreshed,
       settingsProof,
+      scrollProof,
       viewportSnapshots,
       mobileDrawerProof,
       mobileComposerProof,
@@ -427,6 +441,10 @@ async function captureState(cdp, label) {
     const live = messages.filter((node) => node.dataset.live === 'true');
     const lastMessage = messages[messages.length - 1] || null;
     const shell = document.querySelector('[data-webui-shell="true"]');
+    const scrollHost = conversationScrollHost();
+    const composerCardRect = rectOf(document.querySelector('.composer-card'));
+    const lastMessageRect = rectOf(lastMessage);
+    const composerClearancePx = pxNumber(getComputedStyle(document.documentElement).getPropertyValue('--composer-clearance'));
     return {
       selectedSession: shell?.dataset.selectedSession || '',
       selectedTurn: shell?.dataset.selectedTurn || '-',
@@ -482,9 +500,18 @@ async function captureState(cdp, label) {
       phase2TaskHistoryCardCount: document.querySelectorAll('#task-history-list .phase2-event').length,
       phase2WorkerControlCardCount: document.querySelectorAll('#worker-control-list .phase2-card, #worker-control-list .phase2-event').length,
       composerRect: rectOf(document.getElementById('composer-form')),
-      composerCardRect: rectOf(document.querySelector('.composer-card')),
+      composerCardRect,
       composerInputRect: rectOf(document.getElementById('composer-input')),
       messageListRect: rectOf(document.getElementById('message-list')),
+      lastMessageRect,
+      lastMessageAboveComposer: !!lastMessageRect && !!composerCardRect && lastMessageRect.bottom <= composerCardRect.top - 4,
+      composerClearancePx,
+      scrollHostTop: scrollHost.scrollTop,
+      scrollHostHeight: scrollHost.clientHeight,
+      scrollHostScrollHeight: scrollHost.scrollHeight,
+      scrollHostRemaining: Math.max(0, scrollHost.scrollHeight - scrollHost.scrollTop - scrollHost.clientHeight),
+      scrollProofScrollable: scrollHost.scrollHeight > scrollHost.clientHeight + 96,
+      sessionListText: document.getElementById('session-list')?.innerText || '',
       sessionDrawerRect: rectOf(document.querySelector('.sidebar')),
       detailDrawerRect: rectOf(document.querySelector('.inspector')),
       viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -547,9 +574,77 @@ async function captureState(cdp, label) {
         backgroundColor: style.backgroundColor,
       };
     }
+    function conversationScrollHost() {
+      const stage = document.querySelector('.stream-stage');
+      if (stage && stage.scrollHeight > stage.clientHeight + 2) return stage;
+      return document.scrollingElement || document.documentElement;
+    }
+    function pxNumber(value) {
+      const parsed = Number.parseFloat(String(value || '').replace('px', ''));
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
   });
   await fs.writeFile(path.join(artifactDir, `${label}.json`), JSON.stringify(state, null, 2));
   return { label, state };
+}
+
+async function captureScrollProof(cdp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await evalInPage(cdp, () => {
+    document.getElementById('composer-input')?.blur();
+    document.getElementById('close-session-drawer-button')?.click();
+    document.getElementById('close-detail-drawer-button')?.click();
+    window.dispatchEvent(new Event('resize'));
+    window.__freehandLayout?.applyLayoutShape?.();
+  });
+  await delay(350);
+  await evalInPage(cdp, () => {
+    const host = scrollHost();
+    host.scrollTop = host.scrollHeight;
+    function scrollHost() {
+      const stage = document.querySelector('.stream-stage');
+      if (stage && stage.scrollHeight > stage.clientHeight + 2) return stage;
+      return document.scrollingElement || document.documentElement;
+    }
+  });
+  const before = await captureState(cdp, '28-scroll-before-bottom');
+  await evalInPage(cdp, () => {
+    const host = scrollHost();
+    host.scrollTop = Math.max(0, host.scrollHeight - host.clientHeight - 220);
+    host.dispatchEvent(new Event('scroll', { bubbles: true }));
+    function scrollHost() {
+      const stage = document.querySelector('.stream-stage');
+      if (stage && stage.scrollHeight > stage.clientHeight + 2) return stage;
+      return document.scrollingElement || document.documentElement;
+    }
+  });
+  await delay(250);
+  const afterScrollUp = await captureState(cdp, '29-scroll-after-user-up');
+  await evalInPage(cdp, () => {
+    document.getElementById('refresh-session-button')?.click();
+  });
+  await delay(900);
+  const afterRefreshWhileUp = await captureState(cdp, '30-scroll-refresh-while-up');
+  await evalInPage(cdp, () => {
+    const host = scrollHost();
+    host.scrollTop = host.scrollHeight;
+    host.dispatchEvent(new Event('scroll', { bubbles: true }));
+    document.getElementById('refresh-session-button')?.click();
+    function scrollHost() {
+      const stage = document.querySelector('.stream-stage');
+      if (stage && stage.scrollHeight > stage.clientHeight + 2) return stage;
+      return document.scrollingElement || document.documentElement;
+    }
+  });
+  await delay(900);
+  const afterBottomRefresh = await captureState(cdp, '31-scroll-bottom-refresh');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  return { before, afterScrollUp, afterRefreshWhileUp, afterBottomRefresh };
 }
 
 async function capturePhase2Proof(cdp) {
