@@ -3633,6 +3633,61 @@ Current real root cause split:
     - `TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted`
   - final ADP TaskHistory:
     - `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+# 2026-07-11 normal test readiness verification
+
+- marker:
+  - `normal-test-readiness-webui-proof-1783734855627`
+- headless normal gate:
+  - reran `scripts/verify-normal-master-worker-e2e.sh`
+  - final output: `normal_master_worker_e2e_ok url=ws://127.0.0.1:4042/adp`
+  - autonomy fixture output: `master_worker_autonomy_online_ok mock_attempts=24`
+  - production rejected retry task:
+    - `task-normal-rejected-1781783734686`
+    - history: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+  - production blocked decision task:
+    - `task-normal-blocked-1781783734723`
+    - history: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`
+  - production worker crash recovery task:
+    - `task-normal-crash-1781783734746`
+    - history: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+- WebUI online proof:
+  - command: `make verify-webui-online`
+  - result: exit code 0
+  - artifact: `artifacts/webui-online/20260711-verify-4042-1783734855627/summary.json`
+  - session: `webui-session-20260711015428-f13dd4b9`
+  - screenshots include:
+    - `01-after-new-conversation.png`
+    - `06-second-running.png`
+    - `07-second-terminal.png`
+    - `08-after-refresh.png`
+    - `26-mobile-focused-composer.png`
+    - `27-phase2-projection.png`
+  - truth snapshot:
+    - `27-phase2-truth.json`
+  - key checks true:
+    - `removedExistingSessions`
+    - `firstSubmitComposerCleared`
+    - `secondProgressObserved`
+    - `terminal2NoLive`
+    - `phase2TaskBoardMatchesService`
+    - `phase2AgentBoardMatchesService`
+    - `phase2EventInboxMatchesService`
+    - `phase2TaskHistoryMatchesService`
+    - `phase2WorkerControlMatchesService`
+    - `phase2ProjectionVisible`
+    - `phase2NoRawInternalChrome`
+    - `mobileFocusedComposerCompact`
+    - `mobileFocusedNoLeftEdgeIndicators`
+  - post-proof S-profile config:
+    - `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp`
+    - `provider=minimax`
+    - `base_url_host=api.minimaxi.com`
+    - `default_model=MiniMax-M3`
+    - `auth_source=inline`
+- conclusion:
+  - current S-profile is ready for Jason's normal WebUI testing on `http://127.0.0.1:4042`
+  - remaining non-dev promotion gaps are release `4041` and Android true-device verification if the target surface is release/phone
+
 # 2026-07-10 normal master/worker E2E gate closeout
 
 - marker:
