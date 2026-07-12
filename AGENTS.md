@@ -10,7 +10,7 @@ Freehand is a Rust-first agent system with:
 - reasoning and UI split
 - multi-UI access on one truth source
 - contracts + blocks + orchestrators isolation
-- function-map-first development and debugging
+- resource-map-first ownership, then function-map-bound development and debugging
 
 Do not put long detailed rules here. Detailed truth belongs in `docs/`.
 
@@ -25,6 +25,8 @@ Do not put long detailed rules here. Detailed truth belongs in `docs/`.
 ## Route Map
 
 - feature/function owner lookup:
+  - `docs/resource-maps/core.json`
+  - `docs/resource-maps/README.md`
   - `docs/architecture/feature-map.md`
   - `docs/architecture/function-map-spec.md`
   - `docs/function-maps/README.md`
@@ -49,13 +51,14 @@ Do not put long detailed rules here. Detailed truth belongs in `docs/`.
 
 ## Core Router Rules
 
-1. No owner from function map, no edit.
-2. No new function before checking existing blocks and owner crates.
-3. Orchestrator crates stay pure orchestration; helper or semantic logic goes to `freehand-blocks`.
-4. debug starts from `feature_id`, owner, debug artifacts, and runtime directories.
-5. If truth changes, update docs, function map, skill workflow, and memory in same task.
-6. For both features and bug fixes, check information sufficiency, logic closure, and lifecycle completeness before coding or closing work.
-7. If those checks fail, do read-only tracing first. Ask the user only after local repo truth and runtime evidence cannot close the gap.
+1. No resource owner and relation from resource map, no edit.
+2. No owner from function map, no edit.
+3. No new function before checking existing blocks and owner crates.
+4. Orchestrator crates stay pure orchestration; helper or semantic logic goes to `freehand-blocks`.
+5. debug starts from `resource_type`, allowed resource relation, `feature_id`, owner, debug artifacts, and runtime directories.
+6. If truth changes, update resource map, docs, function map, skill workflow, and memory in same task.
+7. For both features and bug fixes, check information sufficiency, logic closure, and lifecycle completeness before coding or closing work.
+8. If those checks fail, do read-only tracing first. Ask the user only after local repo truth and runtime evidence cannot close the gap.
 
 ## Validation Baseline
 

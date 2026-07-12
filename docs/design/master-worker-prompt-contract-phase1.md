@@ -30,7 +30,9 @@ Master duties:
 - inspect blocked/stale/review_ready states first
 - decide whether to wait, query, adjust, reassign, ask user, approve, reject,
   or close
-- return explicit wait intent when waiting
+- schedule an explicit internal timer when waiting
+- when the next useful wait exceeds 3 minutes, timer it instead of dead-waiting
+  in the current turn, then continue other ready Master-side work
 
 Prompt block:
 
@@ -70,13 +72,51 @@ On every task-management turn:
 5. Handle stale or timed-out executions.
 6. Dispatch ready high-priority subtasks if workers are available.
 7. Decide whether to wait, ask the user, continue work, or report.
+8. When no immediate Master-side action remains, call timer(op="schedule")
+   with a concrete wakeup prompt instead of waiting in prose.
+9. If the next useful wait exceeds 3 minutes, schedule the timer instead of
+   blocking the current turn. After scheduling, continue any other ready
+   Master-side work.
 
 Task tool workflow: create_agent only when needed; create a task with goal,
 deliverables, acceptance, target_cwd, and priority; assign; claim_next with
 execution_id; record_execution as running, blocked, recovering, or review_ready;
 approve/reject; close only after accepted review.
 
-When waiting, return a wait action with reason and next_check_after.
+When waiting, call timer(op="schedule") with a concrete reason, prompt, and
+relative, absolute, local-time recurring, or local-time cron schedule. Use
+repeat fields only when the wakeup is meant to recur. Timer truth is independent
+internal tool truth, not task truth.
+
+Timer prompt duty: the prompt must tell the future Master turn what current
+truth to inspect, what waited condition to revisit, and what decision to make.
+It must not rely on memory of the previous turn.
+
+Timer examples:
+
+```json
+{
+  "op": "schedule",
+  "mode": "relative",
+  "delay_seconds": 300,
+  "reason": "Worker was dispatched; waiting more than 3 minutes should be timer-driven instead of dead-waiting.",
+  "prompt": "Read TaskBoard, EventInbox, TaskHistory, and AgentBoard from current truth. Revisit whether the dispatched worker has produced review_ready, blocked, or interrupted truth. If review is ready, approve/reject/close. If still running and no immediate action exists, schedule the next timer."
+}
+```
+
+```json
+{
+  "op": "schedule",
+  "mode": "recurring",
+  "reason": "Working-hours follow-up.",
+  "prompt": "Run scheduled Master follow-up using current framework truth only.",
+  "repeat": {
+    "kind": "cron",
+    "expression": "*/15 9-17 * * 1-5",
+    "max_runs": 32
+  }
+}
+```
 ```
 
 ## Master State Handling Table
@@ -128,6 +168,13 @@ for task-management mutations and queries. Agent lifecycle is agent state
 projected through AgentBoard/lifecycle truth, not a standalone model-facing
 tool. Use `worker_control(op=...)` only for control-channel actions against an
 already running worker execution.
+
+Use `timer(op="schedule")` for internal wakeups. Daily, weekly, and cron timer
+rules use the local timezone. Cron is 5 fields:
+`minute hour day-of-month month weekday`, with Sunday=0 through Saturday=6. Do
+not encode timer state in task notes or task lifecycle operations. If a wait
+exceeds 3 minutes, use this timer surface and continue other ready work rather
+than blocking the current Master turn.
 
 Prompt rule:
 

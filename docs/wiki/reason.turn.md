@@ -8,6 +8,10 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 - generated wiki: `docs/wiki/reason.turn.md`
 - test design: `docs/testing/reason.turn.md`
 
+## Resource Operation Backlinks
+
+- provider_response.apply_to_turn
+
 ## Request Mainline
 
 - user input and context material enter the turn orchestration path
@@ -81,20 +85,20 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create per-turn truth container and provider payload from session-owned rewrite state | session history plus user input plus turn-scoped additions | initialized turn record | CLI/server/node | reason orchestrator | bound |
-| 01 note | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | current startup path reads rewrite mode/version and base context from SessionHistory, invokes planner-owned segment admission, and stores planner diagnostics while keeping them off request content | request-chain content plus session metadata inputs | provider-ready typed request content plus metadata-side cache diagnostics | reason orchestrator | plan_context | bound |
-| 01 metadata | `ReasonTurnEngine::write_metadata` | `crates/freehand-reason/src/lib.rs` | write start-turn control metadata with owner/node provenance after payload construction and before history commit | turn record plus rewrite/model diagnostics | validated metadata envelope in metadata center or explicit metadata error | ReasonTurnEngine::start_turn | MetadataCenter::write | bound |
-| 02 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | materialize provider semantic output into turn truth and broadcast tool-result re-entry for UI lifecycle projection | provider semantic output | updated turn state plus matching broadcast event | provider boundary | turn state writer | bound |
-| 02 metadata | `ReasonTurnEngine::write_provider_output_metadata` | `crates/freehand-reason/src/lib.rs` | classify provider output control metadata before turn mutation | provider semantic output plus turn identity | metadata entries for output kind, tool/usage/error/provider terminal control facts | ReasonTurnEngine::apply_provider_output | ReasonTurnEngine::write_metadata | bound |
-| 03 | `parse_completion_submission_block` | `crates/freehand-blocks/src/lib.rs` | parse tagged completion schema from model text | model text with tagged JSON | typed completion submission or itemized parse errors | turn/live runtime | completion parser | bound |
-| 04 | `validate_completion_submission` | `crates/freehand-blocks/src/lib.rs` | validate completion schema | completion submission | completion decision or rejection | turn state writer | terminal validator | bound |
-| 05 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | accept or reject terminal outcome | candidate completion payload | terminal event or rejection | turn state writer | terminal validator | bound |
-| 06 | `ReasonTurnEngine::fail_turn` | `crates/freehand-reason/src/lib.rs` | write explicit failed terminal outcome after retry exhaustion | failure reason | failed terminal event | turn/live runtime | turn state writer | bound |
-| 07 | `ReasonTurnEngine::project_session` | `crates/freehand-reason/src/lib.rs` | project conversation view from turns | turn records | projected session view | UI/session consumers | projector | bound |
-| 08 | `ReasonTurnEngine::emit_debug` | `crates/freehand-reason/src/lib.rs` | emit observation-only debug event for turn lifecycle or provider-output milestones | turn truth plus scene metadata plus status/detail text | debug event fanout | reason orchestrator | DebugHub::emit | bound |
-| 06a | `ReasonTurnEngine::cancel_turn` | `crates/freehand-reason/src/lib.rs` | write explicit cancelled terminal outcome for user/runtime cancellation | cancellation reason | cancelled terminal event | runtime cancel dispatch | turn state writer | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create per-turn truth container and provider payload from session-owned rewrite state | session history plus user input plus turn-scoped additions | initialized turn record | CLI/server/node | reason orchestrator |  |  |  | bound |
+| 01 note | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | current startup path reads rewrite mode/version and base context from SessionHistory, invokes planner-owned segment admission, and stores planner diagnostics while keeping them off request content | request-chain content plus session metadata inputs | provider-ready typed request content plus metadata-side cache diagnostics | reason orchestrator | plan_context |  |  |  | bound |
+| 01 metadata | `ReasonTurnEngine::write_metadata` | `crates/freehand-reason/src/lib.rs` | write start-turn control metadata with owner/node provenance after payload construction and before history commit | turn record plus rewrite/model diagnostics | validated metadata envelope in metadata center or explicit metadata error | ReasonTurnEngine::start_turn | MetadataCenter::write |  |  |  | bound |
+| 02 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | materialize provider semantic output into turn truth and broadcast tool-result re-entry for UI lifecycle projection | provider semantic output | updated turn state plus matching broadcast event | provider boundary | turn state writer | provider_response | turn | provider_response.apply_to_turn | bound |
+| 02 metadata | `ReasonTurnEngine::write_provider_output_metadata` | `crates/freehand-reason/src/lib.rs` | classify provider output control metadata before turn mutation | provider semantic output plus turn identity | metadata entries for output kind, tool/usage/error/provider terminal control facts | ReasonTurnEngine::apply_provider_output | ReasonTurnEngine::write_metadata |  |  |  | bound |
+| 03 | `parse_completion_submission_block` | `crates/freehand-blocks/src/lib.rs` | parse tagged completion schema from model text | model text with tagged JSON | typed completion submission or itemized parse errors | turn/live runtime | completion parser |  |  |  | bound |
+| 04 | `validate_completion_submission` | `crates/freehand-blocks/src/lib.rs` | validate completion schema | completion submission | completion decision or rejection | turn state writer | terminal validator |  |  |  | bound |
+| 05 | `ReasonTurnEngine::submit_completion` | `crates/freehand-reason/src/lib.rs` | accept or reject terminal outcome | candidate completion payload | terminal event or rejection | turn state writer | terminal validator |  |  |  | bound |
+| 06 | `ReasonTurnEngine::fail_turn` | `crates/freehand-reason/src/lib.rs` | write explicit failed terminal outcome after retry exhaustion | failure reason | failed terminal event | turn/live runtime | turn state writer |  |  |  | bound |
+| 07 | `ReasonTurnEngine::project_session` | `crates/freehand-reason/src/lib.rs` | project conversation view from turns | turn records | projected session view | UI/session consumers | projector |  |  |  | bound |
+| 08 | `ReasonTurnEngine::emit_debug` | `crates/freehand-reason/src/lib.rs` | emit observation-only debug event for turn lifecycle or provider-output milestones | turn truth plus scene metadata plus status/detail text | debug event fanout | reason orchestrator | DebugHub::emit |  |  |  | bound |
+| 06a | `ReasonTurnEngine::cancel_turn` | `crates/freehand-reason/src/lib.rs` | write explicit cancelled terminal outcome for user/runtime cancellation | cancellation reason | cancelled terminal event | runtime cancel dispatch | turn state writer |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

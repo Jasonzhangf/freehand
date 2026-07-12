@@ -8,6 +8,10 @@ Generated from `docs/mainline-calls/reason.context-planner.json`. Do not edit by
 - generated wiki: `docs/wiki/reason.context-planner.md`
 - test design: `docs/testing/reason.context-planner.md`
 
+## Resource Operation Backlinks
+
+- turn.plan_request_context
+
 ## Request Mainline
 
 - `freehand-reason` reads session truth and current turn inputs
@@ -15,6 +19,7 @@ Generated from `docs/mainline-calls/reason.context-planner.json`. Do not edit by
 - upstream restore/context rebuild callers may pre-prune superseded repaired-failure rounds before passing session-memory segments to the planner; raw failure truth remains outside request content in ledgers/UI projections
 - dynamic model-visible input segments must arrive with content-derived admission budgets rather than small fixed runtime caps; the planner rejects only segments that exceed their declared context budget
 - it asks the planner owner path to classify context into stable and volatile segments
+- instruction capability segments are session-stable/cacheable typed context and carry instruction owner provenance
 - task contract segments are session-stable/cacheable and task-space snapshots are turn-volatile/no-cache, so task state can be visible without poisoning the stable cache prefix
 - the planner admits additional context only through typed segment rules
 - preferred context expansion path is subagent search final report -> `SubagentConclusion`
@@ -65,14 +70,14 @@ Generated from `docs/mainline-calls/reason.context-planner.json`. Do not edit by
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `plan_context` | `crates/freehand-blocks/src/lib.rs` | classify stable and volatile context sources into typed segments and append the owning user-turn segment | candidate segments plus current turn input plus rewrite metadata | ordered typed context segment set plus cache diagnostics | freehand-reason | planner builder | bound |
-| 02 | `plan_context` | `crates/freehand-blocks/src/lib.rs` | validate segment admission and token caps | typed context segment candidates | admitted/rejected segment set | planner builder | planner validator | bound |
-| 03 | `plan_context` | `crates/freehand-blocks/src/lib.rs` | calculate cache-shape diagnostics including rewrite mode/version | admitted stable prefix plus rewrite version plus tool schema shape | metadata-side cache diagnostics | planner builder | cache diagnostics block | bound |
-| 04 | `validate_rewrite_base_segments` | `crates/freehand-blocks/src/lib.rs` | validate stable/session-stable base segments for explicit rewrite gates | rewritten stable prefix candidates | admitted/rejected rewrite base segment set | reason.session-history | rewrite validator | bound |
-| 05 | `inspect_context_cache_diagnostics` | `crates/freehand-blocks/src/lib.rs` | calculate rewrite-ledger diagnostics outside request content | admitted rewrite base segments plus rewrite mode/version | metadata-side cache diagnostics | reason.session-history | cache diagnostics block | bound |
-| 06 | `render_context_segments_as_text` | `crates/freehand-blocks/src/lib.rs` | materialize provider-neutral planned request content | admitted ordered segments | provider-neutral request content string | provider adapters | planner projector | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `plan_context` | `crates/freehand-blocks/src/lib.rs` | classify stable and volatile context sources into typed segments and append the owning user-turn segment | candidate segments plus current turn input plus rewrite metadata | ordered typed context segment set plus cache diagnostics | freehand-reason | planner builder | turn | request_context | turn.plan_request_context | bound |
+| 02 | `plan_context` | `crates/freehand-blocks/src/lib.rs` | validate segment admission and token caps | typed context segment candidates | admitted/rejected segment set | planner builder | planner validator |  |  |  | bound |
+| 03 | `plan_context` | `crates/freehand-blocks/src/lib.rs` | calculate cache-shape diagnostics including rewrite mode/version | admitted stable prefix plus rewrite version plus tool schema shape | metadata-side cache diagnostics | planner builder | cache diagnostics block |  |  |  | bound |
+| 04 | `validate_rewrite_base_segments` | `crates/freehand-blocks/src/lib.rs` | validate stable/session-stable base segments for explicit rewrite gates | rewritten stable prefix candidates | admitted/rejected rewrite base segment set | reason.session-history | rewrite validator |  |  |  | bound |
+| 05 | `inspect_context_cache_diagnostics` | `crates/freehand-blocks/src/lib.rs` | calculate rewrite-ledger diagnostics outside request content | admitted rewrite base segments plus rewrite mode/version | metadata-side cache diagnostics | reason.session-history | cache diagnostics block |  |  |  | bound |
+| 06 | `render_context_segments_as_text` | `crates/freehand-blocks/src/lib.rs` | materialize provider-neutral planned request content | admitted ordered segments | provider-neutral request content string | provider adapters | planner projector |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

@@ -2,6 +2,16 @@
 
 - feature_id: `ui.protocol`
 - owner: `crates/freehand-ui-protocol`
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `task.project_to_ui`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `task.project_to_ui` | bound | `cargo test -p freehand-ui-protocol -- --nocapture` covers DTO validation, task/session projection filtering, command receipt, and worker-child session projection tests | `cargo test -p freehand-cli master_worker_autonomy -- --nocapture` covers ADP query/subscribe/command protocol smokes for task board, agent board, event inbox, task history, and session list | `make verify-webui-online` covers WebUI/CLI S-profile projection proofs that task truth renders through protocol projections without UI owning task state |
+
 - lifecycle path under test:
   - commands enter protocol boundary
   - commands act as ingress only and do not make UI a truth writer
@@ -95,7 +105,7 @@
   - selected-session submit command smoke
   - selected-session cwd projection smoke
 - session metadata projection smoke covers created empty sessions, renamed sessions, archived sessions being hidden from the active list, and restored sessions becoming visible again
-- session list projection smoke covers internal `master-lifecycle-*` sessions being absent from user-facing active/archived lists while explicit `QuerySessionTurns` for that id remains queryable
+- session list projection smoke covers top-level active/archived lists being metadata-only: created persisted sessions appear even when empty, turn-only sessions do not become global sessions, and internal `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` sessions are absent while explicit `QuerySessionTurns` for those ids remains queryable
   - command dispatch envelope owner-routing smoke
   - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
   - debug-state snapshot/query by `turn_id`

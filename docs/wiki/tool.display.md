@@ -47,17 +47,17 @@ Generated from `docs/mainline-calls/tool.display.json`. Do not edit by hand.
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `project_tool_call_display` | `crates/freehand-blocks/src/tool_display.rs` | create structured display projection from a tool call | tool name plus arguments | display projection | ui.protocol | tool display owner | bound |
-| 02 | `classify_tool_display_kind` | `crates/freehand-blocks/src/tool_display.rs` | map tool name and shell command shape to a display class | tool name plus arguments | display kind | display projector | classifier | bound |
-| 03 | `parse_read_file_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse read/list target fields | tool arguments | read/list display fields | display projector | read parser | bound |
-| 04 | `parse_file_mutation_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse write/edit target and diff-oriented fields | tool arguments | mutation display fields | display projector | mutation parser | bound |
-| 05 | `parse_search_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse search pattern/path fields | tool arguments | search display fields | display projector | search parser | bound |
-| 06 | `parse_plan_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse task/plan fields | tool arguments | plan display fields | display projector | plan parser | bound |
-| 07 | `parse_shell_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse shell command intent without UI guessing | shell arguments | shell display fields | display projector | shell parser | bound |
-| 08 | `parse_generic_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse unknown or miscellaneous tools into low-noise argument summary | tool arguments | generic display fields | display projector | generic parser | bound |
-| 09 | `project_tool_result_display` | `crates/freehand-blocks/src/tool_display.rs` | update display projection with success/failure result state | previous display plus tool result | updated display projection | ui.protocol | result projector | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `project_tool_call_display` | `crates/freehand-blocks/src/tool_display.rs` | create structured display projection from a tool call | tool name plus arguments | display projection | ui.protocol | tool display owner |  |  |  | bound |
+| 02 | `classify_tool_display_kind` | `crates/freehand-blocks/src/tool_display.rs` | map tool name and shell command shape to a display class | tool name plus arguments | display kind | display projector | classifier |  |  |  | bound |
+| 03 | `parse_read_file_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse read/list target fields | tool arguments | read/list display fields | display projector | read parser |  |  |  | bound |
+| 04 | `parse_file_mutation_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse write/edit target and diff-oriented fields | tool arguments | mutation display fields | display projector | mutation parser |  |  |  | bound |
+| 05 | `parse_search_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse search pattern/path fields | tool arguments | search display fields | display projector | search parser |  |  |  | bound |
+| 06 | `parse_plan_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse task/plan fields | tool arguments | plan display fields | display projector | plan parser |  |  |  | bound |
+| 07 | `parse_shell_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse shell command intent without UI guessing | shell arguments | shell display fields | display projector | shell parser |  |  |  | bound |
+| 08 | `parse_generic_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse unknown or miscellaneous tools into low-noise argument summary | tool arguments | generic display fields | display projector | generic parser |  |  |  | bound |
+| 09 | `project_tool_result_display` | `crates/freehand-blocks/src/tool_display.rs` | update display projection with success/failure result state | previous display plus tool result | updated display projection | ui.protocol | result projector |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

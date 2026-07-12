@@ -57,15 +57,15 @@ Generated from `docs/mainline-calls/agent.lifecycle.json`. Do not edit by hand.
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `TaskRuntime::apply_agent_lifecycle_event` | `crates/freehand-task/src/lib.rs` | reduce typed lifecycle events into per-agent state | typed lifecycle event | updated lifecycle state | runtime/task owner | lifecycle owner | bound |
-| 02 | `AgentLifecycleSnapshot` | `crates/freehand-task/src/lib.rs` | represent one agent's intrinsic lifecycle truth | agent state | serializable lifecycle snapshot | lifecycle owner | query/projection surfaces | bound |
-| 03 | `AgentBoardProjection` | `crates/freehand-task/src/lib.rs` | project all agent lifecycle snapshots for master, scheduler, UI, and headless query | lifecycle state map | AgentBoard projection | lifecycle owner | runtime query dispatch | bound |
-| 04 | `TaskRuntime::query_agent_lifecycle` | `crates/freehand-task/src/lib.rs` | query one agent lifecycle snapshot | agent id | lifecycle snapshot or explicit not-found | runtime query dispatch | lifecycle owner | bound |
-| 05 | `TaskRuntime::query_agent_board` | `crates/freehand-task/src/lib.rs` | query AgentBoard projection | optional filters | AgentBoard projection | runtime query dispatch | lifecycle owner | bound |
-| 06 | `TaskRuntime::apply_execution_fact / TaskRuntime::reject_review / TaskRuntime::approve_review / TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | derive Phase 2A worker lifecycle state from typed task execution and review events | execution/review task events with execution id | AgentLifecycleSnapshot and AgentBoard truth | task.orchestration | agent.lifecycle reducer | bound |
-| 07 | `TaskStore::write_agent_lifecycle_snapshot / TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and reload latest lifecycle snapshot for restart same-id query | lifecycle snapshot | durable lifecycle projection | task event projection / boot | lifecycle owner storage | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `TaskRuntime::apply_agent_lifecycle_event` | `crates/freehand-task/src/lib.rs` | reduce typed lifecycle events into per-agent state | typed lifecycle event | updated lifecycle state | runtime/task owner | lifecycle owner |  |  |  | bound |
+| 02 | `AgentLifecycleSnapshot` | `crates/freehand-task/src/lib.rs` | represent one agent's intrinsic lifecycle truth | agent state | serializable lifecycle snapshot | lifecycle owner | query/projection surfaces |  |  |  | bound |
+| 03 | `AgentBoardProjection` | `crates/freehand-task/src/lib.rs` | project all agent lifecycle snapshots for master, scheduler, UI, and headless query | lifecycle state map | AgentBoard projection | lifecycle owner | runtime query dispatch |  |  |  | bound |
+| 04 | `TaskRuntime::query_agent_lifecycle` | `crates/freehand-task/src/lib.rs` | query one agent lifecycle snapshot | agent id | lifecycle snapshot or explicit not-found | runtime query dispatch | lifecycle owner |  |  |  | bound |
+| 05 | `TaskRuntime::query_agent_board` | `crates/freehand-task/src/lib.rs` | query AgentBoard projection | optional filters | AgentBoard projection | runtime query dispatch | lifecycle owner |  |  |  | bound |
+| 06 | `TaskRuntime::apply_execution_fact / TaskRuntime::reject_review / TaskRuntime::approve_review / TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | derive Phase 2A worker lifecycle state from typed task execution and review events | execution/review task events with execution id | AgentLifecycleSnapshot and AgentBoard truth | task.orchestration | agent.lifecycle reducer |  |  |  | bound |
+| 07 | `TaskStore::write_agent_lifecycle_snapshot / TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and reload latest lifecycle snapshot for restart same-id query | lifecycle snapshot | durable lifecycle projection | task event projection / boot | lifecycle owner storage |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

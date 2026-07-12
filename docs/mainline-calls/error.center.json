@@ -6,6 +6,9 @@
   "test_design_doc": "docs/testing/error.center.md",
   "mainline_call_doc": "docs/mainline-calls/error.center.json",
   "generated_wiki_doc": "docs/wiki/error.center.md",
+  "resource_operations": [
+    "error.record_metadata"
+  ],
   "request_mainline": [
     "runtime observes an owner/provider/tool/schema failure at a fixed pipeline node",
     "runtime constructs `ErrorCenterObservedFailure` with source owner, source pipeline node, code, message, retry index, and retry cap",
@@ -100,6 +103,9 @@
       "output_semantic": "durable metadata row or explicit failure",
       "caller": "runtime live bridge",
       "callee": "metadata center",
+      "source_resource": "error",
+      "target_resource": "metadata",
+      "resource_operation": "error.record_metadata",
       "binding_status": "bound"
     },
     {

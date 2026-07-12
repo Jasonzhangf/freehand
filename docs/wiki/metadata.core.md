@@ -55,16 +55,16 @@ Generated from `docs/mainline-calls/metadata.core.json`. Do not edit by hand.
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `MetadataWriteOwner` | `crates/freehand-metadata/src/lib.rs` | identify the feature/symbol that wrote metadata | owner feature/crate/module/symbol | writer owner contract | metadata writers | metadata contract | bound |
-| 02 | `MetadataWriteNode` | `crates/freehand-metadata/src/lib.rs` | identify the pipeline node where metadata was written | pipeline node and optional runtime node id | write-node contract | metadata writers | metadata contract | bound |
-| 03 | `MetadataSubject` | `crates/freehand-metadata/src/lib.rs` | identify trace/session/turn subject without request text | trace/session/turn ids | metadata subject contract | metadata writers | metadata contract | bound |
-| 04 | `MetadataEnvelope::new` | `crates/freehand-metadata/src/lib.rs` | construct validated metadata envelope | id/kind/owner/node/subject/entries | accepted metadata envelope or explicit error | metadata writers | validate_metadata_envelope | bound |
-| 05 | `validate_metadata_envelope` | `crates/freehand-metadata/src/lib.rs` | enforce owner, write-node, subject, entry, and request-key rules | metadata envelope | pass/fail | MetadataEnvelope::new and MetadataCenter::write | validation helpers | bound |
-| 06 | `MetadataCenter::write` | `crates/freehand-metadata/src/lib.rs` | admit validated metadata into the center | metadata envelope | stored metadata or explicit error | metadata writers | validator plus in-memory store | bound |
-| 07 | `MetadataCenter::by_trace` | `crates/freehand-metadata/src/lib.rs` | query metadata records by trace id for audit/debug correlation | trace id | metadata record references | debug/audit tools | in-memory store | bound |
-| 08 | `MetadataCenter::with_ledger_path` | `crates/freehand-metadata/src/lib.rs` | restore owner-controlled metadata truth from one durable ledger path | metadata ledger path | metadata center preloaded with replay-safe records | runtime bootstrap/debug tests/producer wiring | metadata ledger loader | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `MetadataWriteOwner` | `crates/freehand-metadata/src/lib.rs` | identify the feature/symbol that wrote metadata | owner feature/crate/module/symbol | writer owner contract | metadata writers | metadata contract |  |  |  | bound |
+| 02 | `MetadataWriteNode` | `crates/freehand-metadata/src/lib.rs` | identify the pipeline node where metadata was written | pipeline node and optional runtime node id | write-node contract | metadata writers | metadata contract |  |  |  | bound |
+| 03 | `MetadataSubject` | `crates/freehand-metadata/src/lib.rs` | identify trace/session/turn subject without request text | trace/session/turn ids | metadata subject contract | metadata writers | metadata contract |  |  |  | bound |
+| 04 | `MetadataEnvelope::new` | `crates/freehand-metadata/src/lib.rs` | construct validated metadata envelope | id/kind/owner/node/subject/entries | accepted metadata envelope or explicit error | metadata writers | validate_metadata_envelope |  |  |  | bound |
+| 05 | `validate_metadata_envelope` | `crates/freehand-metadata/src/lib.rs` | enforce owner, write-node, subject, entry, and request-key rules | metadata envelope | pass/fail | MetadataEnvelope::new and MetadataCenter::write | validation helpers |  |  |  | bound |
+| 06 | `MetadataCenter::write` | `crates/freehand-metadata/src/lib.rs` | admit validated metadata into the center | metadata envelope | stored metadata or explicit error | metadata writers | validator plus in-memory store |  |  |  | bound |
+| 07 | `MetadataCenter::by_trace` | `crates/freehand-metadata/src/lib.rs` | query metadata records by trace id for audit/debug correlation | trace id | metadata record references | debug/audit tools | in-memory store |  |  |  | bound |
+| 08 | `MetadataCenter::with_ledger_path` | `crates/freehand-metadata/src/lib.rs` | restore owner-controlled metadata truth from one durable ledger path | metadata ledger path | metadata center preloaded with replay-safe records | runtime bootstrap/debug tests/producer wiring | metadata ledger loader |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

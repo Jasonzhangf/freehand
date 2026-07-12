@@ -6,6 +6,10 @@
   "test_design_doc": "docs/testing/runtime.checkpoint-rewind.md",
   "mainline_call_doc": "docs/mainline-calls/runtime.checkpoint-rewind.json",
   "generated_wiki_doc": "docs/wiki/runtime.checkpoint-rewind.md",
+  "resource_operations": [
+    "workspace_path.checkpoint_before_write",
+    "runtime_command.rewind_checkpoint"
+  ],
   "request_mainline": [
     "runtime receives a writable tool call during live execution",
     "runtime requests canonical preview truth from `tool.preview`",
@@ -103,6 +107,9 @@
       "output_semantic": "checkpoint manifest plus created ledger row",
       "caller": "tool loop",
       "callee": "checkpoint owner",
+      "source_resource": "workspace_path",
+      "target_resource": "checkpoint",
+      "resource_operation": "workspace_path.checkpoint_before_write",
       "binding_status": "bound"
     },
     {
@@ -125,6 +132,9 @@
       "output_semantic": "restored workspace plus restore ledger row",
       "caller": "future CLI/UI/runtime command",
       "callee": "checkpoint owner",
+      "source_resource": "runtime_command",
+      "target_resource": "checkpoint",
+      "resource_operation": "runtime_command.rewind_checkpoint",
       "binding_status": "bound"
     },
     {

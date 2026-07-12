@@ -173,7 +173,6 @@ const state = {
   sessions: [],
   sessionListLoaded: false,
   selectedSessionIds: new Set(),
-  expandedAgentIds: new Set(["master"]),
   selectedSessionId: initialSelectedSessionId,
   selectedCwd: initialSelectedCwd,
   draftSessionId: null,
@@ -197,6 +196,7 @@ const state = {
   pendingUserInput: null,
   pendingSubmitId: null,
   pendingSubmitSessionId: null,
+  pendingSubmitError: null,
   pendingAttachments: [],
   inputHistory: [],
   inputHistoryIndex: null,
@@ -957,8 +957,13 @@ function pendingChatCards(renderPending) {
   const assistantRows = [{
     kind: "system",
     title: "Client",
-    body: ["Request accepted. Waiting for service dispatch."],
-    status: elapsed || "0s",
+    body: renderPending.error
+      ? [
+          "Dispatch status is unknown. The service may still finish this request.",
+          "Refresh service state before sending a duplicate.",
+        ]
+      : ["Request accepted. Waiting for service dispatch."],
+    status: renderPending.error ? "refresh needed" : elapsed || "0s",
   }];
   const renderTurn = {
     turnId: "pending-submit",
@@ -1595,6 +1600,7 @@ function buildConversationRenderModel() {
           attachments: state.pendingAttachments,
           isLive: state.submitInFlight,
           elapsed: elapsedSince(state.submitStartedAt),
+          error: state.pendingSubmitError,
         }
       : null,
     adpFailure: state.adpFailure ? { message: state.adpFailure } : null,
@@ -2187,6 +2193,7 @@ function clearPendingUserInputIfMaterialized() {
   state.pendingUserInput = null;
   state.pendingSubmitId = null;
   state.pendingSubmitSessionId = null;
+  state.pendingSubmitError = null;
   state.pendingAttachments = [];
 }
 
@@ -2361,7 +2368,11 @@ function sessionSummaryForSelected() {
   if (!state.selectedSessionId) {
     return null;
   }
-  return state.sessions.find((session) => session.session_id === state.selectedSessionId) || null;
+  return (
+    state.sessions.find((session) => session.session_id === state.selectedSessionId) ||
+    workerChildSessionForSessionId(state.selectedSessionId) ||
+    null
+  );
 }
 
 function syncSelectedCwdFromProjection(projection) {
@@ -2404,6 +2415,7 @@ function resetLocalConversationState(sessionId) {
   state.pendingUserInput = null;
   state.pendingSubmitId = null;
   state.pendingSubmitSessionId = null;
+  state.pendingSubmitError = null;
   state.pendingAttachments = [];
   state.lifecycleClocks.clear();
   state.toolTimings.clear();
@@ -2461,7 +2473,7 @@ function setSessionList(projection) {
   if (
     state.selectedSessionId &&
     !isDraftSessionId(state.selectedSessionId) &&
-    !state.sessions.some((session) => session.session_id === state.selectedSessionId)
+    !sessionTruthAllowsSessionId(state.selectedSessionId)
   ) {
     setSelectedSessionId(null);
   }
@@ -2646,7 +2658,10 @@ function sessionTruthAllowsSessionId(sessionId) {
   if (!state.sessionListLoaded) {
     return true;
   }
-  return state.sessions.some((session) => session.session_id === sessionId);
+  return (
+    state.sessions.some((session) => session.session_id === sessionId) ||
+    workerChildSessionForSessionId(sessionId) !== null
+  );
 }
 
 function turnOrderKey(turnId) {
@@ -2979,55 +2994,66 @@ function appendSessionParts(item, label, title, meta) {
   item.append(labelNode, titleNode, metaNode);
 }
 
+function sessionKindLabel(session) {
+  if (session && session.temporary) {
+    return "worker";
+  }
+  return normalizeCwd(session && session.cwd) ? "task" : "global";
+}
+
 function normalizeAgentId(value) {
   const agentId = `${value || ""}`.trim();
   return agentId || "master";
 }
 
-function sessionAgentId(session) {
-  if (!session) {
-    return "master";
-  }
-  const explicit = session.agent_id || session.source_agent_id || session.agent || session.source_agent;
-  if (explicit) {
-    return normalizeAgentId(explicit);
-  }
-  if (state.turn && state.turn.session_id === session.session_id && state.turn.source) {
-    return normalizeAgentId(state.turn.source.source_agent_id);
-  }
-  const turn = state.sessionTurns.find((candidate) => candidate.session_id === session.session_id && candidate.source);
-  return normalizeAgentId(turn && turn.source && turn.source.source_agent_id);
+function sanitizeRuntimeIdentifier(value) {
+  return `${value || ""}`
+    .split("")
+    .map((character) => (/^[A-Za-z0-9]$/.test(character) ? character : "-"))
+    .join("");
 }
 
-function agentDisplayName(agentId) {
-  const normalized = normalizeAgentId(agentId);
-  if (normalized === "master") {
-    return "Master";
+function workerSessionIdForTask(task) {
+  const taskId = `${(task && task.task_id) || ""}`.trim();
+  if (!taskId) {
+    return null;
   }
-  return normalized;
+  return `worker-task-${sanitizeRuntimeIdentifier(taskId)}`;
 }
 
-function sessionKindLabel(session) {
-  return normalizeCwd(session && session.cwd) ? "task" : "global";
+function workerChildSessionsForParent(parentSessionId) {
+  if (!parentSessionId || !state.taskBoard) {
+    return [];
+  }
+  return ((state.taskBoard && state.taskBoard.tasks) || [])
+    .filter((task) => task && task.parent_session_id === parentSessionId)
+    .map((task) => ({
+      session_id: workerSessionIdForTask(task),
+      title: task.title ? `Worker · ${task.title}` : `Worker · ${task.task_id}`,
+      archived: false,
+      cwd: task.target_cwd || null,
+      latest_turn_id: null,
+      active_turn_id: null,
+      turn_count: 0,
+      latest_status: task.status || "task",
+      latest_summary: task.goal || task.task_id || null,
+      temporary: true,
+      parent_session_id: parentSessionId,
+      task_id: task.task_id || null,
+      assignee_agent_id: task.assignee_agent_id || null,
+    }))
+    .filter((session) => session.session_id);
 }
 
-function groupedSessionsByAgent(sessions) {
-  const groups = new Map();
-  (sessions || []).forEach((session) => {
-    const agentId = sessionAgentId(session);
-    if (!groups.has(agentId)) {
-      groups.set(agentId, []);
+function workerChildSessionForSessionId(sessionId) {
+  const parents = state.sessions || [];
+  for (const parent of parents) {
+    const child = workerChildSessionsForParent(parent.session_id).find((session) => session.session_id === sessionId);
+    if (child) {
+      return child;
     }
-    groups.get(agentId).push(session);
-  });
-  return Array.from(groups.entries()).map(([agentId, groupSessions]) => ({
-    agentId,
-    sessions: groupSessions,
-  }));
-}
-
-function ensureSessionAgentExpanded(agentId) {
-  state.expandedAgentIds.add(normalizeAgentId(agentId));
+  }
+  return null;
 }
 
 function renderSessionItem(session) {
@@ -3041,6 +3067,7 @@ function renderSessionItem(session) {
   selector.type = "checkbox";
   selector.checked = state.selectedSessionIds.has(session.session_id);
   selector.setAttribute("aria-label", `Select session ${session.session_id}`);
+  selector.disabled = !!session.temporary;
   selector.addEventListener("change", () => {
     toggleSessionSelection(session.session_id, selector.checked);
   });
@@ -3069,50 +3096,27 @@ function renderSessionItem(session) {
       setCommandStatus(`session refresh failed: ${error.message}`);
     });
   });
-  item.append(selector, button);
+  if (!session.temporary) {
+    item.append(selector);
+  }
+  item.append(button);
   return item;
 }
 
-function renderSessionAgentGroup(group) {
-  const selectedInGroup = group.sessions.some((session) => session.session_id === state.selectedSessionId);
-  if (selectedInGroup) {
-    ensureSessionAgentExpanded(group.agentId);
-  }
+function renderSessionWithWorkerChildren(session) {
   const section = document.createElement("section");
-  section.className = "session-agent-group";
-  section.dataset.agentId = group.agentId;
-  section.dataset.expanded = state.expandedAgentIds.has(group.agentId) ? "true" : "false";
-
-  const button = document.createElement("button");
-  button.className = "session-agent-button";
-  button.type = "button";
-  button.setAttribute("aria-expanded", section.dataset.expanded);
-  const taskCount = group.sessions.filter((session) => normalizeCwd(session.cwd)).length;
-  const globalCount = group.sessions.length - taskCount;
-  button.innerHTML = `
-    <span class="session-agent-main">
-      <span class="session-agent-chevron" aria-hidden="true">›</span>
-      <span class="session-agent-name"></span>
-    </span>
-    <span class="session-agent-count"></span>
-  `;
-  button.querySelector(".session-agent-name").textContent = agentDisplayName(group.agentId);
-  button.querySelector(".session-agent-count").textContent =
-    `${group.sessions.length} session(s) · ${taskCount} task · ${globalCount} global`;
-  button.addEventListener("click", () => {
-    if (state.expandedAgentIds.has(group.agentId)) {
-      state.expandedAgentIds.delete(group.agentId);
-    } else {
-      state.expandedAgentIds.add(group.agentId);
-    }
-    renderSessions();
-  });
-
-  const sessionsNode = document.createElement("div");
-  sessionsNode.className = "session-agent-sessions";
-  group.sessions.forEach((session) => sessionsNode.appendChild(renderSessionItem(session)));
-
-  section.append(button, sessionsNode);
+  section.className = "session-with-workers";
+  section.dataset.sessionId = session.session_id;
+  section.appendChild(renderSessionItem(session));
+  const children = workerChildSessionsForParent(session.session_id);
+  if (children.length > 0) {
+    const childrenNode = document.createElement("div");
+    childrenNode.className = "session-worker-children";
+    children.forEach((child) => {
+      childrenNode.appendChild(renderSessionItem(child));
+    });
+    section.appendChild(childrenNode);
+  }
   return section;
 }
 
@@ -3157,8 +3161,8 @@ function renderSessions() {
     renderDraftSessionItem();
   }
 
-  groupedSessionsByAgent(state.sessions).forEach((group) => {
-    sessionList.appendChild(renderSessionAgentGroup(group));
+  state.sessions.forEach((session) => {
+    sessionList.appendChild(renderSessionWithWorkerChildren(session));
   });
   renderSessionBulkToolbar();
 }
@@ -3219,6 +3223,7 @@ function applyPhase2QueryResult(result) {
     state.taskBoard = taskBoard;
     state.phase2StatusError = null;
     renderPhase2Dashboard();
+    renderSessions();
     return true;
   }
   const agentBoard = variantPayload(result, "AgentBoard");
@@ -3242,6 +3247,7 @@ function applyPhase2QueryResult(result) {
     state.eventInbox = masterPoll.event_inbox || state.eventInbox;
     state.phase2StatusError = null;
     renderPhase2Dashboard();
+    renderSessions();
     return true;
   }
   const workerControl = variantPayload(result, "WorkerControl");
@@ -4152,6 +4158,7 @@ async function cancelActiveTurn() {
     state.pendingUserInput = null;
     state.pendingSubmitId = null;
     state.pendingSubmitSessionId = null;
+    state.pendingSubmitError = null;
     state.pendingAttachments = [];
     state.lifecycleClocks.clear();
     state.submitStartedAt = null;
@@ -4173,6 +4180,7 @@ async function cancelActiveTurn() {
   state.pendingUserInput = null;
   state.pendingSubmitId = null;
   state.pendingSubmitSessionId = null;
+  state.pendingSubmitError = null;
   state.pendingAttachments = [];
   state.lifecycleClocks.clear();
   state.submitStartedAt = null;
@@ -4204,6 +4212,7 @@ async function runSlashCommand(rawText) {
     state.pendingUserInput = null;
     state.pendingSubmitId = null;
     state.pendingSubmitSessionId = null;
+    state.pendingSubmitError = null;
     state.pendingAttachments = [];
     state.lifecycleClocks.clear();
     state.submitStartedAt = null;
@@ -4257,6 +4266,7 @@ async function runSlashCommand(rawText) {
       state.pendingUserInput = null;
       state.pendingSubmitId = null;
       state.pendingSubmitSessionId = null;
+      state.pendingSubmitError = null;
       state.pendingAttachments = [];
       state.lifecycleClocks.clear();
       state.submitStartedAt = null;
@@ -4336,12 +4346,18 @@ composerForm.addEventListener("submit", async (event) => {
     return;
   }
   setCommandStatus("dispatching...");
+  if (!state.selectedSessionId) {
+    const sessionId = newDraftSessionId();
+    state.draftSessionId = sessionId;
+    setSelectedSessionId(sessionId);
+  }
   const attachments = currentAttachments();
   const commandText = textWithAttachmentPlaceholders(text, attachments);
   rememberInputHistory(text);
   state.pendingUserInput = text;
   state.pendingSubmitId = null;
   state.pendingSubmitSessionId = state.selectedSessionId;
+  state.pendingSubmitError = null;
   state.pendingAttachments = attachments;
   state.submitStartedAt = Date.now();
   state.submitInFlight = true;
@@ -4354,6 +4370,7 @@ composerForm.addEventListener("submit", async (event) => {
     clearCurrentAttachments();
     state.submitInFlight = false;
     state.submitStartedAt = null;
+    state.pendingSubmitError = null;
     state.pendingAttachments = [];
     try {
       await refreshAllProtocolState();
@@ -4363,14 +4380,12 @@ composerForm.addEventListener("submit", async (event) => {
     }
   } catch (error) {
     state.submitInFlight = false;
-    state.pendingUserInput = null;
-    state.pendingSubmitId = null;
-    state.pendingSubmitSessionId = null;
-    state.pendingAttachments = [];
     state.submitStartedAt = null;
+    state.pendingSubmitError = error.message;
     composerInput.value = "";
+    state.forceScrollToBottom = true;
     renderMessages();
-    setCommandStatus(`dispatch failed; use ↑ to recall input. Draft attachments retained: ${error.message}`);
+    setCommandStatus(`dispatch status unknown; refresh before duplicate send. Use ↑ to recall input. Draft attachments retained: ${error.message}`);
   }
 });
 

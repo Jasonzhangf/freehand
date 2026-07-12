@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use thiserror::Error;
 use walkdir::{DirEntry, WalkDir};
 
@@ -209,6 +210,81 @@ pub fn write_instruction_capability_manifest(
         path: path.display().to_string(),
         message: err.to_string(),
     })
+}
+
+pub fn render_instruction_capability_context(
+    manifest: &InstructionCapabilityManifest,
+) -> Result<String, InstructionCapabilityError> {
+    let agents = manifest
+        .agents
+        .iter()
+        .map(|entry| {
+            let content = fs::read_to_string(&entry.path).map_err(|err| {
+                InstructionCapabilityError::ReadFile {
+                    path: entry.path.clone(),
+                    message: err.to_string(),
+                }
+            })?;
+            Ok(json!({
+                "scope": entry.scope,
+                "path": entry.path,
+                "directory": entry.directory,
+                "precedence": entry.precedence,
+                "content_bytes": entry.content_bytes,
+                "content_hash": entry.content_hash,
+                "content": content
+            }))
+        })
+        .collect::<Result<Vec<_>, InstructionCapabilityError>>()?;
+    let skills = manifest
+        .skills
+        .iter()
+        .map(|entry| {
+            let content = fs::read_to_string(&entry.path).map_err(|err| {
+                InstructionCapabilityError::ReadFile {
+                    path: entry.path.clone(),
+                    message: err.to_string(),
+                }
+            })?;
+            Ok(json!({
+                "scope": entry.scope,
+                "name": entry.name,
+                "description": entry.description,
+                "path": entry.path,
+                "root": entry.root,
+                "precedence": entry.precedence,
+                "content_bytes": entry.content_bytes,
+                "content_hash": entry.content_hash,
+                "content": content
+            }))
+        })
+        .collect::<Result<Vec<_>, InstructionCapabilityError>>()?;
+    let errors = manifest
+        .errors
+        .iter()
+        .map(|entry| {
+            json!({
+                "path": entry.path,
+                "message": entry.message
+            })
+        })
+        .collect::<Vec<_>>();
+    let payload = json!({
+        "schema_version": 1,
+        "purpose": "Compiled Freehand instruction capability content admitted through typed request_context. Runtime/provider code must not scan AGENTS.md or skills directly.",
+        "manifest_fingerprint": manifest.manifest_fingerprint,
+        "freehand_home": manifest.freehand_home,
+        "cwd": manifest.cwd,
+        "project_root": manifest.project_root,
+        "agents": agents,
+        "skills": skills,
+        "errors": errors
+    });
+    let payload_text = serde_json::to_string_pretty(&payload)
+        .map_err(|err| InstructionCapabilityError::RenderManifest(err.to_string()))?;
+    Ok(format!(
+        "Compiled Freehand instruction capability content. Treat this as typed framework instruction capability context, not as task/user payload.\n<freehand_instruction_capability>\n{payload_text}\n</freehand_instruction_capability>"
+    ))
 }
 
 fn agents_md_capability(
@@ -565,6 +641,36 @@ mod tests {
         let raw = fs::read_to_string(&manifest_path).expect("read manifest");
         assert!(raw.contains("\"schema_version\": 1"));
         assert!(raw.contains("freehand-instructions"));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn renders_manifest_entries_as_instruction_capability_context() {
+        let root = temp_dir();
+        let home = root.join("home/.freehand");
+        let cwd = root.join("repo");
+        fs::create_dir_all(&cwd).expect("cwd");
+        write(&cwd.join("Cargo.toml"), "[workspace]\n");
+        write(&home.join("AGENTS.md"), "global sentinel FH-INST-GLOBAL\n");
+        write(&cwd.join("AGENTS.md"), "local sentinel FH-INST-LOCAL\n");
+        write(
+            &home.join("skills/good/SKILL.md"),
+            "---\nname: good\ndescription: good skill sentinel\n---\nSkill body sentinel FH-INST-SKILL\n",
+        );
+        let manifest = compile_instruction_capability_manifest(
+            InstructionCapabilityCompileInput::new(&home, &cwd),
+        )
+        .expect("manifest");
+
+        let context = render_instruction_capability_context(&manifest).expect("context");
+
+        assert!(context.contains("<freehand_instruction_capability>"));
+        assert!(context.contains("FH-INST-GLOBAL"));
+        assert!(context.contains("FH-INST-LOCAL"));
+        assert!(context.contains("good skill sentinel"));
+        assert!(context.contains("FH-INST-SKILL"));
+        assert!(context.contains(&manifest.manifest_fingerprint));
 
         fs::remove_dir_all(root).expect("cleanup");
     }

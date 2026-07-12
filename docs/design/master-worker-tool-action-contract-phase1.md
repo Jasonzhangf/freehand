@@ -50,6 +50,7 @@ Phase 1 should converge on this small owner-scoped action surface:
 | tool | owner surface | purpose |
 | --- | --- | --- |
 | `task` | Task Center / task orchestration | create, query, assign, claim, heartbeat, progress, review, close, and task-board operations |
+| `timer` | Internal timer scheduler | schedule relative, absolute, and recurring internal wakeups with a persisted prompt |
 | `worker_control` | runtime control channel | ask or control a running worker at safe points |
 
 The existing `task(op=...)` direction remains the baseline.
@@ -62,6 +63,18 @@ model-facing `agent` tool just to discover what an agent is doing.
 `worker_control` is a candidate separate tool only for actions against a
 currently running worker execution. It must not mutate durable task truth
 directly; any task-state consequence must flow back through Task Center events.
+
+`timer` is a separate standard internal tool because timers can resume many
+workflow types, not only task orchestration. It must not be encoded as
+`task(op="wait")` or as task note text. Timer calls persist schedule truth and
+the wakeup prompt before returning success; runtime later starts a new internal
+Master turn from that prompt.
+
+If the next useful wait exceeds 3 minutes, Master must call `timer` instead of
+dead-waiting in the current turn. After the timer is scheduled, Master should
+continue any other ready Master-side work. The persisted prompt must state what
+current truth to inspect, what waited condition to revisit, and what decision to
+make when the timer fires.
 
 No implementation should add a new exposed tool name until the function map and
 test design prove a separate owner surface is necessary.
@@ -103,7 +116,7 @@ ops under the small tool surface.
 | submit review | `task(op="submit_review")` |
 | approve or reject review | `task(op="approve")` / `task(op="reject")` |
 | close BigTask/SubTask | `task(op="close")` |
-| wait with next check | `task(op="wait")` or scheduler tick event, depending on owner-map decision |
+| wait with next check | `timer(op="schedule")` with relative, absolute, local-time recurring, or local-time cron schedule; mandatory when the next useful wait exceeds 3 minutes |
 | query AgentBoard | read AgentBoard projection from framework/query surface; not a model mutation tool |
 | query agent lifecycle | read lifecycle snapshot for the agent; not a model mutation tool |
 | ask runtime status | `worker_control(op="query_status")` |

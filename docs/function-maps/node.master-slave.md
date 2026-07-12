@@ -3,6 +3,10 @@
 - feature_id: `node.master-slave`
 - owner crate: `crates/freehand-node`
 - owner module: `crates/freehand-node/src/lib.rs`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `config.bootstrap_node_pairing`
+  - `node_pairing.project_to_ui`
 - owner entry symbols:
   - `LocalNodeRuntime::new`
   - `LocalNodeRuntime::with_debug_hub`
@@ -15,6 +19,21 @@
   - `LocalNodeRuntime::publish_slave_turn`
   - `LocalNodeRuntime::query_node_status`
   - `LocalNodeRuntime::query_task_progress`
+
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `node_pairing`
+- touched resources:
+  - `config`
+  - `ui_projection`
+- resource operations:
+  - `config.bootstrap_node_pairing`
+  - `node_pairing.project_to_ui`
+- forbidden shortcuts:
+  - UI projection must not mutate or synthesize node pairing truth directly.
+  - Pair token and pairing permission truth must not leak through UI/debug payloads.
 
 ## Request Mainline
 

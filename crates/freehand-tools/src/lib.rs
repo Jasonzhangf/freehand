@@ -144,9 +144,7 @@ impl BuiltinToolRegistry {
         self.tools
             .values()
             .filter(|spec| {
-                spec.implemented
-                    && self.execution_scope(&spec.definition.name)
-                        != Some(BuiltinToolExecutionScope::Shell)
+                spec.implemented && matches!(spec.definition.name.as_str(), "task" | "timer")
             })
             .map(|spec| spec.definition.clone())
             .collect()
@@ -158,6 +156,7 @@ impl BuiltinToolRegistry {
             .filter(|spec| {
                 spec.implemented
                     && spec.definition.name != "task"
+                    && spec.definition.name != "timer"
                     && self.execution_scope(&spec.definition.name)
                         != Some(BuiltinToolExecutionScope::Shell)
             })
@@ -192,7 +191,9 @@ impl BuiltinToolRegistry {
     pub fn execution_scope(&self, name: &str) -> Option<BuiltinToolExecutionScope> {
         self.tools.get(name)?;
         Some(match name {
-            "task" | "todo_write" | "complete_step" => BuiltinToolExecutionScope::Framework,
+            "task" | "timer" | "todo_write" | "complete_step" => {
+                BuiltinToolExecutionScope::Framework
+            }
             "bash" | "bg_jobs" | "kill_shell" | "wait_job" => BuiltinToolExecutionScope::Shell,
             "web_fetch" => BuiltinToolExecutionScope::Network,
             _ => BuiltinToolExecutionScope::Workspace,
@@ -230,6 +231,10 @@ impl BuiltinToolRegistry {
             "task" => Err(ToolRegistryError::ExecutionFailed {
                 tool: "task".to_owned(),
                 message: "task execution requires the runtime task orchestrator".to_owned(),
+            }),
+            "timer" => Err(ToolRegistryError::ExecutionFailed {
+                tool: "timer".to_owned(),
+                message: "timer execution requires the runtime timer scheduler".to_owned(),
             }),
             _ => Err(ToolRegistryError::UnimplementedTool(name.to_owned())),
         }
@@ -316,11 +321,11 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "read_file",
             true,
             true,
-            "Read a text file with optional line offset/limit.",
+            "Read one UTF-8 text file with optional line offset/limit. Use `ls` first when the path might be a directory. Do not pass directories, generated output paths that do not exist yet, or guessed files.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "File path"},
+                    "path": {"type": "string", "description": "Existing file path. Absolute readable paths are allowed; directories must use `ls`, not `read_file`."},
                     "offset": {"type": "integer", "minimum": 0},
                     "limit": {"type": "integer", "minimum": 1}
                 },
@@ -418,10 +423,15 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "glob",
             true,
             true,
-            "Find files matching a glob pattern.",
+            "Find files matching a glob pattern inside the current locked workspace. Prefer relative patterns such as `main/**/*.cc`; an absolute pattern is valid only when it is inside the locked workspace. Do not pass `~`, parent traversal, broad external roots, or exact known file paths; use `ls` for directories/existence checks and `read_file` for known files.",
             json!({
                 "type": "object",
-                "properties": {"pattern": {"type": "string"}},
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Workspace-scoped glob. Preferred: relative patterns like \"src/**/*.rs\". Also accepted: absolute patterns under the locked workspace root. Invalid: \"~/**\", \"../**\", or absolute paths outside the locked workspace."
+                    }
+                },
                 "required": ["pattern"]
             }),
         ),
@@ -443,11 +453,11 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "ls",
             true,
             true,
-            "List directory entries.",
+            "List directory entries or report one file entry. Use this before `read_file` when you are unsure whether a path is a file or directory, and to verify whether a generated output file exists.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string"},
+                    "path": {"type": "string", "description": "Existing file or directory path. Absolute readable paths are allowed."},
                     "recursive": {"type": "boolean"}
                 }
             }),
@@ -536,13 +546,13 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "task",
             false,
             true,
-            "Manage Freehand framework tasks and agent registry state.",
+            "Manage Freehand framework tasks and agent registry state. Every call must include top-level op. Prefer the current TaskSpaceSnapshot context before calling query/list/history; use tools only for a concrete mutation or full ledger needed for a decision. Production examples: {\"op\":\"create\",\"title\":\"...\",\"content\":\"...\",\"goal\":\"...\",\"target_cwd\":\"/absolute/existing/repo\",\"dispatch\":{\"mode\":\"none\"}} then {\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}.",
             json!({
                 "type": "object",
                 "properties": {
                     "op": {
                         "type": "string",
-                        "description": "Task Center operation. Use create_agent/create/assign/claim_next to dispatch worker work; use record_execution with status to report worker results; use approve/reject/close for review lifecycle.",
+                        "description": "Required top-level Task Center operation. Never omit op. Master production flow: {\"op\":\"create\", title/content/goal/deliverables/acceptance/target_cwd, \"dispatch\":{\"mode\":\"none\"}}, then {\"op\":\"assign\", \"task_id\":..., \"agent_id\": configured Worker}. Query/list/history are for specific missing truth only; do not use status=\"all\". Worker runner, not Master, owns claim_next/heartbeat/record_execution in production.",
                         "enum": ["create", "query", "list_tasks", "history", "append", "pause", "resume", "heartbeat", "assign", "claim_next", "record_execution", "cancel", "submit_review", "approve", "reject", "close", "list_agents", "query_agent", "create_agent", "close_agent"]
                     },
                     "task_id": {"type": "string"},
@@ -552,7 +562,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                     },
                     "status": {
                         "type": "string",
-                        "description": "For list_tasks this filters task status. For record_execution this reports worker state: running, recovering, blocked, or review_ready."
+                        "description": "For list_tasks this filters one exact task status: created, waiting_agent, assigned, running, interrupted, paused, blocked, review_submitted, approved, rejected, failed, cancelled, or closed. Omit status to list all visible tasks; do not pass all. For record_execution this reports worker state: running, recovering, blocked, interrupted, or review_ready."
                     },
                     "retry_count": {
                         "type": "integer",
@@ -567,9 +577,13 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                     "deliverables": {"type": "array", "items": {"type": "string"}},
                     "acceptance": {"type": "array", "items": {"type": "string"}},
                     "priority": {"type": "integer"},
-                    "target_cwd": {"type": "string"},
+                    "target_cwd": {
+                        "type": "string",
+                        "description": "Existing Worker repository/workspace cwd. Use an expanded absolute path such as /Users/name/Documents/github/repo; do not pass ~, glob patterns, or a not-yet-created output directory."
+                    },
                     "dispatch": {
                         "type": "object",
+                        "description": "For normal Master dispatch, use {\"mode\":\"none\"} then task(op=\"assign\", agent_id=<configured Worker>), or {\"mode\":\"agent\",\"agent_id\":<configured Worker>}. Do not use auto/self in production.",
                         "properties": {
                             "mode": {"type": "string", "enum": ["none", "self", "agent", "auto"]},
                             "agent_id": {"type": "string"},
@@ -585,6 +599,120 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                     "agent_id": {"type": "string"},
                     "capabilities": {"type": "array", "items": {"type": "string"}}
                 },
+                "required": ["op"]
+            }),
+        ),
+        spec(
+            "timer",
+            false,
+            true,
+            "Schedule internal wakeups for the Master. This is independent from task truth: use it after dispatching work when the Master should wake later, read current framework truth, and continue. If the next useful wait exceeds 3 minutes, schedule a timer instead of dead-waiting in the current turn; after scheduling, continue any other ready Master-side work. Do not claim a timer was scheduled unless this timer tool returned `Timer scheduled` in the current turn. Supports relative countdowns, absolute Unix timestamps, local-time daily/weekly recurrence, and 5-field local-time cron expressions. Every schedule must include a concrete reason and the exact prompt to use when the timer fires.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "op": {
+                        "type": "string",
+                        "description": "Timer operation. Use schedule to create/update a wakeup, cancel to stop one, and list to inspect active timers.",
+                        "enum": ["schedule", "cancel", "list"]
+                    },
+                    "timer_id": {
+                        "type": "string",
+                        "description": "Optional stable id for schedule/cancel; generated when omitted for schedule."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why this wakeup is needed. Required for schedule."
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "Prompt used when the timer fires to continue the internal Master workflow. Must tell Master what current truth to inspect, what waited condition to revisit, and what decision to make. Must tell Master to read current framework truth and not assume prior state from memory. Required for schedule."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "Schedule mode for schedule op.",
+                        "enum": ["relative", "absolute", "recurring"]
+                    },
+                    "delay_seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Relative countdown in seconds."
+                    },
+                    "run_at_unix_seconds": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Absolute Unix timestamp in seconds."
+                    },
+                    "repeat": {
+                        "type": "object",
+                        "description": "Recurring schedule rule. interval_seconds is relative repeat; daily/weekly use local time-of-day seconds and optional local weekdays; cron uses a 5-field local-time expression: minute hour day-of-month month weekday.",
+                        "properties": {
+                            "kind": {"type": "string", "enum": ["interval", "daily", "weekly", "cron"]},
+                            "interval_seconds": {"type": "integer", "minimum": 1},
+                            "time_of_day_seconds_local": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 86399,
+                                "description": "Local-time seconds after midnight, used by daily/weekly. Example 09:30 local = 34200."
+                            },
+                            "cron_expression": {
+                                "type": "string",
+                                "description": "Deprecated alias for expression; use expression."
+                            },
+                            "expression": {
+                                "type": "string",
+                                "description": "5-field local-time cron expression: minute hour day-of-month month weekday. Supports *, comma lists, ranges, and /steps. Weekday Sunday=0 through Saturday=6."
+                            },
+                            "weekdays": {
+                                "type": "array",
+                                "items": {"type": "integer", "minimum": 0, "maximum": 6},
+                                "description": "Local weekdays, Sunday=0 through Saturday=6. Workdays are [1,2,3,4,5]."
+                            },
+                            "skip_weekends": {
+                                "type": "boolean",
+                                "description": "For daily local-time schedules, skip local Saturday/Sunday."
+                            },
+                            "max_runs": {"type": "integer", "minimum": 1}
+                        },
+                        "required": ["kind"]
+                    },
+                    "max_runs": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Maximum number of firings. Defaults to 1 for one-shot timers."
+                    }
+                },
+                "examples": [
+                    {
+                        "op": "schedule",
+                        "mode": "relative",
+                        "delay_seconds": 300,
+                        "reason": "Worker was dispatched; waiting more than 3 minutes should be timer-driven instead of dead-waiting.",
+                        "prompt": "Read TaskBoard, EventInbox, TaskHistory, and AgentBoard from current truth. Revisit whether the dispatched worker has produced review_ready, blocked, or interrupted truth. If review is ready, approve/reject/close. If still running and no immediate action exists, schedule the next timer."
+                    },
+                    {
+                        "op": "schedule",
+                        "mode": "recurring",
+                        "reason": "Run a working-day local-time check.",
+                        "prompt": "Run scheduled Master follow-up using current framework truth only.",
+                        "repeat": {
+                            "kind": "weekly",
+                            "time_of_day_seconds_local": 34200,
+                            "weekdays": [1, 2, 3, 4, 5],
+                            "max_runs": 20
+                        }
+                    },
+                    {
+                        "op": "schedule",
+                        "mode": "recurring",
+                        "reason": "Cron-based local-time Master check.",
+                        "prompt": "Run cron-triggered Master follow-up using current framework truth only.",
+                        "repeat": {
+                            "kind": "cron",
+                            "expression": "*/15 9-17 * * 1-5",
+                            "max_runs": 32
+                        }
+                    }
+                ],
                 "required": ["op"]
             }),
         ),
@@ -1139,9 +1267,8 @@ fn execute_delete_range(
 
 fn execute_glob(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
     let pattern = required_string(arguments, "glob", "pattern")?;
-    validate_glob_pattern(pattern)?;
     let root = locked_workspace_root("glob")?;
-    let joined_pattern = root.join(pattern);
+    let joined_pattern = resolve_glob_pattern(&root, pattern)?;
     let joined_pattern = joined_pattern.to_string_lossy().to_string();
     let mut matches = glob::glob(&joined_pattern)
         .map_err(|err| ToolRegistryError::InvalidArguments {
@@ -1289,9 +1416,9 @@ fn execute_ls(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolReg
         message: format!("cannot stat `{}`: {err}", path.display()),
     })?;
     if !metadata.is_dir() {
-        return Err(ToolRegistryError::ExecutionFailed {
-            tool: "ls".to_owned(),
-            message: format!("`{}` is not a directory", relative_display(&root, &path)),
+        let size = metadata.len();
+        return Ok(ToolExecutionOutput {
+            text: format!("{}\t{size}", relative_display(&root, &path)),
         });
     }
 
@@ -1572,12 +1699,14 @@ fn resolve_locked_write_path(
     Ok(canonical_parent.join(file_name))
 }
 
-fn validate_glob_pattern(pattern: &str) -> Result<(), ToolRegistryError> {
+fn resolve_glob_pattern(root: &Path, pattern: &str) -> Result<PathBuf, ToolRegistryError> {
     let path = Path::new(pattern);
-    if path.is_absolute() {
+    if pattern.starts_with('~') {
         return Err(ToolRegistryError::InvalidArguments {
             tool: "glob".to_owned(),
-            message: "absolute patterns are not supported".to_owned(),
+            message:
+                "tilde patterns are not supported; use a path relative to the locked workspace"
+                    .to_owned(),
         });
     }
     if path
@@ -1589,7 +1718,42 @@ fn validate_glob_pattern(pattern: &str) -> Result<(), ToolRegistryError> {
             message: "pattern may not contain `..`".to_owned(),
         });
     }
-    Ok(())
+    if path.is_absolute() {
+        let resolved =
+            canonicalize_absolute_glob_pattern(path).unwrap_or_else(|| path.to_path_buf());
+        if !resolved.starts_with(root) {
+            return Err(ToolRegistryError::WorkspaceBoundaryViolation {
+                tool: "glob".to_owned(),
+                field: "pattern".to_owned(),
+                root: root.to_string_lossy().into_owned(),
+                target: pattern.to_owned(),
+            });
+        }
+        return Ok(resolved);
+    }
+    Ok(root.join(pattern))
+}
+
+fn canonicalize_absolute_glob_pattern(pattern: &Path) -> Option<PathBuf> {
+    let pattern_text = pattern.to_string_lossy();
+    let first_meta = pattern_text
+        .find(|ch| matches!(ch, '*' | '?' | '[' | '{'))
+        .unwrap_or(pattern_text.len());
+    let prefix_end = pattern_text[..first_meta]
+        .rfind(['/', '\\'])
+        .map(|index| index + 1)
+        .unwrap_or(first_meta);
+    let prefix = &pattern_text[..prefix_end];
+    if prefix.is_empty() {
+        return None;
+    }
+    let canonical_prefix = fs::canonicalize(prefix).ok()?;
+    let suffix = &pattern_text[prefix_end..];
+    if suffix.is_empty() {
+        Some(canonical_prefix)
+    } else {
+        Some(canonical_prefix.join(suffix))
+    }
 }
 
 fn contains_path_separator(pattern: &str) -> bool {
@@ -1869,6 +2033,7 @@ mod tests {
         assert!(names.contains(&"ls".to_owned()));
         assert!(names.contains(&"todo_write".to_owned()));
         assert!(names.contains(&"complete_step".to_owned()));
+        assert!(names.contains(&"timer".to_owned()));
         assert_eq!(registry.read_only("read_file"), Some(true));
         assert_eq!(registry.read_only("glob"), Some(true));
         assert_eq!(registry.read_only("grep"), Some(true));
@@ -1887,7 +2052,25 @@ mod tests {
 
         assert!(!names.contains(&"bash".to_owned()));
         assert!(names.contains(&"task".to_owned()));
-        assert!(names.contains(&"read_file".to_owned()));
+        assert!(names.contains(&"timer".to_owned()));
+        assert_eq!(names.len(), 2, "master surface must be framework-only");
+        for forbidden in [
+            "read_file",
+            "write_file",
+            "edit_file",
+            "multi_edit",
+            "grep",
+            "glob",
+            "ls",
+            "todo_write",
+            "complete_step",
+            "bash",
+        ] {
+            assert!(
+                !names.contains(&forbidden.to_owned()),
+                "master surface must not expose {forbidden}: {names:?}"
+            );
+        }
         assert_eq!(
             registry.execution_scope("bash"),
             Some(BuiltinToolExecutionScope::Shell)
@@ -1899,6 +2082,133 @@ mod tests {
         assert_eq!(
             registry.execution_scope("task"),
             Some(BuiltinToolExecutionScope::Framework)
+        );
+        assert_eq!(
+            registry.execution_scope("timer"),
+            Some(BuiltinToolExecutionScope::Framework)
+        );
+    }
+
+    #[test]
+    fn timer_tool_schema_exposes_internal_schedule_contract() {
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        let timer = registry
+            .definitions()
+            .into_iter()
+            .find(|definition| definition.name == "timer")
+            .expect("timer definition");
+        let properties = timer
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("timer properties");
+        assert_eq!(timer.input_schema.get("required"), Some(&json!(["op"])));
+        assert_eq!(
+            properties.get("op").and_then(|schema| schema.get("enum")),
+            Some(&json!(["schedule", "cancel", "list"]))
+        );
+        assert_eq!(
+            properties.get("mode").and_then(|schema| schema.get("enum")),
+            Some(&json!(["relative", "absolute", "recurring"]))
+        );
+        assert!(properties.contains_key("prompt"));
+        assert!(properties.contains_key("delay_seconds"));
+        assert!(properties.contains_key("run_at_unix_seconds"));
+        let repeat_properties = properties
+            .get("repeat")
+            .and_then(|schema| schema.get("properties"))
+            .and_then(Value::as_object)
+            .expect("repeat properties");
+        assert_eq!(
+            repeat_properties
+                .get("kind")
+                .and_then(|schema| schema.get("enum")),
+            Some(&json!(["interval", "daily", "weekly", "cron"]))
+        );
+        assert!(timer.input_schema.get("examples").is_some());
+        assert!(repeat_properties.contains_key("time_of_day_seconds_local"));
+        assert!(repeat_properties.contains_key("expression"));
+        assert!(repeat_properties.contains_key("weekdays"));
+        assert!(repeat_properties.contains_key("skip_weekends"));
+        assert!(repeat_properties.contains_key("max_runs"));
+        let schema_text = timer.input_schema.to_string();
+        assert!(timer.description.contains("exceeds 3 minutes"));
+        assert!(timer.description.contains("dead-waiting"));
+        assert!(
+            timer
+                .description
+                .contains("continue any other ready Master-side work")
+        );
+        assert!(
+            timer
+                .description
+                .contains("Do not claim a timer was scheduled")
+        );
+        assert!(timer.description.contains("Timer scheduled"));
+        assert!(schema_text.contains("what waited condition to revisit"));
+        assert!(schema_text.contains("waiting more than 3 minutes"));
+    }
+
+    #[test]
+    fn glob_tool_schema_prevents_absolute_or_tilde_trial_calls() {
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        let glob = registry
+            .definitions()
+            .into_iter()
+            .find(|definition| definition.name == "glob")
+            .expect("glob definition");
+        let pattern_description = glob
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .and_then(|properties| properties.get("pattern"))
+            .and_then(|schema| schema.get("description"))
+            .and_then(Value::as_str)
+            .expect("glob pattern description");
+
+        assert!(glob.description.contains("locked workspace"));
+        assert!(
+            glob.description
+                .contains("absolute pattern is valid only when it is inside")
+        );
+        assert!(glob.description.contains("Do not pass `~`"));
+        assert!(glob.description.contains("use `ls`"));
+        assert!(glob.description.contains("read_file"));
+        assert!(pattern_description.contains("Workspace-scoped glob"));
+        assert!(pattern_description.contains("absolute patterns under the locked workspace"));
+        assert!(pattern_description.contains("\"~/**\""));
+        assert!(pattern_description.contains("\"../**\""));
+        assert!(pattern_description.contains("outside the locked workspace"));
+    }
+
+    #[test]
+    fn file_tool_schemas_guide_worker_away_from_observed_bad_calls() {
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        let definitions = registry.definitions();
+        let read_file = definitions
+            .iter()
+            .find(|definition| definition.name == "read_file")
+            .expect("read_file definition");
+        let ls = definitions
+            .iter()
+            .find(|definition| definition.name == "ls")
+            .expect("ls definition");
+
+        assert!(read_file.description.contains("Use `ls` first"));
+        assert!(read_file.description.contains("Do not pass directories"));
+        assert!(read_file.description.contains("guessed files"));
+        assert!(
+            read_file
+                .input_schema
+                .to_string()
+                .contains("Existing file path")
+        );
+        assert!(ls.description.contains("report one file entry"));
+        assert!(ls.description.contains("generated output file exists"));
+        assert!(
+            ls.input_schema
+                .to_string()
+                .contains("Existing file or directory")
         );
     }
 
@@ -1916,6 +2226,7 @@ mod tests {
         assert!(names.contains(&"write_file".to_owned()));
         assert!(names.contains(&"todo_write".to_owned()));
         assert!(!names.contains(&"task".to_owned()));
+        assert!(!names.contains(&"timer".to_owned()));
         assert!(!registry.worker_implemented_schema_fingerprint().is_empty());
     }
 
@@ -2721,6 +3032,149 @@ beta
     }
 
     #[test]
+    fn glob_accepts_absolute_patterns_inside_locked_workspace_only() {
+        with_temp_workspace(|root| {
+            fs::create_dir_all(root.join("main/audio")).expect("create audio");
+            fs::write(root.join("main/audio/codec.cc"), "codec\n").expect("write codec");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+
+            let in_workspace_absolute = registry
+                .execute(&tool_call(
+                    "glob",
+                    vec![ToolArgument {
+                        name: "pattern".to_owned(),
+                        value: json!(root.join("main/**/*.cc").to_string_lossy().to_string()),
+                    }],
+                ))
+                .expect("absolute in-workspace glob executes");
+            assert!(in_workspace_absolute.text.contains("main/audio/codec.cc"));
+
+            let tilde = registry.execute(&tool_call(
+                "glob",
+                vec![ToolArgument {
+                    name: "pattern".to_owned(),
+                    value: json!("~/**/*.cc"),
+                }],
+            ));
+            assert!(matches!(
+                tilde,
+                Err(ToolRegistryError::InvalidArguments { tool, message })
+                    if tool == "glob" && message.contains("tilde patterns are not supported")
+            ));
+
+            let outside = registry.execute(&tool_call(
+                "glob",
+                vec![ToolArgument {
+                    name: "pattern".to_owned(),
+                    value: json!("/tmp/**/*.cc"),
+                }],
+            ));
+            assert!(matches!(
+                outside,
+                Err(ToolRegistryError::WorkspaceBoundaryViolation { tool, field, .. })
+                    if tool == "glob" && field == "pattern"
+            ));
+        });
+    }
+
+    #[test]
+    fn path_tools_accept_absolute_symlink_aliases_inside_locked_workspace() {
+        with_temp_workspace(|root| {
+            fs::create_dir_all(root.join("main/boards")).expect("create boards");
+            fs::write(root.join("main/boards/board.cc"), "board\n").expect("write board");
+            let alias = root.parent().expect("temp parent").join(format!(
+                "{}-alias",
+                root.file_name().unwrap().to_string_lossy()
+            ));
+            std::os::unix::fs::symlink(root, &alias).expect("create workspace symlink alias");
+
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let alias_glob = alias.join("main/**/*.cc").to_string_lossy().to_string();
+            let glob_output = registry
+                .execute(&tool_call(
+                    "glob",
+                    vec![ToolArgument {
+                        name: "pattern".to_owned(),
+                        value: json!(alias_glob),
+                    }],
+                ))
+                .expect("glob follows in-workspace symlink alias");
+            assert!(glob_output.text.contains("main/boards/board.cc"));
+
+            let alias_file = alias
+                .join("main/boards/board.cc")
+                .to_string_lossy()
+                .to_string();
+            let read_output = registry
+                .execute(&tool_call(
+                    "read_file",
+                    vec![ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!(alias_file),
+                    }],
+                ))
+                .expect("read_file follows in-workspace symlink alias");
+            assert!(read_output.text.contains("1|board"));
+
+            let alias_dir = alias.join("main/boards").to_string_lossy().to_string();
+            let ls_output = registry
+                .execute(&tool_call(
+                    "ls",
+                    vec![ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!(alias_dir),
+                    }],
+                ))
+                .expect("ls follows in-workspace symlink alias");
+            assert!(ls_output.text.contains("board.cc"));
+
+            let grep_output = registry
+                .execute(&tool_call(
+                    "grep",
+                    vec![
+                        ToolArgument {
+                            name: "pattern".to_owned(),
+                            value: json!("board"),
+                        },
+                        ToolArgument {
+                            name: "path".to_owned(),
+                            value: json!(alias.join("main").to_string_lossy().to_string()),
+                        },
+                    ],
+                ))
+                .expect("grep follows in-workspace symlink alias");
+            assert!(grep_output.text.contains("main/boards/board.cc:1:board"));
+
+            let alias_write = alias
+                .join("main/boards/generated.txt")
+                .to_string_lossy()
+                .to_string();
+            let write_output = registry
+                .execute(&tool_call(
+                    "write_file",
+                    vec![
+                        ToolArgument {
+                            name: "path".to_owned(),
+                            value: json!(alias_write),
+                        },
+                        ToolArgument {
+                            name: "content".to_owned(),
+                            value: json!("generated\n"),
+                        },
+                    ],
+                ))
+                .expect("write_file accepts in-workspace symlink alias");
+            assert!(write_output.text.contains("generated.txt"));
+            assert_eq!(
+                fs::read_to_string(root.join("main/boards/generated.txt")).expect("read written"),
+                "generated\n"
+            );
+
+            fs::remove_file(alias).expect("cleanup symlink alias");
+        });
+    }
+
+    #[test]
     fn grep_searches_recursive_tree() {
         with_temp_workspace(|root| {
             fs::create_dir_all(root.join("src")).expect("create src");
@@ -2809,6 +3263,17 @@ beta
             assert!(recursive.text.contains("docs/specs/"));
             assert!(recursive.text.contains("docs/specs/tool.md"));
             assert!(!recursive.text.contains("target/debug/skip.me"));
+
+            let file_entry = registry
+                .execute(&tool_call(
+                    "ls",
+                    vec![ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("docs/specs/tool.md"),
+                    }],
+                ))
+                .expect("ls reports file entry");
+            assert!(file_entry.text.contains("docs/specs/tool.md\t5"));
         });
     }
 
@@ -2908,7 +3373,16 @@ beta
         let status_schema = properties.get("status").expect("status schema");
         let execution_id_schema = properties.get("execution_id").expect("execution_id schema");
         let retry_count_schema = properties.get("retry_count").expect("retry_count schema");
+        let dispatch_schema = properties.get("dispatch").expect("dispatch schema");
+        let target_cwd_schema = properties.get("target_cwd").expect("target_cwd schema");
 
+        assert!(task_definition.description.contains("TaskSpaceSnapshot"));
+        assert!(
+            task_definition
+                .description
+                .contains("Every call must include top-level op")
+        );
+        assert!(task_definition.description.contains("\"op\":\"create\""));
         assert!(required.iter().any(|item| item.as_str() == Some("op")));
         assert_eq!(
             op_schema.get("type").and_then(serde_json::Value::as_str),
@@ -2930,11 +3404,74 @@ beta
                 .contains("record_execution")
         );
         assert!(
+            op_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("op description")
+                .contains("Never omit op")
+        );
+        assert!(
+            op_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("op description")
+                .contains("\"dispatch\":{\"mode\":\"none\"}")
+        );
+        assert!(
+            op_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("op description")
+                .contains("do not use status=\"all\"")
+        );
+        assert!(
             status_schema
                 .get("description")
                 .and_then(serde_json::Value::as_str)
                 .expect("status description")
                 .contains("review_ready")
+        );
+        assert!(
+            status_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("status description")
+                .contains("Omit status to list all visible tasks")
+        );
+        assert!(
+            status_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("status description")
+                .contains("do not pass all")
+        );
+        assert!(
+            status_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("status description")
+                .contains("interrupted")
+        );
+        assert!(
+            dispatch_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("dispatch description")
+                .contains("Do not use auto/self")
+        );
+        assert!(
+            target_cwd_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("target_cwd description")
+                .contains("expanded absolute path")
+        );
+        assert!(
+            target_cwd_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("target_cwd description")
+                .contains("do not pass ~")
         );
         assert!(
             execution_id_schema

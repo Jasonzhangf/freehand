@@ -9,6 +9,22 @@
   - `ErrorCenterDecision`
 - mainline call source: `docs/mainline-calls/error.center.json`
 - generated wiki: `docs/wiki/error.center.md`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `error.record_metadata`
+
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `error`
+- touched resources:
+  - `metadata`
+- resource operations:
+  - `error.record_metadata`
+- forbidden shortcuts:
+  - Error-center decisions must not mutate owner truth before metadata admission.
+  - Raw provider/tool/request payload text must not be stored as error metadata.
 
 ## Request Mainline
 

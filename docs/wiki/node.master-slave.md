@@ -8,6 +8,11 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 - generated wiki: `docs/wiki/node.master-slave.md`
 - test design: `docs/testing/node.master-slave.md`
 
+## Resource Operation Backlinks
+
+- config.bootstrap_node_pairing
+- node_pairing.project_to_ui
+
 ## Request Mainline
 
 - local master accepts user input or task delegation intent
@@ -68,17 +73,17 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `LocalNodeRuntime::new` | `crates/freehand-node/src/lib.rs` | validate local one-master/one-slave bootstrap and seed listening state | master/slave runtime config | node runtime with listening status | CLI/server wiring | node runtime bootstrap | bound |
-| 02 | `LocalNodeRuntime::with_metadata_center` | `crates/freehand-node/src/lib.rs` | bootstrap node runtime with shared metadata admission before node truth mutation | master/slave runtime config plus metadata center | node runtime with listening status and metadata provenance | runtime live bootstrap/tests | node runtime bootstrap | bound |
-| 03 | `LocalNodeRuntime::pair_slave` | `crates/freehand-node/src/lib.rs` | validate websocket pairing source, ip, and token and materialize paired or rejected status only after metadata admission | pairing request | paired or rejected node status | master runtime | slave runtime state | bound |
-| 04 | `LocalNodeRuntime::lose_slave_pairing` | `crates/freehand-node/src/lib.rs` | materialize pairing loss and return slave to listening state only after metadata admission | paired slave runtime | listening node status | health/runtime wiring | slave runtime state | bound |
-| 05 | `LocalNodeRuntime::delegate_task` | `crates/freehand-node/src/lib.rs` | accept master delegated task and materialize progress snapshot only after metadata admission | delegated task intent | progress projection | master runtime | slave progress truth | bound |
-| 06 | `LocalNodeRuntime::send_direct_message` | `crates/freehand-node/src/lib.rs` | accept authorized direct message from paired source and materialize paired conversation event | direct message intent | slave direct-message projection | master runtime | paired slave runtime | bound |
-| 07 | `LocalNodeRuntime::publish_slave_turn` | `crates/freehand-node/src/lib.rs` | accept authorized slave turn projection and publish to subscribers only after metadata admission | slave turn projection | UI turn projection stream | slave runtime | subscribed master or UI surfaces | bound |
-| 08 | `LocalNodeRuntime::query_node_status` | `crates/freehand-node/src/lib.rs` | expose latest slave node status snapshot | node id | node status snapshot | query surface | UiProtocolState | bound |
-| 09 | `LocalNodeRuntime::query_task_progress` | `crates/freehand-node/src/lib.rs` | expose latest delegated task progress snapshot | turn id | progress snapshot | query surface | UiProtocolState | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `LocalNodeRuntime::new` | `crates/freehand-node/src/lib.rs` | validate local one-master/one-slave bootstrap and seed listening state | master/slave runtime config | node runtime with listening status | CLI/server wiring | node runtime bootstrap | config | node_pairing | config.bootstrap_node_pairing | bound |
+| 02 | `LocalNodeRuntime::with_metadata_center` | `crates/freehand-node/src/lib.rs` | bootstrap node runtime with shared metadata admission before node truth mutation | master/slave runtime config plus metadata center | node runtime with listening status and metadata provenance | runtime live bootstrap/tests | node runtime bootstrap |  |  |  | bound |
+| 03 | `LocalNodeRuntime::pair_slave` | `crates/freehand-node/src/lib.rs` | validate websocket pairing source, ip, and token and materialize paired or rejected status only after metadata admission | pairing request | paired or rejected node status | master runtime | slave runtime state |  |  |  | bound |
+| 04 | `LocalNodeRuntime::lose_slave_pairing` | `crates/freehand-node/src/lib.rs` | materialize pairing loss and return slave to listening state only after metadata admission | paired slave runtime | listening node status | health/runtime wiring | slave runtime state |  |  |  | bound |
+| 05 | `LocalNodeRuntime::delegate_task` | `crates/freehand-node/src/lib.rs` | accept master delegated task and materialize progress snapshot only after metadata admission | delegated task intent | progress projection | master runtime | slave progress truth |  |  |  | bound |
+| 06 | `LocalNodeRuntime::send_direct_message` | `crates/freehand-node/src/lib.rs` | accept authorized direct message from paired source and materialize paired conversation event | direct message intent | slave direct-message projection | master runtime | paired slave runtime |  |  |  | bound |
+| 07 | `LocalNodeRuntime::publish_slave_turn` | `crates/freehand-node/src/lib.rs` | accept authorized slave turn projection and publish to subscribers only after metadata admission | slave turn projection | UI turn projection stream | slave runtime | subscribed master or UI surfaces |  |  |  | bound |
+| 08 | `LocalNodeRuntime::query_node_status` | `crates/freehand-node/src/lib.rs` | expose latest slave node status snapshot | node id | node status snapshot | query surface | UiProtocolState | node_pairing | ui_projection | node_pairing.project_to_ui | bound |
+| 09 | `LocalNodeRuntime::query_task_progress` | `crates/freehand-node/src/lib.rs` | expose latest delegated task progress snapshot | turn id | progress snapshot | query surface | UiProtocolState |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

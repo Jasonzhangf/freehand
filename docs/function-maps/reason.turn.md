@@ -5,11 +5,27 @@
 - owner module: `crates/freehand-reason/src/lib.rs`
 - mainline call source: `docs/mainline-calls/reason.turn.json`
 - generated wiki: `docs/wiki/reason.turn.md`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `provider_response.apply_to_turn`
 - owner entry symbols:
   - `ReasonTurnEngine::start_turn`
   - `ReasonTurnEngine::apply_provider_output`
   - `ReasonTurnEngine::submit_completion`
 - `ReasonTurnEngine::project_session`
+
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `turn`
+- touched resources:
+  - `provider_response`
+- resource operations:
+  - `provider_response.apply_to_turn`
+- forbidden shortcuts:
+  - Provider responses must not mutate session or UI projection truth without turn-owner application.
+  - Completion/schema state must not be treated as provider finish-reason truth alone.
 
 ## Request Mainline
 

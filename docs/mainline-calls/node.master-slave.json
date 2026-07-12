@@ -6,6 +6,10 @@
   "test_design_doc": "docs/testing/node.master-slave.md",
   "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
   "generated_wiki_doc": "docs/wiki/node.master-slave.md",
+  "resource_operations": [
+    "config.bootstrap_node_pairing",
+    "node_pairing.project_to_ui"
+  ],
   "request_mainline": [
     "local master accepts user input or task delegation intent",
     "node runtime may optionally receive one shared MetadataCenter and/or one shared DebugHub before any state mutation",
@@ -107,6 +111,9 @@
       "output_semantic": "node runtime with listening status",
       "caller": "CLI/server wiring",
       "callee": "node runtime bootstrap",
+      "source_resource": "config",
+      "target_resource": "node_pairing",
+      "resource_operation": "config.bootstrap_node_pairing",
       "binding_status": "bound"
     },
     {
@@ -184,6 +191,9 @@
       "output_semantic": "node status snapshot",
       "caller": "query surface",
       "callee": "UiProtocolState",
+      "source_resource": "node_pairing",
+      "target_resource": "ui_projection",
+      "resource_operation": "node_pairing.project_to_ui",
       "binding_status": "bound"
     },
     {

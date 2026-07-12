@@ -37,19 +37,19 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `default_config_path` | `crates/freehand-config/src/lib.rs` | resolve the only supported config path | HOME env | config path | startup orchestration | path resolver | bound |
-| 02 | `load_default_config` | `crates/freehand-config/src/lib.rs` | load default config file from runtime home | default path | loaded config | CLI/server startup | file loader | bound |
-| 03 | `load_config_from_path` | `crates/freehand-config/src/lib.rs` | read config file from one explicit path | explicit path | loaded config | CLI/tests | parser entry | bound |
-| 04 | `parse_config` | `crates/freehand-config/src/lib.rs` | parse raw TOML into typed config tables | raw config text | raw parsed config | file loader | TOML parser | bound |
-| 05 | `validate_config` | `crates/freehand-config/src/lib.rs` | validate agent registry, provider registry, reciprocal peer topology, protocol declaration, auth invariants, and unknown-field rejection | raw parsed config | validated loaded config | parser | validator | bound |
-| 06 | `LoadedConfig::providers` | `crates/freehand-config/src/lib.rs` | expose validated provider registry truth | loaded config | provider registry view | tests/runtime wiring | registry accessor | bound |
-| 07 | `LoadedConfig::select_agent` | `crates/freehand-config/src/lib.rs` | select one agent and resolve its provider binding, paired topology metadata, and env-backed auth source | agent name plus env | selected agent runtime config | CLI/server startup | env resolver | bound |
-| 08 | `ProviderAuthConfig::source_kind` | `crates/freehand-config/src/lib.rs` | expose safe provider auth source classification without returning key material | provider auth config | inline or env source kind | config selector/runtime config projection | auth source classifier | bound |
-| 09 | `ProviderConfigUpdate` | `crates/freehand-config/src/lib.rs` | carry owner-backed provider/model update intent | agent/provider/model/base-url/env-var fields | validated config-owner update input | runtime.ui-command-dispatch | config owner DTO | bound |
-| 10 | `update_provider_config_in_path` | `crates/freehand-config/src/lib.rs` | validate, apply, reparse, select, and atomically persist provider/model config changes | config path plus provider update | selected agent projection from saved config | runtime.ui-command-dispatch / tests | config persistence owner | bound |
-| 11 | `persist_config_atomically` | `crates/freehand-config/src/lib.rs` | write new config through temp file plus rename after validation succeeds | validated TOML text | replaced canonical config file | update_provider_config_in_path | filesystem persistence | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `default_config_path` | `crates/freehand-config/src/lib.rs` | resolve the only supported config path | HOME env | config path | startup orchestration | path resolver |  |  |  | bound |
+| 02 | `load_default_config` | `crates/freehand-config/src/lib.rs` | load default config file from runtime home | default path | loaded config | CLI/server startup | file loader |  |  |  | bound |
+| 03 | `load_config_from_path` | `crates/freehand-config/src/lib.rs` | read config file from one explicit path | explicit path | loaded config | CLI/tests | parser entry |  |  |  | bound |
+| 04 | `parse_config` | `crates/freehand-config/src/lib.rs` | parse raw TOML into typed config tables | raw config text | raw parsed config | file loader | TOML parser |  |  |  | bound |
+| 05 | `validate_config` | `crates/freehand-config/src/lib.rs` | validate agent registry, provider registry, reciprocal peer topology, protocol declaration, auth invariants, and unknown-field rejection | raw parsed config | validated loaded config | parser | validator |  |  |  | bound |
+| 06 | `LoadedConfig::providers` | `crates/freehand-config/src/lib.rs` | expose validated provider registry truth | loaded config | provider registry view | tests/runtime wiring | registry accessor |  |  |  | bound |
+| 07 | `LoadedConfig::select_agent` | `crates/freehand-config/src/lib.rs` | select one agent and resolve its provider binding, paired topology metadata, and env-backed auth source | agent name plus env | selected agent runtime config | CLI/server startup | env resolver |  |  |  | bound |
+| 08 | `ProviderAuthConfig::source_kind` | `crates/freehand-config/src/lib.rs` | expose safe provider auth source classification without returning key material | provider auth config | inline or env source kind | config selector/runtime config projection | auth source classifier |  |  |  | bound |
+| 09 | `ProviderConfigUpdate` | `crates/freehand-config/src/lib.rs` | carry owner-backed provider/model update intent | agent/provider/model/base-url/env-var fields | validated config-owner update input | runtime.ui-command-dispatch | config owner DTO |  |  |  | bound |
+| 10 | `update_provider_config_in_path` | `crates/freehand-config/src/lib.rs` | validate, apply, reparse, select, and atomically persist provider/model config changes | config path plus provider update | selected agent projection from saved config | runtime.ui-command-dispatch / tests | config persistence owner |  |  |  | bound |
+| 11 | `persist_config_atomically` | `crates/freehand-config/src/lib.rs` | write new config through temp file plus rename after validation succeeds | validated TOML text | replaced canonical config file | update_provider_config_in_path | filesystem persistence |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

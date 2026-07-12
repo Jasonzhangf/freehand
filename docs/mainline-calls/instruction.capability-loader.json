@@ -6,6 +6,10 @@
   "test_design_doc": "docs/testing/instruction.capability-loader.md",
   "mainline_call_doc": "docs/mainline-calls/instruction.capability-loader.json",
   "generated_wiki_doc": "docs/wiki/instruction.capability-loader.md",
+  "resource_operations": [
+    "config.compile_instruction_capability",
+    "instruction_capability.admit_request_context"
+  ],
   "request_mainline": [
     "caller supplies Freehand runtime home and current working directory",
     "loader resolves global instruction authoring inputs from `~/.freehand/AGENTS.md` and `~/.freehand/skills`",
@@ -16,6 +20,8 @@
     "output is a deterministic `InstructionCapabilityManifest`",
     "manifest entries carry scope, precedence, normalized path, content byte count, and content hash",
     "skill entries also carry parsed `name` and `description`",
+    "instruction owner renders manifest entries into typed instruction capability context content",
+    "runtime admits rendered instruction capability content as `ContextSegmentKind::InstructionCapability` before context planning",
     "optional writer persists the compiled manifest to `~/.freehand/state/instructions/capability-manifest.json`"
   ],
   "error_mainline": [
@@ -52,6 +58,20 @@
         "manifest writer test"
       ],
       "why_shared": "manifest output path and JSON shape must stay single-sourced"
+    },
+    {
+      "symbol": "render_instruction_capability_context",
+      "owner": "crates/freehand-instructions/src/lib.rs",
+      "purpose": "render compiled AGENTS.md and skill manifest entries into typed provider-visible instruction capability context content",
+      "allowed_callers": [
+        "runtime live context admission",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "instruction capability context rendering tests",
+        "runtime live bridge typed instruction admission tests"
+      ],
+      "why_shared": "runtime and provider crates must not rescan or independently render instruction authoring surfaces"
     }
   ],
   "call_table": [
@@ -75,6 +95,9 @@
       "output_semantic": "manifest candidates",
       "caller": "runtime/CLI/tests",
       "callee": "discovery planner",
+      "source_resource": "config",
+      "target_resource": "instruction_capability",
+      "resource_operation": "config.compile_instruction_capability",
       "binding_status": "bound"
     },
     {
@@ -120,11 +143,25 @@
       "caller": "runtime/CLI/tests",
       "callee": "manifest writer",
       "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "instruction_capability_segment",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "compile and render instruction capability truth, then admit it as a typed context-planner segment",
+      "input_semantic": "runtime home plus cwd plus compiled instruction capability manifest",
+      "output_semantic": "ContextSegmentKind::InstructionCapability request-context segment",
+      "caller": "runtime live bridge",
+      "callee": "freehand-instructions::render_instruction_capability_context",
+      "source_resource": "instruction_capability",
+      "target_resource": "request_context",
+      "resource_operation": "instruction_capability.admit_request_context",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
-    "first manifest compiler is implemented in `crates/freehand-instructions`",
+    "manifest compiler and typed context renderer are implemented in `crates/freehand-instructions`",
     "current support covers global `~/.freehand/AGENTS.md`, local `AGENTS.md`, global `~/.freehand/skills`, and local `.agents/skills`",
-    "runtime/context planner consumption is pending and must be added through this manifest owner"
+    "runtime live bridge consumes this owner output through `ContextSegmentKind::InstructionCapability`, not by provider payload patching"
   ]
 }

@@ -6,6 +6,9 @@
   "test_design_doc": "docs/testing/ui.protocol.md",
   "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
   "generated_wiki_doc": "docs/wiki/ui.protocol.md",
+  "resource_operations": [
+    "task.project_to_ui"
+  ],
   "request_mainline": [
     "UI commands enter one protocol truth shared by CLI and WebUI",
     "UI acts as an input ingress only; command submission does not make UI a truth writer",
@@ -54,7 +57,8 @@
     "public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed public tool bodies expose protocol-projected tool result detail",
     "cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn",
     "session list and transcript projections expose cwd bound by runtime/session truth",
-    "session list projections hide internal framework lifecycle sessions such as `master-lifecycle-*` from user-facing active and archived lists while explicit transcript queries remain queryable for debug truth",
+    "session list projections expose only owner-supplied persisted session metadata as top-level active/archived sessions; internal framework sessions such as `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` remain directly transcript-queryable but are hidden from global session lists",
+    "TaskBoard projections carry parent_session_id so WebUI can nest temporary worker-task transcript sessions under the owning persisted master session without making workers top-level sessions",
     "task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
     "Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
     "session list and transcript projections expose owner-supplied session title, archived state, cwd, and effective transcript projections after rollback",
@@ -608,6 +612,9 @@
       "output_semantic": "runtime-backed UI-safe board/lifecycle projections",
       "caller": "ADP query transport",
       "callee": "runtime query port",
+      "source_resource": "task",
+      "target_resource": "ui_projection",
+      "resource_operation": "task.project_to_ui",
       "binding_status": "bound"
     },
     {

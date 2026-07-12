@@ -6,6 +6,9 @@
   "test_design_doc": "docs/testing/reason.persistence.md",
   "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
   "generated_wiki_doc": "docs/wiki/reason.persistence.md",
+  "resource_operations": [
+    "session.append_turn_to_turn"
+  ],
   "request_mainline": [
     "runtime opens `~/.freehand/state/turns/<agent_id>/<session_id>/` as the authoritative reason state directory",
     "session-owned rewrite truth is restored from `SessionHistory` snapshots",
@@ -188,6 +191,9 @@
       "output_semantic": "durable reason state for running turn",
       "caller": "runtime/live bridge/testkit",
       "callee": "persistence owner",
+      "source_resource": "session",
+      "target_resource": "turn",
+      "resource_operation": "session.append_turn_to_turn",
       "binding_status": "bound"
     },
     {

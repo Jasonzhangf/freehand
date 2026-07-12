@@ -73,6 +73,31 @@ Use this table before grep or implementation. Every bug or feature request must 
 
 If a problem does not fit this table, update this routing index before making code changes. Do not create a second owner by patching an adjacent module.
 
+## Resource Ownership Index
+
+This table is the feature-map backlink for `docs/resource-maps/core.json`. The resource map remains the first truth for identity, truth store, operations, projections, relations, and gates; this table makes feature ownership discoverable from the feature map before opening feature-local docs.
+
+| feature_id | owned resources | resource map |
+| --- | --- | --- |
+| `config.core` | `config` | `docs/resource-maps/core.json` |
+| `reason.persistence` | `session` | `docs/resource-maps/core.json` |
+| `reason.turn` | `turn` | `docs/resource-maps/core.json` |
+| `reason.context-planner` | `request_context` | `docs/resource-maps/core.json` |
+| `provider.reason-live-bridge` | `provider_request` | `docs/resource-maps/core.json` |
+| `provider.semantic` | `provider_response` | `docs/resource-maps/core.json` |
+| `tool.registry` | `tool_call`, `workspace_path` | `docs/resource-maps/core.json` |
+| `task.orchestration` | `task` | `docs/resource-maps/core.json` |
+| `agent.lifecycle` | `agent` | `docs/resource-maps/core.json` |
+| `runtime.master-worker-loop` | `timer` | `docs/resource-maps/core.json` |
+| `error.center` | `error` | `docs/resource-maps/core.json` |
+| `metadata.core` | `metadata` | `docs/resource-maps/core.json` |
+| `debug.core` | `debug_trace` | `docs/resource-maps/core.json` |
+| `ui.protocol` | `ui_projection` | `docs/resource-maps/core.json` |
+| `runtime.ui-command-dispatch` | `runtime_command` | `docs/resource-maps/core.json` |
+| `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
+| `node.master-slave` | `node_pairing` | `docs/resource-maps/core.json` |
+| `instruction.capability-loader` | `instruction_capability` | `docs/resource-maps/core.json` |
+
 ## Architecture Gap Registry
 
 Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Each gap has explicit `feature_id`, owner, risk, and closure path. Gaps are not regressions; they document known-incomplete scope without gate violation.
@@ -105,6 +130,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - function_map_doc: `docs/function-maps/foundation.workspace.md`
 - mainline_call_doc: `docs/mainline-calls/foundation.workspace.json`
 - generated_wiki_doc: `docs/wiki/foundation.workspace.md`
+- resource_map_doc: `docs/resource-maps/core.json`
 - debug_artifacts:
   - none
 - runtime_paths:

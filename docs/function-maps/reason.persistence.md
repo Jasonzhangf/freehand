@@ -3,6 +3,9 @@
 - feature_id: `reason.persistence`
 - owner crate: `crates/freehand-reason`
 - owner module: `crates/freehand-reason/src/persistence.rs`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `session.append_turn_to_turn`
 - owner entry symbols:
   - `ReasonPersistence::record_turn_started`
   - `ReasonPersistence::record_provider_output_applied`
@@ -16,6 +19,19 @@
   - `SessionHistory::from_persisted_json`
   - `SessionHistory::persist_to_path`
   - `SessionHistory::load_from_path`
+
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `session`
+- touched resources:
+  - `turn`
+- resource operations:
+  - `session.append_turn_to_turn`
+- forbidden shortcuts:
+  - UI projection must not synthesize persisted sessions from turn-only or worker sessions.
+  - Session truth must not be recovered from provider raw ledgers or UI sidecars.
 
 ## Request Mainline
 

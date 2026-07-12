@@ -2,6 +2,18 @@
 
 - feature_id: `node.master-slave`
 - owner: `crates/freehand-node`
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `config.bootstrap_node_pairing`
+  - `node_pairing.project_to_ui`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `config.bootstrap_node_pairing` | bound | `cargo test -p freehand-node` covers pairing state, config ownership, pair-token/source validation, metadata/debug leak-prevention, and rejection tests | `cargo test -p freehand-node` covers local node runtime handshake, status snapshot, relisten, and permission-boundary smokes | `cargo run -p xtask -- gates check` covers project boundary plus node resource-map/mainline binding; live websocket transport remains a documented gap outside this bound source edge |
+| `node_pairing.project_to_ui` | bound | `cargo test -p freehand-node` covers delegated progress, slave-turn publication, status projection, permission rejection, and debug observation tests | `cargo test -p freehand-node` covers node boundary status/progress/subscription smokes | `cargo run -p xtask -- gates check` covers project boundary plus UI projection resource-map/mainline binding; live UI transport integration remains a documented gap outside this bound source edge |
+
 - lifecycle path under test:
   - local master/slave pair handshakes
   - slave input permission locks to paired source

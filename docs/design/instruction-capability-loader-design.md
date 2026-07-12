@@ -5,7 +5,8 @@
 - feature_id: `instruction.capability-loader`
 - owner: `crates/freehand-instructions`
 - first slice: compile an index manifest for AGENTS.md and skills
-- non-goal in this slice: injecting instruction content into provider requests
+- current typed-admission slice: render compiled manifest entries into instruction capability context content and admit that content through `ContextSegmentKind::InstructionCapability`
+- non-goal: provider adapters or UI apps directly scanning authoring directories or patching provider payloads
 
 ## Authoring Inputs
 
@@ -29,6 +30,8 @@ The manifest contains:
 - explicit compile errors
 - deterministic manifest fingerprint
 
+The typed context renderer consumes the manifest and reads the listed AGENTS.md and skill files through the instruction owner. Runtime/provider code must not reimplement this scan or rendering logic.
+
 ## Ordering
 
 - global entries use precedence `0`
@@ -46,6 +49,8 @@ This preserves Codex-style global plus repo-local layering while keeping Freehan
 
 ## Context Boundary
 
-The loader is not a prompt builder. It produces a bounded, typed, deterministic index. A later context-planner slice may consume the manifest and convert selected entries into typed context segments with explicit token budgets.
+The loader is not a provider adapter and does not patch provider payloads. It produces a bounded, typed, deterministic manifest and renders instruction capability content for context admission.
+
+Runtime live bridge may consume this owner output only by constructing a `ContextSegmentKind::InstructionCapability` segment. The context planner validates the segment contract and admits it into request context before provider rendering.
 
 Provider adapters and UI apps must never own this discovery or injection behavior.

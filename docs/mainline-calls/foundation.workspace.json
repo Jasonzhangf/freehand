@@ -12,6 +12,7 @@
     "repo root may invoke `xtask mainlines check`",
     "gate runner verifies required files, workspace members, policy doc snippets, and generated wiki freshness",
     "gate runner verifies feature-map seed entries stay unique per feature_id",
+    "gate runner verifies resource-map ownership, operation binding, direct/indirect/forbidden relation, source-edge registry, function-map backlink, and test-design coverage consistency before code refactor",
     "gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path",
     "gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols",
     "gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness",
@@ -31,6 +32,7 @@
   "response_mainline": [
     "gate returns success when required repo truth, workspace structure, and generated wiki freshness are present",
     "gate returns success when feature-map seed entries stay unique and owner routing has one seed entry per feature_id",
+    "gate returns success when resource-map ownership, relation rules, forbidden direct relations, source-edge registry rows, and operation test coverage are internally consistent",
     "gate returns success when migrated mainline manifests are deterministically linked to their owner docs",
     "gate returns success when migrated mainline call-table bindings resolve to source files and source symbols",
     "gate returns success when local and remote automation routes through the same full gate stack",
@@ -51,6 +53,7 @@
   "error_mainline": [
     "missing file or missing required snippet surfaces as gate failure",
     "duplicate feature-map seed entries for one feature_id surface as gate failure",
+    "resource-map parse errors, missing required core resources, duplicate owners, missing projections, unregistered direct resource edges, missing source-edge registry rows, forbidden/direct relation conflicts, forbidden relations without matching indirect relation rules, no-op source shortcut gates, and deferred source gates surface as gate failures",
     "mismatched mainline manifest source path, function map path, test design path, generated wiki path, or feature-map link surfaces as gate failure",
     "missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure",
     "missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure",
@@ -268,6 +271,17 @@
     },
     {
       "step": "19",
+      "symbol_path": "verify_resource_map",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "validate global resource ownership, resource relation rules, operation bindings, source-edge registry, and resource-operation test coverage",
+      "input_semantic": "docs/resource-maps/core.json plus feature map, function maps, mainline call maps, and test designs",
+      "output_semantic": "pass/fail",
+      "caller": "run_gates_check",
+      "callee": "resource-map verifier",
+      "binding_status": "bound"
+    },
+    {
+      "step": "20",
       "symbol_path": "run_release",
       "file_path": "scripts/release.sh",
       "responsibility": "run release regressions and build/stage host + Android artifacts",
@@ -278,7 +292,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "20",
+      "step": "21",
       "symbol_path": "run_verify_webui_online",
       "file_path": "scripts/verify-webui-online.sh",
       "responsibility": "run fixed-port S-profile real browser WebUI plus ADP alpha proof, including temporary verifier credential env injection and config/env restoration",
@@ -289,7 +303,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "21",
+      "step": "22",
       "symbol_path": "run_install_global",
       "file_path": "scripts/install-global.sh",
       "responsibility": "run release script and install host binaries to a global prefix",
@@ -300,7 +314,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "22",
+      "step": "23",
       "symbol_path": "run_install_launchd",
       "file_path": "scripts/install-launchd.sh",
       "responsibility": "install global binaries or refresh S debug binaries and bootstrap/restart the macOS user LaunchAgent",
@@ -311,7 +325,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "23",
+      "step": "24",
       "symbol_path": "run_uninstall_launchd",
       "file_path": "scripts/uninstall-launchd.sh",
       "responsibility": "stop and remove the macOS user LaunchAgent plist",
@@ -322,7 +336,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "24",
+      "step": "25",
       "symbol_path": "run_install_symlink",
       "file_path": "scripts/install-symlink.sh",
       "responsibility": "build debug host binaries and expose S-suffixed symlinks for development",
@@ -335,7 +349,7 @@
   ],
   "sync_status": [
     "workspace gate orchestration, generated-wiki freshness checks, and wiki generation pipeline are bound in code",
-    "current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, source-search boundaries, and static data/control boundary checks",
+    "current gate baseline enforces required files, policy docs, generated wiki freshness, feature-map seed-entry uniqueness, resource-map ownership/relation/source-edge/test-coverage consistency, migrated mainline manifest cross-links, migrated mainline call-table bindings, CI/CD full-gate command alignment, source-search boundaries, and static data/control boundary checks",
     "generated wiki must be regenerated from `docs/mainline-calls/foundation.workspace.json` when this function-map truth changes",
     "initial framework loop governance docs are bound under docs/loops/freehand-framework-loop in L1 report-only mode",
     "alpha WebUI online verification defaults to S-profile 4042 and is documented in docs/release.md; release 4041 proof is explicit via make verify-webui-release-online"

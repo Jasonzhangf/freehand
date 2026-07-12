@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,6 +62,8 @@ fn run_gates_check() -> Result<(), String> {
             "docs/architecture/function-map-spec.md",
             "docs/function-maps/README.md",
             "docs/mainline-calls/README.md",
+            "docs/resource-maps/README.md",
+            "docs/resource-maps/core.json",
             "docs/function-maps/foundation.workspace.md",
             "docs/function-maps/config.core.md",
             "docs/function-maps/provider.semantic.md",
@@ -214,6 +216,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_skill_rules(&root)?;
     verify_orchestrator_policy_docs(&root)?;
     verify_feature_map_unique_entries(&root)?;
+    verify_resource_map(&root)?;
     verify_generated_wiki(&root)?;
     verify_mainline_manifest_links(&root)?;
     verify_mainline_call_table_bindings(&root)?;
@@ -275,8 +278,9 @@ fn verify_skill_rules(root: &Path) -> Result<(), String> {
         .map_err(|err| err.to_string())?;
     let required_skill_snippets = [
         "Runtime home is `~/.freehand`.",
-        "Start from `feature_id`, owner, `debug_artifacts`, and runtime paths in the function map.",
-        "If feature truth changed, update function map, architecture docs, skill workflow, and memory files in the same task.",
+        "Read `docs/resource-maps/core.json`.",
+        "Identify the source resource, target resource, and whether the relation is direct or indirect.",
+        "If feature truth changed, update resource map, function map, architecture docs, skill workflow, and memory files in the same task.",
         "Before adding any function, inspect existing blocks and owner crates first.",
         "docs/references/provider-protocols/",
         "request mainline",
@@ -319,9 +323,10 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
             root.join("AGENTS.md"),
             &[
                 "This file is the repo entry router.",
+                "resource-map-first ownership",
                 "feature/function owner lookup:",
-                "debug starts from `feature_id`, owner, debug artifacts, and runtime directories.",
-                "If truth changes, update docs, function map, skill workflow, and memory in same task.",
+                "debug starts from `resource_type`, allowed resource relation, `feature_id`, owner, debug artifacts, and runtime directories.",
+                "If truth changes, update resource map, docs, function map, skill workflow, and memory in same task.",
             ],
         ),
         (
@@ -647,6 +652,1159 @@ fn verify_feature_map_unique_entries(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_resource_map(root: &Path) -> Result<(), String> {
+    let path = root.join("docs/resource-maps/core.json");
+    let text = fs::read_to_string(&path)
+        .map_err(|err| format!("read resource map {}: {err}", path.display()))?;
+    let map: ResourceMapDoc = serde_json::from_str(&text)
+        .map_err(|err| format!("parse resource map {}: {err}", path.display()))?;
+    if map.schema_version == 0 {
+        return Err("resource map schema_version must be positive".to_owned());
+    }
+
+    let feature_map_path = root.join("docs/architecture/feature-map.md");
+    let feature_map = fs::read_to_string(&feature_map_path)
+        .map_err(|err| format!("read feature map {}: {err}", feature_map_path.display()))?;
+
+    let mut resources = BTreeSet::new();
+    let mut resource_owner_lookup: BTreeMap<String, String> = BTreeMap::new();
+    let mut resource_operations: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let feature_resource_ownership = parse_feature_map_resource_ownership(&feature_map)?;
+    let feature_seed_owners = parse_feature_map_seed_owners(&feature_map)?;
+    for resource in &map.resources {
+        require_non_empty(&resource.resource_type, "resource_type")?;
+        require_non_empty(&resource.owner_feature_id, "owner_feature_id")?;
+        require_non_empty(&resource.owner_crate, "owner_crate")?;
+        require_non_empty(&resource.identity, "identity")?;
+        require_non_empty(&resource.truth_store, "truth_store")?;
+        if resource.operations.is_empty() {
+            return Err(format!(
+                "resource `{}` must declare at least one operation",
+                resource.resource_type
+            ));
+        }
+        if resource.projections.is_empty() {
+            return Err(format!(
+                "resource `{}` must declare at least one projection",
+                resource.resource_type
+            ));
+        }
+        let mut operations = BTreeSet::new();
+        for operation in &resource.operations {
+            require_non_empty(operation, "resource.operations")?;
+            if !operations.insert(operation.clone()) {
+                return Err(format!(
+                    "resource `{}` has duplicate operation `{}`",
+                    resource.resource_type, operation
+                ));
+            }
+        }
+        let mut projections = BTreeSet::new();
+        for projection in &resource.projections {
+            require_non_empty(projection, "resource.projections")?;
+            if !projections.insert(projection.clone()) {
+                return Err(format!(
+                    "resource `{}` has duplicate projection `{}`",
+                    resource.resource_type, projection
+                ));
+            }
+        }
+        if !resources.insert(resource.resource_type.clone()) {
+            return Err(format!(
+                "duplicate resource_type `{}` in docs/resource-maps/core.json",
+                resource.resource_type
+            ));
+        }
+        resource_operations.insert(resource.resource_type.clone(), operations);
+        resource_owner_lookup.insert(
+            resource.resource_type.clone(),
+            resource.owner_feature_id.clone(),
+        );
+        let feature_marker = format!("`{}`", resource.owner_feature_id);
+        require_contains(
+            &feature_map,
+            &feature_marker,
+            "docs/architecture/feature-map.md",
+        )?;
+        let feature_owner = feature_seed_owners
+            .get(resource.owner_feature_id.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "feature map missing seed owner for `{}`",
+                    resource.owner_feature_id
+                )
+            })?;
+        if !feature_owner.contains(&resource.owner_crate) {
+            return Err(format!(
+                "resource `{}` owner_crate `{}` is not present in feature map owner `{}` for `{}`",
+                resource.resource_type,
+                resource.owner_crate,
+                feature_owner,
+                resource.owner_feature_id
+            ));
+        }
+        let owned_resources = feature_resource_ownership
+            .get(resource.owner_feature_id.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "feature map Resource Ownership Index missing owner feature `{}` for resource `{}`",
+                    resource.owner_feature_id, resource.resource_type
+                )
+            })?;
+        if !owned_resources.contains(resource.resource_type.as_str()) {
+            return Err(format!(
+                "feature map Resource Ownership Index owner `{}` does not list resource `{}`",
+                resource.owner_feature_id, resource.resource_type
+            ));
+        }
+    }
+    let mut feature_index_resource_owners = BTreeMap::new();
+    for (feature_id, owned_resources) in &feature_resource_ownership {
+        for resource_type in owned_resources {
+            if !resources.contains(resource_type.as_str()) {
+                return Err(format!(
+                    "feature map Resource Ownership Index feature `{feature_id}` lists unknown resource `{resource_type}`"
+                ));
+            }
+            if let Some(previous_owner) =
+                feature_index_resource_owners.insert(resource_type.clone(), feature_id.clone())
+            {
+                return Err(format!(
+                    "feature map Resource Ownership Index resource `{resource_type}` is owned by both `{previous_owner}` and `{feature_id}`"
+                ));
+            }
+            let expected_owner = resource_owner_lookup.get(resource_type).ok_or_else(|| {
+                format!(
+                    "resource owner lookup missing `{resource_type}` while validating feature map"
+                )
+            })?;
+            if expected_owner != feature_id {
+                return Err(format!(
+                    "feature map Resource Ownership Index resource `{resource_type}` is listed under `{feature_id}` but resource map owner is `{expected_owner}`"
+                ));
+            }
+        }
+    }
+    if map.resource_map_id == "freehand.core-resource-map" {
+        verify_required_core_resources(&resources)?;
+    }
+
+    let mut operation_ids = BTreeSet::new();
+    let mut operation_lookup: BTreeMap<String, (&str, &str)> = BTreeMap::new();
+    let mut operation_binding_lookup: BTreeMap<&str, &ResourceMapOperationBinding> =
+        BTreeMap::new();
+    let mut operation_pairs = BTreeSet::new();
+    let mut bound_operation_pairs = BTreeSet::new();
+    for binding in &map.operation_bindings {
+        require_non_empty(&binding.operation_id, "operation_bindings.operation_id")?;
+        require_non_empty(
+            &binding.owner_feature_id,
+            "operation_bindings.owner_feature_id",
+        )?;
+        require_non_empty(
+            &binding.source_resource,
+            "operation_bindings.source_resource",
+        )?;
+        require_non_empty(
+            &binding.target_resource,
+            "operation_bindings.target_resource",
+        )?;
+        require_non_empty(&binding.effect, "operation_bindings.effect")?;
+        require_non_empty(
+            &binding.mainline_call_doc,
+            "operation_bindings.mainline_call_doc",
+        )?;
+        require_non_empty(&binding.binding_status, "operation_bindings.binding_status")?;
+        if !operation_ids.insert(binding.operation_id.clone()) {
+            return Err(format!(
+                "duplicate resource operation_id `{}` in docs/resource-maps/core.json",
+                binding.operation_id
+            ));
+        }
+        operation_binding_lookup.insert(binding.operation_id.as_str(), binding);
+        operation_lookup.insert(
+            binding.operation_id.clone(),
+            (&binding.source_resource, &binding.target_resource),
+        );
+        operation_pairs.insert((
+            binding.source_resource.clone(),
+            binding.target_resource.clone(),
+        ));
+        let (operation_source, operation_name) =
+            binding.operation_id.split_once('.').ok_or_else(|| {
+                format!(
+                    "resource operation `{}` must use `<source_resource>.<operation>` format",
+                    binding.operation_id
+                )
+            })?;
+        if operation_source != binding.source_resource {
+            return Err(format!(
+                "resource operation `{}` source prefix `{}` does not match source_resource `{}`",
+                binding.operation_id, operation_source, binding.source_resource
+            ));
+        }
+        let allowed_operations = resource_operations
+            .get(&binding.source_resource)
+            .ok_or_else(|| {
+                format!(
+                    "resource operation `{}` references source resource without operations `{}`",
+                    binding.operation_id, binding.source_resource
+                )
+            })?;
+        if !allowed_operations.contains(operation_name) {
+            return Err(format!(
+                "resource operation `{}` is not declared in resource `{}` operations",
+                binding.operation_id, binding.source_resource
+            ));
+        }
+        if binding.binding_status == "bound" {
+            bound_operation_pairs.insert((
+                binding.source_resource.clone(),
+                binding.target_resource.clone(),
+            ));
+        }
+        require_known_resource(&resources, &binding.source_resource, &binding.operation_id)?;
+        require_known_resource(&resources, &binding.target_resource, &binding.operation_id)?;
+        if !root.join(&binding.mainline_call_doc).is_file() {
+            return Err(format!(
+                "resource operation `{}` references missing mainline call source `{}`",
+                binding.operation_id, binding.mainline_call_doc
+            ));
+        }
+        let feature_marker = format!("`{}`", binding.owner_feature_id);
+        require_contains(
+            &feature_map,
+            &feature_marker,
+            "docs/architecture/feature-map.md",
+        )?;
+        match binding.binding_status.as_str() {
+            "bound" => {}
+            "pending" => {
+                require_non_empty(
+                    binding.pending_reason.as_deref().unwrap_or_default(),
+                    "operation_bindings.pending_reason",
+                )?;
+                require_non_empty(
+                    binding.pending_closure_doc.as_deref().unwrap_or_default(),
+                    "operation_bindings.pending_closure_doc",
+                )?;
+                require_non_empty(
+                    binding.pending_verification.as_deref().unwrap_or_default(),
+                    "operation_bindings.pending_verification",
+                )?;
+                if !root
+                    .join(binding.pending_closure_doc.as_deref().unwrap_or_default())
+                    .is_file()
+                {
+                    return Err(format!(
+                        "pending resource operation `{}` references missing pending_closure_doc `{}`",
+                        binding.operation_id,
+                        binding.pending_closure_doc.as_deref().unwrap_or_default()
+                    ));
+                }
+            }
+            status => {
+                return Err(format!(
+                    "resource operation `{}` has unsupported binding_status `{}`",
+                    binding.operation_id, status
+                ));
+            }
+        }
+        let mainline_path = root.join(&binding.mainline_call_doc);
+        let mainline = load_mainline_doc(&mainline_path)?;
+        require_equal(
+            &mainline.feature_id,
+            &binding.owner_feature_id,
+            &binding.operation_id,
+            "resource operation owner_feature_id",
+        )?;
+        if !mainline.resource_operations.contains(&binding.operation_id) {
+            return Err(format!(
+                "resource operation `{}` is not backlinked from `{}` resource_operations",
+                binding.operation_id, binding.mainline_call_doc
+            ));
+        }
+        let has_call_row_backlink = mainline
+            .call_table
+            .iter()
+            .any(|row| row.resource_operation.as_deref() == Some(binding.operation_id.as_str()));
+        if binding.binding_status == "bound" && !has_call_row_backlink {
+            return Err(format!(
+                "bound resource operation `{}` is not backlinked from any call_table row in `{}`",
+                binding.operation_id, binding.mainline_call_doc
+            ));
+        }
+        let function_map_path = root.join(&mainline.function_map_doc);
+        let function_map = fs::read_to_string(&function_map_path).map_err(|err| {
+            format!(
+                "read function map {} for resource operation `{}`: {err}",
+                function_map_path.display(),
+                binding.operation_id
+            )
+        })?;
+        require_contains(
+            &function_map,
+            "docs/resource-maps/core.json",
+            &mainline.function_map_doc,
+        )?;
+        if !mainline.resource_operations.is_empty() {
+            let resource_binding_section =
+                resource_map_binding_section(&function_map, &mainline.function_map_doc)?;
+            require_function_map_binding_label_has_value(
+                resource_binding_section,
+                "owned resources",
+                &mainline.function_map_doc,
+            )?;
+            require_function_map_binding_label_has_value(
+                resource_binding_section,
+                "touched resources",
+                &mainline.function_map_doc,
+            )?;
+            require_function_map_binding_label_has_value(
+                resource_binding_section,
+                "resource operations",
+                &mainline.function_map_doc,
+            )?;
+            require_function_map_binding_label_has_value(
+                resource_binding_section,
+                "forbidden shortcuts",
+                &mainline.function_map_doc,
+            )?;
+            require_contains(
+                resource_binding_section,
+                &format!("`{}`", binding.source_resource),
+                &mainline.function_map_doc,
+            )?;
+            require_contains(
+                resource_binding_section,
+                &format!("`{}`", binding.target_resource),
+                &mainline.function_map_doc,
+            )?;
+            require_contains(
+                resource_binding_section,
+                &binding.operation_id,
+                &mainline.function_map_doc,
+            )?;
+        }
+        require_contains(
+            &function_map,
+            &binding.operation_id,
+            &mainline.function_map_doc,
+        )?;
+        let test_design_path = root.join(&mainline.test_design_doc);
+        let test_design = fs::read_to_string(&test_design_path).map_err(|err| {
+            format!(
+                "read test design {} for resource operation `{}`: {err}",
+                test_design_path.display(),
+                binding.operation_id
+            )
+        })?;
+        require_contains(
+            &test_design,
+            "docs/resource-maps/core.json",
+            &mainline.test_design_doc,
+        )?;
+        require_contains(
+            &test_design,
+            &binding.operation_id,
+            &mainline.test_design_doc,
+        )?;
+        require_resource_operation_test_coverage(
+            root,
+            &test_design,
+            &binding.operation_id,
+            &binding.binding_status,
+            &mainline.test_design_doc,
+        )?;
+    }
+
+    let mut source_edge_ids = BTreeSet::new();
+    let mut source_edge_registry = BTreeSet::new();
+    for edge in &map.source_edge_registry {
+        require_non_empty(&edge.edge_id, "source_edge_registry.edge_id")?;
+        require_non_empty(&edge.operation_id, "source_edge_registry.operation_id")?;
+        require_known_resource(&resources, &edge.source_resource, &edge.edge_id)?;
+        require_known_resource(&resources, &edge.target_resource, &edge.edge_id)?;
+        require_non_empty(
+            &edge.mainline_call_doc,
+            "source_edge_registry.mainline_call_doc",
+        )?;
+        require_non_empty(
+            &edge.call_table_step,
+            "source_edge_registry.call_table_step",
+        )?;
+        require_non_empty(&edge.file_path, "source_edge_registry.file_path")?;
+        require_non_empty(&edge.symbol_path, "source_edge_registry.symbol_path")?;
+        let edge_file_paths = split_binding_segments(&edge.file_path);
+        let edge_symbol_paths = split_binding_segments(&edge.symbol_path);
+        if edge_file_paths.is_empty() {
+            return Err(format!(
+                "source_edge_registry `{}` has no file_path binding",
+                edge.edge_id
+            ));
+        }
+        if edge_symbol_paths.is_empty() {
+            return Err(format!(
+                "source_edge_registry `{}` has no symbol_path binding",
+                edge.edge_id
+            ));
+        }
+        for file_path in &edge_file_paths {
+            if !root.join(file_path).is_file() {
+                return Err(format!(
+                    "source_edge_registry `{}` references missing file `{}`",
+                    edge.edge_id, file_path
+                ));
+            }
+        }
+        for symbol_path in &edge_symbol_paths {
+            if !symbol_resolves_in_files(root, &edge_file_paths, symbol_path)? {
+                return Err(format!(
+                    "source_edge_registry `{}` references missing symbol `{}` in `{}`",
+                    edge.edge_id, symbol_path, edge.file_path
+                ));
+            }
+        }
+        if !source_edge_ids.insert(edge.edge_id.clone()) {
+            return Err(format!(
+                "duplicate source_edge_registry edge_id `{}` in docs/resource-maps/core.json",
+                edge.edge_id
+            ));
+        }
+        let binding = operation_binding_lookup
+            .get(edge.operation_id.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "source_edge_registry `{}` references unknown operation_id `{}`",
+                    edge.edge_id, edge.operation_id
+                )
+            })?;
+        if binding.binding_status != "bound" {
+            return Err(format!(
+                "source_edge_registry `{}` references non-bound operation `{}`",
+                edge.edge_id, edge.operation_id
+            ));
+        }
+        require_equal(
+            &edge.binding_status,
+            &binding.binding_status,
+            &edge.edge_id,
+            "source_edge_registry binding_status",
+        )?;
+        require_equal(
+            &edge.source_resource,
+            &binding.source_resource,
+            &edge.edge_id,
+            "source_edge_registry source_resource",
+        )?;
+        require_equal(
+            &edge.target_resource,
+            &binding.target_resource,
+            &edge.edge_id,
+            "source_edge_registry target_resource",
+        )?;
+        require_equal(
+            &edge.mainline_call_doc,
+            &binding.mainline_call_doc,
+            &edge.edge_id,
+            "source_edge_registry mainline_call_doc",
+        )?;
+        let mainline_path = root.join(&edge.mainline_call_doc);
+        let mainline = load_mainline_doc(&mainline_path)?;
+        let row = mainline
+            .call_table
+            .iter()
+            .find(|row| {
+                row.step == edge.call_table_step
+                    && row.resource_operation.as_deref() == Some(edge.operation_id.as_str())
+            })
+            .ok_or_else(|| {
+                format!(
+                    "source_edge_registry `{}` has no matching call_table row `{}` for operation `{}` in `{}`",
+                    edge.edge_id, edge.call_table_step, edge.operation_id, edge.mainline_call_doc
+                )
+            })?;
+        if row.source_resource.as_deref() != Some(edge.source_resource.as_str())
+            || row.target_resource.as_deref() != Some(edge.target_resource.as_str())
+            || row.file_path != edge.file_path
+            || row.symbol_path != edge.symbol_path
+        {
+            return Err(format!(
+                "source_edge_registry `{}` does not match call_table row `{}` in `{}`",
+                edge.edge_id, edge.call_table_step, edge.mainline_call_doc
+            ));
+        }
+        let key = source_edge_key(
+            &edge.mainline_call_doc,
+            &edge.call_table_step,
+            &edge.operation_id,
+            &edge.source_resource,
+            &edge.target_resource,
+            &edge.file_path,
+            &edge.symbol_path,
+        );
+        if !source_edge_registry.insert(key) {
+            return Err(format!(
+                "duplicate source_edge_registry binding for `{}` step `{}` operation `{}`",
+                edge.mainline_call_doc, edge.call_table_step, edge.operation_id
+            ));
+        }
+    }
+
+    for source_path in mainline_source_paths(root)? {
+        let doc = load_mainline_doc(&source_path)?;
+        for row in &doc.call_table {
+            if let Some(resource_operation) = &row.resource_operation {
+                let (expected_source, expected_target) =
+                    operation_lookup.get(resource_operation).ok_or_else(|| {
+                        format!(
+                            "mainline `{}` step `{}` references unknown resource_operation `{}`",
+                            doc.feature_id, row.step, resource_operation
+                        )
+                    })?;
+                let source_resource = row.source_resource.as_deref().ok_or_else(|| {
+                    format!(
+                        "mainline `{}` step `{}` resource_operation `{}` must declare source_resource",
+                        doc.feature_id, row.step, resource_operation
+                    )
+                })?;
+                let target_resource = row.target_resource.as_deref().ok_or_else(|| {
+                    format!(
+                        "mainline `{}` step `{}` resource_operation `{}` must declare target_resource",
+                        doc.feature_id, row.step, resource_operation
+                    )
+                })?;
+                if source_resource != *expected_source || target_resource != *expected_target {
+                    return Err(format!(
+                        "mainline `{}` step `{}` resource_operation `{}` endpoints mismatch: expected `{}` -> `{}`, got `{}` -> `{}`",
+                        doc.feature_id,
+                        row.step,
+                        resource_operation,
+                        expected_source,
+                        expected_target,
+                        source_resource,
+                        target_resource
+                    ));
+                }
+                let key = source_edge_key(
+                    &doc.mainline_call_doc,
+                    &row.step,
+                    resource_operation,
+                    source_resource,
+                    target_resource,
+                    &row.file_path,
+                    &row.symbol_path,
+                );
+                if !source_edge_registry.contains(&key) {
+                    return Err(format!(
+                        "mainline `{}` step `{}` resource_operation `{}` is missing from source_edge_registry",
+                        doc.feature_id, row.step, resource_operation
+                    ));
+                }
+            } else if row.source_resource.is_some() || row.target_resource.is_some() {
+                return Err(format!(
+                    "mainline `{}` step `{}` declares source/target resource without resource_operation",
+                    doc.feature_id, row.step
+                ));
+            }
+        }
+    }
+
+    let mut relation_rule_ids = BTreeSet::new();
+    let mut relation_rule_pairs = BTreeSet::new();
+    let mut direct_relation_pairs = BTreeSet::new();
+    let mut indirect_relation_rules: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    for rule in &map.relation_rules {
+        require_non_empty(&rule.rule_id, "relation_rules.rule_id")?;
+        if !relation_rule_ids.insert(rule.rule_id.clone()) {
+            return Err(format!(
+                "duplicate resource relation rule_id `{}` in docs/resource-maps/core.json",
+                rule.rule_id
+            ));
+        }
+        require_non_empty(&rule.reason, "relation_rules.reason")?;
+        require_known_resource(&resources, &rule.source_resource, &rule.rule_id)?;
+        require_known_resource(&resources, &rule.target_resource, &rule.rule_id)?;
+        if !relation_rule_pairs.insert((rule.source_resource.clone(), rule.target_resource.clone()))
+        {
+            return Err(format!(
+                "duplicate resource relation rule pair `{}` -> `{}` in docs/resource-maps/core.json",
+                rule.source_resource, rule.target_resource
+            ));
+        }
+        if rule.allowed_direct {
+            direct_relation_pairs
+                .insert((rule.source_resource.clone(), rule.target_resource.clone()));
+        } else {
+            indirect_relation_rules.insert(
+                (rule.source_resource.clone(), rule.target_resource.clone()),
+                rule.via_resources.clone(),
+            );
+        }
+        if rule.allowed_direct && !rule.via_resources.is_empty() {
+            return Err(format!(
+                "direct resource relation `{}` must not declare via_resources",
+                rule.rule_id
+            ));
+        }
+        if !rule.allowed_direct && rule.via_resources.is_empty() {
+            return Err(format!(
+                "indirect resource relation `{}` must declare via_resources",
+                rule.rule_id
+            ));
+        }
+        if !rule.allowed_direct
+            && operation_pairs
+                .contains(&(rule.source_resource.clone(), rule.target_resource.clone()))
+        {
+            return Err(format!(
+                "resource relation `{}` forbids direct `{}` -> `{}` but an operation binding declares that direct pair",
+                rule.rule_id, rule.source_resource, rule.target_resource
+            ));
+        }
+        for via in &rule.via_resources {
+            require_known_resource(&resources, via, &rule.rule_id)?;
+        }
+    }
+    for (source_resource, target_resource) in &bound_operation_pairs {
+        if !direct_relation_pairs.contains(&(source_resource.clone(), target_resource.clone())) {
+            return Err(format!(
+                "bound resource operation pair `{source_resource}` -> `{target_resource}` must have an allowed_direct relation rule"
+            ));
+        }
+    }
+
+    let mut source_shortcut_gate_pairs = BTreeSet::new();
+    for gate in &map.source_shortcut_gates {
+        if !source_shortcut_gate_pairs
+            .insert((gate.source_resource.clone(), gate.target_resource.clone()))
+        {
+            return Err(format!(
+                "duplicate source_shortcut_gates pair `{}` -> `{}`",
+                gate.source_resource, gate.target_resource
+            ));
+        }
+    }
+    let mut precise_source_edge_gate_pairs = BTreeSet::new();
+    for gate in &map.precise_source_edge_gates {
+        if !precise_source_edge_gate_pairs
+            .insert((gate.source_resource.clone(), gate.target_resource.clone()))
+        {
+            return Err(format!(
+                "duplicate precise_source_edge_gates pair `{}` -> `{}`",
+                gate.source_resource, gate.target_resource
+            ));
+        }
+    }
+    let mut forbidden_direct_pairs = BTreeSet::new();
+
+    for relation in &map.forbidden_direct_relations {
+        let context = format!(
+            "forbidden direct relation {} -> {}",
+            relation.source_resource, relation.target_resource
+        );
+        require_known_resource(&resources, &relation.source_resource, &context)?;
+        require_known_resource(&resources, &relation.target_resource, &context)?;
+        if !forbidden_direct_pairs.insert((
+            relation.source_resource.clone(),
+            relation.target_resource.clone(),
+        )) {
+            return Err(format!("{context} is duplicated"));
+        }
+        require_non_empty(&relation.reason, "forbidden_direct_relations.reason")?;
+        if relation.required_via.is_empty() {
+            return Err(format!("{context} must declare required_via"));
+        }
+        if direct_relation_pairs.contains(&(
+            relation.source_resource.clone(),
+            relation.target_resource.clone(),
+        )) {
+            return Err(format!(
+                "{context} conflicts with an allowed_direct relation rule"
+            ));
+        }
+        if operation_pairs.contains(&(
+            relation.source_resource.clone(),
+            relation.target_resource.clone(),
+        )) {
+            return Err(format!(
+                "{context} is forbidden but an operation binding declares that direct pair"
+            ));
+        }
+        for via in &relation.required_via {
+            require_known_resource(&resources, via, &context)?;
+        }
+        let indirect_via = indirect_relation_rules
+            .get(&(
+                relation.source_resource.clone(),
+                relation.target_resource.clone(),
+            ))
+            .ok_or_else(|| format!("{context} must have a matching indirect relation rule"))?;
+        if indirect_via != &relation.required_via {
+            return Err(format!(
+                "{context} required_via must match the indirect relation rule via_resources"
+            ));
+        }
+        require_non_empty(&relation.source_gate_status, "source_gate_status")?;
+        require_non_empty(&relation.source_gate_reason, "source_gate_reason")?;
+        match parse_source_gate_status(&relation.source_gate_status, &context)? {
+            SourceGateStatus::Checked => {
+                if !source_shortcut_gate_pairs.contains(&(
+                    relation.source_resource.clone(),
+                    relation.target_resource.clone(),
+                )) {
+                    return Err(format!(
+                        "{context} has source_gate_status=checked but no matching source_shortcut_gates entry"
+                    ));
+                }
+            }
+            SourceGateStatus::PreciseChecked => {
+                if !precise_source_edge_gate_pairs.contains(&(
+                    relation.source_resource.clone(),
+                    relation.target_resource.clone(),
+                )) {
+                    return Err(format!(
+                        "{context} has source_gate_status=precise_checked but no matching precise_source_edge_gates entry"
+                    ));
+                }
+            }
+        }
+    }
+
+    let resource_owner_crates: BTreeMap<&str, &str> = map
+        .resources
+        .iter()
+        .map(|resource| {
+            (
+                resource.resource_type.as_str(),
+                resource.owner_crate.as_str(),
+            )
+        })
+        .collect();
+
+    for gate in &map.source_shortcut_gates {
+        require_known_resource(&resources, &gate.source_resource, "source_shortcut_gates")?;
+        require_known_resource(&resources, &gate.target_resource, "source_shortcut_gates")?;
+        require_non_empty(&gate.reason, "source_shortcut_gates.reason")?;
+        if gate.forbidden_packages.is_empty() && gate.forbidden_import_tokens.is_empty() {
+            return Err(format!(
+                "source shortcut gate `{}` -> `{}` must declare forbidden_packages or forbidden_import_tokens",
+                gate.source_resource, gate.target_resource
+            ));
+        }
+        for package in &gate.forbidden_packages {
+            require_non_empty(package, "source_shortcut_gates.forbidden_packages")?;
+        }
+        for token in &gate.forbidden_import_tokens {
+            require_non_empty(token, "source_shortcut_gates.forbidden_import_tokens")?;
+        }
+        if !forbidden_direct_pairs
+            .contains(&(gate.source_resource.clone(), gate.target_resource.clone()))
+        {
+            return Err(format!(
+                "source shortcut gate `{}` -> `{}` must reference a forbidden_direct_relations pair",
+                gate.source_resource, gate.target_resource
+            ));
+        }
+        let source_crate = resource_owner_crates
+            .get(gate.source_resource.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "source shortcut gate references resource without owner crate `{}`",
+                    gate.source_resource
+                )
+            })?;
+        verify_source_shortcut_gate(root, source_crate, gate)?;
+    }
+
+    for gate in &map.precise_source_edge_gates {
+        require_known_resource(
+            &resources,
+            &gate.source_resource,
+            "precise_source_edge_gates",
+        )?;
+        require_known_resource(
+            &resources,
+            &gate.target_resource,
+            "precise_source_edge_gates",
+        )?;
+        if !forbidden_direct_pairs
+            .contains(&(gate.source_resource.clone(), gate.target_resource.clone()))
+        {
+            return Err(format!(
+                "precise source edge gate `{}` -> `{}` must reference a forbidden_direct_relations pair",
+                gate.source_resource, gate.target_resource
+            ));
+        }
+        verify_precise_source_edge_gate(root, gate)?;
+    }
+
+    Ok(())
+}
+
+fn verify_required_core_resources(resources: &BTreeSet<String>) -> Result<(), String> {
+    const REQUIRED_CORE_RESOURCES: &[&str] = &[
+        "config",
+        "session",
+        "turn",
+        "request_context",
+        "provider_request",
+        "provider_response",
+        "tool_call",
+        "workspace_path",
+        "task",
+        "agent",
+        "timer",
+        "error",
+        "metadata",
+        "debug_trace",
+        "ui_projection",
+        "runtime_command",
+        "checkpoint",
+        "node_pairing",
+        "instruction_capability",
+    ];
+
+    for resource in REQUIRED_CORE_RESOURCES {
+        if !resources.contains(*resource) {
+            return Err(format!(
+                "core resource map missing required resource `{resource}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn source_edge_key(
+    mainline_call_doc: &str,
+    call_table_step: &str,
+    operation_id: &str,
+    source_resource: &str,
+    target_resource: &str,
+    file_path: &str,
+    symbol_path: &str,
+) -> String {
+    format!(
+        "{mainline_call_doc}\n{call_table_step}\n{operation_id}\n{source_resource}\n{target_resource}\n{file_path}\n{symbol_path}"
+    )
+}
+
+fn parse_feature_map_resource_ownership(
+    feature_map: &str,
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    let section = feature_map
+        .split("## Resource Ownership Index")
+        .nth(1)
+        .and_then(|tail| tail.split("\n## ").next())
+        .ok_or_else(|| "feature map missing `## Resource Ownership Index` section".to_owned())?;
+    let mut ownership = BTreeMap::new();
+    for line in section.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('|')
+            || trimmed.contains("| ---")
+            || trimmed.contains("| feature_id ")
+        {
+            continue;
+        }
+        let cells: Vec<&str> = trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .collect();
+        if cells.len() < 3 {
+            continue;
+        }
+        let feature_id = trim_backticks(cells[0]);
+        if feature_id.is_empty() {
+            continue;
+        }
+        let resource_map_doc = trim_backticks(cells[2]);
+        if resource_map_doc != "docs/resource-maps/core.json" {
+            return Err(format!(
+                "feature map Resource Ownership Index `{feature_id}` must reference `docs/resource-maps/core.json`, got `{resource_map_doc}`"
+            ));
+        }
+        let mut resources = BTreeSet::new();
+        for resource in cells[1].split(',') {
+            let resource = trim_backticks(resource.trim());
+            if resource.is_empty() {
+                continue;
+            }
+            resources.insert(resource.to_owned());
+        }
+        if resources.is_empty() {
+            return Err(format!(
+                "feature map Resource Ownership Index `{feature_id}` must list at least one resource"
+            ));
+        }
+        if ownership.insert(feature_id.to_owned(), resources).is_some() {
+            return Err(format!(
+                "feature map Resource Ownership Index duplicates feature `{feature_id}`"
+            ));
+        }
+    }
+    if ownership.is_empty() {
+        return Err("feature map Resource Ownership Index has no resource rows".to_owned());
+    }
+    Ok(ownership)
+}
+
+fn parse_feature_map_seed_owners(feature_map: &str) -> Result<BTreeMap<String, String>, String> {
+    let mut owners = BTreeMap::new();
+    let mut current_feature: Option<String> = None;
+    let mut current_owner: Option<String> = None;
+
+    for line in feature_map.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("## ") && current_feature.is_some() {
+            if let Some(feature_id) = current_feature.take() {
+                let owner = current_owner.take().ok_or_else(|| {
+                    format!("feature map seed entry `{feature_id}` must declare `owner`")
+                })?;
+                if owners.insert(feature_id.clone(), owner).is_some() {
+                    return Err(format!(
+                        "feature map seed entry `{feature_id}` is duplicated"
+                    ));
+                }
+            }
+            continue;
+        }
+        if trimmed.starts_with("### `") && trimmed.ends_with('`') {
+            if let Some(feature_id) = current_feature.take() {
+                let owner = current_owner.take().ok_or_else(|| {
+                    format!("feature map seed entry `{feature_id}` must declare `owner`")
+                })?;
+                if owners.insert(feature_id.clone(), owner).is_some() {
+                    return Err(format!(
+                        "feature map seed entry `{feature_id}` is duplicated"
+                    ));
+                }
+            }
+            current_feature = Some(trimmed[5..trimmed.len() - 1].to_owned());
+            current_owner = None;
+            continue;
+        }
+        if current_feature.is_some() && current_owner.is_none() && trimmed.starts_with("- owner:") {
+            let owner = trimmed.trim_start_matches("- owner:").trim();
+            if owner.is_empty() {
+                return Err("feature map seed owner must not be empty".to_owned());
+            }
+            current_owner = Some(owner.to_owned());
+        }
+    }
+
+    if let Some(feature_id) = current_feature.take() {
+        let owner = current_owner
+            .take()
+            .ok_or_else(|| format!("feature map seed entry `{feature_id}` must declare `owner`"))?;
+        if owners.insert(feature_id.clone(), owner).is_some() {
+            return Err(format!(
+                "feature map seed entry `{feature_id}` is duplicated"
+            ));
+        }
+    }
+
+    if owners.is_empty() {
+        return Err("feature map has no seed owner entries".to_owned());
+    }
+    Ok(owners)
+}
+
+fn trim_backticks(value: &str) -> &str {
+    value.trim().trim_matches('`').trim()
+}
+
+fn verify_source_shortcut_gate(
+    root: &Path,
+    source_crate: &str,
+    gate: &ResourceMapSourceShortcutGate,
+) -> Result<(), String> {
+    let cargo_path = root.join(source_crate).join("Cargo.toml");
+    let cargo = fs::read_to_string(&cargo_path).map_err(|err| {
+        format!(
+            "read source shortcut Cargo.toml {}: {err}",
+            cargo_path.display()
+        )
+    })?;
+    for package in &gate.forbidden_packages {
+        if cargo.contains(package) {
+            return Err(format!(
+                "resource shortcut gate `{}` -> `{}` forbids dependency `{}` in {}",
+                gate.source_resource,
+                gate.target_resource,
+                package,
+                cargo_path.display()
+            ));
+        }
+    }
+
+    for file_path in rust_source_paths_under(&root.join(source_crate))? {
+        let source = fs::read_to_string(&file_path)
+            .map_err(|err| format!("read source shortcut file {}: {err}", file_path.display()))?;
+        for token in &gate.forbidden_import_tokens {
+            if source.contains(token) {
+                return Err(format!(
+                    "resource shortcut gate `{}` -> `{}` forbids import/reference token `{}` in {}",
+                    gate.source_resource,
+                    gate.target_resource,
+                    token,
+                    file_path.display()
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+enum SourceGateStatus {
+    Checked,
+    PreciseChecked,
+}
+
+fn parse_source_gate_status(status: &str, context: &str) -> Result<SourceGateStatus, String> {
+    match status {
+        "checked" => Ok(SourceGateStatus::Checked),
+        "precise_checked" => Ok(SourceGateStatus::PreciseChecked),
+        other => Err(format!(
+            "{context} has unsupported source_gate_status `{other}`"
+        )),
+    }
+}
+
+fn rust_source_paths_under(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut paths = Vec::new();
+    collect_rust_source_paths_under(dir, &mut paths)?;
+    Ok(paths)
+}
+
+fn collect_rust_source_paths_under(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = fs::read_dir(dir)
+        .map_err(|err| format!("read source directory {}: {err}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read source directory entry: {err}"))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|err| format!("read file type {}: {err}", path.display()))?;
+        if file_type.is_dir() {
+            if entry.file_name() == "target" {
+                continue;
+            }
+            collect_rust_source_paths_under(&path, paths)?;
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn verify_precise_source_edge_gate(
+    root: &Path,
+    gate: &ResourceMapPreciseSourceEdgeGate,
+) -> Result<(), String> {
+    require_non_empty(&gate.file_path, "precise_source_edge_gates.file_path")?;
+    require_non_empty(&gate.symbol_path, "precise_source_edge_gates.symbol_path")?;
+    require_non_empty(&gate.reason, "precise_source_edge_gates.reason")?;
+    if gate.required_tokens.is_empty() {
+        return Err(format!(
+            "precise source edge gate `{}` -> `{}` must declare required_tokens",
+            gate.source_resource, gate.target_resource
+        ));
+    }
+    let file_path = root.join(&gate.file_path);
+    let source = fs::read_to_string(&file_path).map_err(|err| {
+        format!(
+            "read precise source edge file {}: {err}",
+            file_path.display()
+        )
+    })?;
+    if !symbol_resolves_in_files(
+        root,
+        std::slice::from_ref(&gate.file_path),
+        &gate.symbol_path,
+    )? {
+        return Err(format!(
+            "precise source edge gate `{}` -> `{}` references missing symbol `{}` in `{}`",
+            gate.source_resource, gate.target_resource, gate.symbol_path, gate.file_path
+        ));
+    }
+    let body = extract_function_body(&source, &gate.symbol_path).ok_or_else(|| {
+        format!(
+            "precise source edge gate `{}` -> `{}` could not extract function body for `{}` in `{}`",
+            gate.source_resource, gate.target_resource, gate.symbol_path, gate.file_path
+        )
+    })?;
+    for token in &gate.required_tokens {
+        require_non_empty(token, "precise_source_edge_gates.required_tokens")?;
+        if !body.contains(token) {
+            return Err(format!(
+                "precise source edge gate `{}` -> `{}` requires token `{}` in `{}` body",
+                gate.source_resource, gate.target_resource, token, gate.symbol_path
+            ));
+        }
+    }
+    for token in &gate.forbidden_tokens {
+        require_non_empty(token, "precise_source_edge_gates.forbidden_tokens")?;
+        if body.contains(token) {
+            return Err(format!(
+                "precise source edge gate `{}` -> `{}` forbids token `{}` in `{}` body",
+                gate.source_resource, gate.target_resource, token, gate.symbol_path
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn extract_function_body<'a>(source: &'a str, symbol_path: &str) -> Option<&'a str> {
+    let symbol_tail = symbol_path
+        .rsplit("::")
+        .next()
+        .unwrap_or(symbol_path)
+        .trim();
+    let pattern = format!("fn {symbol_tail}(");
+    let function_start = source.find(&pattern)?;
+    let signature_tail = &source[function_start..];
+    let body_start_offset = signature_tail.find('{')?;
+    let body_start = function_start + body_start_offset;
+    let mut depth = 0_i32;
+    for (offset, ch) in source[body_start..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let end = body_start + offset + ch.len_utf8();
+                    return source.get(body_start..end);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn require_non_empty(value: &str, field: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err(format!("resource map field `{field}` must not be empty"));
+    }
+    Ok(())
+}
+
+fn require_known_resource(
+    resources: &BTreeSet<String>,
+    resource_type: &str,
+    context: &str,
+) -> Result<(), String> {
+    if !resources.contains(resource_type) {
+        return Err(format!(
+            "resource map `{context}` references unknown resource `{resource_type}`"
+        ));
+    }
+    Ok(())
+}
+
 fn verify_generated_wiki(root: &Path) -> Result<(), String> {
     let generated = render_all_mainline_wikis(root)?;
     for (path, expected) in generated {
@@ -785,6 +1943,16 @@ fn verify_mainline_manifest_links(root: &Path) -> Result<(), String> {
             &doc.generated_wiki_doc,
             "docs/architecture/feature-map.md",
         )?;
+        for row in &doc.call_table {
+            if let Some(resource_operation) = &row.resource_operation {
+                if !doc.resource_operations.contains(resource_operation) {
+                    return Err(format!(
+                        "mainline `{}` step `{}` references resource_operation `{}` that is not listed in resource_operations",
+                        doc.feature_id, row.step, resource_operation
+                    ));
+                }
+            }
+        }
     }
 
     Ok(())
@@ -1548,6 +2716,338 @@ fn require_contains(text: &str, snippet: &str, rel_path: &str) -> Result<(), Str
     Ok(())
 }
 
+fn resource_map_binding_section<'a>(
+    function_map: &'a str,
+    rel_path: &str,
+) -> Result<&'a str, String> {
+    function_map
+        .split("## Resource Map Binding")
+        .nth(1)
+        .and_then(|tail| tail.split("\n## ").next())
+        .ok_or_else(|| {
+            format!("function map `{rel_path}` missing `## Resource Map Binding` section")
+        })
+}
+
+fn require_function_map_binding_label_has_value(
+    section: &str,
+    label: &str,
+    rel_path: &str,
+) -> Result<(), String> {
+    let marker = format!("- {label}:");
+    let mut lines = section.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with(&marker) {
+            continue;
+        }
+        let inline_value = trimmed[marker.len()..].trim();
+        if !inline_value.is_empty() {
+            return Ok(());
+        }
+        while let Some(next_line) = lines.peek() {
+            let next_trimmed = next_line.trim();
+            if next_trimmed.is_empty() {
+                lines.next();
+                continue;
+            }
+            if next_line.starts_with("  - ") && next_trimmed.len() > 2 {
+                return Ok(());
+            }
+            break;
+        }
+        return Err(format!(
+            "function map `{rel_path}` Resource Map Binding `{label}` must declare at least one value"
+        ));
+    }
+    Err(format!(
+        "function map `{rel_path}` Resource Map Binding missing `{label}:`"
+    ))
+}
+
+fn require_resource_operation_test_coverage(
+    root: &Path,
+    test_design: &str,
+    operation_id: &str,
+    binding_status: &str,
+    rel_path: &str,
+) -> Result<(), String> {
+    require_contains(test_design, "## Resource Operation Test Coverage", rel_path)?;
+    require_contains(test_design, "white-box", rel_path)?;
+    require_contains(test_design, "module black-box", rel_path)?;
+    require_contains(test_design, "project black-box", rel_path)?;
+
+    let operation_marker = format!("`{operation_id}`");
+    let cells = test_design
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('|') && line.ends_with('|'))
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(str::trim)
+                .collect::<Vec<_>>()
+        })
+        .find(|cells| cells.first().copied() == Some(operation_marker.as_str()))
+        .ok_or_else(|| {
+            format!(
+                "test design `{rel_path}` must include a Resource Operation Test Coverage table row for `{operation_id}`"
+            )
+        })?;
+    if cells.len() < 5 {
+        return Err(format!(
+            "test design `{rel_path}` Resource Operation Test Coverage row for `{operation_id}` must include operation, status, white-box, module black-box, and project black-box columns"
+        ));
+    }
+    if cells[1] != binding_status {
+        return Err(format!(
+            "test design `{rel_path}` Resource Operation Test Coverage row for `{operation_id}` has status `{}`, expected `{binding_status}`",
+            cells[1]
+        ));
+    }
+    for (column_name, value) in [
+        ("white-box", cells[2]),
+        ("module black-box", cells[3]),
+        ("project black-box", cells[4]),
+    ] {
+        if value.is_empty() || value == "-" {
+            return Err(format!(
+                "test design `{rel_path}` Resource Operation Test Coverage row for `{operation_id}` has empty {column_name} coverage"
+            ));
+        }
+        if binding_status == "bound" && contains_pending_coverage_language(value) {
+            return Err(format!(
+                "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` has pending/future {column_name} coverage"
+            ));
+        }
+        if binding_status == "bound" && !contains_verification_command(value) {
+            return Err(format!(
+                "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage must include a command-style verification entry"
+            ));
+        }
+        if binding_status == "bound" {
+            validate_coverage_command_entries(root, value, rel_path, operation_id, column_name)?;
+        }
+    }
+    Ok(())
+}
+
+fn contains_pending_coverage_language(value: &str) -> bool {
+    let lowered = value.to_ascii_lowercase();
+    ["pending", "future", "not claimed", "not yet", "todo", "tbd"]
+        .iter()
+        .any(|needle| lowered.contains(needle))
+}
+
+fn contains_verification_command(value: &str) -> bool {
+    [
+        "`cargo ",
+        "`make ",
+        "`scripts/",
+        "`bash ",
+        "`node ",
+        "`jq ",
+        "`grep ",
+        "`freehand-cli",
+        "`./gradlew",
+    ]
+    .iter()
+    .any(|needle| value.contains(needle))
+}
+
+fn validate_coverage_command_entries(
+    root: &Path,
+    value: &str,
+    rel_path: &str,
+    operation_id: &str,
+    column_name: &str,
+) -> Result<(), String> {
+    let commands = extract_backtick_commands(value);
+    if commands.is_empty() {
+        return Err(format!(
+            "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage must include a backticked command"
+        ));
+    }
+    let package_names = cargo_package_names(root)?;
+    let makefile = fs::read_to_string(root.join("Makefile")).unwrap_or_default();
+    for command in commands {
+        validate_coverage_command_entry(
+            root,
+            &package_names,
+            &makefile,
+            &command,
+            rel_path,
+            operation_id,
+            column_name,
+        )?;
+    }
+    Ok(())
+}
+
+fn extract_backtick_commands(value: &str) -> Vec<String> {
+    let mut commands = Vec::new();
+    let mut remaining = value;
+    while let Some(start) = remaining.find('`') {
+        let after_start = &remaining[start + 1..];
+        let Some(end) = after_start.find('`') else {
+            break;
+        };
+        let command = after_start[..end].trim();
+        if is_verification_command_entry(command) {
+            commands.push(command.to_owned());
+        }
+        remaining = &after_start[end + 1..];
+    }
+    commands
+}
+
+fn is_verification_command_entry(command: &str) -> bool {
+    [
+        "cargo ",
+        "make ",
+        "scripts/",
+        "bash ",
+        "node ",
+        "jq ",
+        "grep ",
+        "freehand-cli",
+        "./gradlew",
+    ]
+    .iter()
+    .any(|prefix| command.starts_with(prefix))
+}
+
+fn validate_coverage_command_entry(
+    root: &Path,
+    package_names: &BTreeSet<String>,
+    makefile: &str,
+    command: &str,
+    rel_path: &str,
+    operation_id: &str,
+    column_name: &str,
+) -> Result<(), String> {
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err(format!(
+            "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage has empty command entry"
+        ));
+    }
+    match parts[0] {
+        "cargo" => {
+            if let Some(package) = command_package_arg(&parts) {
+                if !package_names.contains(package) {
+                    return Err(format!(
+                        "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage references unknown cargo package `{package}`"
+                    ));
+                }
+            }
+        }
+        "make" => {
+            if let Some(target) = parts.get(1) {
+                let target_marker = format!("{target}:");
+                if !makefile.contains(&target_marker) {
+                    return Err(format!(
+                        "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage references unknown make target `{target}`"
+                    ));
+                }
+            }
+        }
+        "scripts/verify-provider-retry-online.sh" | "scripts/verify-timer-tool-online.sh" => {
+            if !root.join(parts[0]).is_file() {
+                return Err(format!(
+                    "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage references missing script `{}`",
+                    parts[0]
+                ));
+            }
+        }
+        "bash" | "node" | "jq" | "grep" | "freehand-cliS" | "freehand-cli" | "./gradlew" => {}
+        other if other.starts_with("scripts/") => {
+            if !root.join(other).is_file() {
+                return Err(format!(
+                    "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage references missing script `{other}`"
+                ));
+            }
+        }
+        other => {
+            return Err(format!(
+                "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage uses unsupported command `{other}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn command_package_arg<'a>(parts: &'a [&'a str]) -> Option<&'a str> {
+    parts.windows(2).find_map(|window| match window {
+        ["-p" | "--package", package] => Some(*package),
+        _ => None,
+    })
+}
+
+fn cargo_package_names(root: &Path) -> Result<BTreeSet<String>, String> {
+    let mut names = BTreeSet::new();
+    collect_cargo_package_names(root, root, &mut names)?;
+    Ok(names)
+}
+
+fn collect_cargo_package_names(
+    root: &Path,
+    dir: &Path,
+    names: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let entries = fs::read_dir(dir)
+        .map_err(|err| format!("read cargo package directory {}: {err}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read cargo package directory entry: {err}"))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|err| format!("read file type {}: {err}", path.display()))?;
+        if file_type.is_dir() {
+            let file_name = entry.file_name();
+            if matches!(
+                file_name.to_str(),
+                Some("target" | ".git" | "artifacts" | "output" | "dist" | "node_modules")
+            ) {
+                continue;
+            }
+            collect_cargo_package_names(root, &path, names)?;
+        } else if file_type.is_file() && entry.file_name() == "Cargo.toml" {
+            let rel = relative_slash_path(root, &path)?;
+            let text = fs::read_to_string(&path)
+                .map_err(|err| format!("read cargo manifest {rel}: {err}"))?;
+            if let Some(name) = parse_cargo_package_name(&text) {
+                names.insert(name);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_cargo_package_name(manifest: &str) -> Option<String> {
+    let mut in_package = false;
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[package]" {
+            in_package = true;
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            in_package = false;
+            continue;
+        }
+        if !in_package || !trimmed.starts_with("name") {
+            continue;
+        }
+        let (_, value) = trimmed.split_once('=')?;
+        let name = value.trim().trim_matches('"');
+        if !name.is_empty() {
+            return Some(name.to_owned());
+        }
+    }
+    None
+}
+
 fn load_mainline_doc(path: &Path) -> Result<MainlineCallDoc, String> {
     let text = fs::read_to_string(path)
         .map_err(|err| format!("read mainline call source {}: {err}", path.display()))?;
@@ -1567,6 +3067,13 @@ fn render_mainline_wiki(doc: &MainlineCallDoc) -> String {
     out.push_str(&format!("- function map: `{}`\n", doc.function_map_doc));
     out.push_str(&format!("- generated wiki: `{}`\n", doc.generated_wiki_doc));
     out.push_str(&format!("- test design: `{}`\n\n", doc.test_design_doc));
+    if !doc.resource_operations.is_empty() {
+        render_bullets(
+            &mut out,
+            "Resource Operation Backlinks",
+            &doc.resource_operations,
+        );
+    }
     render_bullets(&mut out, "Request Mainline", &doc.request_mainline);
     render_bullets(&mut out, "Response Mainline", &doc.response_mainline);
     render_bullets(&mut out, "Error Mainline", &doc.error_mainline);
@@ -1586,11 +3093,14 @@ fn render_mainline_wiki(doc: &MainlineCallDoc) -> String {
         out.push_str(&format!("  - why shared: {}\n", shared.why_shared));
     }
     out.push_str("\n## Function Call Table\n\n");
-    out.push_str("| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |\n");
-    out.push_str("| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    out.push_str("| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |\n");
+    out.push_str("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
     for row in &doc.call_table {
+        let source_resource = row.source_resource.as_deref().unwrap_or("");
+        let target_resource = row.target_resource.as_deref().unwrap_or("");
+        let resource_operation = row.resource_operation.as_deref().unwrap_or("");
         out.push_str(&format!(
-            "| {} | `{}` | `{}` | {} | {} | {} | {} | {} | {} |\n",
+            "| {} | `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             row.step,
             row.symbol_path,
             row.file_path,
@@ -1599,6 +3109,9 @@ fn render_mainline_wiki(doc: &MainlineCallDoc) -> String {
             row.output_semantic,
             row.caller,
             row.callee,
+            source_resource,
+            target_resource,
+            resource_operation,
             row.binding_status,
         ));
     }
@@ -1626,6 +3139,8 @@ struct MainlineCallDoc {
     test_design_doc: String,
     mainline_call_doc: String,
     generated_wiki_doc: String,
+    #[serde(default)]
+    resource_operations: Vec<String>,
     request_mainline: Vec<String>,
     response_mainline: Vec<String>,
     error_mainline: Vec<String>,
@@ -1654,7 +3169,113 @@ struct MainlineCallRow {
     output_semantic: String,
     caller: String,
     callee: String,
+    #[serde(default)]
+    source_resource: Option<String>,
+    #[serde(default)]
+    target_resource: Option<String>,
+    #[serde(default)]
+    resource_operation: Option<String>,
     binding_status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResourceMapDoc {
+    schema_version: u32,
+    #[allow(dead_code)]
+    resource_map_id: String,
+    resources: Vec<ResourceMapResource>,
+    operation_bindings: Vec<ResourceMapOperationBinding>,
+    #[serde(default)]
+    source_edge_registry: Vec<ResourceMapSourceEdge>,
+    relation_rules: Vec<ResourceMapRelationRule>,
+    forbidden_direct_relations: Vec<ResourceMapForbiddenRelation>,
+    #[serde(default)]
+    source_shortcut_gates: Vec<ResourceMapSourceShortcutGate>,
+    #[serde(default)]
+    precise_source_edge_gates: Vec<ResourceMapPreciseSourceEdgeGate>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResourceMapResource {
+    resource_type: String,
+    owner_feature_id: String,
+    owner_crate: String,
+    identity: String,
+    truth_store: String,
+    operations: Vec<String>,
+    #[allow(dead_code)]
+    projections: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResourceMapOperationBinding {
+    operation_id: String,
+    owner_feature_id: String,
+    source_resource: String,
+    target_resource: String,
+    #[allow(dead_code)]
+    effect: String,
+    mainline_call_doc: String,
+    binding_status: String,
+    #[serde(default)]
+    pending_reason: Option<String>,
+    #[serde(default)]
+    pending_closure_doc: Option<String>,
+    #[serde(default)]
+    pending_verification: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResourceMapSourceEdge {
+    edge_id: String,
+    operation_id: String,
+    source_resource: String,
+    target_resource: String,
+    mainline_call_doc: String,
+    call_table_step: String,
+    file_path: String,
+    symbol_path: String,
+    binding_status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResourceMapRelationRule {
+    rule_id: String,
+    source_resource: String,
+    target_resource: String,
+    allowed_direct: bool,
+    via_resources: Vec<String>,
+    reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResourceMapForbiddenRelation {
+    source_resource: String,
+    target_resource: String,
+    required_via: Vec<String>,
+    source_gate_status: String,
+    source_gate_reason: String,
+    reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResourceMapSourceShortcutGate {
+    source_resource: String,
+    target_resource: String,
+    forbidden_packages: Vec<String>,
+    forbidden_import_tokens: Vec<String>,
+    reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResourceMapPreciseSourceEdgeGate {
+    source_resource: String,
+    target_resource: String,
+    file_path: String,
+    symbol_path: String,
+    required_tokens: Vec<String>,
+    forbidden_tokens: Vec<String>,
+    reason: String,
 }
 
 fn verify_webui_app_boundary(root: &Path) -> Result<(), String> {
@@ -1892,6 +3513,396 @@ mod tests {
     }
 
     #[test]
+    fn resource_map_accepts_registered_direct_edge() {
+        let root = test_repo_root("resource-map-registered-edge");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::Aligned);
+
+        verify_resource_map(&root).expect("registered resource operation edge should pass");
+    }
+
+    #[test]
+    fn resource_map_rejects_unregistered_direct_edge_row() {
+        let root = test_repo_root("resource-map-unregistered-edge");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::UnregisteredDirectEdgeRow);
+
+        let err = verify_resource_map(&root)
+            .expect_err("source/target resource row without resource_operation must fail");
+        assert!(
+            err.contains("declares source/target resource without resource_operation"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_missing_source_edge_registry() {
+        let root = test_repo_root("resource-map-missing-source-edge-registry");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::MissingSourceEdgeRegistry);
+
+        let err = verify_resource_map(&root)
+            .expect_err("bound resource-operation rows must be in source_edge_registry");
+        assert!(err.contains("missing from source_edge_registry"), "{err}");
+    }
+
+    #[test]
+    fn resource_map_rejects_source_edge_registry_missing_symbol() {
+        let root = test_repo_root("resource-map-source-edge-missing-symbol");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::SourceEdgeMissingSymbol);
+
+        let err = verify_resource_map(&root)
+            .expect_err("source_edge_registry must bind to a real source symbol");
+        assert!(
+            err.contains(
+                "source_edge_registry `demo.feature#01` references missing symbol `Demo::missing`"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_missing_direct_relation_rule() {
+        let root = test_repo_root("resource-map-missing-direct-relation-rule");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::MissingDirectRelationRule);
+
+        let err = verify_resource_map(&root)
+            .expect_err("bound resource-operation pairs must declare allowed_direct relation");
+        assert!(
+            err.contains("must have an allowed_direct relation rule"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_operation_not_declared_on_source_resource() {
+        let root = test_repo_root("resource-map-missing-allowed-operation");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::MissingAllowedResourceOperation,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("operation binding must be declared by source resource operations");
+        assert!(
+            err.contains("is not declared in resource `alpha` operations"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_missing_feature_map_resource_backlink() {
+        let root = test_repo_root("resource-map-missing-feature-backlink");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::MissingFeatureMapResourceBacklink,
+        );
+
+        let err =
+            verify_resource_map(&root).expect_err("feature map must backlink resource ownership");
+        assert!(
+            err.contains(
+                "Resource Ownership Index owner `demo.feature` does not list resource `alpha`"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_unknown_feature_map_resource() {
+        let root = test_repo_root("resource-map-unknown-feature-resource");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::UnknownFeatureMapResource);
+
+        let err = verify_resource_map(&root)
+            .expect_err("feature map resource ownership must not list unknown resources");
+        assert!(err.contains("lists unknown resource `ghost`"), "{err}");
+    }
+
+    #[test]
+    fn resource_map_rejects_duplicate_feature_map_resource_owner() {
+        let root = test_repo_root("resource-map-duplicate-feature-resource-owner");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("feature map resource ownership must be unique by resource");
+        assert!(err.contains("resource `alpha` is owned by both"), "{err}");
+    }
+
+    #[test]
+    fn resource_map_rejects_feature_owner_crate_mismatch() {
+        let root = test_repo_root("resource-map-feature-owner-crate-mismatch");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::FeatureOwnerCrateMismatch);
+
+        let err = verify_resource_map(&root)
+            .expect_err("feature-map owner must contain resource owner_crate");
+        assert!(
+            err.contains("owner_crate `crates/demo` is not present in feature map owner"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_missing_required_core_resource() {
+        let root = test_repo_root("resource-map-missing-required-core-resource");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::MissingRequiredCoreResource);
+
+        let err = verify_resource_map(&root)
+            .expect_err("core resource map must include required resources");
+        assert!(
+            err.contains("core resource map missing required resource `config`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_missing_resource_projection() {
+        let root = test_repo_root("resource-map-missing-resource-projection");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::MissingResourceProjection);
+
+        let err =
+            verify_resource_map(&root).expect_err("resources must declare at least one projection");
+        assert!(
+            err.contains("resource `alpha` must declare at least one projection"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_empty_operation_binding_effect() {
+        let root = test_repo_root("resource-map-empty-operation-binding-effect");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::EmptyOperationBindingEffect);
+
+        let err = verify_resource_map(&root).expect_err("operation bindings must describe effect");
+        assert!(
+            err.contains("`operation_bindings.effect` must not be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_pending_operation_missing_contract() {
+        let root = test_repo_root("resource-map-pending-operation-missing-contract");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::PendingOperationMissingContract,
+        );
+
+        let err =
+            verify_resource_map(&root).expect_err("pending operations must declare closure truth");
+        assert!(
+            err.contains("`operation_bindings.pending_reason` must not be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_empty_relation_rule_reason() {
+        let root = test_repo_root("resource-map-empty-relation-rule-reason");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::EmptyRelationRuleReason);
+
+        let err = verify_resource_map(&root).expect_err("relation rules must explain the relation");
+        assert!(
+            err.contains("`relation_rules.reason` must not be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_forbidden_allowed_direct_conflict() {
+        let root = test_repo_root("resource-map-forbidden-allowed-direct-conflict");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::ForbiddenAllowedDirectConflict,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("forbidden direct relations must not conflict with allowed direct rules");
+        assert!(
+            err.contains(
+                "forbidden direct relation alpha -> beta conflicts with an allowed_direct relation rule"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_noop_source_shortcut_gate() {
+        let root = test_repo_root("resource-map-noop-source-shortcut-gate");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::NoopSourceShortcutGate);
+
+        let err = verify_resource_map(&root)
+            .expect_err("source shortcut gates must declare at least one check");
+        assert!(
+            err.contains(
+                "source shortcut gate `beta` -> `alpha` must declare forbidden_packages or forbidden_import_tokens"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_duplicate_source_shortcut_gate_pair() {
+        let root = test_repo_root("resource-map-duplicate-source-shortcut-gate");
+        write_resource_map_fixture(&root, ResourceMapFixtureMode::DuplicateSourceShortcutGate);
+
+        let err =
+            verify_resource_map(&root).expect_err("source shortcut gate pairs must be unique");
+        assert!(
+            err.contains("duplicate source_shortcut_gates pair `beta` -> `alpha`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_empty_forbidden_direct_relation_reason() {
+        let root = test_repo_root("resource-map-empty-forbidden-direct-relation-reason");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("forbidden direct relations must explain why direct access is forbidden");
+        assert!(
+            err.contains("`forbidden_direct_relations.reason` must not be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_forbidden_without_indirect_relation_rule() {
+        let root = test_repo_root("resource-map-forbidden-missing-indirect-relation");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::MissingForbiddenIndirectRelation,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("forbidden direct relations must be backed by indirect relation rules");
+        assert!(
+            err.contains(
+                "forbidden direct relation beta -> alpha must have a matching indirect relation rule"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_empty_function_map_resource_binding() {
+        let root = test_repo_root("resource-map-empty-function-map-resource-binding");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::EmptyFunctionMapResourceBinding,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("function maps must declare non-empty resource binding lists");
+        assert!(
+            err.contains(
+                "function map `docs/function-maps/demo.feature.md` Resource Map Binding `touched resources` must declare at least one value"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_pending_coverage_for_bound_operation() {
+        let root = test_repo_root("resource-map-pending-coverage-for-bound-operation");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::PendingCoverageForBoundOperation,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("bound resource operations must not use pending coverage language");
+        assert!(
+            err.contains(
+                "Resource Operation Test Coverage row for bound `alpha.to_beta` has pending/future project black-box coverage"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_operation_only_mentioned_in_wrong_coverage_cell() {
+        let root = test_repo_root("resource-map-operation-mentioned-in-wrong-coverage-cell");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("operation id must appear in the coverage operation cell");
+        assert!(
+            err.contains(
+                "must include a Resource Operation Test Coverage table row for `alpha.to_beta`"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_bound_coverage_without_command_entry() {
+        let root = test_repo_root("resource-map-bound-coverage-without-command-entry");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("bound resource operation coverage must include command entries");
+        assert!(
+            err.contains("white-box coverage must include a command-style verification entry"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_bound_coverage_unknown_cargo_package() {
+        let root = test_repo_root("resource-map-bound-coverage-unknown-cargo-package");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage,
+        );
+
+        let err = verify_resource_map(&root)
+            .expect_err("bound coverage commands must reference known cargo packages");
+        assert!(
+            err.contains("references unknown cargo package `missing-package`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_map_rejects_duplicate_precise_source_edge_gate_pair() {
+        let root = test_repo_root("resource-map-duplicate-precise-source-edge-gate");
+        write_resource_map_fixture(
+            &root,
+            ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate,
+        );
+
+        let err =
+            verify_resource_map(&root).expect_err("precise source edge gate pairs must be unique");
+        assert!(
+            err.contains("duplicate precise_source_edge_gates pair `beta` -> `alpha`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn resource_source_gate_status_rejects_deferred() {
+        parse_source_gate_status("checked", "demo relation")
+            .expect("checked status should be accepted");
+        parse_source_gate_status("precise_checked", "demo relation")
+            .expect("precise_checked status should be accepted");
+
+        let err = parse_source_gate_status("deferred", "demo relation")
+            .expect_err("deferred status must fail");
+        assert!(err.contains("unsupported source_gate_status"), "{err}");
+        assert!(err.contains("deferred"), "{err}");
+    }
+
+    #[test]
     fn metadata_request_boundaries_accept_aligned_sources() {
         let root = test_repo_root("metadata-boundary-aligned");
         write_metadata_boundary_fixture(&root, MetadataBoundaryFixtureMode::Aligned);
@@ -2041,6 +4052,35 @@ mod tests {
         Aligned,
         MissingArtifacts,
         MissingUnsafeArgGuard,
+    }
+
+    enum ResourceMapFixtureMode {
+        Aligned,
+        UnregisteredDirectEdgeRow,
+        MissingSourceEdgeRegistry,
+        MissingDirectRelationRule,
+        MissingAllowedResourceOperation,
+        MissingFeatureMapResourceBacklink,
+        UnknownFeatureMapResource,
+        DuplicateFeatureMapResourceOwner,
+        FeatureOwnerCrateMismatch,
+        MissingRequiredCoreResource,
+        MissingResourceProjection,
+        EmptyOperationBindingEffect,
+        PendingOperationMissingContract,
+        EmptyRelationRuleReason,
+        ForbiddenAllowedDirectConflict,
+        NoopSourceShortcutGate,
+        DuplicateSourceShortcutGate,
+        EmptyForbiddenDirectRelationReason,
+        MissingForbiddenIndirectRelation,
+        EmptyFunctionMapResourceBinding,
+        PendingCoverageForBoundOperation,
+        OperationMentionedInWrongCoverageCell,
+        BoundCoverageWithoutCommandEntry,
+        BoundCoverageUnknownCargoPackage,
+        SourceEdgeMissingSymbol,
+        DuplicatePreciseSourceEdgeGate,
     }
 
     fn test_repo_root(name: &str) -> PathBuf {
@@ -2328,9 +4368,794 @@ FREEHAND_WEBUI_PROFILE=\"${FREEHAND_WEBUI_PROFILE:-4041}\" \\\n\
             .expect("write feature-map fixture");
     }
 
+    fn write_resource_map_fixture(root: &Path, mode: ResourceMapFixtureMode) {
+        create_dirs(root);
+        fs::create_dir_all(root.join("docs/resource-maps")).expect("create resource-map dir");
+        fs::create_dir_all(root.join("crates/demo/src")).expect("create demo crate dir");
+        fs::write(
+            root.join("crates/demo/src/lib.rs"),
+            "pub struct Demo;\nimpl Demo { pub fn run(&self) {} }\n",
+        )
+        .expect("write demo source");
+        let (feature_resource_cell, extra_feature_resource_rows) = match mode {
+            ResourceMapFixtureMode::MissingFeatureMapResourceBacklink => ("`beta`", ""),
+            ResourceMapFixtureMode::UnknownFeatureMapResource => ("`alpha`, `beta`, `ghost`", ""),
+            ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner => (
+                "`alpha`, `beta`",
+                "\n| `demo.other` | `alpha` | `docs/resource-maps/core.json` |",
+            ),
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => ("`alpha`, `beta`", ""),
+        };
+        let feature_owner = match mode {
+            ResourceMapFixtureMode::FeatureOwnerCrateMismatch => "`crates/other`",
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => "`crates/demo`",
+        };
+        fs::write(
+            root.join("docs/architecture/feature-map.md"),
+            format!(
+                "## Resource Ownership Index\n\n| feature_id | owned resources | resource map |\n| --- | --- | --- |\n| `demo.feature` | {feature_resource_cell} | `docs/resource-maps/core.json` |{extra_feature_resource_rows}\n\n## Seed Entries\n\n### `demo.feature`\n\n- owner: {feature_owner}\n- mainline_call_doc: `docs/mainline-calls/demo.feature.json`\n- generated_wiki_doc: `docs/wiki/demo.feature.md`\n"
+            ),
+        )
+        .expect("write feature map");
+        let function_map_doc = match mode {
+            ResourceMapFixtureMode::EmptyFunctionMapResourceBinding => {
+                "- feature_id: `demo.feature`\n- mainline call source: `docs/mainline-calls/demo.feature.json`\n\n## Resource Map Binding\n\n- resource map: `docs/resource-maps/core.json`\n- owned resources: `alpha`\n- touched resources:\n- resource operations: `alpha.to_beta`\n- forbidden shortcuts: none\n"
+            }
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                "- feature_id: `demo.feature`\n- mainline call source: `docs/mainline-calls/demo.feature.json`\n\n## Resource Map Binding\n\n- resource map: `docs/resource-maps/core.json`\n- owned resources: `alpha`\n- touched resources: `beta`\n- resource operations: `alpha.to_beta`\n- forbidden shortcuts: none\n"
+            }
+            ResourceMapFixtureMode::PendingCoverageForBoundOperation => {
+                "- feature_id: `demo.feature`\n- mainline call source: `docs/mainline-calls/demo.feature.json`\n\n## Resource Map Binding\n\n- resource map: `docs/resource-maps/core.json`\n- owned resources: `alpha`\n- touched resources: `beta`\n- resource operations: `alpha.to_beta`\n- forbidden shortcuts: none\n"
+            }
+            ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell => {
+                "- feature_id: `demo.feature`\n- mainline call source: `docs/mainline-calls/demo.feature.json`\n\n## Resource Map Binding\n\n- resource map: `docs/resource-maps/core.json`\n- owned resources: `alpha`\n- touched resources: `beta`\n- resource operations: `alpha.to_beta`\n- forbidden shortcuts: none\n"
+            }
+            ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry => {
+                "- feature_id: `demo.feature`\n- mainline call source: `docs/mainline-calls/demo.feature.json`\n\n## Resource Map Binding\n\n- resource map: `docs/resource-maps/core.json`\n- owned resources: `alpha`\n- touched resources: `beta`\n- resource operations: `alpha.to_beta`\n- forbidden shortcuts: none\n"
+            }
+            ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage => {
+                "- feature_id: `demo.feature`\n- mainline call source: `docs/mainline-calls/demo.feature.json`\n\n## Resource Map Binding\n\n- resource map: `docs/resource-maps/core.json`\n- owned resources: `alpha`\n- touched resources: `beta`\n- resource operations: `alpha.to_beta`\n- forbidden shortcuts: none\n"
+            }
+        };
+        fs::write(
+            root.join("docs/function-maps/demo.feature.md"),
+            function_map_doc,
+        )
+        .expect("write function map");
+        let project_black_box = match mode {
+            ResourceMapFixtureMode::PendingCoverageForBoundOperation => {
+                "pending: future project smoke"
+            }
+            ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry => "project smoke",
+            ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage => {
+                "`cargo test -p missing-package -- --nocapture`"
+            }
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                "`cargo run -p xtask -- gates check`"
+            }
+        };
+        let coverage_operation_cell = match mode {
+            ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell => "`alpha.other`",
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => "`alpha.to_beta`",
+        };
+        let module_black_box = match mode {
+            ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell => {
+                "boundary smoke mentions `alpha.to_beta` in the wrong cell"
+            }
+            ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry => "boundary smoke",
+            ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage => {
+                "`cargo test -p xtask resource_map_ -- --nocapture`"
+            }
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                "`cargo test -p xtask resource_map_ -- --nocapture`"
+            }
+        };
+        let white_box = match mode {
+            ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry => "owner unit test",
+            ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage => {
+                "`cargo test -p xtask resource_map_ -- --nocapture`"
+            }
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                "`cargo test -p xtask resource_map_ -- --nocapture`"
+            }
+        };
+        fs::write(
+            root.join("docs/testing/demo.feature.md"),
+            format!(
+                "- feature_id: `demo.feature`\n- resource map: `docs/resource-maps/core.json`\n- resource operation coverage:\n  - `alpha.to_beta`\n\n## Resource Operation Test Coverage\n\n| resource operation | status | white-box | module black-box | project black-box |\n| --- | --- | --- | --- | --- |\n| {coverage_operation_cell} | bound | {white_box} | {module_black_box} | {project_black_box} |\n"
+            ),
+        )
+        .expect("write test design");
+        let resource_operation = match mode {
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                r#",
+      "resource_operation": "alpha.to_beta""#
+            }
+            ResourceMapFixtureMode::UnregisteredDirectEdgeRow => "",
+        };
+        let mainline_resource_operations = match mode {
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                r#""resource_operations": ["alpha.to_beta"],"#
+            }
+            ResourceMapFixtureMode::UnregisteredDirectEdgeRow => r#""resource_operations": [],"#,
+        };
+        let source_edge_symbol_path = match mode {
+            ResourceMapFixtureMode::SourceEdgeMissingSymbol => "Demo::missing",
+            _ => "Demo::run",
+        };
+        fs::write(
+            root.join("docs/mainline-calls/demo.feature.json"),
+            format!(
+                r#"{{
+  "feature_id": "demo.feature",
+  "owner_crate": "crates/demo",
+  "owner_module": "crates/demo/src/lib.rs",
+  "function_map_doc": "docs/function-maps/demo.feature.md",
+  "test_design_doc": "docs/testing/demo.feature.md",
+  "mainline_call_doc": "docs/mainline-calls/demo.feature.json",
+  "generated_wiki_doc": "docs/wiki/demo.feature.md",
+  {mainline_resource_operations}
+  "request_mainline": [],
+  "response_mainline": [],
+  "error_mainline": [],
+  "shared_functions": [],
+  "call_table": [
+    {{
+      "step": "01",
+      "symbol_path": "{source_edge_symbol_path}",
+      "file_path": "crates/demo/src/lib.rs",
+      "responsibility": "demo",
+      "input_semantic": "alpha",
+      "output_semantic": "beta",
+      "caller": "demo",
+      "callee": "demo",
+      "source_resource": "alpha",
+      "target_resource": "beta"{resource_operation},
+      "binding_status": "bound"
+    }}
+  ],
+  "sync_status": []
+}}"#
+            ),
+        )
+        .expect("write mainline");
+        let operation_bindings = match mode {
+            ResourceMapFixtureMode::PendingOperationMissingContract => r#"[
+    {
+      "operation_id": "alpha.to_beta",
+      "owner_feature_id": "demo.feature",
+      "source_resource": "alpha",
+      "target_resource": "beta",
+      "effect": "fixture pending edge without closure contract",
+      "mainline_call_doc": "docs/mainline-calls/demo.feature.json",
+      "binding_status": "pending"
+    }
+  ]"#
+            .to_owned(),
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                if matches!(mode, ResourceMapFixtureMode::EmptyOperationBindingEffect) {
+                    r#"[
+    {
+      "operation_id": "alpha.to_beta",
+      "owner_feature_id": "demo.feature",
+      "source_resource": "alpha",
+      "target_resource": "beta",
+      "effect": "",
+      "mainline_call_doc": "docs/mainline-calls/demo.feature.json",
+      "binding_status": "bound"
+    }
+  ]"#
+                    .to_owned()
+                } else {
+                    r#"[
+    {
+      "operation_id": "alpha.to_beta",
+      "owner_feature_id": "demo.feature",
+      "source_resource": "alpha",
+      "target_resource": "beta",
+      "effect": "fixture edge",
+      "mainline_call_doc": "docs/mainline-calls/demo.feature.json",
+      "binding_status": "bound"
+    }
+  ]"#
+                    .to_owned()
+                }
+            }
+            ResourceMapFixtureMode::UnregisteredDirectEdgeRow => "[]".to_owned(),
+        };
+        let source_edge_registry = match mode {
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                format!(
+                    r#"[
+    {{
+      "edge_id": "demo.feature#01",
+      "operation_id": "alpha.to_beta",
+      "source_resource": "alpha",
+      "target_resource": "beta",
+      "mainline_call_doc": "docs/mainline-calls/demo.feature.json",
+      "call_table_step": "01",
+      "file_path": "crates/demo/src/lib.rs",
+      "symbol_path": "{source_edge_symbol_path}",
+      "binding_status": "bound"
+    }}
+  ]"#
+                )
+            }
+            ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::PendingOperationMissingContract => "[]".to_owned(),
+        };
+        let relation_rules = match mode {
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                if matches!(mode, ResourceMapFixtureMode::EmptyRelationRuleReason) {
+                    r#"[
+    {
+      "rule_id": "alpha-to-beta-direct",
+      "source_resource": "alpha",
+      "target_resource": "beta",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": ""
+    }
+  ]"#
+                    .to_owned()
+                } else if matches!(mode, ResourceMapFixtureMode::NoopSourceShortcutGate) {
+                    r#"[
+    {
+      "rule_id": "alpha-to-beta-direct",
+      "source_resource": "alpha",
+      "target_resource": "beta",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "fixture direct relation"
+    },
+    {
+      "rule_id": "beta-to-alpha-indirect",
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "allowed_direct": false,
+      "via_resources": ["alpha"],
+      "reason": "fixture forbidden shortcut must route through alpha"
+    }
+  ]"#
+                    .to_owned()
+                } else {
+                    r#"[
+    {
+      "rule_id": "alpha-to-beta-direct",
+      "source_resource": "alpha",
+      "target_resource": "beta",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "fixture direct relation"
+    }
+  ]"#
+                    .to_owned()
+                }
+            }
+            ResourceMapFixtureMode::MissingDirectRelationRule => "[]".to_owned(),
+        };
+        let alpha_operations = match mode {
+            ResourceMapFixtureMode::MissingAllowedResourceOperation => r#""read""#,
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => r#""to_beta""#,
+        };
+        let alpha_projections = match mode {
+            ResourceMapFixtureMode::MissingResourceProjection => "",
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingRequiredCoreResource
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => r#""alpha projection""#,
+        };
+        let resource_map_id = match mode {
+            ResourceMapFixtureMode::MissingRequiredCoreResource => "freehand.core-resource-map",
+            ResourceMapFixtureMode::Aligned
+            | ResourceMapFixtureMode::UnregisteredDirectEdgeRow
+            | ResourceMapFixtureMode::MissingSourceEdgeRegistry
+            | ResourceMapFixtureMode::MissingDirectRelationRule
+            | ResourceMapFixtureMode::MissingAllowedResourceOperation
+            | ResourceMapFixtureMode::MissingFeatureMapResourceBacklink
+            | ResourceMapFixtureMode::UnknownFeatureMapResource
+            | ResourceMapFixtureMode::DuplicateFeatureMapResourceOwner
+            | ResourceMapFixtureMode::FeatureOwnerCrateMismatch
+            | ResourceMapFixtureMode::MissingResourceProjection
+            | ResourceMapFixtureMode::EmptyOperationBindingEffect
+            | ResourceMapFixtureMode::EmptyRelationRuleReason
+            | ResourceMapFixtureMode::ForbiddenAllowedDirectConflict
+            | ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate
+            | ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason
+            | ResourceMapFixtureMode::MissingForbiddenIndirectRelation
+            | ResourceMapFixtureMode::EmptyFunctionMapResourceBinding
+            | ResourceMapFixtureMode::PendingCoverageForBoundOperation
+            | ResourceMapFixtureMode::PendingOperationMissingContract
+            | ResourceMapFixtureMode::OperationMentionedInWrongCoverageCell
+            | ResourceMapFixtureMode::BoundCoverageWithoutCommandEntry
+            | ResourceMapFixtureMode::BoundCoverageUnknownCargoPackage
+            | ResourceMapFixtureMode::SourceEdgeMissingSymbol
+            | ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => "fixture",
+        };
+        let forbidden_direct_relations = match mode {
+            ResourceMapFixtureMode::ForbiddenAllowedDirectConflict => {
+                r#"[
+    {
+      "source_resource": "alpha",
+      "target_resource": "beta",
+      "required_via": ["beta"],
+      "reason": "fixture conflicting forbidden direct relation",
+      "source_gate_status": "checked",
+      "source_gate_reason": "fixture would require a source gate if it did not conflict first"
+    }
+  ]"#
+            }
+            ResourceMapFixtureMode::NoopSourceShortcutGate
+            | ResourceMapFixtureMode::DuplicateSourceShortcutGate => {
+                r#"[
+    {
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "required_via": ["alpha"],
+      "reason": "fixture forbidden relation for noop source shortcut gate",
+      "source_gate_status": "checked",
+      "source_gate_reason": "fixture requires source shortcut gate coverage"
+    }
+  ]"#
+            }
+            ResourceMapFixtureMode::EmptyForbiddenDirectRelationReason => {
+                r#"[
+    {
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "required_via": ["alpha"],
+      "reason": "",
+      "source_gate_status": "checked",
+      "source_gate_reason": "fixture requires source shortcut gate coverage"
+    }
+  ]"#
+            }
+            ResourceMapFixtureMode::MissingForbiddenIndirectRelation => {
+                r#"[
+    {
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "required_via": ["alpha"],
+      "reason": "fixture forbidden relation without matching indirect relation rule",
+      "source_gate_status": "checked",
+      "source_gate_reason": "fixture should fail before source shortcut gate validation"
+    }
+  ]"#
+            }
+            ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                r#"[
+    {
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "required_via": ["alpha"],
+      "reason": "fixture forbidden relation for duplicate precise source edge gate",
+      "source_gate_status": "precise_checked",
+      "source_gate_reason": "fixture requires precise source edge gate coverage"
+    }
+  ]"#
+            }
+            _ => "[]",
+        };
+        let source_shortcut_gates = match mode {
+            ResourceMapFixtureMode::NoopSourceShortcutGate => {
+                r#"[
+    {
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "forbidden_packages": [],
+      "forbidden_import_tokens": [],
+      "reason": "fixture noop source shortcut gate"
+    }
+  ]"#
+            }
+            ResourceMapFixtureMode::DuplicateSourceShortcutGate => {
+                r#"[
+    {
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "forbidden_packages": ["freehand-ghost"],
+      "forbidden_import_tokens": [],
+      "reason": "fixture duplicate source shortcut gate first"
+    },
+    {
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "forbidden_packages": ["freehand-other-ghost"],
+      "forbidden_import_tokens": [],
+      "reason": "fixture duplicate source shortcut gate second"
+    }
+  ]"#
+            }
+            _ => "[]",
+        };
+        let precise_source_edge_gates = match mode {
+            ResourceMapFixtureMode::DuplicatePreciseSourceEdgeGate => {
+                r#"[
+    {
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "file_path": "crates/demo/src/lib.rs",
+      "symbol_path": "Demo::run",
+      "required_tokens": ["run"],
+      "forbidden_tokens": [],
+      "reason": "fixture duplicate precise source edge gate first"
+    },
+    {
+      "source_resource": "beta",
+      "target_resource": "alpha",
+      "file_path": "crates/demo/src/lib.rs",
+      "symbol_path": "Demo::run",
+      "required_tokens": ["run"],
+      "forbidden_tokens": [],
+      "reason": "fixture duplicate precise source edge gate second"
+    }
+  ]"#
+            }
+            _ => "[]",
+        };
+        fs::write(
+            root.join("docs/resource-maps/core.json"),
+            format!(
+                r#"{{
+  "schema_version": 1,
+  "resource_map_id": "{resource_map_id}",
+  "resources": [
+    {{
+      "resource_type": "alpha",
+      "owner_feature_id": "demo.feature",
+      "owner_crate": "crates/demo",
+      "identity": "alpha id",
+      "truth_store": "alpha truth",
+      "operations": [{alpha_operations}],
+      "projections": [{alpha_projections}]
+    }},
+    {{
+      "resource_type": "beta",
+      "owner_feature_id": "demo.feature",
+      "owner_crate": "crates/demo",
+      "identity": "beta id",
+      "truth_store": "beta truth",
+      "operations": ["read"],
+      "projections": ["beta projection"]
+    }}
+  ],
+  "operation_bindings": {operation_bindings},
+  "source_edge_registry": {source_edge_registry},
+  "relation_rules": {relation_rules},
+  "forbidden_direct_relations": {forbidden_direct_relations},
+  "source_shortcut_gates": {source_shortcut_gates},
+  "precise_source_edge_gates": {precise_source_edge_gates}
+}}"#
+            ),
+        )
+        .expect("write resource map");
+    }
+
     fn create_dirs(root: &Path) {
         for rel in [
             "src",
+            "xtask/src",
             "docs/architecture",
             "docs/function-maps",
             "docs/testing",
@@ -2339,6 +5164,18 @@ FREEHAND_WEBUI_PROFILE=\"${FREEHAND_WEBUI_PROFILE:-4041}\" \\\n\
         ] {
             fs::create_dir_all(root.join(rel)).expect("create fixture dir");
         }
+        fs::write(
+            root.join("xtask/Cargo.toml"),
+            "[package]\nname = \"xtask\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .expect("write xtask cargo fixture");
+        fs::write(root.join("xtask/src/main.rs"), "fn main() {}\n")
+            .expect("write xtask source fixture");
+        fs::write(
+            root.join("Makefile"),
+            "verify-webui-online:\n\tscripts/verify-webui-online.sh\n",
+        )
+        .expect("write Makefile fixture");
     }
 
     fn write_metadata_boundary_fixture(root: &Path, mode: MetadataBoundaryFixtureMode) {

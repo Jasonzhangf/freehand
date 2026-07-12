@@ -6,9 +6,13 @@
   "test_design_doc": "docs/testing/runtime.master-worker-loop.md",
   "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
   "generated_wiki_doc": "docs/wiki/runtime.master-worker-loop.md",
+  "resource_operations": [
+    "timer.fire_master_wakeup"
+  ],
   "request_mainline": [
     "one daemon process selects one configured agent",
     "Master mode starts the WebUI/ADP host plus a background lifecycle runner over Task Center EventInbox truth",
+    "before reading Task Center events, the Master lifecycle runner claims due independent timer schedules and resumes the Master with the persisted wakeup prompt",
     "the Master lifecycle runner drains events after its durable cursor and invokes the Master model only for current review-ready, blocked, or interrupted truth",
     "each actionable event attempt uses a task-scoped internal master-lifecycle reason session, deterministic event-and-attempt-isolated turn and trace ids, and an explicit target-task decision boundary",
     "Slave mode constructs a production Worker runner instead of a Master UI dispatcher",
@@ -24,6 +28,8 @@
   ],
   "response_mainline": [
     "no Assigned task returns an explicit idle outcome without task mutation",
+    "a due one-shot timer fires as an internal Master wakeup and completes without creating or mutating task truth",
+    "a due recurring timer fires, increments its fire count, and reschedules until its configured run limit is reached; daily, weekly, and cron recurrence uses local timezone semantics",
     "Master review-ready handling must reject or approve and close before the lifecycle cursor advances",
     "reaching the event-specific target-task decision boundary closes the reason turn in the same tool-result round and returns control to EventInbox polling",
     "lifecycle decision rounds are finite and exhaustion closes blocked while leaving the event cursor retryable",
@@ -54,7 +60,9 @@
     "assignment to a historical or non-configured Worker returns a paired failed tool result and writes no TaskAssigned event",
     "task creation with omitted, auto, self, or non-configured-agent dispatch returns a paired failed tool result and writes no task truth",
     "lifecycle decision round-budget exhaustion is explicit blocked reason truth rather than an indefinitely active turn",
+    "timer wakeup executor failure records timer failure truth, releases the schedule back to active retryable state, and surfaces a retryable Master execution error",
     "Task Center and lifecycle-state failures stop the Master runner while lifecycle executor and missing-decision failures remain retryable",
+    "timer state read/write failures stop the Master runner explicitly because independent timer truth is unavailable",
     "Master lifecycle cursor parse or write failure stops the loop explicitly",
     "missing or invalid target cwd records blocked truth before model execution, with classified wording for missing parent, likely output-directory misuse, permission denial, and generic canonicalization failure",
     "claim or heartbeat persistence failure stops before provider execution",
@@ -210,15 +218,40 @@
       "step": "11",
       "symbol_path": "ProductionMasterRunner::run_once",
       "file_path": "crates/freehand-runtime/src/master_runner.rs",
-      "responsibility": "drain new Task Center events from the durable lifecycle cursor",
-      "input_semantic": "Task Center and cursor",
-      "output_semantic": "idle or task decision outcome",
+      "responsibility": "claim due timer wakeups before draining new Task Center events from the durable lifecycle cursor",
+      "input_semantic": "timer store plus Task Center and cursor",
+      "output_semantic": "timer-fired, idle, or task decision outcome",
       "caller": "Master lifecycle service and tests",
-      "callee": "TaskRuntime::query_event_inbox and ProductionMasterRunner::handle_event",
+      "callee": "ProductionMasterRunner::handle_due_timer, TaskRuntime::query_event_inbox, and ProductionMasterRunner::handle_event",
       "binding_status": "bound"
     },
     {
       "step": "12",
+      "symbol_path": "ProductionMasterRunner::handle_due_timer",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "responsibility": "execute a due independent timer wakeup and complete, reschedule, or release timer truth",
+      "input_semantic": "due timer schedule",
+      "output_semantic": "timer-fired outcome or retryable execution error",
+      "caller": "ProductionMasterRunner::run_once",
+      "callee": "timer store and live reason turn",
+      "source_resource": "timer",
+      "target_resource": "turn",
+      "resource_operation": "timer.fire_master_wakeup",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "TimerStore::claim_due / TimerStore::complete_due / TimerStore::fail_due",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "persist independent timer schedule state and timer ledger events outside Task Center truth",
+      "input_semantic": "timer state json and timer ledger",
+      "output_semantic": "running, completed, or active timer truth",
+      "caller": "Master timer tool and Master runner",
+      "callee": "timer store owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
       "symbol_path": "ProductionMasterRunner::handle_event",
       "file_path": "crates/freehand-runtime/src/master_runner.rs",
       "responsibility": "invoke the Master model only for current review-ready, blocked, or interrupted truth",
@@ -229,7 +262,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "13",
+      "step": "15",
       "symbol_path": "run_master_lifecycle_reason_turn",
       "file_path": "crates/freehand-runtime/src/lib.rs",
       "responsibility": "execute one event-isolated lifecycle decision with a target-task boundary and finite round budget",
@@ -240,7 +273,7 @@
       "binding_status": "bound"
     },
     {
-      "step": "14",
+      "step": "16",
       "symbol_path": "configured_worker_task_boundary_failure",
       "file_path": "crates/freehand-runtime/src/lib.rs",
       "responsibility": "validate Master task create and assign routing against the configured Worker topology",
@@ -251,18 +284,18 @@
       "binding_status": "bound"
     },
     {
-      "step": "15",
+      "step": "17",
       "symbol_path": "execute_registry_tool_call_with_workspace",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "enforce configured Worker task routing before task-tool mutation",
-      "input_semantic": "Master task create or assign call and configured Worker id",
-      "output_semantic": "paired failed result or owner-routed task mutation",
+      "responsibility": "enforce configured Worker task routing before task-tool mutation and route Master timer calls to independent timer truth",
+      "input_semantic": "Master task or timer call and configured Worker id",
+      "output_semantic": "paired failed result or owner-routed task/timer mutation",
       "caller": "provider and reason live bridge",
-      "callee": "configured_worker_task_boundary_failure and task tool owner",
+      "callee": "configured_worker_task_boundary_failure, task tool owner, and timer store owner",
       "binding_status": "bound"
     },
     {
-      "step": "16",
+      "step": "18",
       "symbol_path": "run_master_mode",
       "file_path": "apps/freehand-daemon/src/main.rs",
       "responsibility": "run WebUI/ADP host and Master lifecycle runner under one daemon lifetime",
@@ -276,6 +309,7 @@
   "sync_status": [
     "Task Center claim, heartbeat, execution fact, persistence, and recovery APIs are already bound",
     "Master workspace boundary, external-cwd delegation, and path/symlink dispatch guidance are already bound",
+    "independent timer schedule truth, Master due-timer wakeup routing, and failure release are code-bound",
     "production Master lifecycle runner, durable cursor, and supervised Master daemon startup are code-bound",
     "production Worker runner, retryable interrupted/rejected requeue, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound",
     "deterministic positive and negative tests cover Master review close/reject/missing-decision plus Worker idle/review-ready/blocked/retry/missing-workspace/role boundaries",

@@ -39,13 +39,13 @@ Generated from `docs/mainline-calls/app.cli-live-turn.json`. Do not edit by hand
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `run` | `apps/freehand-cli/src/main.rs` | parse CLI command and dispatch config summary, smoke, or live turn | CLI args | selected command path | shell/operator | CLI dispatcher | bound |
-| 02 | `load_default_config` | `crates/freehand-config/src/lib.rs` | load runtime config from `~/.freehand/config.toml` | runtime home config path | selected config truth | CLI dispatcher | config owner | bound |
-| 03 | `default_config_path` | `crates/freehand-config/src/lib.rs` | derive runtime home from config truth | default config path | runtime home parent | CLI live runner | config owner | bound |
-| 04 | `run_reason_live` | `apps/freehand-cli/src/main.rs` | run one config-selected provider live request through app boundary | selected agent plus prompt plus stream/session flags | terminal-facing live summary | CLI dispatcher | app live runner | bound |
-| 05 | `run_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | bridge selected provider execution into one persisted tool-capable live request | selected config plus live turn request | turn truth plus broadcasts plus persistence/tool summary | app live runner | runtime bridge | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `run` | `apps/freehand-cli/src/main.rs` | parse CLI command and dispatch config summary, smoke, or live turn | CLI args | selected command path | shell/operator | CLI dispatcher |  |  |  | bound |
+| 02 | `load_default_config` | `crates/freehand-config/src/lib.rs` | load runtime config from `~/.freehand/config.toml` | runtime home config path | selected config truth | CLI dispatcher | config owner |  |  |  | bound |
+| 03 | `default_config_path` | `crates/freehand-config/src/lib.rs` | derive runtime home from config truth | default config path | runtime home parent | CLI live runner | config owner |  |  |  | bound |
+| 04 | `run_reason_live` | `apps/freehand-cli/src/main.rs` | run one config-selected provider live request through app boundary | selected agent plus prompt plus stream/session flags | terminal-facing live summary | CLI dispatcher | app live runner |  |  |  | bound |
+| 05 | `run_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | bridge selected provider execution into one persisted tool-capable live request | selected config plus live turn request | turn truth plus broadcasts plus persistence/tool summary | app live runner | runtime bridge |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

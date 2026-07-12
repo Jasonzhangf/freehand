@@ -2,6 +2,16 @@
 
 - feature_id: `reason.turn`
 - owner: `crates/freehand-reason`
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `provider_response.apply_to_turn`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `provider_response.apply_to_turn` | bound | `cargo test -p freehand-reason -- --nocapture` covers provider-output apply, tool-result apply, terminalization, cancellation, metadata, and debug producer tests | `cargo test -p freehand-reason -- --nocapture` covers turn engine start/apply/tool/terminal smokes at the reason boundary | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers runtime live bridge and UI projection smokes that prove normalized provider output becomes turn truth without provider DTO leakage |
+
 - lifecycle path under test:
   - per-turn truth is written
   - start-turn metadata is written with explicit owner and write-node provenance

@@ -35,6 +35,7 @@ pub enum ContextSegmentKind {
     DeveloperPolicy,
     SessionMemory,
     SessionSummary,
+    InstructionCapability,
     TaskContract,
     TaskSpaceSnapshot,
     SubagentConclusion,

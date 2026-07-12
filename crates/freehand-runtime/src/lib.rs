@@ -22,6 +22,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use chrono::{
+    DateTime, Datelike, Duration as ChronoDuration, Local, NaiveTime, TimeZone, Timelike,
+};
 use freehand_blocks::{
     CompletionClaim, CompletionDecision, CompletionSchemaIssue, CompletionSchemaRejection,
     CompletionSubmission, completion_schema_guidance, completion_schema_rejection_feedback,
@@ -47,6 +50,10 @@ use freehand_control::{
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
     DebugTraceEnvelope,
+};
+use freehand_instructions::{
+    InstructionCapabilityCompileInput, compile_instruction_capability_manifest,
+    render_instruction_capability_context,
 };
 use freehand_metadata::{
     MetadataCenter, MetadataEntry, MetadataEnvelope, MetadataError, MetadataId, MetadataKind,
@@ -181,6 +188,8 @@ pub enum RuntimeLiveBridgeError {
     ToolExecutionFailed(String),
     #[error("task projection failed: {0}")]
     TaskProjectionFailed(String),
+    #[error("instruction capability admission failed: {0}")]
+    InstructionCapabilityFailed(String),
     #[error("live bridge role `{expected}` requires matching agent mode, got `{actual}`")]
     AgentModeMismatch { expected: String, actual: String },
     #[error("worker live execution requires a target workspace")]
@@ -818,11 +827,740 @@ fn sanitize_identifier(value: &str) -> String {
         .collect()
 }
 
-fn now_unix_seconds() -> u64 {
+pub(crate) fn now_unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_secs()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum TimerRepeatRule {
+    Interval {
+        interval_seconds: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_runs: Option<u32>,
+    },
+    Daily {
+        #[serde(alias = "time_of_day_seconds_utc")]
+        time_of_day_seconds_local: u32,
+        #[serde(default)]
+        skip_weekends: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_runs: Option<u32>,
+    },
+    Weekly {
+        #[serde(alias = "time_of_day_seconds_utc")]
+        time_of_day_seconds_local: u32,
+        weekdays: Vec<u8>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_runs: Option<u32>,
+    },
+    Cron {
+        expression: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_runs: Option<u32>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TimerSchedule {
+    pub schema_version: u32,
+    pub timer_id: String,
+    pub agent_id: AgentId,
+    pub status: String,
+    pub reason: String,
+    pub prompt: String,
+    pub next_due_at: u64,
+    pub created_at: u64,
+    pub updated_at: u64,
+    pub fired_count: u32,
+    pub max_runs: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<TimerRepeatRule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_trace_id: Option<TraceId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TimerLedgerEvent {
+    schema_version: u32,
+    event_id: String,
+    timer_id: String,
+    agent_id: AgentId,
+    event_type: String,
+    occurred_at: u64,
+    payload: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DueTimerSchedule {
+    pub schedule: TimerSchedule,
+    pub fired_at: u64,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub(crate) enum TimerStoreError {
+    #[error("timer field `{0}` is required")]
+    MissingField(&'static str),
+    #[error("timer `{0}` not found")]
+    NotFound(String),
+    #[error("timer persistence failed: {0}")]
+    Persistence(String),
+    #[error("timer repeat rule invalid: {0}")]
+    InvalidRepeat(String),
+}
+
+pub(crate) struct TimerStore {
+    runtime_home: PathBuf,
+    agent_id: AgentId,
+}
+
+impl TimerStore {
+    pub(crate) fn new(runtime_home: &Path, agent_id: &AgentId) -> Self {
+        Self {
+            runtime_home: runtime_home.to_path_buf(),
+            agent_id: agent_id.clone(),
+        }
+    }
+
+    fn schedule_from_args(
+        &self,
+        args: &Map<String, Value>,
+        turn: &TurnRecord,
+    ) -> Result<TimerSchedule, TimerStoreError> {
+        let now = now_unix_seconds();
+        let reason = required_timer_string(args, "reason")?.to_owned();
+        let prompt = required_timer_string(args, "prompt")?.to_owned();
+        let mode = required_timer_string(args, "mode")?;
+        let repeat = parse_timer_repeat(args)?;
+        let next_due_at = match mode {
+            "relative" => {
+                let delay = required_timer_u64(args, "delay_seconds")?;
+                now.saturating_add(delay)
+            }
+            "absolute" => required_timer_u64(args, "run_at_unix_seconds")?,
+            "recurring" => {
+                let repeat = repeat
+                    .as_ref()
+                    .ok_or(TimerStoreError::MissingField("repeat"))?;
+                next_due_after(now, repeat).ok_or_else(|| {
+                    TimerStoreError::InvalidRepeat("cannot compute next recurring fire".to_owned())
+                })?
+            }
+            other => {
+                return Err(TimerStoreError::InvalidRepeat(format!(
+                    "unsupported mode `{other}`"
+                )));
+            }
+        };
+        let max_runs = optional_timer_u32(args, "max_runs")
+            .or_else(|| repeat.as_ref().and_then(repeat_max_runs))
+            .unwrap_or(1);
+        if max_runs == 0 {
+            return Err(TimerStoreError::MissingField("max_runs"));
+        }
+        Ok(TimerSchedule {
+            schema_version: 1,
+            timer_id: optional_timer_string(args, "timer_id")
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| {
+                    format!(
+                        "timer-{}-{}",
+                        sanitize_identifier(turn.request.agent_id.as_str()),
+                        now_unix_seconds()
+                    )
+                }),
+            agent_id: self.agent_id.clone(),
+            status: "active".to_owned(),
+            reason,
+            prompt,
+            next_due_at,
+            created_at: now,
+            updated_at: now,
+            fired_count: 0,
+            max_runs,
+            repeat,
+            source_session_id: Some(turn.request.session_id.clone()),
+            source_turn_id: Some(turn.request.turn_id.clone()),
+            source_trace_id: Some(turn.request.trace_id.clone()),
+        })
+    }
+
+    pub(crate) fn upsert_schedule(
+        &self,
+        schedule: TimerSchedule,
+    ) -> Result<TimerSchedule, TimerStoreError> {
+        let mut schedules = self.load_schedules()?;
+        schedules.retain(|existing| existing.timer_id != schedule.timer_id);
+        schedules.push(schedule.clone());
+        self.write_schedules(&schedules)?;
+        self.append_event(
+            &schedule,
+            "TimerScheduled",
+            json!({
+                "reason": schedule.reason,
+                "next_due_at": schedule.next_due_at,
+                "max_runs": schedule.max_runs,
+                "repeat": schedule.repeat,
+            }),
+        )?;
+        Ok(schedule)
+    }
+
+    fn cancel(&self, timer_id: &str) -> Result<TimerSchedule, TimerStoreError> {
+        let mut schedules = self.load_schedules()?;
+        let mut cancelled = None;
+        for schedule in &mut schedules {
+            if schedule.timer_id == timer_id {
+                schedule.status = "cancelled".to_owned();
+                schedule.updated_at = now_unix_seconds();
+                cancelled = Some(schedule.clone());
+                break;
+            }
+        }
+        let schedule = cancelled.ok_or_else(|| TimerStoreError::NotFound(timer_id.to_owned()))?;
+        self.write_schedules(&schedules)?;
+        self.append_event(&schedule, "TimerCancelled", json!({}))?;
+        Ok(schedule)
+    }
+
+    pub(crate) fn active_schedules(&self) -> Result<Vec<TimerSchedule>, TimerStoreError> {
+        Ok(self
+            .load_schedules()?
+            .into_iter()
+            .filter(|schedule| schedule.status == "active")
+            .collect())
+    }
+
+    fn claim_due(&self, now: u64) -> Result<Option<DueTimerSchedule>, TimerStoreError> {
+        let mut schedules = self.load_schedules()?;
+        let Some(index) = schedules
+            .iter()
+            .position(|schedule| schedule.status == "active" && schedule.next_due_at <= now)
+        else {
+            return Ok(None);
+        };
+        let mut schedule = schedules[index].clone();
+        schedule.status = "running".to_owned();
+        schedule.updated_at = now;
+        schedules[index] = schedule.clone();
+        self.write_schedules(&schedules)?;
+        self.append_event(&schedule, "TimerFired", json!({"fired_at": now}))?;
+        Ok(Some(DueTimerSchedule {
+            schedule,
+            fired_at: now,
+        }))
+    }
+
+    fn complete_due(&self, due: &DueTimerSchedule) -> Result<TimerSchedule, TimerStoreError> {
+        let mut schedules = self.load_schedules()?;
+        let Some(index) = schedules
+            .iter()
+            .position(|schedule| schedule.timer_id == due.schedule.timer_id)
+        else {
+            return Err(TimerStoreError::NotFound(due.schedule.timer_id.clone()));
+        };
+        let mut schedule = schedules[index].clone();
+        schedule.fired_count = schedule.fired_count.saturating_add(1);
+        schedule.updated_at = now_unix_seconds();
+        if schedule.fired_count >= schedule.max_runs {
+            schedule.status = "completed".to_owned();
+        } else if let Some(repeat) = schedule.repeat.as_ref() {
+            schedule.status = "active".to_owned();
+            schedule.next_due_at = next_due_after(due.fired_at.saturating_add(1), repeat)
+                .ok_or_else(|| {
+                    TimerStoreError::InvalidRepeat("cannot compute next recurring fire".to_owned())
+                })?;
+        } else {
+            schedule.status = "completed".to_owned();
+        }
+        schedules[index] = schedule.clone();
+        self.write_schedules(&schedules)?;
+        self.append_event(
+            &schedule,
+            "TimerCompleted",
+            json!({
+                "fired_count": schedule.fired_count,
+                "status": schedule.status,
+                "next_due_at": schedule.next_due_at,
+            }),
+        )?;
+        Ok(schedule)
+    }
+
+    fn fail_due(
+        &self,
+        due: &DueTimerSchedule,
+        error: &str,
+    ) -> Result<TimerSchedule, TimerStoreError> {
+        let mut schedules = self.load_schedules()?;
+        let Some(index) = schedules
+            .iter()
+            .position(|schedule| schedule.timer_id == due.schedule.timer_id)
+        else {
+            return Err(TimerStoreError::NotFound(due.schedule.timer_id.clone()));
+        };
+        let mut schedule = schedules[index].clone();
+        schedule.status = "active".to_owned();
+        schedule.updated_at = now_unix_seconds();
+        schedules[index] = schedule.clone();
+        self.write_schedules(&schedules)?;
+        self.append_event(
+            &schedule,
+            "TimerFailed",
+            json!({
+                "fired_at": due.fired_at,
+                "error": error,
+                "next_due_at": schedule.next_due_at,
+            }),
+        )?;
+        Ok(schedule)
+    }
+
+    fn load_schedules(&self) -> Result<Vec<TimerSchedule>, TimerStoreError> {
+        let path = self.state_path();
+        if !path.is_file() {
+            return Ok(Vec::new());
+        }
+        let raw = fs::read_to_string(&path)
+            .map_err(|error| TimerStoreError::Persistence(error.to_string()))?;
+        serde_json::from_str(&raw).map_err(|error| TimerStoreError::Persistence(error.to_string()))
+    }
+
+    fn write_schedules(&self, schedules: &[TimerSchedule]) -> Result<(), TimerStoreError> {
+        let path = self.state_path();
+        let parent = path.parent().ok_or_else(|| {
+            TimerStoreError::Persistence("timer state path has no parent".to_owned())
+        })?;
+        fs::create_dir_all(parent)
+            .map_err(|error| TimerStoreError::Persistence(error.to_string()))?;
+        let temp = path.with_extension("tmp");
+        let raw = serde_json::to_string_pretty(schedules)
+            .map_err(|error| TimerStoreError::Persistence(error.to_string()))?;
+        fs::write(&temp, raw).map_err(|error| TimerStoreError::Persistence(error.to_string()))?;
+        fs::rename(&temp, &path).map_err(|error| TimerStoreError::Persistence(error.to_string()))
+    }
+
+    fn append_event(
+        &self,
+        schedule: &TimerSchedule,
+        event_type: &str,
+        payload: Value,
+    ) -> Result<(), TimerStoreError> {
+        let path = self.ledger_path();
+        let parent = path.parent().ok_or_else(|| {
+            TimerStoreError::Persistence("timer ledger path has no parent".to_owned())
+        })?;
+        fs::create_dir_all(parent)
+            .map_err(|error| TimerStoreError::Persistence(error.to_string()))?;
+        let event = TimerLedgerEvent {
+            schema_version: 1,
+            event_id: format!(
+                "timer-event-{}-{}",
+                sanitize_identifier(&schedule.timer_id),
+                now_unix_seconds()
+            ),
+            timer_id: schedule.timer_id.clone(),
+            agent_id: self.agent_id.clone(),
+            event_type: event_type.to_owned(),
+            occurred_at: now_unix_seconds(),
+            payload,
+        };
+        let line = serde_json::to_string(&event)
+            .map_err(|error| TimerStoreError::Persistence(error.to_string()))?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|error| TimerStoreError::Persistence(error.to_string()))?;
+        writeln!(file, "{line}").map_err(|error| TimerStoreError::Persistence(error.to_string()))
+    }
+
+    #[cfg(test)]
+    fn load_events(&self) -> Result<Vec<TimerLedgerEvent>, TimerStoreError> {
+        use std::io::{BufRead, BufReader};
+
+        let path = self.ledger_path();
+        if !path.is_file() {
+            return Ok(Vec::new());
+        }
+        let file = fs::File::open(path)
+            .map_err(|error| TimerStoreError::Persistence(error.to_string()))?;
+        let reader = BufReader::new(file);
+        let mut events = Vec::new();
+        for line in reader.lines() {
+            let line = line.map_err(|error| TimerStoreError::Persistence(error.to_string()))?;
+            if !line.trim().is_empty() {
+                events.push(
+                    serde_json::from_str(&line)
+                        .map_err(|error| TimerStoreError::Persistence(error.to_string()))?,
+                );
+            }
+        }
+        Ok(events)
+    }
+
+    fn state_path(&self) -> PathBuf {
+        self.runtime_home
+            .join("state")
+            .join("timers")
+            .join(format!("{}.json", self.agent_id.as_str()))
+    }
+
+    fn ledger_path(&self) -> PathBuf {
+        self.runtime_home
+            .join("ledgers")
+            .join("timers")
+            .join(format!("{}.jsonl", self.agent_id.as_str()))
+    }
+}
+
+pub(crate) fn claim_due_timer_schedule(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    now: u64,
+) -> Result<Option<DueTimerSchedule>, TimerStoreError> {
+    TimerStore::new(runtime_home, agent_id).claim_due(now)
+}
+
+pub(crate) fn complete_due_timer_schedule(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    due: &DueTimerSchedule,
+) -> Result<TimerSchedule, TimerStoreError> {
+    TimerStore::new(runtime_home, agent_id).complete_due(due)
+}
+
+pub(crate) fn fail_due_timer_schedule(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    due: &DueTimerSchedule,
+    error: &str,
+) -> Result<TimerSchedule, TimerStoreError> {
+    TimerStore::new(runtime_home, agent_id).fail_due(due, error)
+}
+
+fn required_timer_string<'a>(
+    object: &'a Map<String, Value>,
+    field: &'static str,
+) -> Result<&'a str, TimerStoreError> {
+    object
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(TimerStoreError::MissingField(field))
+}
+
+fn optional_timer_string<'a>(object: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
+    object
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn required_timer_u64(
+    object: &Map<String, Value>,
+    field: &'static str,
+) -> Result<u64, TimerStoreError> {
+    object
+        .get(field)
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0 || field == "run_at_unix_seconds")
+        .ok_or(TimerStoreError::MissingField(field))
+}
+
+fn optional_timer_u32(object: &Map<String, Value>, field: &str) -> Option<u32> {
+    object
+        .get(field)
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+fn parse_timer_repeat(
+    object: &Map<String, Value>,
+) -> Result<Option<TimerRepeatRule>, TimerStoreError> {
+    let Some(value) = object.get("repeat") else {
+        return Ok(None);
+    };
+    let repeat = value
+        .as_object()
+        .ok_or_else(|| TimerStoreError::InvalidRepeat("repeat must be an object".to_owned()))?;
+    let kind = required_timer_string(repeat, "kind")?;
+    let max_runs = optional_timer_u32(repeat, "max_runs");
+    match kind {
+        "interval" => Ok(Some(TimerRepeatRule::Interval {
+            interval_seconds: required_timer_u64(repeat, "interval_seconds")?,
+            max_runs,
+        })),
+        "daily" => Ok(Some(TimerRepeatRule::Daily {
+            time_of_day_seconds_local: timer_time_of_day(repeat)?,
+            skip_weekends: repeat
+                .get("skip_weekends")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            max_runs,
+        })),
+        "weekly" => {
+            let weekdays = repeat
+                .get("weekdays")
+                .and_then(Value::as_array)
+                .ok_or(TimerStoreError::MissingField("weekdays"))?
+                .iter()
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .and_then(|day| u8::try_from(day).ok())
+                        .filter(|day| *day <= 6)
+                        .ok_or_else(|| {
+                            TimerStoreError::InvalidRepeat(
+                                "weekdays must be integers 0..6".to_owned(),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if weekdays.is_empty() {
+                return Err(TimerStoreError::MissingField("weekdays"));
+            }
+            Ok(Some(TimerRepeatRule::Weekly {
+                time_of_day_seconds_local: timer_time_of_day(repeat)?,
+                weekdays,
+                max_runs,
+            }))
+        }
+        "cron" => {
+            let expression = optional_timer_string(repeat, "expression")
+                .or_else(|| optional_timer_string(repeat, "cron_expression"))
+                .ok_or(TimerStoreError::MissingField("expression"))?
+                .to_owned();
+            parse_cron_expression(&expression)?;
+            Ok(Some(TimerRepeatRule::Cron {
+                expression,
+                max_runs,
+            }))
+        }
+        other => Err(TimerStoreError::InvalidRepeat(format!(
+            "unsupported repeat kind `{other}`"
+        ))),
+    }
+}
+
+fn timer_time_of_day(object: &Map<String, Value>) -> Result<u32, TimerStoreError> {
+    let value = object
+        .get("time_of_day_seconds_local")
+        .or_else(|| object.get("time_of_day_seconds_utc"))
+        .and_then(Value::as_u64)
+        .filter(|value| *value < 86_400)
+        .ok_or(TimerStoreError::MissingField("time_of_day_seconds_local"))?;
+    u32::try_from(value).map_err(|_| {
+        TimerStoreError::InvalidRepeat("time_of_day_seconds_local too large".to_owned())
+    })
+}
+
+fn repeat_max_runs(rule: &TimerRepeatRule) -> Option<u32> {
+    match rule {
+        TimerRepeatRule::Interval { max_runs, .. }
+        | TimerRepeatRule::Daily { max_runs, .. }
+        | TimerRepeatRule::Weekly { max_runs, .. }
+        | TimerRepeatRule::Cron { max_runs, .. } => *max_runs,
+    }
+}
+
+fn next_due_after(after: u64, rule: &TimerRepeatRule) -> Option<u64> {
+    match rule {
+        TimerRepeatRule::Interval {
+            interval_seconds, ..
+        } => Some(after.saturating_add(*interval_seconds)),
+        TimerRepeatRule::Daily {
+            time_of_day_seconds_local,
+            skip_weekends,
+            ..
+        } => next_daily_due(after, *time_of_day_seconds_local, *skip_weekends),
+        TimerRepeatRule::Weekly {
+            time_of_day_seconds_local,
+            weekdays,
+            ..
+        } => next_weekly_due(after, *time_of_day_seconds_local, weekdays),
+        TimerRepeatRule::Cron { expression, .. } => next_cron_due(after, expression),
+    }
+}
+
+fn next_daily_due(after: u64, time_of_day: u32, skip_weekends: bool) -> Option<u64> {
+    let after_dt = local_datetime(after)?;
+    let local_time = NaiveTime::from_num_seconds_from_midnight_opt(time_of_day, 0)?;
+    for day_offset in 0..14_i64 {
+        let date = after_dt.date_naive() + ChronoDuration::days(day_offset);
+        let candidate = local_timestamp(date.and_time(local_time))?;
+        if candidate <= after {
+            continue;
+        }
+        let weekday = local_weekday(candidate)?;
+        if skip_weekends && (weekday == 0 || weekday == 6) {
+            continue;
+        }
+        return Some(candidate);
+    }
+    None
+}
+
+fn next_weekly_due(after: u64, time_of_day: u32, weekdays: &[u8]) -> Option<u64> {
+    let after_dt = local_datetime(after)?;
+    let local_time = NaiveTime::from_num_seconds_from_midnight_opt(time_of_day, 0)?;
+    for day_offset in 0..14_i64 {
+        let date = after_dt.date_naive() + ChronoDuration::days(day_offset);
+        let candidate = local_timestamp(date.and_time(local_time))?;
+        if candidate <= after {
+            continue;
+        }
+        if weekdays.contains(&local_weekday(candidate)?) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn next_cron_due(after: u64, expression: &str) -> Option<u64> {
+    let cron = parse_cron_expression(expression).ok()?;
+    let mut cursor = after.saturating_add(60 - (after % 60));
+    for _ in 0..527_040_u32 {
+        let dt = local_datetime(cursor)?;
+        if cron.matches(&dt) {
+            return Some(cursor);
+        }
+        cursor = cursor.saturating_add(60);
+    }
+    None
+}
+
+fn local_datetime(timestamp: u64) -> Option<DateTime<Local>> {
+    let timestamp = i64::try_from(timestamp).ok()?;
+    Local.timestamp_opt(timestamp, 0).earliest()
+}
+
+fn local_timestamp(local: chrono::NaiveDateTime) -> Option<u64> {
+    let timestamp = Local.from_local_datetime(&local).earliest()?.timestamp();
+    u64::try_from(timestamp).ok()
+}
+
+fn local_weekday(timestamp: u64) -> Option<u8> {
+    Some(local_datetime(timestamp)?.weekday().num_days_from_sunday() as u8)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedCronExpression {
+    minutes: Vec<u32>,
+    hours: Vec<u32>,
+    days_of_month: Vec<u32>,
+    months: Vec<u32>,
+    weekdays: Vec<u32>,
+}
+
+impl ParsedCronExpression {
+    fn matches(&self, dt: &DateTime<Local>) -> bool {
+        self.minutes.contains(&dt.minute())
+            && self.hours.contains(&dt.hour())
+            && self.days_of_month.contains(&dt.day())
+            && self.months.contains(&dt.month())
+            && self.weekdays.contains(&dt.weekday().num_days_from_sunday())
+    }
+}
+
+fn parse_cron_expression(expression: &str) -> Result<ParsedCronExpression, TimerStoreError> {
+    let fields = expression.split_whitespace().collect::<Vec<_>>();
+    if fields.len() != 5 {
+        return Err(TimerStoreError::InvalidRepeat(
+            "cron expression must have 5 fields: minute hour day-of-month month weekday".to_owned(),
+        ));
+    }
+    Ok(ParsedCronExpression {
+        minutes: parse_cron_field(fields[0], 0, 59, "minute")?,
+        hours: parse_cron_field(fields[1], 0, 23, "hour")?,
+        days_of_month: parse_cron_field(fields[2], 1, 31, "day-of-month")?,
+        months: parse_cron_field(fields[3], 1, 12, "month")?,
+        weekdays: parse_cron_field(fields[4], 0, 6, "weekday")?,
+    })
+}
+
+fn parse_cron_field(
+    field: &str,
+    min: u32,
+    max: u32,
+    name: &str,
+) -> Result<Vec<u32>, TimerStoreError> {
+    if field.trim().is_empty() {
+        return Err(TimerStoreError::InvalidRepeat(format!(
+            "cron {name} field is empty"
+        )));
+    }
+    let mut values = Vec::new();
+    for part in field.split(',') {
+        let (range_part, step) = match part.split_once('/') {
+            Some((range_part, step_part)) => {
+                let step = step_part.parse::<u32>().map_err(|_| {
+                    TimerStoreError::InvalidRepeat(format!("cron {name} step must be an integer"))
+                })?;
+                if step == 0 {
+                    return Err(TimerStoreError::InvalidRepeat(format!(
+                        "cron {name} step must be greater than zero"
+                    )));
+                }
+                (range_part, step)
+            }
+            None => (part, 1),
+        };
+        let (start, end) = if range_part == "*" {
+            (min, max)
+        } else if let Some((start, end)) = range_part.split_once('-') {
+            (
+                parse_cron_number(start, min, max, name)?,
+                parse_cron_number(end, min, max, name)?,
+            )
+        } else {
+            let value = parse_cron_number(range_part, min, max, name)?;
+            (value, value)
+        };
+        if start > end {
+            return Err(TimerStoreError::InvalidRepeat(format!(
+                "cron {name} range start must be <= end"
+            )));
+        }
+        let mut value = start;
+        while value <= end {
+            if !values.contains(&value) {
+                values.push(value);
+            }
+            value = value.saturating_add(step);
+            if value == u32::MAX {
+                break;
+            }
+        }
+    }
+    if values.is_empty() {
+        return Err(TimerStoreError::InvalidRepeat(format!(
+            "cron {name} field produced no values"
+        )));
+    }
+    values.sort_unstable();
+    Ok(values)
+}
+
+fn parse_cron_number(raw: &str, min: u32, max: u32, name: &str) -> Result<u32, TimerStoreError> {
+    let value = raw.parse::<u32>().map_err(|_| {
+        TimerStoreError::InvalidRepeat(format!("cron {name} value must be an integer"))
+    })?;
+    if value < min || value > max {
+        return Err(TimerStoreError::InvalidRepeat(format!(
+            "cron {name} value {value} outside {min}..{max}"
+        )));
+    }
+    Ok(value)
 }
 
 fn fnv1a_hex(input: &str) -> String {
@@ -1106,8 +1844,14 @@ where
         LiveReasonExecutionRole::Master => Some(selected.paired_agent_name.as_str()),
         LiveReasonExecutionRole::Worker => None,
     };
-    let mut carryover_segments =
-        base_live_context_segments(&request.prompt, role, configured_worker);
+    let mut carryover_segments = base_live_context_segments(
+        &request.prompt,
+        role,
+        configured_worker,
+        &request.runtime_home,
+        request.cwd.as_deref(),
+        &agent_id,
+    )?;
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
@@ -1720,7 +2464,10 @@ where
                 None,
                 role,
                 configured_worker,
-            );
+                &request.runtime_home,
+                request.cwd.as_deref(),
+                &agent_id,
+            )?;
             turns.push(turn);
             continue;
         }
@@ -1855,7 +2602,10 @@ where
                     Some(feedback.as_str()),
                     role,
                     configured_worker,
-                );
+                    &request.runtime_home,
+                    request.cwd.as_deref(),
+                    &agent_id,
+                )?;
                 turns.push(turn);
                 continue;
             }
@@ -2065,7 +2815,10 @@ where
                         None,
                         role,
                         configured_worker,
-                    );
+                        &request.runtime_home,
+                        request.cwd.as_deref(),
+                        &agent_id,
+                    )?;
                     turns.push(turn);
                     continue;
                 }
@@ -2198,7 +2951,10 @@ where
                         None,
                         role,
                         configured_worker,
-                    );
+                        &request.runtime_home,
+                        request.cwd.as_deref(),
+                        &agent_id,
+                    )?;
                     turns.push(turn);
                 }
             },
@@ -2349,7 +3105,10 @@ where
                     Some(feedback.as_str()),
                     role,
                     configured_worker,
-                );
+                    &request.runtime_home,
+                    request.cwd.as_deref(),
+                    &agent_id,
+                )?;
                 turns.push(turn);
             }
         }
@@ -4697,6 +5456,7 @@ fn project_task_snapshot_for_ui(task: TaskSnapshot) -> UiTaskSnapshotProjection 
         goal: task.goal,
         priority: task.priority,
         target_cwd: task.target_cwd,
+        parent_session_id: task.parent.session_id,
         assignee_agent_id: task.assignee.map(|assignee| assignee.agent_id),
         active_execution_id: task.active_execution_id,
         updated_at: task.updated_at,
@@ -5700,7 +6460,9 @@ fn control_status_contract_segment() -> ContextSegment {
         cache_policy: ContextCachePolicy::CacheAnchor,
         role: ContextRole::Developer,
         content: concat!(
-            "Freehand may read hidden interaction status from exactly one tagged JSON block:\n",
+            "Optional hidden status block. Ordinary responses must omit it and include only the required <freehand_completion> block. ",
+            "Output freehand_status only when a previous Freehand schema feedback explicitly asks for it. ",
+            "If you output it, the opening and closing tags must match exactly:\n",
             "<<<freehand_status>>>\n",
             "{\n",
             "  \"schema_version\": 1,\n",
@@ -5716,6 +6478,7 @@ fn control_status_contract_segment() -> ContextSegment {
             "  }\n",
             "}\n",
             "<</freehand_status>>>\n",
+            "Do not use <<freehand_status>>, </<freehand_status>>>, <</freehand_status>>, or any shortened tag. ",
             "Status has no side effects. Use built-in tools for task mutations."
         )
         .to_owned(),
@@ -5752,6 +6515,171 @@ fn tool_guidance_segment(
     }
 }
 
+fn task_space_snapshot_segment(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    role: LiveReasonExecutionRole,
+    configured_worker: Option<&str>,
+) -> Result<Option<ContextSegment>, RuntimeLiveBridgeError> {
+    if role != LiveReasonExecutionRole::Master {
+        return Ok(None);
+    }
+    let task_runtime = TaskRuntime::boot(runtime_home, agent_id.clone())
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+    let board = task_runtime
+        .query_task_board(TaskBoardQuery {
+            status: None,
+            assignee: None,
+            include_terminal: true,
+        })
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+    let agent_board = task_runtime
+        .query_agent_board()
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+    let inbox = task_runtime
+        .query_event_inbox(TaskEventInboxQuery {
+            after_cursor: None,
+            limit: 12,
+        })
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+
+    let tasks = board
+        .tasks
+        .iter()
+        .take(12)
+        .map(compact_task_snapshot_json)
+        .collect::<Vec<_>>();
+    let agents = agent_board
+        .agents
+        .iter()
+        .map(|agent| {
+            json!({
+                "agent_id": agent.agent_id.as_str(),
+                "state": agent.state,
+                "alive": agent.alive,
+                "current_task_id": agent.current_task_id.as_ref().map(|id| id.as_str()),
+                "current_execution_id": agent.current_execution_id,
+                "next_check_at": agent.next_check_at
+            })
+        })
+        .collect::<Vec<_>>();
+    let recent_events = inbox
+        .events
+        .iter()
+        .map(|event| {
+            json!({
+                "cursor": event.cursor,
+                "kind": event.kind,
+                "task_id": event.task_id.as_str(),
+                "execution_id": event.execution_id,
+                "agent_id": event.agent_id.as_ref().map(|id| id.as_str()),
+                "created_at": event.created_at
+            })
+        })
+        .collect::<Vec<_>>();
+    let snapshot = json!({
+        "schema_version": 1,
+        "purpose": "Current Freehand framework truth. Read this before exploratory task query/list/history calls.",
+        "configured_worker": configured_worker,
+        "valid_task_status_filters": [
+            "created",
+            "waiting_agent",
+            "assigned",
+            "running",
+            "interrupted",
+            "paused",
+            "blocked",
+            "review_submitted",
+            "approved",
+            "rejected",
+            "failed",
+            "cancelled",
+            "closed"
+        ],
+        "known_tasks": tasks,
+        "blocked_task_ids": board
+            .blocked
+            .iter()
+            .take(8)
+            .map(|task| task.task_id.as_str())
+            .collect::<Vec<_>>(),
+        "review_ready_task_ids": board
+            .review_ready
+            .iter()
+            .take(8)
+            .map(|task| task.task_id.as_str())
+            .collect::<Vec<_>>(),
+        "agents": agents,
+        "recent_master_visible_events": recent_events
+    });
+    let snapshot_text = serde_json::to_string_pretty(&snapshot)
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+    let content = format!(
+        "Current Freehand framework truth snapshot. Use this before calling task(op=\"query\"), task(op=\"list_tasks\"), task(op=\"history\"), or task(op=\"list_agents\"). Do not call status=\"all\"; omit status to list all visible tasks.\n<freehand_task_space>\n{snapshot_text}\n</freehand_task_space>"
+    );
+    Ok(Some(ContextSegment {
+        segment_id: ContextSegmentId::new("task-space-snapshot"),
+        kind: ContextSegmentKind::TaskSpaceSnapshot,
+        stability: ContextStability::TurnVolatile,
+        cache_policy: ContextCachePolicy::NoCache,
+        role: ContextRole::Developer,
+        token_budget: runtime_prompt_segment_token_budget(&content),
+        content,
+        provenance: ContextProvenance {
+            source: "freehand_runtime".to_owned(),
+            reference: Some("task_space_snapshot".to_owned()),
+        },
+    }))
+}
+
+fn instruction_capability_segment(
+    runtime_home: &Path,
+    cwd: Option<&Path>,
+) -> Result<ContextSegment, RuntimeLiveBridgeError> {
+    let cwd = match cwd {
+        Some(path) => path.to_path_buf(),
+        None => env::current_dir()
+            .map_err(|err| RuntimeLiveBridgeError::InstructionCapabilityFailed(err.to_string()))?,
+    };
+    let manifest = compile_instruction_capability_manifest(InstructionCapabilityCompileInput::new(
+        runtime_home.to_path_buf(),
+        cwd,
+    ))
+    .map_err(|err| RuntimeLiveBridgeError::InstructionCapabilityFailed(err.to_string()))?;
+    let content = render_instruction_capability_context(&manifest)
+        .map_err(|err| RuntimeLiveBridgeError::InstructionCapabilityFailed(err.to_string()))?;
+    Ok(ContextSegment {
+        segment_id: ContextSegmentId::new("instruction-capability"),
+        kind: ContextSegmentKind::InstructionCapability,
+        stability: ContextStability::SessionStable,
+        cache_policy: ContextCachePolicy::Cacheable,
+        role: ContextRole::Developer,
+        token_budget: runtime_prompt_segment_token_budget(&content),
+        content,
+        provenance: ContextProvenance {
+            source: "instruction_capability".to_owned(),
+            reference: Some(manifest.manifest_fingerprint.clone()),
+        },
+    })
+}
+
+fn compact_task_snapshot_json(task: &TaskSnapshot) -> Value {
+    json!({
+        "task_id": task.task_id.as_str(),
+        "status": task_status_label(&task.status),
+        "title": task.title,
+        "target_cwd": task.target_cwd,
+        "assignee_agent_id": task.assignee.as_ref().map(|assignee| assignee.agent_id.as_str()),
+        "active_execution_id": task.active_execution_id,
+        "review_status": task.review.status,
+        "review_decision": task.review.decision,
+        "last_event_seq": task.last_event_seq,
+        "last_event_id": task.last_event_id,
+        "last_progress_at": task.last_progress_at,
+        "parent_session_id": task.parent.session_id.as_ref().map(|id| id.as_str())
+    })
+}
+
 fn worker_execution_guidance() -> &'static str {
     concat!(
         "Use the available Freehand tool registry to complete the assigned Worker task inside the locked task workspace, then provide the required Freehand completion schema.\n\n",
@@ -5776,28 +6704,33 @@ fn master_task_orchestration_guidance(configured_worker: &str) -> String {
 - Current topology: assign production tasks only to this configured Worker id. Historical agents returned by list_agents are persisted history, not eligible production dispatch targets.\n\
 - Worker lifecycle boundary: never put task(...), claim_next, heartbeat, record_execution, approve, reject, or close instructions into Worker task content. The Worker does not receive the task tool. The production Worker runner owns claim/heartbeat and converts the Worker completion schema into TaskReviewSubmitted or TaskBlocked truth.\n\n{}",
         concat!(
-            "Use the available Freehand tool registry when it helps the task. Choose the smallest sufficient tool for repository inspection or task bookkeeping, then continue and provide the required Freehand completion schema.\n\n",
+            "Use the available Freehand framework tools when they help orchestration. Choose task for Task Center truth or dispatch, timer for durable wakeups, then provide the required Freehand completion schema.\n\n",
             "Master task orchestration policy:\n",
             "- Role: you are the master agent. You own the user conversation, task decomposition, worker coordination, review, and final user-facing answer.\n",
             "- Dispatch when: work targets another cwd/repository, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
             "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside your current allowed workspace without isolated execution.\n",
-            "- Workspace boundary: read/query tools may inspect external readable paths, but writes outside your current cwd are not allowed. For external writes or implementation work, create or reuse a worker resource, create a task with the correct existing target_cwd, assign it, then let the production Worker runner claim and execute it.\n",
-            "- Path duty before dispatch: for any user-supplied path, identify whether it is absolute or starts with ~. Treat ~ as the user's home path from the request context, not as the Master's runtime workspace. If the path is outside your allowed workspace, you may inspect it with read/query tools; if a write/mutation is needed, dispatch a Worker task whose target_cwd is the workspace to mutate.\n",
+            "- Master tool surface: your live provider tools are framework-only: task and timer. Do not try read_file, ls, grep, glob, write_file, edit_file, multi_edit, complete_step, todo_write, or shell from the Master.\n",
+            "- Workspace boundary: external repository analysis, report generation, deep inspection, or writing must be delegated. Create or reuse a worker resource, create a task with the correct existing target_cwd, assign it to the configured Worker, then let the production Worker runner claim and execute it.\n",
+            "- Path duty before dispatch: for any user-supplied path, identify whether it is absolute or starts with ~. Treat ~ as the user's home path from the request context, not as the Master's runtime workspace. Expand ~/... to the user's absolute home path before writing target_cwd; do not pass ~, glob patterns, or broad search paths as target_cwd. If the path is outside your allowed workspace or requires repository inspection/mutation, dispatch a Worker task whose target_cwd is the workspace to inspect or mutate.\n",
             "- Symlink duty before dispatch: when a user path may include symlinks, instruct the Worker to check the path itself and each parent component for symlinks, resolve the canonical path, and report both the requested path and canonical path. The task goal/acceptance must preserve the original user-facing path and require canonical-path evidence.\n",
-            "- target_cwd rule: target_cwd is the Worker agent cwd and must be the existing repository/workspace to mutate. A separate target path B is not automatically the cwd. Reads may inspect B; writes to B require dispatching a task whose target_cwd is B's existing workspace root, or asking the user/framework to create/select that workspace first.\n",
+            "- target_cwd rule: target_cwd is the Worker agent cwd and must be the existing repository/workspace to inspect or mutate. A separate target path B is not automatically the cwd. Work on B requires dispatching a task whose target_cwd is B's existing workspace root, or asking the user/framework to create/select that workspace first.\n",
             "- Missing path rule: if a user path cannot be resolved by the Worker, leave the task blocked with exact path evidence and required external action. Do not convert missing-path evidence into broad filesystem searches or silently switch target_cwd.\n",
             "- Multi-agent dispatch: split independent repository/slice work into separate worker tasks, keep each worker focused, then review and synthesize typed worker results in the master answer.\n",
             "- Concurrency control: assign only useful independent subtasks; avoid duplicate dispatch for work already running, recovering, blocked, or review_ready; poll task truth before starting more work.\n",
             "- Flow control: use task(op=\"list_agents\"), task(op=\"list_tasks\"), task(op=\"query\"), and task(op=\"history\") to inspect current framework truth before dispatching duplicates, retrying, approving, rejecting, or closing work.\n",
             "- Task tool workflow: create_agent only when needed; create a task with goal, deliverables, acceptance, target_cwd, and priority; assign it; query task/history while the Worker runner claims, heartbeats, and records execution; approve/reject; close only after accepted review.\n",
-            "- Task create dispatch: always set dispatch.mode to none and then assign the configured Worker, or set dispatch.mode to agent with the exact configured Worker id. Never omit dispatch and never use auto or self dispatch, because persisted historical agents are not production targets.\n",
+            "- Task create dispatch: every task tool call must include top-level op. For production worker work, call task with {\"op\":\"create\", ..., \"target_cwd\":\"/absolute/existing/repo\", \"dispatch\":{\"mode\":\"none\"}} and then task with {\"op\":\"assign\", \"task_id\":\"...\", \"agent_id\":\"configured Worker\"}. Never omit dispatch and never use auto or self dispatch, because persisted historical agents are not production targets.\n",
             "- Ownership boundary: as Master, do not call claim_next, heartbeat, or record_execution on behalf of a Worker. Those mutations are owned by the Worker runner. Use them only in explicit framework/debug tests, never as normal production orchestration.\n",
+            "- Timer workflow: when all immediate Master-side actions are dispatched or waiting on worker progress, call timer(op=\"schedule\") with reason, prompt, and either delay_seconds, run_at_unix_seconds, or a repeat rule. If the next useful wait exceeds 3 minutes, schedule a timer instead of dead-waiting in the current turn. A timer is not scheduled until the timer tool returns `Timer scheduled`; do not claim or imply that a timer was scheduled in completion text unless this turn has a successful timer tool result. After scheduling the timer, continue any other ready Master-side work instead of blocking on the waited item. If no other work is ready, complete the current turn with the timer result as evidence. The timer prompt must tell the future Master turn what current truth to inspect, what waited condition to revisit, and what decision to make. Timer truth is independent internal scheduler truth, not task truth. Daily, weekly, and cron repeat rules use the local timezone. Cron is 5 fields: minute hour day-of-month month weekday.\n",
         ),
         concat!(
             "Master task orchestration examples:\n",
             "- Use the owner-scoped task tool; do not invent query_task_board, dispatch_subtask, approve_submission, or reject_submission tool names.\n",
+            "- Use the standard internal timer tool for next checks; do not encode timers as task notes or task(op=\"wait\").\n",
+            "- Timer relative sample: timer(op=\"schedule\", mode=\"relative\", delay_seconds=300, reason=\"worker dispatched; waiting more than 3 minutes must be timer-driven\", prompt=\"Read TaskBoard, EventInbox, TaskHistory, and AgentBoard from current truth. Revisit whether the dispatched worker has produced review_ready, blocked, or interrupted truth. If review is ready, approve/reject/close. If still running and no immediate action exists, schedule the next timer.\").\n",
+            "- Timer local cron sample: timer(op=\"schedule\", mode=\"recurring\", reason=\"working-hours follow-up\", prompt=\"Run scheduled Master follow-up using current framework truth only.\", repeat={\"kind\":\"cron\",\"expression\":\"*/15 9-17 * * 1-5\",\"max_runs\":32}).\n",
             "- Create worker resources with task(op=\"create_agent\") only when the task needs a worker id that does not exist.\n",
-            "- Create and dispatch work with task(op=\"create\") and task(op=\"assign\"). Keep the same task_id and agent_id while the Worker runner creates and preserves the execution_id.\n",
+            "- Create and dispatch work with task(op=\"create\") and task(op=\"assign\"). Keep the same task_id and agent_id while the Worker runner creates and preserves the execution_id. The task input JSON must include top-level `op`; do not send a task input object without `op`.\n",
             "- Cross-workspace sample: for a request comparing ~/code/codex with ~/code/Deepseek-reasonix, create one task for the Codex repository analysis and one task for the Reasonix repository analysis, each with target_cwd, deliverables, acceptance, and evidence requirements; assign/claim separate workers when available, then synthesize the comparison only after reviewing the worker results.\n",
             "- Symlinked repo sample: for a request analyzing ~/github/project where ~/github may be a symlink, create a Worker task with the requested repo path as target_cwd and acceptance requiring `pwd -P`, `ls -ld` on the path and parents, and evidence of the canonical resolved path before repository analysis. Do not first search ~/ or /Users from the Master.\n",
             "- Worker success sample: wait for task history to contain Worker-owned review_ready, then task(op=\"approve\"), then task(op=\"close\").\n",
@@ -5829,13 +6762,23 @@ fn base_live_context_segments(
     original_prompt: &str,
     role: LiveReasonExecutionRole,
     configured_worker: Option<&str>,
-) -> Vec<ContextSegment> {
-    vec![
+    runtime_home: &Path,
+    cwd: Option<&Path>,
+    agent_id: &AgentId,
+) -> Result<Vec<ContextSegment>, RuntimeLiveBridgeError> {
+    let mut segments = vec![
         completion_contract_segment(),
         control_status_contract_segment(),
         tool_guidance_segment(role, configured_worker),
-        original_task_segment(original_prompt),
-    ]
+        instruction_capability_segment(runtime_home, cwd)?,
+    ];
+    if let Some(segment) =
+        task_space_snapshot_segment(runtime_home, agent_id, role, configured_worker)?
+    {
+        segments.push(segment);
+    }
+    segments.push(original_task_segment(original_prompt));
+    Ok(segments)
 }
 
 fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
@@ -5852,8 +6795,18 @@ fn next_round_segments(
     rejection_feedback: Option<&str>,
     role: LiveReasonExecutionRole,
     configured_worker: Option<&str>,
-) -> Vec<ContextSegment> {
-    let mut segments = base_live_context_segments(original_prompt, role, configured_worker);
+    runtime_home: &Path,
+    cwd: Option<&Path>,
+    agent_id: &AgentId,
+) -> Result<Vec<ContextSegment>, RuntimeLiveBridgeError> {
+    let mut segments = base_live_context_segments(
+        original_prompt,
+        role,
+        configured_worker,
+        runtime_home,
+        cwd,
+        agent_id,
+    )?;
     if !visible_text.trim().is_empty() {
         let content = format!("Previous round visible output:\n{visible_text}");
         segments.push(ContextSegment {
@@ -5886,7 +6839,7 @@ fn next_round_segments(
             },
         });
     }
-    segments
+    Ok(segments)
 }
 
 fn collect_turn_text(turn: &TurnRecord) -> String {
@@ -5987,13 +6940,11 @@ fn execute_registry_tool_call(
                     tool_call,
                 );
             }
-            if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Shell) {
-                return Ok(master_workspace_denied_result(
+            if tool_name != "timer" {
+                return Ok(master_capability_boundary_result(
                     turn,
                     tool_call,
-                    runtime_home,
-                    workspace_root,
-                    "unsandboxed shell execution is not available to the master",
+                    configured_worker,
                 ));
             }
             let mut root = fs::canonicalize(runtime_home).map_err(|err| {
@@ -6075,6 +7026,26 @@ fn execute_registry_tool_call(
     .map_err(|err| RuntimeLiveBridgeError::ToolExecutionFailed(err.to_string()))?
 }
 
+fn master_capability_boundary_result(
+    turn: &TurnRecord,
+    tool_call: &ReasonReq04ToolCall,
+    configured_worker: Option<&str>,
+) -> ExecutedToolResult {
+    let worker = configured_worker.unwrap_or("<configured-worker>");
+    ExecutedToolResult {
+        result: tool_result_reentry(
+            turn,
+            tool_call,
+            ToolResultStatus::Failed,
+            format!(
+                "Master capability boundary: `{}` is not available to the Master live tool surface. The Master may use only task and timer. For external repository analysis, search, read, write, or report generation, create a Worker task with task(op=\"create\", target_cwd=\"<existing repository cwd>\", dispatch={{\"mode\":\"none\"}}), then task(op=\"assign\", agent_id=\"{worker}\"). No file content was read or written by this Master call.",
+                tool_call.tool_call.tool_name
+            ),
+        ),
+        task_truth_changed: false,
+    }
+}
+
 fn master_workspace_denied_result(
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
@@ -6123,6 +7094,31 @@ fn execute_registry_tool_call_with_workspace(
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ExecutedToolResult, RuntimeLiveBridgeError> {
     let tool_name = tool_call.tool_call.tool_name.as_str();
+    if tool_name == "timer" {
+        if role == LiveReasonExecutionRole::Worker {
+            return Ok(ExecutedToolResult {
+                result: tool_result_reentry(
+                    turn,
+                    tool_call,
+                    ToolResultStatus::Failed,
+                    "Worker capability boundary: internal timer scheduling is only available to the Master."
+                        .to_owned(),
+                ),
+                task_truth_changed: false,
+            });
+        }
+        let (status, output) = match execute_timer_tool(runtime_home, turn, tool_call) {
+            Ok(output) => (ToolResultStatus::Success, output),
+            Err(err) => (
+                ToolResultStatus::Failed,
+                format!("Timer tool execution failed: {err}"),
+            ),
+        };
+        return Ok(ExecutedToolResult {
+            result: tool_result_reentry(turn, tool_call, status, output),
+            task_truth_changed: false,
+        });
+    }
     if tool_name == "task" {
         if role == LiveReasonExecutionRole::Worker {
             return Ok(ExecutedToolResult {
@@ -6222,12 +7218,66 @@ fn execute_registry_tool_call_with_workspace(
     })
 }
 
+fn execute_timer_tool(
+    runtime_home: &Path,
+    turn: &TurnRecord,
+    tool_call: &ReasonReq04ToolCall,
+) -> Result<String, String> {
+    let args = tool_arguments_object(&tool_call.tool_call.arguments);
+    let op = required_json_string(&args, "op")?;
+    let store = TimerStore::new(runtime_home, &turn.request.agent_id);
+    match op {
+        "schedule" => {
+            let schedule = store
+                .schedule_from_args(&args, turn)
+                .map_err(|err| err.to_string())
+                .and_then(|schedule| {
+                    store
+                        .upsert_schedule(schedule)
+                        .map_err(|err| err.to_string())
+                })?;
+            Ok(format!(
+                "Timer scheduled: timer_id={} next_due_at={} max_runs={} fired_count={} status={}",
+                schedule.timer_id,
+                schedule.next_due_at,
+                schedule.max_runs,
+                schedule.fired_count,
+                schedule.status
+            ))
+        }
+        "cancel" => {
+            let timer_id = required_json_string(&args, "timer_id")?;
+            let schedule = store.cancel(timer_id).map_err(|err| err.to_string())?;
+            Ok(format!(
+                "Timer cancelled: timer_id={} status={}",
+                schedule.timer_id, schedule.status
+            ))
+        }
+        "list" => {
+            let schedules = store.active_schedules().map_err(|err| err.to_string())?;
+            serde_json::to_string(&schedules)
+                .map_err(|err| format!("timer list serialization failed: {err}"))
+        }
+        other => Err(format!("unsupported timer op `{other}`")),
+    }
+}
+
 fn execute_task_tool(
     runtime_home: &Path,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<String, String> {
     let args = tool_arguments_object(&tool_call.tool_call.arguments);
+    if !args.contains_key("op") {
+        return Err(concat!(
+            "`op` is required as a top-level task field. ",
+            "Valid production examples: ",
+            "task({\"op\":\"create\",\"title\":\"...\",\"content\":\"...\",\"goal\":\"...\",\"target_cwd\":\"/absolute/existing/repo\",\"dispatch\":{\"mode\":\"none\"}}), ",
+            "then task({\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}). ",
+            "Use task({\"op\":\"query\",\"task_id\":\"...\"}) or task({\"op\":\"history\",\"task_id\":\"...\"}) only for specific existing-task truth."
+        )
+        .to_owned());
+    }
     let op = required_json_string(&args, "op")?;
     let task_runtime = TaskRuntime::boot(runtime_home, turn.request.agent_id.clone())
         .map_err(|err| err.to_string())?;
@@ -7422,12 +8472,14 @@ mod tests {
         fs::create_dir_all(&request.runtime_home).expect("create runtime home");
         fs::write(request.runtime_home.join("Cargo.toml"), "[workspace]\n")
             .expect("write master workspace fixture");
+        let mut request = request;
+        request.cwd = Some(request.runtime_home.clone());
 
-        let outcome = run_live_reason_turn(
-            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+        let outcome = run_worker_live_reason_turn(
+            &live_selected_worker_agent(base_url, freehand_config::ProviderType::Anthropic),
             request,
         )
-        .expect("live bridge");
+        .expect("worker live bridge");
         let first_request = rx.recv().expect("first request");
         let second_request = rx.recv().expect("second request");
         let third_request = rx.recv().expect("third request");
@@ -9341,6 +10393,18 @@ provider = "old"
         }
     }
 
+    fn live_selected_worker_agent(
+        base_url: String,
+        provider_type: freehand_config::ProviderType,
+    ) -> SelectedAgentConfig {
+        let mut selected = live_selected_agent(base_url, provider_type);
+        selected.name = "worker-live".to_owned();
+        selected.mode = AgentMode::Slave;
+        selected.paired_agent_name = "master-live".to_owned();
+        selected.paired_agent_mode = AgentMode::Master;
+        selected
+    }
+
     fn temp_runtime_home() -> PathBuf {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -9838,6 +10902,28 @@ provider = "old"
         }
     }
 
+    fn timer_tool_call(arguments: Vec<(&str, Value)>) -> ReasonReq04ToolCall {
+        ReasonReq04ToolCall {
+            session_id: SessionId::new("session-timer"),
+            turn_id: TurnId::new("turn-timer"),
+            trace_id: TraceId::new("trace-timer"),
+            feature_id: FeatureId::new("provider.reason-live-bridge"),
+            agent_id: AgentId::new("agent-live"),
+            tool_call: ToolCallContract {
+                tool_call_id: ToolCallId::new("toolu_timer_1"),
+                tool_name: "timer".to_owned(),
+                arguments: arguments
+                    .into_iter()
+                    .map(|(name, value)| ToolArgument {
+                        name: name.to_owned(),
+                        value,
+                    })
+                    .collect(),
+                arguments_complete: true,
+            },
+        }
+    }
+
     fn tool_use_named_response(tool_call_id: &str, tool_name: &str, input: Value) -> String {
         json!({
             "content": [{
@@ -9884,12 +10970,20 @@ provider = "old"
     ) {
         assert!(raw_request.contains(sentinel));
         assert!(raw_request.contains("Master task orchestration policy"));
+        assert!(
+            raw_request
+                .contains("`continue` means Freehand should immediately run another model round")
+        );
+        assert!(raw_request.contains("Do not use `continue` to wait for a Worker, timer"));
         assert!(raw_request.contains("you are the master agent"));
         assert!(raw_request.contains("Dispatch when"));
         assert!(raw_request.contains("Multi-agent dispatch"));
         assert!(raw_request.contains("Concurrency control"));
         assert!(raw_request.contains("Flow control"));
         assert!(raw_request.contains("Task tool workflow"));
+        assert!(raw_request.contains("Timer workflow"));
+        assert!(raw_request.contains("Ordinary responses must omit it"));
+        assert!(raw_request.contains("include only the required <freehand_completion> block"));
         assert!(raw_request.contains(&format!(
             "Configured paired Worker id: `{configured_worker}`"
         )));
@@ -9899,10 +10993,32 @@ provider = "old"
         assert!(raw_request.contains(
             "converts the Worker completion schema into TaskReviewSubmitted or TaskBlocked"
         ));
-        assert!(raw_request.contains("read/query tools may inspect external readable paths"));
-        assert!(raw_request.contains("writes outside your current cwd are not allowed"));
+        assert!(raw_request.contains("framework-only: task and timer"));
+        assert!(raw_request.contains("Do not try read_file, ls, grep, glob"));
+        assert!(raw_request.contains("external repository analysis"));
+        assert!(raw_request.contains("must be delegated"));
+        assert!(raw_request.contains("Every call must include top-level op"));
+        assert!(raw_request.contains("Never omit op"));
+        assert!(raw_request.contains("expanded absolute path"));
+        assert!(raw_request.contains("do not pass ~"));
+        assert!(raw_request.contains("\\\"target_cwd\\\":\\\"/absolute/existing/repo"));
         assert!(raw_request.contains("assign only useful independent subtasks"));
         assert!(raw_request.contains("task(op=\\\"list_agents\\\")"));
+        assert!(raw_request.contains("timer(op=\\\"schedule\\\")"));
+        assert!(raw_request.contains("A timer is not scheduled until the timer tool returns"));
+        assert!(raw_request.contains("do not claim or imply that a timer was scheduled"));
+        assert!(raw_request.contains(
+            "If no other work is ready, complete the current turn with the timer result as evidence"
+        ));
+        assert!(raw_request.contains("next useful wait exceeds 3 minutes"));
+        assert!(raw_request.contains("dead-waiting in the current turn"));
+        assert!(raw_request.contains("continue any other ready Master-side work"));
+        assert!(raw_request.contains("what waited condition to revisit"));
+        assert!(raw_request.contains("task-space-snapshot"));
+        assert!(raw_request.contains("<freehand_task_space>"));
+        assert!(raw_request.contains("valid_task_status_filters"));
+        assert!(raw_request.contains("known_tasks"));
+        assert!(raw_request.contains("Do not call status=\\\"all\\\""));
         assert!(raw_request.contains("Master task orchestration examples"));
         assert!(raw_request.contains("Cross-workspace sample"));
         assert!(raw_request.contains("~/code/codex"));
@@ -9912,6 +11028,23 @@ provider = "old"
         assert!(raw_request.contains("Worker execution error sample"));
         assert!(raw_request.contains("Worker retry sample"));
         assert!(raw_request.contains("\"name\":\"task\""));
+        assert!(raw_request.contains("\"name\":\"timer\""));
+        for forbidden in [
+            "\"name\":\"read_file\"",
+            "\"name\":\"ls\"",
+            "\"name\":\"grep\"",
+            "\"name\":\"glob\"",
+            "\"name\":\"write_file\"",
+            "\"name\":\"edit_file\"",
+            "\"name\":\"multi_edit\"",
+            "\"name\":\"complete_step\"",
+            "\"name\":\"todo_write\"",
+        ] {
+            assert!(
+                !raw_request.contains(forbidden),
+                "master request must not expose forbidden tool schema {forbidden}"
+            );
+        }
         assert!(raw_request.contains("\"record_execution\""));
         assert!(raw_request.contains("\"retry_count\""));
         assert!(raw_request.contains("create_agent"));
@@ -10529,6 +11662,232 @@ provider = "old"
 
         assert!(agents_output.contains("\"agent_id\":\"agent-task\""));
         let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn timer_tool_schedules_independent_internal_wakeups() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-timer"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-timer"),
+                    turn_id: TurnId::new("turn-timer"),
+                    trace_id: TraceId::new("trace-timer"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-live"),
+                    user_text: "schedule a wakeup".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+
+        let output = execute_timer_tool(
+            &runtime_home,
+            &turn,
+            &timer_tool_call(vec![
+                ("op", json!("schedule")),
+                ("timer_id", json!("timer-relative-proof")),
+                ("reason", json!("check delegated work")),
+                ("prompt", json!("Read TaskBoard and continue.")),
+                ("mode", json!("relative")),
+                ("delay_seconds", json!(60)),
+            ]),
+        )
+        .expect("schedule relative timer");
+        assert!(output.contains("timer_id=timer-relative-proof"));
+
+        let store = TimerStore::new(&runtime_home, &AgentId::new("agent-live"));
+        let schedules = store.active_schedules().expect("active schedules");
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(schedules[0].timer_id, "timer-relative-proof");
+        assert_eq!(schedules[0].prompt, "Read TaskBoard and continue.");
+        assert!(schedules[0].next_due_at >= now_unix_seconds());
+        assert!(
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live"))
+                .expect("task runtime")
+                .list_tasks(Default::default())
+                .expect("list tasks")
+                .is_empty(),
+            "timer tool must not create task truth"
+        );
+        let events = store.load_events().expect("timer events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "TimerScheduled");
+
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn timer_tool_validates_recurring_absolute_shapes() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-timer"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-timer"),
+                    turn_id: TurnId::new("turn-timer"),
+                    trace_id: TraceId::new("trace-timer"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-live"),
+                    user_text: "schedule recurring wakeup".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+
+        execute_timer_tool(
+            &runtime_home,
+            &turn,
+            &timer_tool_call(vec![
+                ("op", json!("schedule")),
+                ("timer_id", json!("timer-weekly-proof")),
+                ("reason", json!("weekly check")),
+                ("prompt", json!("Run weekly status check.")),
+                ("mode", json!("recurring")),
+                (
+                    "repeat",
+                    json!({
+                        "kind": "weekly",
+                        "weekdays": [1, 3, 5],
+                        "time_of_day_seconds_local": 3600,
+                        "max_runs": 3
+                    }),
+                ),
+            ]),
+        )
+        .expect("schedule weekly timer");
+
+        let err = execute_timer_tool(
+            &runtime_home,
+            &turn,
+            &timer_tool_call(vec![
+                ("op", json!("schedule")),
+                ("timer_id", json!("timer-invalid-proof")),
+                ("reason", json!("bad weekly check")),
+                ("prompt", json!("Should reject.")),
+                ("mode", json!("recurring")),
+                (
+                    "repeat",
+                    json!({
+                        "kind": "weekly",
+                        "weekdays": [7],
+                        "time_of_day_seconds_local": 3600
+                    }),
+                ),
+            ]),
+        )
+        .expect_err("invalid weekday must fail");
+        assert!(err.contains("weekdays must be integers 0..6"));
+
+        let schedules = TimerStore::new(&runtime_home, &AgentId::new("agent-live"))
+            .active_schedules()
+            .expect("active schedules");
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(schedules[0].timer_id, "timer-weekly-proof");
+        assert_eq!(schedules[0].max_runs, 3);
+
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn timer_tool_accepts_local_time_cron_repeat() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut history =
+            SessionHistory::new(SessionId::new("session-timer"), Vec::new()).expect("history");
+        let turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: SessionId::new("session-timer"),
+                    turn_id: TurnId::new("turn-timer"),
+                    trace_id: TraceId::new("trace-timer"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("agent-live"),
+                    user_text: "schedule cron wakeup".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("turn");
+
+        execute_timer_tool(
+            &runtime_home,
+            &turn,
+            &timer_tool_call(vec![
+                ("op", json!("schedule")),
+                ("timer_id", json!("timer-cron-proof")),
+                ("reason", json!("cron check")),
+                ("prompt", json!("Run local cron status check.")),
+                ("mode", json!("recurring")),
+                (
+                    "repeat",
+                    json!({
+                        "kind": "cron",
+                        "expression": "*/15 9-17 * * 1-5",
+                        "max_runs": 4
+                    }),
+                ),
+            ]),
+        )
+        .expect("schedule cron timer");
+
+        let schedules = TimerStore::new(&runtime_home, &AgentId::new("agent-live"))
+            .active_schedules()
+            .expect("active schedules");
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(schedules[0].timer_id, "timer-cron-proof");
+        assert!(matches!(
+            schedules[0].repeat,
+            Some(TimerRepeatRule::Cron { ref expression, .. }) if expression == "*/15 9-17 * * 1-5"
+        ));
+
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn timer_tool_rejects_invalid_cron_repeat() {
+        let err = parse_cron_expression("*/0 9 * * 1-5").expect_err("zero step must fail");
+        assert!(err.to_string().contains("step must be greater than zero"));
+        let err = parse_cron_expression("0 25 * * 1-5").expect_err("invalid hour must fail");
+        assert!(err.to_string().contains("outside 0..23"));
+        let parsed = parse_cron_expression("*/15 9-17 * * 1-5").expect("valid cron");
+        assert!(parsed.minutes.contains(&0));
+        assert!(parsed.minutes.contains(&45));
+        assert!(parsed.hours.contains(&9));
+        assert!(parsed.hours.contains(&17));
+        assert!(parsed.weekdays.contains(&1));
+        assert!(parsed.weekdays.contains(&5));
+    }
+
+    #[test]
+    fn local_time_daily_and_weekly_due_use_local_weekday() {
+        let now = now_unix_seconds();
+        let local_now = local_datetime(now).expect("local datetime");
+        let next_local_hour = (local_now.hour() + 1) % 24;
+        let local_second = next_local_hour * 3600;
+        let next_daily = next_daily_due(now, local_second, false).expect("daily due");
+        let due_local = local_datetime(next_daily).expect("daily local datetime");
+        assert_eq!(due_local.hour(), next_local_hour);
+
+        let weekday = due_local.weekday().num_days_from_sunday() as u8;
+        let next_weekly =
+            next_weekly_due(now, local_second, &[weekday]).expect("weekly due for local weekday");
+        let weekly_local = local_datetime(next_weekly).expect("weekly local datetime");
+        assert_eq!(weekly_local.weekday().num_days_from_sunday() as u8, weekday);
+        assert_eq!(weekly_local.hour(), next_local_hour);
     }
 
     #[test]
@@ -11263,6 +12622,81 @@ provider = "old"
             .expect("original task token cost");
         assert!(original_task.token_budget >= original_task_cost.estimated_tokens);
         assert!(original_task.token_budget > 128);
+    }
+
+    #[test]
+    fn live_bridge_admits_instruction_capability_manifest_as_typed_context() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        fs::create_dir_all(runtime_home.join("skills/global-skill")).expect("global skill dir");
+        fs::write(
+            runtime_home.join("AGENTS.md"),
+            "Global instruction sentinel FH-INSTRUCTION-GLOBAL",
+        )
+        .expect("write global agents");
+        fs::write(
+            runtime_home.join("skills/global-skill/SKILL.md"),
+            "---\nname: global-skill\ndescription: Global instruction skill sentinel\n---\n# Skill\n",
+        )
+        .expect("write global skill");
+        let workspace = runtime_home.join("workspace");
+        fs::create_dir_all(workspace.join(".agents/skills/local-skill")).expect("workspace dirs");
+        fs::write(
+            workspace.join("Cargo.toml"),
+            "[package]\nname=\"instruction-fixture\"\nversion=\"0.0.0\"\nedition=\"2021\"\n",
+        )
+        .expect("write marker");
+        fs::write(
+            workspace.join("AGENTS.md"),
+            "Local instruction sentinel FH-INSTRUCTION-LOCAL",
+        )
+        .expect("write local agents");
+        fs::write(
+            workspace.join(".agents/skills/local-skill/SKILL.md"),
+            "---\nname: local-skill\ndescription: Local instruction skill sentinel\n---\n# Local Skill\n",
+        )
+        .expect("write local skill");
+
+        let (base_url, rx, handle) = spawn_mock_server(
+            200,
+            "application/json",
+            complete_single_response("accepted"),
+        );
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home;
+        request.cwd = Some(workspace);
+
+        let outcome = run_live_reason_turn(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+        )
+        .expect("instruction capability context reaches provider request");
+        let raw_request = rx.recv().expect("request");
+        handle.join().expect("join");
+
+        assert!(raw_request.contains("kind=\\\"instruction_capability\\\""));
+        assert!(raw_request.contains("<freehand_instruction_capability>"));
+        assert!(raw_request.contains("Global instruction skill sentinel"));
+        assert!(raw_request.contains("Local instruction skill sentinel"));
+        assert!(raw_request.contains("FH-INSTRUCTION-GLOBAL"));
+        assert!(raw_request.contains("FH-INSTRUCTION-LOCAL"));
+        let instruction_segment = outcome
+            .turn
+            .planned_context
+            .ordered_segments
+            .iter()
+            .find(|segment| segment.segment_id.as_str() == "instruction-capability")
+            .expect("instruction capability segment");
+        assert_eq!(
+            instruction_segment.kind,
+            ContextSegmentKind::InstructionCapability
+        );
+        assert_eq!(
+            instruction_segment.provenance.source,
+            "instruction_capability"
+        );
     }
 
     #[test]
@@ -12165,14 +13599,20 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 complete_single_response("tool done"),
             ],
         );
-        let request = live_request(false);
+        let mut request = live_request(false);
+        request.cwd = Some(std::env::current_dir().expect("current repo cwd"));
         let runtime_home = request.runtime_home.clone();
         let session_id = request.session_id.clone();
         let mut debug_events = Vec::<DebugEvent>::new();
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        selected.mode = AgentMode::Slave;
+        selected.paired_agent_mode = AgentMode::Master;
 
-        let outcome = run_live_reason_turn_with_hooks(
-            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+        let outcome = run_live_reason_turn_with_policy(
+            &selected,
             request,
+            LiveReasonExecutionRole::Worker,
+            None,
             |_| {},
             |event| debug_events.push(event.clone()),
             |_| {},
@@ -12324,7 +13764,8 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         assert!(second_request.contains("\"type\":\"tool_result\""));
         assert!(second_request.contains("\"tool_use_id\":\"toolu_missing_read_1\""));
         assert!(second_request.contains("\"is_error\":true"));
-        assert!(second_request.contains("Tool execution failed:"));
+        assert!(second_request.contains("Master capability boundary"));
+        assert!(second_request.contains("task(op=\\\"create\\\""));
         assert_eq!(outcome.rounds, 2);
         assert_eq!(outcome.tool_executions, 1);
         assert_eq!(
@@ -12371,7 +13812,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
-    fn live_bridge_allows_external_master_read_then_accepts_worker_dispatch_for_write() {
+    fn live_bridge_rejects_injected_master_read_then_accepts_worker_dispatch() {
         let _cwd_lock = cwd_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -12438,8 +13879,9 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
         selected.paired_agent_name = agent_id.to_owned();
-        let outcome = run_live_reason_turn(&selected, request)
-            .expect("external read result must return to model and still permit task dispatch");
+        let outcome = run_live_reason_turn(&selected, request).expect(
+            "injected master read failure must return to model and still permit task dispatch",
+        );
         let requests = (0..5)
             .map(|_| rx.recv().expect("provider request"))
             .collect::<Vec<_>>();
@@ -12447,10 +13889,19 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
         assert!(!requests[0].contains("\"name\":\"bash\""));
         assert!(requests[0].contains("\"name\":\"task\""));
+        assert!(!requests[0].contains("\"name\":\"read_file\""));
+        assert!(!requests[0].contains("\"name\":\"ls\""));
+        assert!(!requests[0].contains("\"name\":\"grep\""));
+        assert!(!requests[0].contains("\"name\":\"glob\""));
         assert!(requests[1].contains("\"type\":\"tool_result\""));
         assert!(requests[1].contains("\"tool_use_id\":\"toolu_external_read\""));
-        assert!(!requests[1].contains("\"is_error\":true"));
-        assert!(requests[1].contains("must-not-be-read"));
+        assert!(requests[1].contains("\"is_error\":true"));
+        assert!(requests[1].contains("Master capability boundary"));
+        assert!(requests[1].contains("task(op=\\\"create\\\""));
+        assert!(
+            !requests[1].contains("must-not-be-read"),
+            "forbidden master read must not leak external file content"
+        );
         assert!(requests[2].contains("Agent created"));
         assert!(requests[3].contains("Task created"));
         assert!(requests[4].contains("Task assigned"));
@@ -12516,8 +13967,8 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         request.runtime_home = runtime_home.clone();
         request.cwd = Some(runtime_home.clone());
 
-        let outcome = run_live_reason_turn(
-            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+        let outcome = run_worker_live_reason_turn(
+            &live_selected_worker_agent(base_url, freehand_config::ProviderType::Anthropic),
             request,
         )
         .expect("external write boundary should return to model");
@@ -12529,7 +13980,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         assert!(second_request.contains("\"tool_use_id\":\"toolu_external_write\""));
         assert!(second_request.contains("\"is_error\":true"));
         assert!(second_request.contains("Write boundary denied"));
-        assert!(second_request.contains("task(op=\\\"create\\\""));
+        assert!(second_request.contains("write_file"));
         assert_eq!(
             fs::read_to_string(&outside_file).expect("read external file"),
             "original"
@@ -12557,12 +14008,14 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 complete_single_response("recovered after unknown tool"),
             ],
         );
-        let request = live_request(false);
+        let mut request = live_request(false);
+        fs::create_dir_all(&request.runtime_home).expect("create runtime home");
+        request.cwd = Some(request.runtime_home.clone());
         let runtime_home = request.runtime_home.clone();
         let session_id = request.session_id.clone();
 
-        let outcome = run_live_reason_turn(
-            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+        let outcome = run_worker_live_reason_turn(
+            &live_selected_worker_agent(base_url, freehand_config::ProviderType::Anthropic),
             request,
         )
         .expect("unknown tool should be returned to model as failed tool result");
@@ -12584,7 +14037,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 .map(|event| event.status.clone()),
             Some(TerminalStatus::Success)
         );
-        let metadata = metadata_ledger_records(&runtime_home, "agent-live", &session_id);
+        let metadata = metadata_ledger_records(&runtime_home, "worker-live", &session_id);
         assert!(metadata.iter().any(|record| {
             record.owner.feature_id.as_str() == "error.center"
                 && record.write_node.pipeline_node == "RuntimeLive03ToolExecuted"
@@ -12968,11 +14421,12 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             );
             let mut request = live_request(false);
             request.runtime_home = root.to_path_buf();
+            request.cwd = Some(root.to_path_buf());
             let runtime_home = request.runtime_home.clone();
             let session_id = request.session_id.clone();
 
-            let outcome = run_live_reason_turn(
-                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            let outcome = run_worker_live_reason_turn(
+                &live_selected_worker_agent(base_url, freehand_config::ProviderType::Anthropic),
                 request,
             )
             .expect("live bridge");
@@ -12987,7 +14441,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 "pong\n"
             );
 
-            let rows = checkpoint_ledger_rows(&runtime_home, "agent-live", &session_id);
+            let rows = checkpoint_ledger_rows(&runtime_home, "worker-live", &session_id);
             assert_eq!(rows.len(), 2);
             assert_eq!(rows[0].event, RuntimeCheckpointLedgerEvent::Created);
             assert_eq!(rows[1].event, RuntimeCheckpointLedgerEvent::Applied);
@@ -12995,7 +14449,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
             let store = RuntimeCheckpointStore::new(
                 &runtime_home,
-                &AgentId::new("agent-live"),
+                &AgentId::new("worker-live"),
                 &session_id,
             )
             .expect("checkpoint store");
@@ -13006,14 +14460,14 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
             rewind_checkpoint(
                 &runtime_home,
-                &AgentId::new("agent-live"),
+                &AgentId::new("worker-live"),
                 &session_id,
                 &checkpoint_id,
             )
             .expect("rewind");
             assert!(!file_path.exists());
 
-            let rows = checkpoint_ledger_rows(&runtime_home, "agent-live", &session_id);
+            let rows = checkpoint_ledger_rows(&runtime_home, "worker-live", &session_id);
             assert_eq!(rows.len(), 3);
             assert_eq!(rows[2].event, RuntimeCheckpointLedgerEvent::Restored);
         });
@@ -13034,11 +14488,12 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             );
             let mut request = live_request(false);
             request.runtime_home = root.to_path_buf();
+            request.cwd = Some(root.to_path_buf());
             let runtime_home = request.runtime_home.clone();
             let session_id = request.session_id.clone();
 
-            let outcome = run_live_reason_turn(
-                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            let outcome = run_worker_live_reason_turn(
+                &live_selected_worker_agent(base_url, freehand_config::ProviderType::Anthropic),
                 request,
             )
             .expect("live bridge");
@@ -13052,14 +14507,14 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 "after\n"
             );
 
-            let rows = checkpoint_ledger_rows(&runtime_home, "agent-live", &session_id);
+            let rows = checkpoint_ledger_rows(&runtime_home, "worker-live", &session_id);
             assert_eq!(rows[0].event, RuntimeCheckpointLedgerEvent::Created);
             assert_eq!(rows[1].event, RuntimeCheckpointLedgerEvent::Applied);
             let checkpoint_id = rows[0].checkpoint_id.clone();
 
             let store = RuntimeCheckpointStore::new(
                 &runtime_home,
-                &AgentId::new("agent-live"),
+                &AgentId::new("worker-live"),
                 &session_id,
             )
             .expect("checkpoint store");
@@ -13069,7 +14524,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
             rewind_checkpoint(
                 &runtime_home,
-                &AgentId::new("agent-live"),
+                &AgentId::new("worker-live"),
                 &session_id,
                 &checkpoint_id,
             )

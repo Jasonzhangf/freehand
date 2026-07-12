@@ -6,12 +6,16 @@
   "test_design_doc": "docs/testing/reason.context-planner.md",
   "mainline_call_doc": "docs/mainline-calls/reason.context-planner.json",
   "generated_wiki_doc": "docs/wiki/reason.context-planner.md",
+  "resource_operations": [
+    "turn.plan_request_context"
+  ],
   "request_mainline": [
     "`freehand-reason` reads session truth and current turn inputs",
     "`reason.session-history` provides stable base context plus session-owned `rewrite_mode` and `rewrite_version`",
     "upstream restore/context rebuild callers may pre-prune superseded repaired-failure rounds before passing session-memory segments to the planner; raw failure truth remains outside request content in ledgers/UI projections",
     "dynamic model-visible input segments must arrive with content-derived admission budgets rather than small fixed runtime caps; the planner rejects only segments that exceed their declared context budget",
     "it asks the planner owner path to classify context into stable and volatile segments",
+    "instruction capability segments are session-stable/cacheable typed context and carry instruction owner provenance",
     "task contract segments are session-stable/cacheable and task-space snapshots are turn-volatile/no-cache, so task state can be visible without poisoning the stable cache prefix",
     "the planner admits additional context only through typed segment rules",
     "preferred context expansion path is subagent search final report -> `SubagentConclusion`",
@@ -99,6 +103,9 @@
       "output_semantic": "ordered typed context segment set plus cache diagnostics",
       "caller": "freehand-reason",
       "callee": "planner builder",
+      "source_resource": "turn",
+      "target_resource": "request_context",
+      "resource_operation": "turn.plan_request_context",
       "binding_status": "bound"
     },
     {

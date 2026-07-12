@@ -6,6 +6,9 @@
   "test_design_doc": "docs/testing/reason.turn.md",
   "mainline_call_doc": "docs/mainline-calls/reason.turn.json",
   "generated_wiki_doc": "docs/wiki/reason.turn.md",
+  "resource_operations": [
+    "provider_response.apply_to_turn"
+  ],
   "request_mainline": [
     "user input and context material enter the turn orchestration path",
     "`reason.session-history` provides stable base context plus the current turn's `rewrite_mode` and `rewrite_version`",
@@ -160,6 +163,9 @@
       "output_semantic": "updated turn state plus matching broadcast event",
       "caller": "provider boundary",
       "callee": "turn state writer",
+      "source_resource": "provider_response",
+      "target_resource": "turn",
+      "resource_operation": "provider_response.apply_to_turn",
       "binding_status": "bound"
     },
     {

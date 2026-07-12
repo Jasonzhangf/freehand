@@ -4,12 +4,15 @@ Each feature owner crate should eventually add its own machine-readable function
 
 For features that have migrated mainline documentation, the machine-readable mainline call source is a separate truth from the human-readable function map and generated wiki.
 
+Function maps are now resource-first. Every feature-local function map must be read after the global resource map has identified the involved resources and whether their relation is direct or indirect.
+
 Suggested filename:
 
 - `function-map.toml`
 - durable human-readable companion doc under `docs/function-maps/<feature-id>.md`
 - migrated machine-readable mainline call source under `docs/mainline-calls/<feature-id>.json`
 - generated wiki under `docs/wiki/<feature-id>.md`
+- global resource map under `docs/resource-maps/core.json`
 
 ## Required Keys
 
@@ -36,6 +39,7 @@ lifecycle_checks = ["information sufficient", "logic closed-loop", "lifecycle ma
 
 Each feature must also keep a durable function-map doc with at least:
 
+- resource ownership and resource relation awareness from `docs/resource-maps/core.json`
 - owner crate
 - owner module
 - owner entry symbols
@@ -47,6 +51,20 @@ Each feature must also keep a durable function-map doc with at least:
 - sync status against code
 - when migrated, one `mainline call source` reference
 - when migrated, one `generated wiki` reference
+- when implementing a resource operation, the exact `resource_operations` id from `docs/resource-maps/core.json`
+- when binding a direct resource edge to source, the matching `source_edge_registry` entry from `docs/resource-maps/core.json`
+
+The `## Resource Map Binding` section is gate-checked. It must list non-empty `owned resources`, `touched resources`, `resource operations`, and `forbidden shortcuts`; the section must include the bound operation id and both source/target resource types. Do not rely on scattered prose outside this section for resource backlinks.
+
+Resource-owning features must also document:
+
+- owned `resource_type` values
+- resource identity fields
+- truth store
+- allowed operations
+- direct relations to other resources
+- indirect relations and required `via_resources`
+- forbidden direct relations that the feature must not implement
 
 Tool-owning features must also document:
 
@@ -97,6 +115,13 @@ serialization = ["serializable", "replayable", "persistable"]
 ## Rules
 
 - one feature id, one owner
+- one resource type, one owner feature
+- every resource owner must be backlinked from `docs/architecture/feature-map.md` `Resource Ownership Index`
+- every resource relation must be present in `docs/resource-maps/core.json` before implementation
+- every operation binding id must be allowed by the source resource's `operations` list using `<source_resource>.<operation>` format
+- every bound direct resource edge must be registered in `source_edge_registry`, not only in a feature-local mainline call table
+- every bound operation source/target pair must also have an `allowed_direct=true` relation rule; operation bindings are not implicit relation permission
+- indirect relations must use their required intermediate resource; direct shortcut edges are forbidden even when they are locally convenient
 - one function semantic, one owning crate or module
 - one request/response/error mainline, one explicit logic description
 - shared logic must move into `freehand-blocks`

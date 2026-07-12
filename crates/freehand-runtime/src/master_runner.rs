@@ -14,9 +14,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
-    LiveReasonTaskDecisionBoundary, LiveReasonTaskDecisionMode, LiveReasonTurnRequest,
-    RuntimeAgentBootstrapError, load_default_runtime_agent, run_master_lifecycle_reason_turn,
-    sanitize_identifier,
+    DueTimerSchedule, LiveReasonTaskDecisionBoundary, LiveReasonTaskDecisionMode,
+    LiveReasonTurnRequest, RuntimeAgentBootstrapError, claim_due_timer_schedule,
+    complete_due_timer_schedule, fail_due_timer_schedule, load_default_runtime_agent,
+    now_unix_seconds, run_live_reason_turn, run_master_lifecycle_reason_turn, sanitize_identifier,
 };
 
 #[cfg(test)]
@@ -39,6 +40,10 @@ pub enum ProductionMasterTickOutcome {
     },
     BlockedObserved {
         task_id: TaskId,
+        summary: String,
+    },
+    TimerFired {
+        timer_id: String,
         summary: String,
     },
 }
@@ -110,6 +115,12 @@ trait MasterTurnExecutor: Send + Sync {
         request: LiveReasonTurnRequest,
         decision_boundary: LiveReasonTaskDecisionBoundary,
     ) -> Result<String, String>;
+
+    fn execute_timer(
+        &self,
+        selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+    ) -> Result<String, String>;
 }
 
 struct LiveMasterTurnExecutor;
@@ -128,6 +139,20 @@ impl MasterTurnExecutor for LiveMasterTurnExecutor {
             .terminal_event
             .as_ref()
             .ok_or_else(|| "master lifecycle turn closed without terminal event".to_owned())?;
+        Ok(terminal.summary.clone())
+    }
+
+    fn execute_timer(
+        &self,
+        selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+    ) -> Result<String, String> {
+        let outcome = run_live_reason_turn(selected, request).map_err(|error| error.to_string())?;
+        let terminal = outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .ok_or_else(|| "timer wakeup turn closed without terminal event".to_owned())?;
         Ok(terminal.summary.clone())
     }
 }
@@ -190,6 +215,9 @@ impl ProductionMasterRunner {
     }
 
     pub fn run_once(&self) -> Result<ProductionMasterTickOutcome, ProductionMasterRunnerError> {
+        if let Some(outcome) = self.handle_due_timer()? {
+            return Ok(outcome);
+        }
         let task_runtime = self.open_task_center()?;
         let mut state = self.load_state()?;
         if !state.initialized {
@@ -239,6 +267,39 @@ impl ProductionMasterRunner {
             self.write_state(&state)?;
         }
         Ok(latest_outcome)
+    }
+
+    fn handle_due_timer(
+        &self,
+    ) -> Result<Option<ProductionMasterTickOutcome>, ProductionMasterRunnerError> {
+        let Some(due) = claim_due_timer_schedule(
+            &self.runtime_home,
+            &self.master_agent_id,
+            now_unix_seconds(),
+        )
+        .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let summary = match self.executor.execute_timer(
+            &self.selected,
+            timer_live_request(&self.runtime_home, &due)?,
+        ) {
+            Ok(summary) => summary,
+            Err(error) => {
+                fail_due_timer_schedule(&self.runtime_home, &self.master_agent_id, &due, &error)
+                    .map_err(|state_error| {
+                        ProductionMasterRunnerError::State(state_error.to_string())
+                    })?;
+                return Err(ProductionMasterRunnerError::Execution(error));
+            }
+        };
+        complete_due_timer_schedule(&self.runtime_home, &self.master_agent_id, &due)
+            .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
+        Ok(Some(ProductionMasterTickOutcome::TimerFired {
+            timer_id: due.schedule.timer_id,
+            summary,
+        }))
     }
 
     pub fn run(&self) -> Result<(), ProductionMasterRunnerError> {
@@ -458,6 +519,36 @@ Rules:\n\
 Task snapshot:\n{task_json}\n\
 \n\
 Trigger event:\n{event_json}"
+        ),
+        cwd: Some(runtime_home.to_path_buf()),
+        stream: false,
+        cancel_token: None,
+    })
+}
+
+fn timer_live_request(
+    runtime_home: &Path,
+    due: &DueTimerSchedule,
+) -> Result<LiveReasonTurnRequest, ProductionMasterRunnerError> {
+    let timer_json = serde_json::to_string_pretty(&due.schedule)
+        .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
+    let timer_key = sanitize_identifier(&due.schedule.timer_id);
+    Ok(LiveReasonTurnRequest {
+        runtime_home: runtime_home.to_path_buf(),
+        session_id: SessionId::new(format!("master-timer-{timer_key}")),
+        turn_id: TurnId::new(format!("master-timer-{timer_key}-fire-{}", due.fired_at)),
+        trace_id: TraceId::new(format!(
+            "master-timer-trace-{timer_key}-fire-{}",
+            due.fired_at
+        )),
+        prompt: format!(
+            "You are the production Master resumed by an internal timer.\n\
+Use current framework truth and the timer wakeup prompt; do not assume task state from memory.\n\
+\n\
+Timer schedule truth:\n{timer_json}\n\
+\n\
+Wakeup prompt:\n{}",
+            due.schedule.prompt
         ),
         cwd: Some(runtime_home.to_path_buf()),
         stream: false,

@@ -460,6 +460,8 @@ pub struct UiTaskSnapshotProjection {
     pub goal: String,
     pub priority: i64,
     pub target_cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<SessionId>,
     pub assignee_agent_id: Option<AgentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_execution_id: Option<String>,
@@ -2214,23 +2216,16 @@ fn session_list_projection(
     latest_active_turn_id: Option<&TurnId>,
     archived: bool,
 ) -> UiSessionListProjection {
-    let mut grouped: Vec<(SessionId, Vec<&UiTurnProjection>)> = Vec::new();
-    for turn in turns.values() {
-        if !user_visible_session_id(&turn.session_id) {
-            continue;
-        }
-        match grouped
-            .iter_mut()
-            .find(|(session_id, _)| session_id == &turn.session_id)
-        {
-            Some((_, session_turns)) => session_turns.push(turn),
-            None => grouped.push((turn.session_id.clone(), vec![turn])),
-        }
-    }
-
-    let mut sessions = grouped
-        .into_iter()
-        .map(|(session_id, mut session_turns)| {
+    let mut sessions = session_metadata
+        .values()
+        .filter(|metadata| {
+            metadata.archived == archived && user_visible_session_id(&metadata.session_id)
+        })
+        .map(|metadata| {
+            let mut session_turns = turns
+                .values()
+                .filter(|turn| turn.session_id == metadata.session_id)
+                .collect::<Vec<_>>();
             session_turns.sort_by(|left, right| {
                 turn_order_key(&left.turn_id).cmp(&turn_order_key(&right.turn_id))
             });
@@ -2241,16 +2236,15 @@ fn session_list_projection(
                     .any(|turn| &turn.turn_id == turn_id)
                     .then(|| turn_id.clone())
             });
-            let metadata = session_metadata.get(&session_id);
             let cwd = session_cwds
-                .get(&session_id)
+                .get(&metadata.session_id)
                 .cloned()
-                .or_else(|| metadata.and_then(|metadata| metadata.cwd.clone()))
+                .or_else(|| metadata.cwd.clone())
                 .or_else(|| latest.and_then(|turn| turn.cwd.clone()));
             UiSessionSummary {
-                session_id,
-                title: metadata.and_then(|metadata| metadata.title.clone()),
-                archived: metadata.is_some_and(|metadata| metadata.archived),
+                session_id: metadata.session_id.clone(),
+                title: metadata.title.clone(),
+                archived: metadata.archived,
                 cwd,
                 latest_turn_id: latest.map(|turn| turn.turn_id.clone()),
                 active_turn_id,
@@ -2262,39 +2256,15 @@ fn session_list_projection(
             }
         })
         .collect::<Vec<_>>();
-    for metadata in session_metadata.values() {
-        if !user_visible_session_id(&metadata.session_id) {
-            continue;
-        }
-        if metadata.archived != archived
-            || sessions
-                .iter()
-                .any(|session| session.session_id == metadata.session_id)
-        {
-            continue;
-        }
-        sessions.push(UiSessionSummary {
-            session_id: metadata.session_id.clone(),
-            title: metadata.title.clone(),
-            archived: metadata.archived,
-            cwd: metadata
-                .cwd
-                .clone()
-                .or_else(|| session_cwds.get(&metadata.session_id).cloned()),
-            latest_turn_id: None,
-            active_turn_id: None,
-            turn_count: 0,
-            latest_status: "empty".to_owned(),
-            latest_summary: metadata.title.clone(),
-        });
-    }
-    sessions.retain(|session| session.archived == archived);
     sessions.sort_by(|left, right| left.session_id.as_str().cmp(right.session_id.as_str()));
     UiSessionListProjection { sessions }
 }
 
 fn user_visible_session_id(session_id: &SessionId) -> bool {
-    !session_id.as_str().starts_with("master-lifecycle-")
+    let value = session_id.as_str();
+    !value.starts_with("master-lifecycle-")
+        && !value.starts_with("master-timer-")
+        && !value.starts_with("worker-task-")
 }
 
 fn session_transcript_projection(
@@ -3312,6 +3282,12 @@ mod tests {
     fn session_list_and_transcript_project_session_cwd() {
         let mut state = UiProtocolState::default();
         let session_id = SessionId::new("webui-session-cwd");
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: session_id.clone(),
+            title: Some("Cwd session".to_owned()),
+            archived: false,
+            cwd: None,
+        });
         state.apply_turn_projection(turn_projection_from_events(TurnProjectionInput {
             source_agent_id: AgentId::new("agent-1"),
             source_node_id: "node-1".to_owned(),
@@ -3356,6 +3332,14 @@ mod tests {
         let mut state = UiProtocolState::default();
         let user_session_id = SessionId::new("webui-visible-session");
         let lifecycle_session_id = SessionId::new("master-lifecycle-task-1");
+        let timer_session_id = SessionId::new("master-timer-timer-1");
+        let worker_session_id = SessionId::new("worker-task-task-1");
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: user_session_id.clone(),
+            title: Some("Visible session".to_owned()),
+            archived: false,
+            cwd: None,
+        });
         state.apply_turn_projection(turn_projection_from_events(TurnProjectionInput {
             source_agent_id: AgentId::new("master"),
             source_node_id: "node-1".to_owned(),
@@ -3386,6 +3370,36 @@ mod tests {
             error_events: Vec::new(),
             slave_substream_card: false,
         }));
+        state.apply_turn_projection(turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("master"),
+            source_node_id: "node-1".to_owned(),
+            session_id: timer_session_id.clone(),
+            turn_id: TurnId::new("turn-timer-1"),
+            cwd: None,
+            user_text: Some("internal timer wakeup".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            usage_events: Vec::new(),
+            terminal_event: None,
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        }));
+        state.apply_turn_projection(turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("worker"),
+            source_node_id: "node-worker".to_owned(),
+            session_id: worker_session_id.clone(),
+            turn_id: TurnId::new("turn-worker-1"),
+            cwd: None,
+            user_text: Some("internal worker execution".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            usage_events: Vec::new(),
+            terminal_event: None,
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        }));
 
         match state.query(&UiCommand::QuerySessionList).expect("list") {
             UiQueryResult::SessionList(list) => {
@@ -3407,6 +3421,73 @@ mod tests {
                     transcript.turns[0].user_text.as_deref(),
                     Some("internal lifecycle decision")
                 );
+            }
+            other => panic!("unexpected transcript result: {other:?}"),
+        }
+        for internal_session_id in [timer_session_id, worker_session_id] {
+            match state
+                .query(&UiCommand::QuerySessionTurns {
+                    session_id: internal_session_id.clone(),
+                })
+                .expect("internal transcript")
+            {
+                UiQueryResult::SessionTurns(transcript) => {
+                    assert_eq!(transcript.session_id, internal_session_id);
+                    assert_eq!(transcript.turns.len(), 1);
+                }
+                other => panic!("unexpected internal transcript result: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn session_list_exposes_only_persisted_metadata_sessions() {
+        let mut state = UiProtocolState::default();
+        let persisted_session_id = SessionId::new("persisted-session");
+        let turn_only_session_id = SessionId::new("turn-only-session");
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: persisted_session_id.clone(),
+            title: Some("Persisted".to_owned()),
+            archived: false,
+            cwd: None,
+        });
+        for (index, session_id) in [persisted_session_id.clone(), turn_only_session_id.clone()]
+            .into_iter()
+            .enumerate()
+        {
+            state.apply_turn_projection(turn_projection_from_events(TurnProjectionInput {
+                source_agent_id: AgentId::new("master"),
+                source_node_id: "node-1".to_owned(),
+                session_id,
+                turn_id: TurnId::new(format!("turn-metadata-only-{index}")),
+                cwd: None,
+                user_text: Some("turn text".to_owned()),
+                semantic_events: Vec::new(),
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+                usage_events: Vec::new(),
+                terminal_event: None,
+                error_events: Vec::new(),
+                slave_substream_card: false,
+            }));
+        }
+
+        match state.query(&UiCommand::QuerySessionList).expect("list") {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions.len(), 1);
+                assert_eq!(list.sessions[0].session_id, persisted_session_id);
+            }
+            other => panic!("unexpected list result: {other:?}"),
+        }
+        match state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: turn_only_session_id.clone(),
+            })
+            .expect("transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.session_id, turn_only_session_id);
+                assert_eq!(transcript.turns.len(), 1);
             }
             other => panic!("unexpected transcript result: {other:?}"),
         }
@@ -3833,6 +3914,18 @@ mod tests {
     #[test]
     fn session_queries_return_ordered_transcript_without_cross_session_leakage() {
         let mut state = UiProtocolState::default();
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: SessionId::new("session-a"),
+            title: Some("Session A".to_owned()),
+            archived: false,
+            cwd: None,
+        });
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: SessionId::new("session-b"),
+            title: Some("Session B".to_owned()),
+            archived: false,
+            cwd: None,
+        });
         let mut first = sample_turn_projection(false);
         first.session_id = SessionId::new("session-a");
         first.turn_id = TurnId::new("runtime-turn-1-r2");

@@ -3812,6 +3812,64 @@ Current real root cause split:
   - production rejected retry `task-normal-rejected-1781783700382`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
   - production blocked decision `task-normal-blocked-1781783700459`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`
   - production worker crash recovery `task-normal-crash-1781783700473`: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskInterrupted,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`
+# 2026-07-11 independent timer internal tool implementation
+
+- user correction:
+  - timer/wakeup is an independent standard internal tool, not task truth.
+  - do not model waiting as `task(op="wait")`, task notes, or task lifecycle state.
+- implementation:
+  - `freehand-tools` now exposes `timer` as a framework tool for Master only; Worker schema excludes it.
+  - timer supports `schedule`, `cancel`, and `list`, with relative delay, absolute unix timestamp, local-time interval/daily/weekly rules, strict 5-field local-time cron expressions, weekdays, skip weekends, max runs, reason, examples, and persisted wakeup prompt.
+  - `freehand-runtime` now persists timer schedules under `~/.freehand/state/timers/<agent>.json` and ledger events under `~/.freehand/ledgers/timers/<agent>.jsonl`.
+  - Master runner claims due timers before Task Center EventInbox processing, starts an internal Master turn with the persisted prompt, completes one-shot timers, reschedules recurring timers, and releases failed wakeups back to active retryable timer truth.
+  - docs, function maps, test designs, mainline manifests, generated wiki, and local skill were updated to lock timer as independent framework tool truth.
+- verification:
+  - `cargo test -p freehand-tools -- --nocapture` passed 34 tests.
+  - `cargo test -p freehand-runtime timer -- --nocapture` passed 7 focused timer tests.
+  - `cargo test -p freehand-runtime production_master_runner_ -- --nocapture` passed 9 Master runner tests.
+  - `cargo test -p freehand-runtime -- --nocapture` passed 133 tests.
+  - `cargo clippy -p freehand-runtime -p freehand-tools --all-targets -- -D warnings` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+  - S-profile config remains minimax/MiniMax-M3 inline auth; fixture env grep has 0 matches.
+  - `scripts/verify-timer-tool-online.sh` passed on S-profile `127.0.0.1:4042`: `timer_tool_online_ok`, timer `timer-online-proof-1783774257-95369`, `mock_attempts=3`, ADP receipt `reason_live_turn_completed rounds=2 tool_executions=1`, fixture second request `sawToolResult=true`, third request `sawTimerWakeup=true`, due verified `status=completed fired_count=1`, ledger had `TimerScheduled`, `TimerFired`, and `TimerCompleted`.
+  - `FREEHAND_TIMER_VERIFY_MODE=restart-due scripts/verify-timer-tool-online.sh` passed on S-profile `127.0.0.1:4042`: timer `timer-online-proof-1783774667-24465` was first verified persisted as `status=active next_due_at=1783774692`, then service-scoped `restartS` ran before due; after restart, Master runner fired the overdue timer, fixture third request had `sawTimerWakeup=true`, state became `completed fired_count=1`, and ledger had `TimerFired`/`TimerCompleted`.
+- remaining:
+  - `output/` remains unrelated untracked content and was not touched.
+
+# 2026-07-11 metadata-only global sessions and worker child rows
+
+- marker:
+  - `metadata-only-session-list-worker-child-closeout-1783780857107`
+- user requirement:
+  - global session list shows only persisted sessions.
+  - user New task/New conversation sessions are persisted and top-level.
+  - subagent/worker task sessions are temporary/internal and must not appear top-level.
+  - worker/subagent sessions appear only indented under the owning master session.
+  - tests should use fixed sessions instead of continuously creating random sessions.
+- implementation:
+  - `ui.protocol` `session_list_projection` now builds top-level active/archived lists from `session_metadata` only, not raw turn grouping.
+  - `user_visible_session_id` filters `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` from global session lists while keeping direct `QuerySessionTurns` queryable.
+  - `UiTaskSnapshotProjection` now carries `parent_session_id`, projected from `TaskSnapshot.parent.session_id` in runtime.
+  - WebUI session rail removed agent-group top-level rendering; it renders persisted sessions as top-level rows and TaskBoard-parented `worker-task-*` sessions as indented temporary child rows.
+  - WebUI session truth gate allows selected worker child transcript only when TaskBoard parent truth links it to a persisted parent; child rows are excluded from select-all/rename/remove.
+  - docs/function maps/testing/mainline JSON/wiki and local skill were synced.
+- validation:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `cargo check -p freehand-runtime -p freehand-cli -p freehand-server` passed.
+  - `cargo test -p freehand-ui-protocol session -- --nocapture` passed 11 focused tests before the new redline was added.
+  - `cargo test -p freehand-ui-protocol session_list -- --nocapture` passed 3 focused tests, including metadata-only redline.
+  - `cargo test -p freehand-server webui -- --nocapture` passed 3 tests.
+  - `cargo test -p freehand-runtime runtime_dispatches_phase2a_master_worker_loop_into_task_truth -- --nocapture` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+  - S-profile `127.0.0.1:4042` health and `freehand-cliS adp-smoke` passed after `scripts/install-launchd.sh restartS`.
+  - fixed online proof used `webui-session-fixed-subagent-proof` and `task-fixed-subagent-proof`; no random verification session was created.
+  - ADP owner proof: fixed session present top-level; top-level `worker-task-*`, `master-timer-*`, and `master-lifecycle-*` arrays empty; task parent `webui-session-fixed-subagent-proof`.
+  - Browser proof: `artifacts/webui-online/fixed-session-subagent-1783780857107/summary.json`, screenshot `fixed-session-subagent.png`; `pass=true`, `fixedChildExists=true`, `fixedChildKind=worker`, `workerTopLevelRows=[]`, `masterLifecycleVisible=false`, `masterTimerVisible=false`.
+  - final S-profile config remained minimax/MiniMax-M3 inline auth; fixture env grep returned 0 matches.
+- remaining:
+  - fixed proof task/session remain as durable verification truth by design; do not physically delete without explicit destructive approval.
+  - unrelated dirty changes from timer/submission work and untracked `output/` remain untouched.
+
 # 2026-07-11 WebUI scroll/composer and internal lifecycle session closeout
 
 - marker:
@@ -3888,3 +3946,1064 @@ Current real root cause split:
   - final config query returned minimax/MiniMax-M3 inline auth; no provider/master fixture env remained.
 - remaining:
   - WorkerTurnExecutor still returns `String` errors, so Worker provider-system classification uses explicit provider code substrings. A later cleanup should carry structured runtime error info across that boundary.
+
+# 2026-07-11 timer 3-minute wait prompt policy
+
+- user requirement:
+  - default tool prompt must say waits over 3 minutes should use timer.
+  - Master must not dead-wait; after scheduling a timer, it should continue later ready work.
+  - timer prompt must explain what to do when the waited item is revisited.
+- implementation:
+  - `timer` schema description and example now include the >3-minute wait rule, no-dead-wait instruction, continue-other-ready-work instruction, and prompt duty.
+  - Master orchestration guidance now says if the next useful wait exceeds 3 minutes, call `timer(op="schedule")`, continue other ready Master-side work, and write a persisted prompt that names current truth to inspect, waited condition to revisit, and decision to make.
+  - docs/function maps/test designs updated for `tool.registry` and `runtime.master-worker-loop`; mainline wiki regenerated.
+  - local skill updated to keep this as Freehand timer policy.
+- local validation:
+  - `cargo fmt --check` passed.
+  - `cargo test -p freehand-tools timer_tool_schema_exposes_internal_schedule_contract -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_admits_long_operator_task_without_semantic_truncation -- --nocapture` passed.
+  - `bash -n scripts/verify-timer-tool-online.sh` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- online validation:
+  - pre-check config on S-profile `127.0.0.1:4042` was `provider=minimax`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`; fixture env grep was 0 matches.
+  - `scripts/verify-timer-tool-online.sh` passed: timer `timer-online-proof-1783775995-84734`, `mock_attempts=3`, first state `status=active`, due state `status=completed fired_count=1`, provider request 2 `sawToolResult=true`, provider request 3 `sawTimerWakeup=true`.
+  - `FREEHAND_TIMER_VERIFY_MODE=restart-due scripts/verify-timer-tool-online.sh` passed: timer `timer-online-proof-1783776198-96001`, persisted `status=active next_due_at=1783776221` before service-scoped restart, after restart due state `status=completed fired_count=1`, provider request 3 `sawTimerWakeup=true`.
+  - final config restored to minimax/MiniMax-M3 inline auth; fixture env grep 0 matches.
+- remaining:
+  - `output/` remains unrelated untracked content and was not touched.
+
+# 2026-07-11 WebUI submit timeout must preserve draft session
+
+- user report:
+  - after sending a task, WebUI auto-refreshed and became an empty session.
+  - screenshot showed command status `dispatch failed ... request timed out after 8s`, session rail `no sessions`, and conversation empty.
+- root cause:
+  - submit failure catch cleared `pendingUserInput`, `pendingSubmitSessionId`, and pending attachments.
+  - then `setSessionList()` could receive an empty/no-new-session list while the backend request was still ambiguous, and because no draft/pending guard remained it called `clearLocalConversationTruth()`.
+  - result: a command timeout was treated as proof that no backend work existed, so the visible pending request disappeared.
+- implementation:
+  - when submitting with no selected session, WebUI now creates a draft `webui-session-*` and sends that session id.
+  - submit failure no longer clears pending user input, pending session, or attachment draft.
+  - new `pendingSubmitError` marks the pending card as dispatch status unknown and tells the operator to refresh before sending a duplicate.
+  - docs/function map/test design updated for `app.webui-smoke`; asset smoke locks `pendingSubmitError`, draft creation before submit, and the new unknown-dispatch status copy.
+- validation:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `cargo test -p freehand-server webui -- --nocapture` passed: 3 tests.
+  - `node --check scripts/webui_verify_online.mjs` passed.
+  - `cargo fmt --check` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed after rerunning sequentially; first parallel run exited 137 from cargo/file-lock contention.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+  - `scripts/install-launchd.sh restartS` passed.
+  - `curl -4fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+  - served `webui.js` hash matched workspace: `7c48fc3448ea7f80763901c10cf0784a35e152b08339142193a61f86a1ae333e`.
+  - Playwright online proof on real 4042 page:
+    - created draft session `webui-session-20260711140007-7afeb94b`.
+    - set browser offline, submitted marker `FH-WEBUI-DRAFT-OFFLINE-PENDING-1783778408982`.
+    - DOM had `hasMarker=true`, `hasUnknownDispatch=true`, `hasRefreshInstruction=true`, `hasDraftSession=true`, `showsNoSessionsOnly=false`, `emptyStateOnly=false`, `composerValue=""`, `pass=true`.
+- remaining:
+  - online proof used browser offline to deterministically trigger the same timeout/transport failure class; it did not wait for a real provider turn to time out.
+# 2026-07-11 tool guidance / latest failure sample analysis
+
+- user report:
+  - tool-call execution success is low.
+  - model should not spend multiple tool rounds learning what the framework does.
+  - latest call failures and task startup failure need evidence-backed analysis.
+- evidence sampled:
+  - latest session: `webui-session-20260711144341-d20c3ef1`.
+  - provider raw ledgers: `~/.freehand/ledgers/providers/anthropic/master/webui-session-20260711144341-d20c3ef1/runtime-turn-271*.jsonl`.
+  - reason ledger: `~/.freehand/ledgers/reason/master/webui-session-20260711144341-d20c3ef1.jsonl`.
+  - duplicate/cancelled task ledger: `~/.freehand/ledgers/tasks/master/task-1783781111.jsonl`.
+  - long blocked worker sample: `~/.freehand/state/turns/worker/worker-task-task-xiaozhi-struct-002/turns/worker-turn-exec-worker-worker-1783754038173229000-0-r25.json`.
+- findings:
+  - `glob("/Users/*/Documents/github/xiaozhi-esp32-2.2.4")` failed with `absolute patterns are not supported`; then `glob("~/**/xiaozhi-esp32-2.2.4")` also failed/no-match. Root cause: schema did not state relative-only/tilde-invalid strongly enough or tell the model to use known external path tools/Worker target_cwd instead.
+  - model called `task(op=list_tasks, status="all")`, which failed with `unsupported task status all`. Root cause: status field did not explicitly say omit `status` for all visible tasks and list the valid status filters.
+  - task `task-1783781111` was created/assigned/claimed, then Master cancelled it as a malformed duplicate. Root cause is not Worker startup failure alone; Master context lacked compact current Task Center/Agent truth and schema examples did not lock create/assign/current-truth workflow tightly enough.
+  - model read runtime/config/ledgers over many rounds to infer framework behavior. Root cause: framework state and behavior were not fully present in model-visible context; tool schemas were too implicit, causing probing calls.
+  - worker `task-xiaozhi-struct-002` blocked after provider/network failure (`anthropic_http_request_failed` to minimax anthropic endpoint), then timer cycles appended passive blocked decisions without re-entering a useful task state. This is provider health/recovery evidence, separate from the schema prompt-guard issue.
+- implementation:
+  - `glob` schema now says relative-only, no absolute paths or `~`, use `ls`/`read_file` for known external paths, or Worker `target_cwd` for external repo work.
+  - `task` schema now points to `TaskSpaceSnapshot`, says not to use `status="all"`, lists valid status filters, includes `interrupted`, and documents `dispatch.mode="none"` plus configured Worker assign.
+  - Master live context now injects `TaskSpaceSnapshot` from TaskBoard/AgentBoard/EventInbox before the original task, including configured Worker, known tasks, valid status filters, blocked/review-ready ids, agents, and recent events.
+  - docs/function maps/testing and local skill updated to lock no-trial-error tool guidance.
+- validation so far:
+  - `cargo test -p freehand-tools glob_tool_schema_prevents_absolute_or_tilde_trial_calls -- --nocapture` passed.
+  - `cargo test -p freehand-tools task_tool_exposes_operation_parameter -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_admits_long_operator_task_without_semantic_truncation -- --nocapture` passed after adding TaskSpaceSnapshot assertions.
+- remaining:
+  - run fmt, mainline generation/check, gates, diff check, and live S-profile evidence before closing.
+
+# 2026-07-12 Master framework-only tool guidance closeout
+
+- marker:
+  - `master-framework-tool-guidance-closeout-1783789815`
+- issue fixed:
+  - v1/v2/v3 retests showed Master still had too much tool surface and guidance ambiguity: malformed optional `freehand_status` loops, `claim="continue"` used as async wait, and direct Master external repo read/search/write behavior.
+  - v4 after framework-only surface exposed a second issue: task calls repeatedly omitted top-level `op`, and a verbal "timer scheduled" claim was not backed by a real timer tool result.
+- implementation:
+  - Master live provider schema is now framework-only: `task` and `timer`; it excludes file/search/write tools, `todo_write`, `complete_step`, and shell.
+  - Runtime rejects injected Master non-framework calls with a paired failed capability-boundary tool result, Worker dispatch guidance, and no file-content leak.
+  - Worker still keeps governed file/search/write tools and excludes task/timer/shell.
+  - Completion guidance locks `continue` as immediate same-turn next model round and forbids using it for Worker/timer/user/external waits.
+  - Optional `freehand_status` guidance says ordinary responses omit it and only output required `<freehand_completion>` unless schema feedback explicitly asks.
+  - Task schema/guidance now says every task call must include top-level `op`, shows create/assign examples, and requires expanded absolute existing repository/workspace `target_cwd` instead of `~`, glob, or output dirs.
+  - Timer schema/guidance now says Master cannot claim a timer exists unless the current turn got successful `Timer scheduled` tool result.
+  - docs/function maps/test designs/local skill updated for `tool.registry`, `provider.reason-live-bridge`, and `runtime.master-worker-loop`.
+- local validation:
+  - `cargo test -p freehand-tools master_tool_surface_excludes_unsandboxed_shell -- --nocapture` passed.
+  - `cargo test -p freehand-tools glob_tool_schema_prevents_absolute_or_tilde_trial_calls -- --nocapture` passed.
+  - `cargo test -p freehand-tools task_tool_exposes_operation_parameter -- --nocapture` passed.
+  - `cargo test -p freehand-tools timer_tool_schema_exposes_internal_schedule_contract -- --nocapture` passed.
+  - `cargo test -p freehand-blocks completion -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_admits_long_operator_task_without_semantic_truncation -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_rejects_injected_master_read_then_accepts_worker_dispatch -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_returns_tool_execution_failure_to_model_for_next_round -- --nocapture` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- online validation:
+  - S-profile only: `scripts/install-launchd.sh restartS`, health `ok`, `freehand-cliS adp-smoke` passed.
+  - config stayed `provider=minimax`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`; fixture env grep returned 0 matches.
+  - fixed retest session `webui-session-fixed-xiaozhi-tool-retest-v6` submitted the exact reused xiaozhi prompt and completed with `rounds=3 schema_rejections=0 tool_executions=2`.
+  - v6 Master tool calls were exactly `task(op="query", task_id="task-1783783921")` and `timer(op="schedule", delay_seconds=300, ...)`; forbidden Master calls count was 0 for `read_file/ls/grep/glob/write_file/edit_file/multi_edit/complete_step/todo_write/bash`.
+  - v6 tool results were both success; timer result was `Timer scheduled: timer_id=timer-master-1783789815 next_due_at=1783790115 max_runs=1 fired_count=0 status=active`.
+  - v6 terminal success cited Worker task `task-1783783921`, target cwd `/Users/fanzhang/Documents/github/xiaozhi-esp32-2.2.4`, active execution `exec-worker-worker-1783789054065083000-1651`, and timer `timer-master-1783789815`.
+- remaining:
+  - `task-1783783921` is still a long-running Worker analysis task; current scope was Master guidance/tool-surface correctness and timer-backed wait, not completion of that external analysis deliverable.
+  - existing unrelated dirty worktree and untracked `output/` / `scripts/verify-timer-tool-online.sh` remain untouched.
+
+# 2026-07-12 Worker tool failure-rate retest for reused xiaozhi prompt
+
+- marker:
+  - `worker-tool-guidance-failure-rate-retest-1783818755`
+- reused prompt/task:
+  - prompt: `分析 ~/Documents/github/xiaozhi-esp32-2.2.4 的项目情况，把其中的内存分配，项目架构，模块关系通过 html 渲染出来，做一个详细的项目分析给我`
+  - fixed Master proof session remained `webui-session-fixed-xiaozhi-tool-retest-v6`.
+  - active Worker task remained `task-1783783921`; no replacement task was created for this retest.
+- pre-fix evidence:
+  - Master fixed session remained good: 2 tool calls (`task`, `timer`), 2 successful tool results, 0 schema rejections, 0 forbidden Master tool calls.
+  - Worker ledger for `worker-task-task-1783783921` had 691 tool calls, 683 tool results, 24 failed tool results, 0 schema rejections, 5 provider errors.
+  - failed tool-result rate by result count: 24 / 683 = 3.51%.
+  - failure classes: 13 `glob` failures from absolute patterns under `/Users/fanzhang/Documents/github/xiaozhi-esp32-2.2.4`, 8 `read_file` failures from directories/missing/binary files, 3 `ls` failures from missing paths.
+  - `project_analysis.html` did not exist, and ADP task history had no `TaskReviewSubmitted`, `TaskClosed`, or `TaskBlocked`; it was still running with repeated `TaskInterrupted` from provider/network failures.
+- implementation:
+  - `glob` now accepts relative patterns and absolute patterns only when they remain under the canonical locked workspace root; it rejects `~`, `..`, and external absolute patterns.
+  - absolute `glob` boundary checking canonicalizes the non-glob prefix first, so macOS `/var` vs `/private/var` does not falsely violate the workspace boundary.
+  - `ls` now reports one file entry as `path<TAB>size` instead of failing when the path is an existing file.
+  - `read_file`, `glob`, and `ls` schema guidance now addresses observed bad calls: directories need `ls`, generated/missing outputs should not be read, exact existence checks should use `ls`, and binary sidecars are not valid UTF-8 file reads.
+  - function map, test design, mainline JSON, generated wiki, and local skill were updated with the same owner truth.
+- validation:
+  - `cargo test -p freehand-tools glob_tool_schema_prevents_absolute_or_tilde_trial_calls -- --nocapture` passed.
+  - `cargo test -p freehand-tools glob_accepts_absolute_patterns_inside_locked_workspace_only -- --nocapture` passed after canonical-prefix fix.
+  - `cargo test -p freehand-tools file_tool_schemas_guide_worker_away_from_observed_bad_calls -- --nocapture` passed.
+  - `cargo test -p freehand-tools ls_lists_entries_and_recursive_tree -- --nocapture` passed.
+  - `cargo test -p freehand-tools -- --nocapture` passed 37 tests.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+  - `scripts/install-launchd.sh restartS` and `scripts/install-launchd.sh restartWorkerS` completed service-scoped restarts.
+  - S-profile health returned `ok`; config remained `provider=minimax`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`; daemon/worker env fixture grep returned 0 matches.
+- online observation after fix:
+  - Worker ledger advanced to 710 tool calls, 703 tool results, 25 failed tool results, 0 schema rejections, 5 provider errors.
+  - Incremental new results after the repair window: +19 tool calls, +20 tool results, +1 failed result. The new observed failure was `read_file` on directory `main/boards`; no new in-workspace absolute `glob` rejection was observed after the new worker binary was installed.
+  - ADP task history advanced to `TaskInterrupted -> TaskProgressed -> TaskAssigned` but not `TaskResumed`/review/close within the observation window.
+  - `project_analysis.html` still missing. The old prompt deliverable is not complete; the current blocker is ongoing Worker/provider progress, with historical `anthropic_http_request_failed` interruptions to `https://api.minimaxi.com/anthropic/v1/messages`.
+- remaining:
+  - Need a later online completion pass once Worker claims and finishes `task-1783783921` or provider connectivity stabilizes.
+  - Current tool fix materially removes the dominant old absolute-`glob` failure class but does not make the whole old prompt complete.
+
+# 2026-07-12 Path tools absolute/symlink support correction
+
+- user correction:
+  - The likely root is tool support for absolute paths and symlink paths, not only prompt wording.
+- implementation:
+  - Added `path_tools_accept_absolute_symlink_aliases_inside_locked_workspace`.
+  - The test creates a real symlink alias to the locked workspace and verifies `glob`, `grep`, `read_file`, `ls`, and `write_file` all accept absolute alias paths that canonicalize back into the locked workspace.
+  - This locks the expected Freehand behavior for user-facing paths like `~/github/repo` resolving to canonical paths like `/Users/fanzhang/Documents/github/repo`.
+  - Docs/mainline/skill now say path tools must canonicalize symlink aliases before workspace-boundary decisions.
+- validation:
+  - `cargo test -p freehand-tools path_tools_accept_absolute_symlink_aliases_inside_locked_workspace -- --nocapture` passed.
+  - `cargo test -p freehand-tools -- --nocapture` passed 38 tests.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- remaining:
+  - No new online completion pass was run after this test-only contract hardening; previous online blocker remains Worker/provider progress for `task-1783783921`.
+
+# 2026-07-12 Resource center before function map rule
+
+- user correction:
+  - Function map refactor must start from a resource center, not from the old feature-local function map model.
+  - Global `AGENTS.md` and coding-principles rules must be updated before local project architecture refactor.
+- implementation:
+  - Updated global `/Users/fanzhang/.codex/AGENTS.md` with `资源中心先于 function map`.
+  - Updated global `/Users/fanzhang/.codex/skills/coding-principals/SKILL.md` and compressed dev-flow-code skill with resource-center-first ordering.
+  - Added `docs/resource-maps/core.json` and `docs/resource-maps/README.md`.
+  - Updated Freehand function-map spec, function-map README, dev gates, feature map, and local dev skill so project work starts from resource map before function map.
+  - Added `xtask` resource-map gate: parses resource manifest, enforces unique `resource_type`, owner feature presence, valid operation source/target resources, existing mainline call docs, valid direct/indirect relation resources, and valid forbidden direct relation `required_via`.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This is the first resource-center skeleton and gate. It does not yet prove every code caller/callee edge is resource-bound; next step is to migrate existing feature maps/mainline call maps to reference resource operation bindings.
+
+# 2026-07-12 Resource operation backlinks and gate hardening
+
+- goal source:
+  - `/Users/fanzhang/.codex/attachments/e2cfd589-69d8-4a0e-8e26-1b035fba8e86/pasted-text-1.txt`.
+- implementation:
+  - Project `AGENTS.md` now says Freehand is resource-map-first ownership, then function-map-bound development/debugging.
+  - `docs/resource-maps/core.json` now covers required resources: `config`, `session`, `turn`, `request_context`, `provider_request`, `provider_response`, `tool_call`, `workspace_path`, `task`, `agent`, `timer`, `error`, `metadata`, `debug_trace`, `ui_projection`, `runtime_command`, `checkpoint`, `node_pairing`, `instruction_capability`.
+  - Added resource operation bindings for checkpoint, node pairing, and instruction capability:
+    - `workspace_path.checkpoint_before_write`
+    - `runtime_command.rewind_checkpoint`
+    - `config.bootstrap_node_pairing`
+    - `node_pairing.project_to_ui`
+    - `config.compile_instruction_capability`
+    - `instruction_capability.admit_request_context` as `pending`
+  - Added `resource_operations` backlinks to the relevant mainline JSON files and regenerated generated wiki.
+  - Added resource-map backlinks and operation ids to paired function maps and test designs.
+  - Hardened `xtask gates check` so resource operation ids are unique, owner feature matches the referenced mainline doc, operation bindings are backlinked from mainline JSON/function map/test design, relation resources are valid, and forbidden/indirect relation pairs cannot also appear as direct operation bindings.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - Gate now locks resource map consistency and operation backlinks. It still does not statically inspect every Rust call edge for resource shortcuts; that is the next deeper enforcement layer.
+
+# 2026-07-12 Mainline call-table resource operation row backlinks
+
+- implementation:
+  - Added optional `resource_operation` to mainline call-table rows.
+  - `xtask gates check` now requires every `bound` resource operation in `docs/resource-maps/core.json` to be backlinked from at least one call-table row in the referenced mainline JSON.
+  - `xtask gates check` also rejects call-table row `resource_operation` values that are not listed in that same mainline source's `resource_operations`.
+  - Generated wiki now includes a `resource operation` column in function call tables.
+  - Added row-level backlinks for 13 bound operations:
+    - `reason.persistence` step `06` -> `session.append_turn_to_turn`
+    - `reason.context-planner` step `01` -> `turn.plan_request_context`
+    - `provider.reason-live-bridge` step `08` -> `request_context.build_provider_request`
+    - `reason.turn` step `02` -> `provider_response.apply_to_turn`
+    - `tool.registry` step `05` -> `tool_call.execute_workspace_path`
+    - `ui.protocol` step `26` -> `task.project_to_ui`
+    - `runtime.master-worker-loop` step `12` -> `timer.fire_master_wakeup`
+    - `error.center` step `04` -> `error.record_metadata`
+    - `runtime.checkpoint-rewind` steps `03` and `05` -> checkpoint operations
+    - `node.master-slave` steps `01` and `08` -> node pairing operations
+    - `instruction.capability-loader` step `02` -> `config.compile_instruction_capability`
+  - `instruction_capability.admit_request_context` remains doc-level `pending` and has no fake call-table row.
+- validation:
+  - `jq empty` on touched mainline JSON files passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This proves resource operation backlinks at manifest/mainline row level. Full source-code shortcut scanning remains a later gate.
+
+# 2026-07-12 Required core resources gate
+
+- goal source:
+  - `/Users/fanzhang/.codex/attachments/e2cfd589-69d8-4a0e-8e26-1b035fba8e86/pasted-text-1.txt`.
+- audit finding:
+  - `docs/resource-maps/core.json` currently had all 19 resources required by the objective, but `xtask gates check` did not lock that required set.
+  - Removing a core resource could fail indirectly later, but there was no targeted resource-coverage error.
+- implementation:
+  - Added `verify_required_core_resources` for `resource_map_id=freehand.core-resource-map`.
+  - Required resources: `config`, `session`, `turn`, `request_context`, `provider_request`, `provider_response`, `tool_call`, `workspace_path`, `task`, `agent`, `timer`, `error`, `metadata`, `debug_trace`, `ui_projection`, `runtime_command`, `checkpoint`, `node_pairing`, `instruction_capability`.
+  - Added red test `resource_map_rejects_missing_required_core_resource`.
+  - Kept fixture maps exempt unless they opt into `freehand.core-resource-map`, so tests do not need to duplicate production resources.
+  - Updated resource-map README and dev-gates docs.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 10 tests.
+- remaining:
+  - Run full manifest/gate stack after formatting.
+  - This locks the objective's explicit resource coverage list; it does not prove code refactor completion.
+
+# 2026-07-12 Resource owner crate backlink gate
+
+- goal source:
+  - `/Users/fanzhang/.codex/attachments/e2cfd589-69d8-4a0e-8e26-1b035fba8e86/pasted-text-1.txt`.
+- audit finding:
+  - Resource map entries had `owner_crate`, and feature-map seed entries had `owner`, but `xtask gates check` did not verify they agreed.
+  - This allowed resource ownership to drift between resource map and feature map while both still mentioned the same `feature_id`.
+- implementation:
+  - Added feature-map seed owner parsing to `xtask`.
+  - `xtask gates check` now requires every resource's `owner_crate` to appear in the owning feature's seed `owner` line.
+  - Added red test `resource_map_rejects_feature_owner_crate_mismatch`.
+  - Updated resource-map README and dev-gates docs.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 9 tests.
+  - First full `xtask gates check` exposed a parser bug: `node.master-slave` was followed by a `## ui.platform-architecture` non-seed section whose `- owner:` line overwrote the seed owner.
+  - Fixed parser to end a seed entry on any `## ` heading and to keep only the first `- owner:` line for each seed entry.
+  - After parser fix, `cargo test -p xtask resource_map_ -- --nocapture` passed 9 tests and `cargo run -p xtask -- gates check` passed.
+- remaining:
+  - Run full manifest/gate stack after formatting.
+  - This checks textual owner crate alignment, not all code-level ownership paths.
+
+# 2026-07-12 Feature-map resource owner uniqueness gate
+
+- goal source:
+  - `/Users/fanzhang/.codex/attachments/e2cfd589-69d8-4a0e-8e26-1b035fba8e86/pasted-text-1.txt`.
+- audit finding:
+  - The Resource Ownership Index backlink existed, but the gate only checked resource-map -> feature-map presence.
+  - It did not reject feature-map ownership rows listing unknown resources or the same resource under more than one feature.
+- implementation:
+  - `xtask gates check` now rejects unknown resources in `docs/architecture/feature-map.md` `Resource Ownership Index`.
+  - Gate rejects duplicate feature-map resource owners for the same `resource_type`.
+  - Gate rejects feature-map owner/resource pairs that do not match the resource map's `owner_feature_id`.
+  - Added xtask red tests `resource_map_rejects_unknown_feature_map_resource` and `resource_map_rejects_duplicate_feature_map_resource_owner`.
+  - Updated resource-map README and dev-gates docs.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 8 tests.
+- remaining:
+  - Run full manifest/gate stack after formatting.
+  - This locks feature-map resource ownership uniqueness; it still does not auto-discover every Rust call edge.
+
+# 2026-07-12 Feature-map resource ownership backlinks
+
+- goal source:
+  - `/Users/fanzhang/.codex/attachments/e2cfd589-69d8-4a0e-8e26-1b035fba8e86/pasted-text-1.txt`.
+- audit finding:
+  - `docs/resource-maps/core.json` mapped each resource to `owner_feature_id`, but `docs/architecture/feature-map.md` only had one global `resource_map_doc` reference and did not list owned resources per feature.
+  - This made the feature map a weak backlink instead of an aligned resource ownership registry.
+- implementation:
+  - Added `## Resource Ownership Index` to `docs/architecture/feature-map.md`.
+  - Indexed every current resource owner feature and owned `resource_type`, with a backlink to `docs/resource-maps/core.json`.
+  - `xtask gates check` now parses the Resource Ownership Index and requires every resource owner feature to list its resource.
+  - Gate rejects missing ownership rows, ownership rows pointing to a non-core resource map path, duplicate feature rows, and empty resource cells.
+  - Added xtask red test `resource_map_rejects_missing_feature_map_resource_backlink`.
+  - Updated resource-map README, dev-gates docs, function-map docs, function-map spec, and freehand-dev skill.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 6 tests.
+- remaining:
+  - Run full manifest/gate stack after formatting.
+  - Feature-map backlink now covers resource ownership, not every relation edge; relation edge truth remains in the resource map.
+
+# 2026-07-12 Resource operation allowlist binding
+
+- goal source:
+  - `/Users/fanzhang/.codex/attachments/e2cfd589-69d8-4a0e-8e26-1b035fba8e86/pasted-text-1.txt`.
+- audit finding:
+  - `operation_bindings` were registered, but many `operation_id` suffixes were not present in the source resource's `operations` allowlist.
+  - This meant resource-level allowed operations were descriptive rather than authoritative.
+- implementation:
+  - Added bound/pending operation suffixes to the relevant source resource `operations` arrays in `docs/resource-maps/core.json`.
+  - `xtask gates check` now requires operation ids to use `<source_resource>.<operation>` format.
+  - Gate rejects operation bindings whose source prefix differs from `source_resource`.
+  - Gate rejects operation bindings whose operation suffix is not listed in the source resource's `operations`.
+  - Gate rejects duplicate operation names inside a resource.
+  - Added xtask red test `resource_map_rejects_operation_not_declared_on_source_resource`.
+  - Updated resource-map README, dev-gates docs, function-map spec, and freehand-dev skill.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 5 tests.
+- remaining:
+  - Run full manifest/gate stack after formatting.
+  - This locks declared operation ids to resource allowlists; it does not inspect all arbitrary Rust function calls.
+
+# 2026-07-12 Direct relation rules for bound operations
+
+- goal source:
+  - `/Users/fanzhang/.codex/attachments/e2cfd589-69d8-4a0e-8e26-1b035fba8e86/pasted-text-1.txt`.
+- audit finding:
+  - 13 bound operation pairs existed, but only `node_pairing -> ui_projection` had an explicit `allowed_direct=true` relation rule.
+  - This left most direct relations implicit through operation bindings, which did not satisfy the goal that direct / indirect / forbidden direct relations be clear in the resource map.
+- implementation:
+  - Added `allowed_direct=true` relation rules for all 13 currently bound operation pairs.
+  - Updated `xtask gates check` so every bound operation source/target pair must have an `allowed_direct=true` relation rule.
+  - Gate now rejects duplicate relation rule ids, duplicate relation source/target pairs, and direct rules that declare `via_resources`.
+  - Added xtask red test `resource_map_rejects_missing_direct_relation_rule`.
+  - Updated resource-map README, dev-gates docs, function-map docs, and freehand-dev skill to state operation bindings do not imply direct relation permission.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 4 tests.
+- remaining:
+  - Run full manifest/gate stack after formatting.
+  - Pending operation `instruction_capability.admit_request_context` still has no direct relation rule by design because it is not source-bound.
+
+# 2026-07-12 Source edge registry
+
+- goal source:
+  - `/Users/fanzhang/.codex/attachments/e2cfd589-69d8-4a0e-8e26-1b035fba8e86/pasted-text-1.txt`.
+- implementation:
+  - Added `source_edge_registry` to `docs/resource-maps/core.json` as the resource-center-level index for code-bound direct resource edges.
+  - Registered 13 currently bound mainline resource-operation rows:
+    - `reason.persistence#06` -> `session.append_turn_to_turn`
+    - `reason.context-planner#01` -> `turn.plan_request_context`
+    - `provider.reason-live-bridge#08` -> `request_context.build_provider_request`
+    - `reason.turn#02` -> `provider_response.apply_to_turn`
+    - `tool.registry#05` -> `tool_call.execute_workspace_path`
+    - `ui.protocol#26` -> `task.project_to_ui`
+    - `runtime.master-worker-loop#12` -> `timer.fire_master_wakeup`
+    - `error.center#04` -> `error.record_metadata`
+    - `runtime.checkpoint-rewind#03` -> `workspace_path.checkpoint_before_write`
+    - `runtime.checkpoint-rewind#05` -> `runtime_command.rewind_checkpoint`
+    - `node.master-slave#01` -> `config.bootstrap_node_pairing`
+    - `node.master-slave#08` -> `node_pairing.project_to_ui`
+    - `instruction.capability-loader#02` -> `config.compile_instruction_capability`
+  - `instruction_capability.admit_request_context` stays `pending` and has no fake source-edge row.
+  - `xtask gates check` now validates source-edge registry entries against operation bindings and mainline call-table rows in both directions.
+  - Added xtask red test `resource_map_rejects_missing_source_edge_registry`.
+  - Updated resource-map, mainline-call, function-map, dev-gate, and local skill docs to make the registry a required resource-center truth.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 3 tests.
+- remaining:
+  - Run full manifest/gate stack after formatting.
+  - Whole-repo automatic Rust call-graph discovery of undeclared resource edges remains future work.
+
+# 2026-07-12 Mainline call-table resource endpoint gate
+
+- implementation:
+  - Added optional `source_resource` and `target_resource` to mainline call-table rows.
+  - Generated wiki function call tables now render `source resource`, `target resource`, and `resource operation`.
+  - `xtask gates check` now requires any row with `resource_operation` to declare both endpoints and match the exact `source_resource` / `target_resource` from `docs/resource-maps/core.json`.
+  - `xtask gates check` rejects rows that declare only source/target resources without a `resource_operation`.
+  - Current bound row endpoint triples:
+    - `reason.persistence` step `06`: `session -> turn` via `session.append_turn_to_turn`
+    - `reason.context-planner` step `01`: `turn -> request_context` via `turn.plan_request_context`
+    - `provider.reason-live-bridge` step `08`: `request_context -> provider_request` via `request_context.build_provider_request`
+    - `reason.turn` step `02`: `provider_response -> turn` via `provider_response.apply_to_turn`
+    - `tool.registry` step `05`: `tool_call -> workspace_path` via `tool_call.execute_workspace_path`
+    - `ui.protocol` step `26`: `task -> ui_projection` via `task.project_to_ui`
+    - `runtime.master-worker-loop` step `12`: `timer -> turn` via `timer.fire_master_wakeup`
+    - `error.center` step `04`: `error -> metadata` via `error.record_metadata`
+    - `runtime.checkpoint-rewind` step `03`: `workspace_path -> checkpoint` via `workspace_path.checkpoint_before_write`
+    - `runtime.checkpoint-rewind` step `05`: `runtime_command -> checkpoint` via `runtime_command.rewind_checkpoint`
+    - `node.master-slave` step `01`: `config -> node_pairing` via `config.bootstrap_node_pairing`
+    - `node.master-slave` step `08`: `node_pairing -> ui_projection` via `node_pairing.project_to_ui`
+    - `instruction.capability-loader` step `02`: `config -> instruction_capability` via `config.compile_instruction_capability`
+- validation:
+  - `jq empty` on resource map and touched mainline JSON files passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This locks resource operation endpoints at manifest row level. It still does not parse Rust call graphs for undeclared resource edges.
+
+# 2026-07-12 Resource source shortcut gate
+
+- implementation:
+  - Added `source_shortcut_gates` to `docs/resource-maps/core.json`.
+  - Added `xtask gates check` validation for selected forbidden direct resource relations that are safe to scan statically.
+  - Gate now checks the source resource owner crate `Cargo.toml` does not depend on forbidden target packages and Rust files under that owner crate do not contain forbidden target import/reference tokens.
+  - First statically checked forbidden pairs:
+    - `ui_projection -> task`: forbids `freehand-task` / `freehand_task`
+    - `ui_projection -> session`: forbids `freehand-reason` / `freehand_reason`
+    - `metadata -> request_context`: forbids `freehand-blocks` / `freehand_blocks`
+    - `instruction_capability -> provider_request`: forbids `freehand-runtime`, `freehand-provider-core`, `freehand-provider-anthropic`, `freehand-provider-openai` and matching Rust import tokens
+    - `ui_projection -> node_pairing`: forbids `freehand-node` / `freehand_node`
+  - Runtime orchestrator forbidden pairs such as `timer -> task` and `runtime_command -> workspace_path` are intentionally not broad dependency-scanned because `freehand-runtime` legitimately depends on multiple owner crates; those need the later call-edge gate.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This is source-level shortcut scanning for selected owner crates, not full Rust call-graph enforcement.
+
+# 2026-07-12 Function-map resource binding sections
+
+- implementation:
+  - `xtask gates check` now requires every function map tied to a mainline source with `resource_operations` to contain:
+    - `## Resource Map Binding`
+    - `owned resources:`
+    - `touched resources:`
+    - `forbidden shortcuts:`
+  - Backfilled Resource Map Binding sections in 11 function maps:
+    - `reason.persistence`
+    - `reason.context-planner`
+    - `provider.reason-live-bridge`
+    - `reason.turn`
+    - `tool.registry`
+    - `ui.protocol`
+    - `runtime.master-worker-loop`
+    - `error.center`
+    - `runtime.checkpoint-rewind`
+    - `node.master-slave`
+    - `instruction.capability-loader`
+  - Each section names the resource map, owned resources, touched resources, resource operations, and forbidden shortcuts for that feature-local function map.
+- validation:
+  - `rg` confirmed all 11 function maps contain the required section labels.
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This locks function-map section presence and resource alignment language. It does not prove every listed owned/touched resource is semantically exhaustive.
+
+# 2026-07-12 Resource operation test coverage gate
+
+- goal source:
+  - `/Users/fanzhang/.codex/attachments/e2cfd589-69d8-4a0e-8e26-1b035fba8e86/pasted-text-1.txt`.
+- implementation:
+  - Added `## Resource Operation Test Coverage` tables to the 11 current resource-backed test designs.
+  - Each table row maps the resource operation id to `status`, `white-box`, `module black-box`, and `project black-box` coverage.
+  - `instruction_capability.admit_request_context` remains explicit `pending`; no fake code binding or fake test claim was added.
+  - `xtask gates check` now requires every resource operation binding to have a matching test coverage table row in the paired test design, checks the row status against `binding_status`, and rejects empty coverage cells.
+  - Updated `docs/architecture/dev-gates.md`, `docs/resource-maps/README.md`, and `.agents/skills/freehand-dev/SKILL.md` to make resource-operation test coverage part of the resource-center workflow.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `cargo test -p xtask -- --nocapture` passed 23 tests.
+  - `git diff --check` passed.
+- remaining:
+  - Test design coverage is now gate-structured at resource-operation level.
+  - Full Rust source call-graph scanning for every undeclared resource edge remains a deeper future gate.
+  - No business-code resource-owner refactor has started in this slice by design.
+
+# 2026-07-12 Forbidden relation source-gate status
+
+- implementation:
+  - Added `source_gate_status` and `source_gate_reason` to every `forbidden_direct_relations` entry in `docs/resource-maps/core.json`.
+  - `checked` relations must have a matching `source_shortcut_gates` entry.
+  - `deferred` relations must carry an explicit reason; current deferred pairs are `timer -> task` and `runtime_command -> workspace_path` because `freehand-runtime` legitimately orchestrates multiple owner crates and needs a future precise call-edge gate instead of broad dependency scanning.
+  - `xtask gates check` now rejects duplicate forbidden relation pairs, checked relations without a source shortcut gate, unsupported source gate statuses, missing status/reason fields, and `source_shortcut_gates` entries that are not backed by a declared forbidden relation.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, and `.agents/skills/freehand-dev/SKILL.md` to make checked/deferred source-gate status part of the resource-center workflow.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask -- --nocapture` passed 23 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed after rerunning sequentially; the earlier parallel run raced against generation and saw an out-of-date wiki.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - Source shortcut coverage is no longer a silent selected allowlist; unchecked forbidden relations are explicit deferred gaps.
+  - The deferred runtime orchestrator pairs still need a precise source call-edge gate before full code-edge closure can be claimed.
+
+# 2026-07-12 Precise source edge gates for runtime orchestrator relations
+
+- implementation:
+  - Added `precise_source_edge_gates` to `docs/resource-maps/core.json`.
+  - Upgraded `timer -> task` and `runtime_command -> workspace_path` from `source_gate_status=deferred` to `source_gate_status=precise_checked`.
+  - `timer -> task` precise gate checks `ProductionMasterRunner::handle_due_timer` in `crates/freehand-runtime/src/master_runner.rs`.
+    - required owner-hop tokens: `claim_due_timer_schedule`, `timer_live_request`, `execute_timer`, `complete_due_timer_schedule`.
+    - forbidden direct Task Center tokens: `open_task_center`, `TaskRuntime`, `TaskMutationRequest`, `record_execution`, `submit_review`, `approve_review`, `close_task`.
+  - `runtime_command -> workspace_path` precise gate checks `rewind_checkpoint` in `crates/freehand-runtime/src/lib.rs`.
+    - required owner-hop tokens: `RuntimeCheckpointStore::new`, `store.rewind`.
+    - forbidden direct workspace mutation/tool tokens: `fs::`, `write_text_atomic`, `with_workspace_root`, `execute_registry_tool_call`.
+  - `xtask gates check` now validates `precise_checked` forbidden relations have matching precise gates, each precise gate points to a declared forbidden relation, its file exists, its symbol resolves, its function body contains every required token, and its function body contains no forbidden token.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, and `.agents/skills/freehand-dev/SKILL.md` for `precise_checked` semantics.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask -- --nocapture` passed 23 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - The two previous deferred runtime orchestrator relations now have precise source body checks.
+  - This is still selected precise source-edge coverage, not a complete whole-repo Rust call graph for every possible undeclared edge.
+
+# 2026-07-12 Deferred source-gate status rejected
+
+- implementation:
+  - `xtask gates check` no longer accepts `source_gate_status="deferred"` for forbidden direct resource relations.
+  - Added `parse_source_gate_status` with accepted statuses `checked` and `precise_checked`.
+  - Added red test `resource_source_gate_status_rejects_deferred`; `cargo test -p xtask` now proves `deferred` is rejected.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, and `.agents/skills/freehand-dev/SKILL.md` so future forbidden relations must add `source_shortcut_gates` or `precise_source_edge_gates` instead of becoming documented gaps.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask -- --nocapture` passed 24 tests.
+  - `cargo run -p xtask -- gates check` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - Current forbidden direct relations all have active source gate status: 5 `checked`, 2 `precise_checked`, 0 `deferred`.
+  - Whole-repo automatic discovery of all undeclared Rust resource edges remains future work.
+
+# 2026-07-12 Mainline unregistered direct resource edge red test
+
+- implementation:
+  - Added xtask fixture coverage for `verify_resource_map`.
+  - `resource_map_accepts_registered_direct_edge` proves an aligned call-table row with `source_resource`, `target_resource`, and `resource_operation` passes when backed by `operation_bindings`.
+  - `resource_map_rejects_unregistered_direct_edge_row` proves a row with `source_resource`/`target_resource` but no `resource_operation` fails.
+  - Updated `docs/resource-maps/README.md` and `docs/architecture/dev-gates.md` to state that mainline rows cannot declare resource endpoints without a valid resource operation.
+- validation:
+  - `cargo test -p xtask -- --nocapture` passed 26 tests.
+- remaining:
+  - This locks machine-readable mainline rows against undeclared direct resource edges.
+  - It does not yet auto-discover resource edges from arbitrary Rust code outside the manifest/call-table surface.
+
+# 2026-07-12 Resource projection gate
+
+- implementation:
+  - `xtask gates check` now rejects resources with no declared projections.
+  - Projection strings must be non-empty and unique within each resource.
+  - Added red test `resource_map_rejects_missing_resource_projection`.
+  - Updated resource-map README, dev-gates docs, and local Freehand skill so resource creation starts with owner, truth store, operations, and observable projections before code refactor.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 11 focused resource-map tests.
+  - `cargo fmt --check` passed after running `cargo fmt`.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask -- --nocapture` passed 35 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+  - `mempalace mine . --wing freehand --agent codex --limit 3` passed after a prior palace lock cleared.
+  - `mempalace search --wing freehand --results 3 "resource projection gate projectionless resources"` found the new MEMORY/note entries.
+- remaining:
+  - This proves projections are declared and gate-parseable; it does not yet prove every projection has complete runtime coverage.
+
+# 2026-07-12 Operation binding contract field gate
+
+- audit finding:
+  - Objective says each operation binding must have `operation_id`, `owner_feature_id`, `source_resource`, `target_resource`, `effect`, `mainline_call_doc`, and `binding_status`.
+  - `xtask gates check` already validated many semantic links, but did not explicitly reject empty `effect` or other empty binding contract fields before backlink checks.
+- implementation:
+  - `verify_resource_map` now rejects empty operation binding fields: `operation_id`, `owner_feature_id`, `source_resource`, `target_resource`, `effect`, `mainline_call_doc`, and `binding_status`.
+  - Added red test `resource_map_rejects_empty_operation_binding_effect`.
+  - Updated resource-map README, dev-gates docs, and local Freehand skill so operation binding field completeness is part of the resource-center gate.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 12 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 36 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+  - `mempalace mine . --wing freehand --agent codex --limit 3` passed.
+  - `mempalace search --wing freehand --results 3 "EmptyOperationBindingEffect operation_bindings.effect"` found the new MEMORY/note entries.
+- remaining:
+  - This locks operation binding contract field presence. It does not yet add whole-repo automatic Rust call-graph discovery for every undeclared resource edge.
+
+# 2026-07-12 Relation rule reason gate
+
+- audit finding:
+  - Resource relation rules had `reason`, but `xtask gates check` did not reject an empty reason.
+  - This left direct/indirect relation permission structurally valid but under-explained in the resource-center truth.
+- implementation:
+  - `verify_resource_map` now rejects empty `relation_rules.reason`.
+  - Added red test `resource_map_rejects_empty_relation_rule_reason`.
+  - Updated resource-map README, dev-gates docs, and local Freehand skill so every relation rule must explain why the direct edge is allowed or why an indirect edge must route through `via_resources`.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 13 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 37 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This locks relation rule reason presence. It does not yet add whole-repo automatic Rust call-graph discovery for every undeclared resource edge.
+
+# 2026-07-12 Forbidden/direct relation conflict gate
+
+- audit finding:
+  - `forbidden_direct_relations` rejected operation bindings for the same direct pair, but did not reject an `allowed_direct=true` relation rule for the same pair.
+  - This allowed one resource edge to be simultaneously modeled as directly allowed and forbidden, weakening `docs/resource-maps/core.json` as the unique relation truth.
+- implementation:
+  - `verify_resource_map` now rejects a forbidden direct relation whose source/target pair is also present in an `allowed_direct=true` relation rule.
+  - Added red test `resource_map_rejects_forbidden_allowed_direct_conflict`.
+  - Updated resource-map README, dev-gates docs, and local Freehand skill so a resource pair cannot be both directly allowed and forbidden.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 14 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 38 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This locks allowed-vs-forbidden direct relation consistency. It does not yet add whole-repo automatic Rust call-graph discovery for every undeclared resource edge.
+
+# 2026-07-12 Source shortcut gate no-op rejection
+
+- audit finding:
+  - `source_shortcut_gates` entries were required to point at forbidden direct relation pairs, but could declare no `forbidden_packages` and no `forbidden_import_tokens`.
+  - Such an entry satisfies the structural backlink but enforces no shortcut boundary, which violates the no silent allowlist direction.
+- implementation:
+  - `verify_resource_map` now rejects source shortcut gates with empty `reason`.
+  - Gate now rejects source shortcut gates with both `forbidden_packages` and `forbidden_import_tokens` empty.
+  - Gate now rejects empty entries inside `forbidden_packages` and `forbidden_import_tokens`.
+  - Added red test `resource_map_rejects_noop_source_shortcut_gate`.
+  - Updated resource-map README, dev-gates docs, and local Freehand skill.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 15 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 39 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This locks source shortcut gates against no-op checked entries. It does not yet add whole-repo automatic Rust call-graph discovery for every undeclared resource edge.
+
+# 2026-07-12 Source gate pair uniqueness
+
+- audit finding:
+  - `source_shortcut_gates` and `precise_source_edge_gates` were collected into sets for forbidden-relation matching, but duplicate source/target gate entries were not rejected.
+  - This allowed multiple gate rows to claim the same forbidden resource pair, weakening the resource map as unique relation truth.
+- implementation:
+  - `verify_resource_map` now rejects duplicate `source_shortcut_gates` source/target pairs before source file scanning.
+  - `verify_resource_map` now rejects duplicate `precise_source_edge_gates` source/target pairs before precise body scanning.
+  - Precise source-edge `required_tokens` and `forbidden_tokens` entries now must be non-empty.
+  - Added red test `resource_map_rejects_duplicate_source_shortcut_gate_pair`.
+  - Updated resource-map README, dev-gates docs, and local Freehand skill.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 16 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 40 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This locks source/precise gate pair uniqueness. It does not yet add whole-repo automatic Rust call-graph discovery for every undeclared resource edge.
+
+# 2026-07-12 Forbidden direct relation reason gate
+
+- audit finding:
+  - Objective requires every forbidden direct relation to write `required_via` and a reason.
+  - `ResourceMapForbiddenRelation.reason` existed but was dead-code allowed and not validated, so a forbidden shortcut could have an empty reason.
+- implementation:
+  - `verify_resource_map` now rejects empty `forbidden_direct_relations.reason`.
+  - Removed dead-code allowance from `ResourceMapForbiddenRelation.reason`.
+  - Added red test `resource_map_rejects_empty_forbidden_direct_relation_reason`.
+  - Updated resource-map README, dev-gates docs, and local Freehand skill.
+- validation so far:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 17 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 41 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This locks forbidden direct relation reason presence. It does not yet add whole-repo automatic Rust call-graph discovery for every undeclared resource edge.
+
+# 2026-07-12 Precise source edge duplicate red test
+
+- audit finding:
+  - `verify_resource_map` rejected duplicate `precise_source_edge_gates` pairs after the source gate pair uniqueness work, but only duplicate `source_shortcut_gates` had explicit fixture coverage.
+  - This left the precise gate duplicate invariant covered by code and full gate only, not by a focused red test.
+- implementation:
+  - Added red test `resource_map_rejects_duplicate_precise_source_edge_gate_pair`.
+  - Added fixture mode `DuplicatePreciseSourceEdgeGate`, which declares a `precise_checked` forbidden relation and two precise source-edge gates for the same `beta -> alpha` pair.
+- validation:
+  - `cargo fmt --check` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 18 focused resource-map tests at the time of this change.
+  - Later full stack in the same resource-center closeout passed with `jq empty docs/resource-maps/core.json`, `cargo check -p xtask`, `cargo test -p xtask -- --nocapture` at 43 tests after the indirect-rule backlink addition, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check`.
+- remaining:
+  - MemoryPalace mine/search still needs to run after the latest note/MEMORY updates.
+
+# 2026-07-12 Forbidden direct relation indirect-rule backlink
+
+- audit finding:
+  - `forbidden_direct_relations.required_via` named the required owner path, but `xtask gates check` only validated that each required resource existed.
+  - Two production forbidden pairs, `metadata -> request_context` and `ui_projection -> node_pairing`, did not have matching `allowed_direct=false` relation rules, so the resource map could describe a forbidden shortcut without also declaring the indirect relation truth for that same pair.
+- implementation:
+  - Added indirect relation rules `metadata-to-request-context-forbidden-through-owner` and `ui-to-node-pairing-through-runtime-command` to `docs/resource-maps/core.json`.
+  - Updated `verify_resource_map` so every forbidden direct relation must have a matching indirect relation rule with the same source, target, and `via_resources`/`required_via`.
+  - Added red test `resource_map_rejects_forbidden_without_indirect_relation_rule`.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, `.agents/skills/freehand-dev/SKILL.md`, `docs/function-maps/foundation.workspace.md`, `docs/testing/foundation.workspace.md`, and `docs/mainline-calls/foundation.workspace.json`.
+  - Regenerated wiki through `cargo run -p xtask -- mainlines generate`.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 19 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 43 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This locks forbidden direct relations to declared indirect relation rules.
+  - Whole-repo automatic discovery of all undeclared Rust resource edges remains future work.
+
+# 2026-07-12 Function-map resource binding section gate
+
+- audit finding:
+  - `verify_resource_map` required paired function maps to contain `## Resource Map Binding`, `owned resources:`, `touched resources:`, `forbidden shortcuts:`, and the operation id somewhere in the file.
+  - This allowed a function map to satisfy the backlink with empty resource binding labels or scattered prose, weakening the requirement that function maps declare owned resources, touched resources, resource operations, and forbidden shortcuts.
+- implementation:
+  - Added `resource_map_binding_section` and `require_function_map_binding_label_has_value`.
+  - `verify_resource_map` now checks the function map's `## Resource Map Binding` section specifically.
+  - For every feature with resource operations, that section must declare non-empty `owned resources`, `touched resources`, `resource operations`, and `forbidden shortcuts`.
+  - The same section must name the operation id plus the operation's source and target resource types.
+  - Added red test `resource_map_rejects_empty_function_map_resource_binding`.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, `docs/function-maps/README.md`, `docs/architecture/function-map-spec.md`, and `.agents/skills/freehand-dev/SKILL.md`.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 20 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 44 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This locks function-map resource backlinks against empty binding sections.
+  - It still does not perform whole-repo automatic Rust call-graph discovery for every undeclared resource edge.
+
+# 2026-07-12 Bound resource operation test coverage placeholder gate
+
+- audit finding:
+  - `## Resource Operation Test Coverage` rows accepted any non-empty white-box/module black-box/project black-box text for `bound` operations.
+  - Existing bound rows could still say `future`, `pending`, or `not claimed`, which made the test design look mapped while admitting the verification entrance was not current.
+  - The row lookup also matched any table row containing an operation id anywhere in the row, so a coverage note mentioning another operation id could be mistaken for that operation's own row.
+- implementation:
+  - `require_resource_operation_test_coverage` now finds a coverage row only when the first table cell exactly matches the operation id.
+  - For `binding_status=bound`, coverage cells now reject placeholder language: `pending`, `future`, `not claimed`, `not yet`, `todo`, and `tbd`.
+  - Added red tests `resource_map_rejects_pending_coverage_for_bound_operation` and `resource_map_rejects_operation_only_mentioned_in_wrong_coverage_cell`.
+  - Updated bound test-design rows in `instruction.capability-loader` and `node.master-slave` so their coverage cells describe current verification entrances and move live-transport gaps outside the bound coverage claim.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, and `.agents/skills/freehand-dev/SKILL.md`.
+- validation:
+  - `grep -RIn "| .*bound .*\\(pending\\|future\\|not claimed\\|not yet\\|TODO\\|TBD\\)" docs/testing/*.md || true` returned no matches.
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 22 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 46 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This prevents bound operations from carrying future/pending coverage placeholders and fixes exact coverage-row lookup.
+  - It still does not prove that every named coverage phrase is an executable command; that is a separate stricter gate candidate.
+
+# 2026-07-12 Bound coverage command-entry gate
+
+- audit finding:
+  - `bound` Resource Operation Test Coverage cells could be current-looking prose without an executable verification entry.
+  - This made docs/gates prove that coverage was named, but not that another worker could run the mapped white-box/module black-box/project black-box checks.
+- implementation:
+  - `require_resource_operation_test_coverage` now rejects `bound` coverage cells that do not include a command-style verification entry.
+  - Added red test `resource_map_rejects_bound_coverage_without_command_entry`.
+  - Updated bound rows in `docs/testing/*.md` so white-box, module black-box, and project black-box cells include runnable command-style entries.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, and `.agents/skills/freehand-dev/SKILL.md`.
+- validation:
+  - `grep -RIn "| .*bound .*\\(pending\\|future\\|not claimed\\|not yet\\|TODO\\|TBD\\)" docs/testing/*.md || true` returned no matches.
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 23 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 47 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This proves every `bound` coverage cell contains a command-style entry, but it does not yet parse and execute each named command from every test-design row.
+  - Whole-repo automatic discovery of all undeclared Rust resource edges remains future work.
+
+# 2026-07-12 Resource-center objective completion audit
+
+- current objective evidence:
+  - `docs/resource-maps/core.json` currently declares 19 required core resources.
+  - Current operation binding counts are 14 total, 13 `bound`, and 1 `pending`.
+  - Current relation counts are 21 relation rules, 7 forbidden direct relations, 5 broad source shortcut gates, and 2 precise source-edge gates.
+  - The only pending operation is `instruction_capability.admit_request_context`; it is intentionally not faked into `source_edge_registry` or call-table source edges.
+  - All 7 forbidden direct relations have active `source_gate_status` values: 5 `checked` and 2 `precise_checked`; 0 `deferred`.
+- validation evidence:
+  - placeholder grep over `docs/testing/*.md` returned no matches.
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 23 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 47 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+  - `mempalace mine . --wing freehand --agent codex --limit 3` processed note/MEMORY/SKILL.
+  - `mempalace search --wing freehand --results 5 "resource_map_rejects_bound_coverage_without_command_entry"` returned MEMORY rank 1 and note rank 2.
+  - `mempalace search --wing freehand --results 5 "bound coverage command-style verification entry"` returned note rank 1 and SKILL rank 2.
+- not complete yet:
+  - The full objective is not complete because `instruction_capability.admit_request_context` remains a real pending resource operation.
+  - The resource map gate still does not automatically discover every undeclared Rust source edge; it only validates declared source-edge registry rows plus selected broad/precise shortcut gates.
+  - The test-design gate now proves command-style coverage entries are present, but does not parse and execute each command listed in every bound coverage cell.
+  - No business-code resource-owner refactor should be claimed until a specific resource operation is selected after this skeleton audit and verified against its mapped white-box/module/project tests.
+
+# 2026-07-12 Source-edge registry code-binding gate
+
+- audit finding:
+  - `source_edge_registry` validated that registry rows matched mainline call-table row strings, but did not directly prove the registry's file and symbol bindings existed in source.
+  - A stale mainline row and stale registry row could therefore mutually backfill each other while the resource map still looked source-bound.
+- implementation:
+  - `verify_resource_map` now splits each `source_edge_registry.file_path` and `source_edge_registry.symbol_path` with the same binding segment rules used by mainline call-table checks.
+  - Each registry file must exist.
+  - Each registry symbol must resolve in the listed file set.
+  - Added red test `resource_map_rejects_source_edge_registry_missing_symbol`.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, and `.agents/skills/freehand-dev/SKILL.md`.
+- validation:
+  - `cargo test -p xtask resource_map_rejects_source_edge_registry_missing_symbol -- --nocapture` passed.
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed after `cargo fmt`.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 24 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 48 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This strengthens declared source-edge registry rows. It still does not discover every undeclared Rust resource edge across the whole repo automatically.
+
+# 2026-07-12 Bound coverage command target gate
+
+- audit finding:
+  - The previous coverage gate required command-style text in each `bound` Resource Operation Test Coverage cell, but did not verify that repo-owned command targets existed.
+  - A coverage cell could point to a non-existent cargo package, script, or Makefile target while still looking executable.
+- implementation:
+  - `verify_resource_map` now extracts backticked command entries from `bound` coverage cells.
+  - `cargo ... -p <package>` and `cargo ... --package <package>` entries must reference cargo package names found in repo Cargo manifests.
+  - `scripts/...` entries must reference existing script files.
+  - `make <target>` entries must reference a target in the repo `Makefile`.
+  - Added red test `resource_map_rejects_bound_coverage_unknown_cargo_package`.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, and `.agents/skills/freehand-dev/SKILL.md`.
+- validation:
+  - `cargo test -p xtask resource_map_rejects_bound_coverage_unknown_cargo_package -- --nocapture` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 25 focused resource-map tests.
+  - `cargo fmt --check` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask -- --nocapture` passed 49 tests.
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - The gate validates command entrances and repo-owned targets; it still does not execute every command listed in every coverage row.
+  - Whole-repo automatic discovery of all undeclared Rust resource edges remains future work.
+
+# 2026-07-12 Pending resource operation closure contract gate
+
+- audit finding:
+  - `binding_status=pending` previously recorded a real gap but did not require a separate pending reason, closeout owner doc, or verification entrance.
+  - This made a pending resource operation explicit, but still too easy to leave vague or permanent.
+- implementation:
+  - `verify_resource_map` now requires pending operation bindings to declare non-empty `pending_reason`, `pending_closure_doc`, and `pending_verification`.
+  - `pending_closure_doc` must point to an existing repo file.
+  - Production pending operation `instruction_capability.admit_request_context` now names its reason, design doc, and required closure verification.
+  - Added red test `resource_map_rejects_pending_operation_missing_contract`.
+  - Updated `docs/resource-maps/README.md`, `docs/architecture/dev-gates.md`, and `.agents/skills/freehand-dev/SKILL.md`.
+- validation:
+  - `cargo test -p xtask resource_map_rejects_pending_operation_missing_contract -- --nocapture` passed.
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `cargo fmt --check` passed after `cargo fmt`.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 26 focused resource-map tests.
+  - `cargo test -p xtask -- --nocapture` passed 50 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - `instruction_capability.admit_request_context` is still pending; this gate makes the gap owned and auditable, not closed.
+  - Whole-repo automatic discovery of all undeclared Rust resource edges remains future work.
+
+# 2026-07-12 Resource-center goal plan audit correction
+
+- audit finding:
+  - `docs/goals/resource-center-top-down-refactor-plan.md` still named stale path families `docs/mainlines/*.json` and `docs/test-designs/*.md`.
+  - Current repo truth is `docs/mainline-calls/*.json` and `docs/testing/*.md`.
+  - The plan also needed an explicit current-state audit so the next worker does not mistake the skeleton gate pass for completed business-code resource-owner refactor.
+- implementation:
+  - Corrected the stale source-truth paths in `docs/goals/resource-center-top-down-refactor-plan.md`.
+  - Added `## Current Resource-Center Audit` with the current counts: 19 required core resources, 14 operation bindings, 13 bound operations, 1 pending operation, 21 relation rules, 7 forbidden direct relations, 5 source shortcut gates, and 2 precise source-edge gates.
+  - Recorded that `instruction_capability.admit_request_context` remains the only pending operation and must not be treated as a bound source edge before typed context-planner admission is implemented and verified.
+  - Recorded residual gaps: no whole-repo automatic discovery of undeclared Rust resource edges, and coverage command entries are validated for presence/targets but not executed by the gate.
+- validation:
+  - `jq empty docs/resource-maps/core.json` passed.
+  - `git diff --check` passed.
+
+# 2026-07-12 Instruction capability typed request-context admission
+
+- audit finding:
+  - `docs/resource-maps/core.json` had one remaining pending operation: `instruction_capability.admit_request_context`.
+  - `crates/freehand-instructions` compiled deterministic AGENTS.md/skill manifests, but runtime live bridge did not consume the manifest into provider-visible request context.
+  - `ContextSegmentKind` had no instruction capability variant, so using `DeveloperPolicy` would have hidden the resource edge instead of making it typed.
+- implementation:
+  - Added `ContextSegmentKind::InstructionCapability`.
+  - `freehand-blocks::plan_context` now labels, orders, and validates instruction capability segments as session-stable/cacheable developer context.
+  - `freehand-instructions` now owns `render_instruction_capability_context`, which renders compiled AGENTS.md and skill entries into typed instruction capability context content. Runtime/provider code does not scan authoring directories directly.
+  - `freehand-runtime` now depends on `freehand-instructions`, compiles the instruction capability manifest from runtime home + cwd, renders it through the instruction owner, and admits it as `instruction-capability` / `ContextSegmentKind::InstructionCapability` before context planning.
+  - Updated resource map: `instruction_capability.admit_request_context` changed from `pending` to `bound`; added `source_edge_registry` row `instruction.capability-loader#07` for `instruction_capability_segment`; added direct relation rule `instruction-capability-admits-request-context-direct`.
+  - Updated instruction capability and context planner function maps, mainline JSON, test designs, generated wiki, design doc, goal plan, and local Freehand skill.
+  - Updated stale live_bridge tests that assumed Master could execute file tools; current truth is Master has framework-only task/timer tools, while Worker owns file read/write tooling inside its `target_cwd`.
+- validation:
+  - `cargo test -p freehand-instructions -- --nocapture` passed 4 tests.
+  - `cargo test -p freehand-blocks -- --nocapture` passed 45 tests.
+  - `cargo test -p freehand-runtime live_bridge -- --nocapture` passed 41 tests.
+  - `cargo check -p freehand-runtime` passed.
+  - `cargo check -p xtask` passed.
+  - `cargo test -p xtask resource_map_ -- --nocapture` passed 26 focused tests.
+  - `cargo test -p xtask -- --nocapture` passed 50 tests.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `cargo fmt --check` passed.
+  - `git diff --check` passed before this note append.
+  - S-profile online proof on `127.0.0.1:4042`: `scripts/install-launchd.sh restartS` completed, health returned `ok`, `freehand-cliS adp-smoke` passed, and config stayed `provider=minimax`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`.
+  - Online sample `freehand-cliS adp-turn-sample --url ws://127.0.0.1:4042/adp --sample success` passed for session `cli-adp-sample-success-1783840670133249000`, turn `runtime-turn-279`, `rounds=1`, `tool_executions=0`, `schema_retries=0`, `provider_retries=0`.
+  - Persisted online turn truth proved both `planned_context.ordered_segments` and `provider_payload.input_segments` contain segment `instruction-capability` with `kind=InstructionCapability`, `stability=SessionStable`, `cache_policy=Cacheable`, `role=Developer`, `source=instruction_capability`, and `<freehand_instruction_capability>` content.
+  - `freehand-cliS adp-error-query` for the online session returned `count=0`.
+  - S-profile fixture env grep returned 0 matches.
+- remaining:
+  - Current production resource map has 14 operation bindings and all are `bound`.
+  - The full top-down resource-center objective still has residual risk: gates validate declared source edges plus configured shortcut gates, but do not automatically discover every undeclared Rust resource edge across the whole repo.
+  - Coverage command entries are target-validated by gate, but the gate still does not execute every command listed in every coverage row.
+
+# 2026-07-12 Resource-center top-down goal completion audit
+
+- audit finding:
+  - After closing `instruction_capability.admit_request_context`, `docs/resource-maps/core.json` has 19 required resources, 14 operation bindings, 14 bound operations, 0 pending operations, 22 relation rules, 7 forbidden direct relations, 5 source shortcut gates, 2 precise source-edge gates, and 14 source-edge registry rows.
+  - `docs/goals/resource-center-top-down-refactor-plan.md` still had the pre-closeout relation-rule count as 21; actual resource map count is 22 after adding `instruction-capability-admits-request-context-direct`.
+- implementation:
+  - Corrected the goal plan audit count to 22 relation rules.
+  - Added `## Requirement Completion Audit` to the goal plan with requirement-by-requirement current evidence and status.
+  - The audit marks the original top-down resource-center objective complete with residual risks explicitly scoped to stronger future automation: whole-repo undeclared Rust resource-edge discovery and gate execution of every coverage-row command.
+- validation pending:
+  - rerun resource-map JSON parse, fmt, xtask check/tests, mainlines generate/check, gates check, diff check, and MemoryPalace mine/search after this note update.
+  - `rg -n "docs/mainlines|docs/test-designs" docs/goals/resource-center-top-down-refactor-plan.md docs/resource-maps/README.md .agents/skills/freehand-dev/SKILL.md docs/architecture/dev-gates.md` returned no matches.

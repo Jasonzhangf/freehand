@@ -5,6 +5,7 @@ This directory is the durable truth for code-bound feature mainlines.
 `docs/architecture/feature-map.md` answers:
 
 - who owns the feature
+- which resources the feature owns through `Resource Ownership Index`
 - where it may change
 - how it is validated
 - which problem area routes to which `feature_id`
@@ -24,20 +25,35 @@ This directory answers:
 - where the machine-readable mainline call source lives for migrated features
 - where the generated wiki artifact lives for migrated features
 
+`docs/resource-maps/` answers the global resource questions that a feature-local function map cannot answer by itself:
+
+- which resources exist
+- which feature owns each resource
+- how resources may connect directly
+- which bound source edge registers each direct operation in code
+- which resource relations are indirect and must pass through a required intermediate resource
+- which direct relations are forbidden
+
 ## Owner Routing Rule
 
 Problem location is not grep-first.
 
 Use this exact chain:
 
-1. `docs/architecture/feature-map.md` `Owner Routing Index`
-2. one `feature_id`
-3. one owner module/crate
-4. one `docs/function-maps/<feature-id>.md`
-5. one `docs/testing/<feature-id>.md`
-6. mapped white-box, module black-box, and project black-box tests
+1. `docs/resource-maps/core.json`
+2. source resource, target resource, direct-or-indirect relation, and `source_edge_registry` row for bound direct edges
+3. `docs/architecture/feature-map.md` `Owner Routing Index`
+4. one `feature_id`
+5. one owner module/crate
+6. one `docs/function-maps/<feature-id>.md`
+7. one `docs/testing/<feature-id>.md`
+8. mapped white-box, module black-box, and project black-box tests
 
 If a function map cannot identify the owner symbol or mainline, the feature is not ready for implementation or closure.
+
+If the resource map does not allow the relation, the feature is not ready for implementation. A bound operation pair needs both an `allowed_direct=true` relation rule and a `source_edge_registry` row. Add or correct the resource map and gate first instead of connecting modules directly.
+
+For features with resource operations, `## Resource Map Binding` is a gated section, not a prose heading. It must include non-empty `owned resources`, `touched resources`, `resource operations`, and `forbidden shortcuts`, and the section must name the operation id plus the source and target resources from `docs/resource-maps/core.json`.
 
 ## Required Per-Feature Sections
 

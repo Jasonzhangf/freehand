@@ -17,6 +17,7 @@ use freehand_task::{
 };
 
 use super::*;
+use crate::{TimerRepeatRule, TimerSchedule, TimerStore};
 
 type MasterExecutorAction = dyn Fn(&LiveReasonTurnRequest) -> Result<String, String> + Send + Sync;
 
@@ -42,6 +43,15 @@ impl MasterTurnExecutor for StubMasterExecutor {
         _selected: &SelectedAgentConfig,
         request: LiveReasonTurnRequest,
         _decision_boundary: LiveReasonTaskDecisionBoundary,
+    ) -> Result<String, String> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        (self.action)(&request)
+    }
+
+    fn execute_timer(
+        &self,
+        _selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
     ) -> Result<String, String> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         (self.action)(&request)
@@ -540,6 +550,148 @@ fn production_master_loop_stops_on_corrupt_cursor_state() {
         .expect_err("corrupt owner truth must stop the loop");
     assert!(matches!(error, ProductionMasterRunnerError::State(_)));
     assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_fires_due_timer_without_task_truth() {
+    let runtime_home = temp_path("timer-due");
+    bootstrap_runner(&runtime_home);
+    let store = TimerStore::new(&runtime_home, &AgentId::new("master"));
+    let timer = TimerSchedule {
+        schema_version: 1,
+        timer_id: "timer-due-proof".to_owned(),
+        agent_id: AgentId::new("master"),
+        status: "active".to_owned(),
+        reason: "check worker progress".to_owned(),
+        prompt: "Read TaskBoard and continue any pending Master work.".to_owned(),
+        next_due_at: now_unix_seconds().saturating_sub(1),
+        created_at: now_unix_seconds().saturating_sub(10),
+        updated_at: now_unix_seconds().saturating_sub(10),
+        fired_count: 0,
+        max_runs: 1,
+        repeat: None,
+        source_session_id: None,
+        source_turn_id: None,
+        source_trace_id: None,
+    };
+    store.upsert_schedule(timer).expect("schedule timer");
+    let observed_prompt = Arc::new(Mutex::new(String::new()));
+    let prompt_out = Arc::clone(&observed_prompt);
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        *prompt_out.lock().expect("prompt lock") = request.prompt.clone();
+        Ok("timer wakeup complete".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+
+    assert!(matches!(
+        runner.run_once().expect("timer tick"),
+        ProductionMasterTickOutcome::TimerFired {
+            ref timer_id,
+            ..
+        } if timer_id == "timer-due-proof"
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    assert!(
+        observed_prompt
+            .lock()
+            .expect("prompt lock")
+            .contains("Read TaskBoard and continue")
+    );
+    let schedules = store.active_schedules().expect("active schedules");
+    assert!(schedules.is_empty(), "one-shot timer must complete");
+    let task_runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    assert!(
+        task_runtime
+            .list_tasks(Default::default())
+            .expect("list tasks")
+            .is_empty(),
+        "timer must not create task truth"
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_reschedules_recurring_timer_until_max_runs() {
+    let runtime_home = temp_path("timer-repeat");
+    bootstrap_runner(&runtime_home);
+    let store = TimerStore::new(&runtime_home, &AgentId::new("master"));
+    let timer = TimerSchedule {
+        schema_version: 1,
+        timer_id: "timer-repeat-proof".to_owned(),
+        agent_id: AgentId::new("master"),
+        status: "active".to_owned(),
+        reason: "repeat check".to_owned(),
+        prompt: "Check the recurring condition.".to_owned(),
+        next_due_at: now_unix_seconds().saturating_sub(1),
+        created_at: now_unix_seconds().saturating_sub(10),
+        updated_at: now_unix_seconds().saturating_sub(10),
+        fired_count: 0,
+        max_runs: 2,
+        repeat: Some(TimerRepeatRule::Interval {
+            interval_seconds: 60,
+            max_runs: Some(2),
+        }),
+        source_session_id: None,
+        source_turn_id: None,
+        source_trace_id: None,
+    };
+    store.upsert_schedule(timer).expect("schedule timer");
+    let executor = Arc::new(StubMasterExecutor::new(|_| Ok("timer fired".to_owned())));
+    let runner = test_runner(runtime_home.clone(), executor);
+
+    assert!(matches!(
+        runner.run_once().expect("first timer tick"),
+        ProductionMasterTickOutcome::TimerFired { .. }
+    ));
+    let active = store.active_schedules().expect("active schedules");
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].fired_count, 1);
+    assert_eq!(active[0].status, "active");
+    assert!(active[0].next_due_at > now_unix_seconds());
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_releases_due_timer_after_wakeup_failure() {
+    let runtime_home = temp_path("timer-failure-release");
+    bootstrap_runner(&runtime_home);
+    let store = TimerStore::new(&runtime_home, &AgentId::new("master"));
+    let timer = TimerSchedule {
+        schema_version: 1,
+        timer_id: "timer-failure-proof".to_owned(),
+        agent_id: AgentId::new("master"),
+        status: "active".to_owned(),
+        reason: "retry failed wakeup".to_owned(),
+        prompt: "Retry the internal wakeup after provider recovery.".to_owned(),
+        next_due_at: now_unix_seconds().saturating_sub(1),
+        created_at: now_unix_seconds().saturating_sub(10),
+        updated_at: now_unix_seconds().saturating_sub(10),
+        fired_count: 0,
+        max_runs: 1,
+        repeat: None,
+        source_session_id: None,
+        source_turn_id: None,
+        source_trace_id: None,
+    };
+    store.upsert_schedule(timer).expect("schedule timer");
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("provider temporarily unavailable".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor);
+
+    let error = runner
+        .run_once()
+        .expect_err("timer wakeup failure must surface");
+    assert!(matches!(error, ProductionMasterRunnerError::Execution(_)));
+    let active = store.active_schedules().expect("active schedules");
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].timer_id, "timer-failure-proof");
+    assert_eq!(active[0].status, "active");
+    assert_eq!(active[0].fired_count, 0);
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }

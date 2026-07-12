@@ -3,6 +3,16 @@
 - feature_id: `runtime.master-worker-loop`
 - owner: `crates/freehand-runtime`
 - host: `apps/freehand-daemon`
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `timer.fire_master_wakeup`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `timer.fire_master_wakeup` | bound | `cargo test -p freehand-runtime timer -- --nocapture` covers durable timer due-claim, one-shot, recurring, local-time cron/daily/weekly, wakeup prompt, failure release, and Master runner tests | `cargo test -p freehand-runtime production_master -- --nocapture` covers production Master runner smokes where due timers create internal Master wakeup turns without task-state mutation | `scripts/verify-timer-tool-online.sh` covers S-profile timer online proof and restart-due proof showing persisted timer wakeup fires after due time and completes timer truth |
+
 
 ## Lifecycle Under Test
 
@@ -23,14 +33,17 @@
 11. Each Master lifecycle event attempt runs in a task-scoped internal
     lifecycle session with event-and-attempt-isolated turn and trace ids; the
     session name is reused per task to avoid user-facing session explosion.
-12. A successful target-task mutation is evaluated against an explicit
+12. Before Task Center EventInbox processing, the Master lifecycle runner claims
+    due independent timer schedules from durable timer truth and starts an
+    internal Master wakeup turn with the persisted prompt.
+13. A successful target-task mutation is evaluated against an explicit
     event-specific decision boundary. Once reached, the framework closes the
     lifecycle turn immediately instead of asking the model to wait for future
     Worker events inside the same turn.
-13. A lifecycle decision has a finite round budget. Exhaustion becomes an
+14. A lifecycle decision has a finite round budget. Exhaustion becomes an
     explicit blocked lifecycle turn and leaves the EventInbox cursor retryable;
     it must never remain as an unbounded active reason turn.
-14. Retryable Master decision failures keep the same durable event cursor,
+15. Retryable Master decision failures keep the same durable event cursor,
     back off, and retry without terminating the daemon. Task Center/state
     persistence failures remain fatal because owner truth is unavailable.
 
@@ -79,6 +92,14 @@ Task Center truth before another execution starts.
 - Master guidance forbids embedding `task(...)` lifecycle calls in Worker task
   content; the Worker runner owns claim, heartbeat, review submission, and
   blocked execution facts.
+- Master guidance tells the model to schedule a timer instead of dead-waiting
+  when the next useful wait exceeds 3 minutes, then continue other ready
+  Master-side work.
+- Master "timer scheduled" claims must be backed by a successful `timer`
+  tool result and timer ledger truth; verbal completion text alone is not proof
+  of a scheduled wakeup.
+- Master guidance requires timer prompts to say what current truth to inspect,
+  what waited condition to revisit, and what decision to make.
 - Assigned task is claimed once with one execution id.
 - Claim writes `TaskResumed` and `TaskHeartbeat`.
 - Successful model completion writes `TaskReviewSubmitted` with matching task/execution/agent ids.
@@ -86,6 +107,11 @@ Task Center truth before another execution starts.
 - Worker prompt includes both requested `target_cwd` and canonical locked workspace, and requires path preflight for absolute paths, `~`, and symlinks.
 - Symlinked `~/...` target cwd can execute: the runner expands `~`, follows the symlink to the canonical workspace, preserves the requested path in task truth, and asks the Worker to report both paths.
 - no-task tick returns `Idle` and leaves task history unchanged.
+- due one-shot timer runs an internal Master wakeup with the persisted prompt,
+  completes timer truth, and leaves Task Center truth empty.
+- due recurring timer fires once, increments `fired_count`, and reschedules
+  while below `max_runs`; daily, weekly, and cron recurrence uses local timezone
+  semantics.
 - interrupted tasks assigned to the configured Worker are requeued once and
   claimed with a new execution id.
 - rejected submissions are requeued to the same Worker and the next prompt
@@ -115,6 +141,9 @@ Task Center truth before another execution starts.
   round instead of killing the lifecycle runner.
 - provider/executor failure during one Master lifecycle decision leaves the
   event cursor unchanged and is retried by the long-running runner.
+- provider/executor failure during a timer wakeup records timer failure truth,
+  releases the timer to active retryable state, and surfaces a retryable Master
+  execution error instead of leaving the schedule stuck in `running`.
 - missing/incomplete Master decisions leave the event cursor unchanged and are
   retried by the long-running runner with bounded exponential backoff.
 - approved review truth remains retryable until the Master closes it.
@@ -173,6 +202,8 @@ Task Center truth before another execution starts.
   lifecycle event cursor unchanged.
 - Task Center and lifecycle-state read/write failures stop the Master runner
   explicitly instead of being treated as retryable model/provider failures.
+- timer state read/write failures stop the Master runner explicitly because
+  independent timer truth is unavailable.
 - historical lifecycle turns from another task are absent from the current
   provider request; same-task lifecycle turns remain internal framework truth
   and must not appear in user-facing session lists.
@@ -189,6 +220,9 @@ Task Center truth before another execution starts.
   - review rejection with persisted requirements
   - blocked decision persisted through `task(op="append")`
   - missing review decision and same-event retry
+  - due timer wakeup without task truth
+  - recurring timer reschedule up to `max_runs`
+  - timer wakeup failure release back to active retryable state
 - live provider fixture drives:
   - an invalid historical-Worker assignment followed by a corrected configured
     Worker assignment; the second provider request must contain the paired
@@ -235,7 +269,9 @@ Task Center truth before another execution starts.
 - `~/.freehand/state/tasks`
 - `~/.freehand/state/agents`
 - `~/.freehand/state/turns`
+- `~/.freehand/state/timers`
 - `~/.freehand/ledgers/tasks`
+- `~/.freehand/ledgers/timers`
 - `~/.freehand/ledgers/reason`
 - `~/.freehand/logs`
 

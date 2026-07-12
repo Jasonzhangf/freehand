@@ -49,16 +49,16 @@ Generated from `docs/mainline-calls/reason.session-history.json`. Do not edit by
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `SessionHistory::new` | `crates/freehand-reason/src/session_history.rs` | create session truth with validated base context and ordinary rewrite state | session id plus stable/session-stable base segments | initialized session history | runtime/bootstrap | session-history owner | bound |
-| 02 | `SessionHistory::stage_compaction` | `crates/freehand-reason/src/session_history.rs` | stage compaction rewrite and bump rewrite version | compacted base context plus reason | updated session truth plus rewrite ledger record | runtime/orchestrator | rewrite gate | bound |
-| 03 | `SessionHistory::stage_rollback` | `crates/freehand-reason/src/session_history.rs` | stage rollback rewrite and bump rewrite version | rollback base context plus reason plus reference turn id | updated session truth plus rewrite ledger record | runtime/orchestrator | rewrite gate | bound |
-| 04 | `SessionHistory::stage_resume_rebuild` | `crates/freehand-reason/src/session_history.rs` | stage resume rebuild rewrite and bump rewrite version | rebuilt base context plus reason plus resume source | updated session truth plus rewrite ledger record | runtime/orchestrator | rewrite gate | bound |
-| 05 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | consume session rewrite state for turn startup | session history plus turn input | planned turn request plus provider payload | CLI/server/node | turn orchestrator | bound |
-| 06 | `SessionHistory::commit_turn_start` | `crates/freehand-reason/src/session_history.rs` | clear one-shot non-ordinary rewrite mode after successful startup and stamp applied turn id | turn id | updated session truth | turn orchestrator | session-history owner | bound |
-| 07 | `SessionHistory::persist_json` | `crates/freehand-reason/src/session_history.rs` | render persistable session truth snapshot | session history | JSON snapshot | runtime/debug/replay | persistence helper | bound |
-| 08 | `SessionHistory::from_persisted_json` | `crates/freehand-reason/src/session_history.rs` | restore session truth from persisted JSON | JSON snapshot | session history | runtime/debug/replay | persistence helper | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `SessionHistory::new` | `crates/freehand-reason/src/session_history.rs` | create session truth with validated base context and ordinary rewrite state | session id plus stable/session-stable base segments | initialized session history | runtime/bootstrap | session-history owner |  |  |  | bound |
+| 02 | `SessionHistory::stage_compaction` | `crates/freehand-reason/src/session_history.rs` | stage compaction rewrite and bump rewrite version | compacted base context plus reason | updated session truth plus rewrite ledger record | runtime/orchestrator | rewrite gate |  |  |  | bound |
+| 03 | `SessionHistory::stage_rollback` | `crates/freehand-reason/src/session_history.rs` | stage rollback rewrite and bump rewrite version | rollback base context plus reason plus reference turn id | updated session truth plus rewrite ledger record | runtime/orchestrator | rewrite gate |  |  |  | bound |
+| 04 | `SessionHistory::stage_resume_rebuild` | `crates/freehand-reason/src/session_history.rs` | stage resume rebuild rewrite and bump rewrite version | rebuilt base context plus reason plus resume source | updated session truth plus rewrite ledger record | runtime/orchestrator | rewrite gate |  |  |  | bound |
+| 05 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | consume session rewrite state for turn startup | session history plus turn input | planned turn request plus provider payload | CLI/server/node | turn orchestrator |  |  |  | bound |
+| 06 | `SessionHistory::commit_turn_start` | `crates/freehand-reason/src/session_history.rs` | clear one-shot non-ordinary rewrite mode after successful startup and stamp applied turn id | turn id | updated session truth | turn orchestrator | session-history owner |  |  |  | bound |
+| 07 | `SessionHistory::persist_json` | `crates/freehand-reason/src/session_history.rs` | render persistable session truth snapshot | session history | JSON snapshot | runtime/debug/replay | persistence helper |  |  |  | bound |
+| 08 | `SessionHistory::from_persisted_json` | `crates/freehand-reason/src/session_history.rs` | restore session truth from persisted JSON | JSON snapshot | session history | runtime/debug/replay | persistence helper |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

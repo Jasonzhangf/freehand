@@ -59,13 +59,13 @@ Generated from `docs/mainline-calls/tool.preview.json`. Do not edit by hand.
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `BuiltinToolRegistry::preview` | `crates/freehand-tools/src/lib.rs` | route writable tool preview requests into the single owner preview path | writable tool call | preview request dispatch | runtime checkpoint owner and tests | tool preview owner | bound |
-| 02 | `plan_write_file` | `crates/freehand-tools/src/lib.rs` | compute create/overwrite preview without writing and return the exact post-image later persisted by execute | path plus content | canonical file-change truth | preview dispatch and execute | write tool preview owner | bound |
-| 03 | `plan_edit_file` | `crates/freehand-tools/src/lib.rs` | compute exact-match edit preview without writing and return the exact post-image later persisted by execute | path plus old_string plus new_string | canonical file-change truth | preview dispatch and execute | edit tool preview owner | bound |
-| 04 | `plan_multi_edit` | `crates/freehand-tools/src/lib.rs` | compute ordered multi-edit preview without writing and return the exact post-image later persisted by execute | path plus ordered edits | canonical file-change truth | preview dispatch and execute | multi-edit preview owner | bound |
-| 05 | `plan_delete_range` | `crates/freehand-tools/src/lib.rs` | compute anchor-based delete preview without writing and return the exact post-image later persisted by execute | path plus range anchors plus inclusive flag | canonical file-change truth | preview dispatch and execute | delete-range preview owner | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `BuiltinToolRegistry::preview` | `crates/freehand-tools/src/lib.rs` | route writable tool preview requests into the single owner preview path | writable tool call | preview request dispatch | runtime checkpoint owner and tests | tool preview owner |  |  |  | bound |
+| 02 | `plan_write_file` | `crates/freehand-tools/src/lib.rs` | compute create/overwrite preview without writing and return the exact post-image later persisted by execute | path plus content | canonical file-change truth | preview dispatch and execute | write tool preview owner |  |  |  | bound |
+| 03 | `plan_edit_file` | `crates/freehand-tools/src/lib.rs` | compute exact-match edit preview without writing and return the exact post-image later persisted by execute | path plus old_string plus new_string | canonical file-change truth | preview dispatch and execute | edit tool preview owner |  |  |  | bound |
+| 04 | `plan_multi_edit` | `crates/freehand-tools/src/lib.rs` | compute ordered multi-edit preview without writing and return the exact post-image later persisted by execute | path plus ordered edits | canonical file-change truth | preview dispatch and execute | multi-edit preview owner |  |  |  | bound |
+| 05 | `plan_delete_range` | `crates/freehand-tools/src/lib.rs` | compute anchor-based delete preview without writing and return the exact post-image later persisted by execute | path plus range anchors plus inclusive flag | canonical file-change truth | preview dispatch and execute | delete-range preview owner |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

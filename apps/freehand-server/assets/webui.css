@@ -754,6 +754,28 @@ body.theme-dark .settings-provider-form select {
   border-color: rgba(138, 106, 48, 0.16);
 }
 
+.session-with-workers {
+  display: grid;
+  gap: 6px;
+}
+
+.session-worker-children {
+  display: grid;
+  gap: 6px;
+  margin-left: 18px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(31, 108, 88, 0.18);
+}
+
+.session-item[data-session-kind="worker"] {
+  border-color: rgba(31, 108, 88, 0.12);
+  background: rgba(245, 241, 232, 0.58);
+}
+
+.session-item[data-session-kind="worker"] .session-button {
+  padding-left: 4px;
+}
+
 .session-title,
 .inspector-block-title,
 .slave-name,

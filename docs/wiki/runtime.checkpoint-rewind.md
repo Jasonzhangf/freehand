@@ -8,6 +8,11 @@ Generated from `docs/mainline-calls/runtime.checkpoint-rewind.json`. Do not edit
 - generated wiki: `docs/wiki/runtime.checkpoint-rewind.md`
 - test design: `docs/testing/runtime.checkpoint-rewind.md`
 
+## Resource Operation Backlinks
+
+- workspace_path.checkpoint_before_write
+- runtime_command.rewind_checkpoint
+
 ## Request Mainline
 
 - runtime receives a writable tool call during live execution
@@ -57,14 +62,14 @@ Generated from `docs/mainline-calls/runtime.checkpoint-rewind.json`. Do not edit
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `RuntimeCheckpointStore::new` | `crates/freehand-runtime/src/lib.rs` | bind runtime home checkpoint directories and the canonical runtime-home workspace root for one selected master runtime | runtime home plus selected agent and session | checkpoint store | runtime bootstrap and tests | checkpoint owner | bound |
-| 02 | `BuiltinToolRegistry::preview` | `crates/freehand-tools/src/lib.rs` | request writable-tool preview before any side effect | writable tool call | canonical preview truth | live bridge/tool loop | tool preview owner | bound |
-| 03 | `RuntimeCheckpointStore::create_from_preview` | `crates/freehand-runtime/src/lib.rs` | snapshot previewed pre-image set and write checkpoint manifest | preview truth plus turn identity | checkpoint manifest plus created ledger row | tool loop | checkpoint owner | bound |
-| 04 | `execute_registry_tool_call` | `crates/freehand-runtime/src/lib.rs` | call `tool.registry` execute only after checkpoint succeeds for writable tools | checkpoint id plus writable tool call | tool result plus applied ledger row | tool loop | tool registry owner | bound |
-| 05 | `rewind_checkpoint` | `crates/freehand-runtime/src/lib.rs` | restore one checkpoint pre-image set into the locked workspace root | checkpoint id | restored workspace plus restore ledger row | future CLI/UI/runtime command | checkpoint owner | bound |
-| 06 | `list_checkpoints / RuntimeCheckpointStore::list_summaries` | `crates/freehand-runtime/src/lib.rs` | read manifest plus ledger truth into safe checkpoint summaries | runtime home plus agent/session ids | checkpoint summary list | runtime dispatcher and tests | checkpoint owner | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `RuntimeCheckpointStore::new` | `crates/freehand-runtime/src/lib.rs` | bind runtime home checkpoint directories and the canonical runtime-home workspace root for one selected master runtime | runtime home plus selected agent and session | checkpoint store | runtime bootstrap and tests | checkpoint owner |  |  |  | bound |
+| 02 | `BuiltinToolRegistry::preview` | `crates/freehand-tools/src/lib.rs` | request writable-tool preview before any side effect | writable tool call | canonical preview truth | live bridge/tool loop | tool preview owner |  |  |  | bound |
+| 03 | `RuntimeCheckpointStore::create_from_preview` | `crates/freehand-runtime/src/lib.rs` | snapshot previewed pre-image set and write checkpoint manifest | preview truth plus turn identity | checkpoint manifest plus created ledger row | tool loop | checkpoint owner | workspace_path | checkpoint | workspace_path.checkpoint_before_write | bound |
+| 04 | `execute_registry_tool_call` | `crates/freehand-runtime/src/lib.rs` | call `tool.registry` execute only after checkpoint succeeds for writable tools | checkpoint id plus writable tool call | tool result plus applied ledger row | tool loop | tool registry owner |  |  |  | bound |
+| 05 | `rewind_checkpoint` | `crates/freehand-runtime/src/lib.rs` | restore one checkpoint pre-image set into the locked workspace root | checkpoint id | restored workspace plus restore ledger row | future CLI/UI/runtime command | checkpoint owner | runtime_command | checkpoint | runtime_command.rewind_checkpoint | bound |
+| 06 | `list_checkpoints / RuntimeCheckpointStore::list_summaries` | `crates/freehand-runtime/src/lib.rs` | read manifest plus ledger truth into safe checkpoint summaries | runtime home plus agent/session ids | checkpoint summary list | runtime dispatcher and tests | checkpoint owner |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

@@ -23,6 +23,7 @@
     `$HOME/.freehand`, create it before service bootstrap, and never default the
     master daemon to the repository root
   - gate command can validate policy locks
+  - gate command validates resource-map ownership, operation binding, direct/indirect/forbidden relation, source-edge registry, function-map backlink, and test-design coverage consistency before code refactor
   - source-only search policy keeps implementation search out of generated/runtime outputs and rejects unsafe `rg` ignore-bypass options
   - gate command can reject data/control boundary leaks at the repo source level
   - mainline generation command can render wiki from JSON truth
@@ -33,6 +34,7 @@
   - mainline JSON parse/render logic
   - generated-wiki freshness logic
   - feature-map duplicate seed-entry detection
+  - resource-map parser and consistency checks, including required core resources, unique owner backlinks, operation binding completeness, source-edge registry backlinks, forbidden/direct relation conflict rejection, forbidden direct relations backed by matching indirect relation rules, source shortcut gates, and precise source-edge gates
   - mainline manifest cross-link logic between JSON, feature map, function map, test design, and generated wiki path
   - mainline call-table file and symbol binding logic for migrated `bound` rows
   - CI/CD and local hook command-alignment logic
@@ -68,6 +70,7 @@
   - `bash -n scripts/uninstall-launchd.sh`
   - `cargo test -p xtask` data/control leak-gate positive and negative tests
   - `cargo test -p xtask` feature-map uniqueness positive and negative tests
+  - `cargo test -p xtask resource_map_ -- --nocapture` resource-map positive and negative gate tests
   - loop governance doc smoke validates required files are present and owner-bound through `foundation.workspace`
 - project black-box impact:
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
@@ -97,5 +100,6 @@
   - source-search boundary checks and unsafe-argument guard checks are implemented in `xtask`
   - release/global-install operator docs live in `docs/release.md`
   - data/control leak gate must stay implemented in `xtask`
+  - resource-map gate must stay implemented in `xtask`
   - initial loop governance docs are landed under `docs/loops/freehand-framework-loop`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

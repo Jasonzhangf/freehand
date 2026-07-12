@@ -6,6 +6,9 @@
   "test_design_doc": "docs/testing/provider.reason-live-bridge.md",
   "mainline_call_doc": "docs/mainline-calls/provider.reason-live-bridge.json",
   "generated_wiki_doc": "docs/wiki/provider.reason-live-bridge.md",
+  "resource_operations": [
+    "request_context.build_provider_request"
+  ],
   "request_mainline": [
     "selected agent config enters the runtime-owned live bridge with one bound provider",
     "live bridge restores or creates the requested session through `ReasonPersistence` before round execution",
@@ -219,6 +222,9 @@
       "output_semantic": "provider semantic request",
       "caller": "live bridge",
       "callee": "provider semantic owner",
+      "source_resource": "request_context",
+      "target_resource": "provider_request",
+      "resource_operation": "request_context.build_provider_request",
       "binding_status": "bound"
     },
     {

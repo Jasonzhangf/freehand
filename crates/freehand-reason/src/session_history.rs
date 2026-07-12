@@ -259,6 +259,7 @@ mod tests {
             ),
             ContextSegmentKind::SessionMemory
             | ContextSegmentKind::SessionSummary
+            | ContextSegmentKind::InstructionCapability
             | ContextSegmentKind::TaskContract => (
                 ContextStability::SessionStable,
                 ContextCachePolicy::Cacheable,

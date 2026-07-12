@@ -6,14 +6,19 @@
   "test_design_doc": "docs/testing/tool.registry.md",
   "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
   "generated_wiki_doc": "docs/wiki/tool.registry.md",
+  "resource_operations": [
+    "tool_call.execute_workspace_path"
+  ],
   "request_mainline": [
     "runtime asks the tool owner for a per-run registry",
     "registry exports provider-neutral tool definitions without importing provider adapter DTOs",
     "registry can export generic and master-safe stable implemented-tool schema fingerprints for planner/cache diagnostics without leaking provider DTOs into reason owners",
     "registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner",
+    "registry exposes `timer` as a standard internal framework tool for durable wakeups and keeps timer semantics out of task lifecycle operations",
     "registry classifies registered tools as framework, workspace, shell, or network execution scope",
     "the master-safe export excludes unrestricted shell scope while retaining framework and workspace-scoped tools",
     "relative path-based tools resolve from one owner-supplied current workspace root",
+    "`glob` accepts relative patterns and absolute patterns only when they remain under the locked workspace root after canonical/symlink resolution; it rejects `~`, `..`, and external absolute patterns",
     "read-only path tools may inspect readable external absolute or parent paths",
     "file-mutation tools remain locked to the current workspace root",
     "writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`",
@@ -22,8 +27,9 @@
   "response_mainline": [
     "completed provider tool calls enter `BuiltinToolRegistry::execute`",
     "first real foreground command execution set is: `bash`",
-    "first real read-only execution set is: `read_file`, `glob`, `grep`, `ls`",
+    "first real read-only execution set is: `read_file`, `glob`, `grep`, `ls`; `ls` can list directories or report one file entry for existence checks",
     "first real file-mutation execution set is: `write_file`, `edit_file`, `multi_edit`",
+    "first internal timer execution surface is `timer(op=\"schedule\"|\"cancel\"|\"list\")` with relative, absolute, local-time recurring, and local-time cron schedule fields plus a persisted prompt and examples",
     "implemented tools return user/model-visible tool result text",
     "foreground `bash` remains generically executable for non-master owners and tests but is absent from the master-safe export",
     "runtime may bind one explicit per-call workspace root through `with_workspace_root` without mutating process-global cwd or environment",
@@ -79,6 +85,20 @@
         "read-file, grep, and ls external-read tests"
       ],
       "why_shared": "keeps read path resolution single-sourced without confusing read access with write permission"
+    },
+    {
+      "symbol": "resolve_glob_pattern",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "resolve a workspace-scoped glob pattern, accepting relative patterns and absolute patterns only under the locked workspace root after canonical/symlink resolution",
+      "allowed_callers": [
+        "execute_glob"
+      ],
+      "related_tests": [
+        "glob in-workspace absolute pattern test",
+        "glob external absolute and tilde rejection tests",
+        "path-tool symlink-alias positive test"
+      ],
+      "why_shared": "keeps glob boundary semantics single-sourced instead of scattering path checks across schema guidance and execution"
     },
     {
       "symbol": "resolve_locked_write_path",
@@ -178,6 +198,20 @@
         "cross-workspace boundary test"
       ],
       "why_shared": "keeps tool category truth out of runtime string lists"
+    },
+    {
+      "symbol": "reasonix_aligned_builtin_specs",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "declare the independent timer tool schema alongside other built-in tool contracts",
+      "allowed_callers": [
+        "BuiltinToolRegistry::reasonix_aligned",
+        "tests"
+      ],
+      "related_tests": [
+        "timer tool schema export test",
+        "master and worker tool-surface tests"
+      ],
+      "why_shared": "keeps timer schema truth in the registry owner instead of task or runtime prompt-only definitions"
     }
   ],
   "call_table": [
@@ -234,6 +268,9 @@
       "output_semantic": "tool execution output",
       "caller": "runtime live bridge",
       "callee": "tool owner",
+      "source_resource": "tool_call",
+      "target_resource": "workspace_path",
+      "resource_operation": "tool_call.execute_workspace_path",
       "binding_status": "bound"
     },
     {
@@ -295,7 +332,7 @@
       "step": "11",
       "symbol_path": "execute_glob",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "match in-root files by glob pattern with recursive filename fallback",
+      "responsibility": "match locked-workspace files by relative or in-workspace absolute glob pattern with recursive filename fallback",
       "input_semantic": "pattern",
       "output_semantic": "newline-separated match list",
       "caller": "registry execute",
@@ -317,17 +354,28 @@
       "step": "13",
       "symbol_path": "execute_ls",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "list readable directory entries or recursive tree, resolving relative paths from cwd and permitting external readable paths",
+      "responsibility": "list readable directory entries/recursive tree or report one file entry, resolving relative paths from cwd and permitting external readable paths",
       "input_semantic": "optional path plus optional recursive",
-      "output_semantic": "newline-separated directory listing",
+      "output_semantic": "newline-separated directory listing or one file entry",
       "caller": "registry execute",
       "callee": "read-only file tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "reasonix_aligned_builtin_specs",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "declare timer as an independent framework tool with schedule, cancel, list, relative, absolute, local-time recurring, local-time cron, weekday, skip-weekend, max-runs, reason, prompt, and example schema fields",
+      "input_semantic": "static timer registry truth",
+      "output_semantic": "provider-neutral timer tool definition",
+      "caller": "registry constructor/tests",
+      "callee": "tool owner",
       "binding_status": "bound"
     }
   ],
   "sync_status": [
     "Reasonix-aligned built-in names and schemas are bound in `freehand-tools`",
-    "current implemented tool set is: `bash`, `read_file`, `write_file`, `edit_file`, `multi_edit`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`",
+    "current implemented tool set is: `bash`, `read_file`, `write_file`, `edit_file`, `multi_edit`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`, `timer`",
     "generic and master-safe implemented tool schema fingerprints are bound in `freehand-tools`; the runtime master bridge consumes only the master-safe fingerprint",
     "tool execution scopes are bound in the registry owner and master exposure excludes shell scope",
     "read-only path tools use the owner-supplied workspace root only as current cwd for relative paths and may read/query external readable paths",
@@ -335,6 +383,8 @@
     "first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing",
     "first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path",
     "checkpointed live writable execution now depends on the code-bound `tool.preview` and `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts",
+    "`timer` is implemented as a framework tool: `freehand-tools` owns schema exposure while `freehand-runtime` owns durable schedule execution and Master wakeup routing",
+    "timer daily, weekly, and cron fields use local-time semantics; cron is a strict 5-field expression: minute hour day-of-month month weekday",
     "`bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools remain registered but explicitly unimplemented until their lifecycle/gates are designed"
   ]
 }

@@ -56,15 +56,15 @@ Generated from `docs/mainline-calls/debug.core.json`. Do not edit by hand.
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `DebugSemanticPosition` | `crates/freehand-debug/src/lib.rs` | carry semantic coordinates for debug correlation | feature/session/turn/trace/node identifiers | semantic debug position | module emitters | debug contract | bound |
-| 02 | `DebugScenePosition` | `crates/freehand-debug/src/lib.rs` | carry scene coordinates for debug correlation | crate/file/function/artifact coordinates | scene debug position | module emitters | debug contract | bound |
-| 03 | `DebugTraceEnvelope` | `crates/freehand-debug/src/lib.rs` | combine semantic and scene coordinates with optional hashes/artifact/timestamp | debug coordinates plus hash/timestamp metadata | trace envelope | module emitters/replay tools | debug contract | bound |
-| 04 | `DebugStateSnapshot::new` | `crates/freehand-debug/src/lib.rs` | build UI-consumable read-only debug snapshot | semantic position plus scene position plus status/detail text | debug snapshot | module emitters/UI protocol tests | debug contract | bound |
-| 05 | `DebugHub::emit` | `crates/freehand-debug/src/lib.rs` | fan out emitted debug events to subscribers and sinks | debug event | delivered debug event | owner modules | debug hub | bound |
-| 06 | `DebugHub::subscribe` | `crates/freehand-debug/src/lib.rs` | register read-only debug subscribers | subscriber request | subscription handle | UI/debug tools | debug hub | bound |
-| 07 | `DebugHub::subscribe_failures` | `crates/freehand-debug/src/lib.rs` | register read-only subscribers for observation failures | failure-subscriber request | observation-failure subscription handle | reason/provider/node/UI debug tools | debug hub | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `DebugSemanticPosition` | `crates/freehand-debug/src/lib.rs` | carry semantic coordinates for debug correlation | feature/session/turn/trace/node identifiers | semantic debug position | module emitters | debug contract |  |  |  | bound |
+| 02 | `DebugScenePosition` | `crates/freehand-debug/src/lib.rs` | carry scene coordinates for debug correlation | crate/file/function/artifact coordinates | scene debug position | module emitters | debug contract |  |  |  | bound |
+| 03 | `DebugTraceEnvelope` | `crates/freehand-debug/src/lib.rs` | combine semantic and scene coordinates with optional hashes/artifact/timestamp | debug coordinates plus hash/timestamp metadata | trace envelope | module emitters/replay tools | debug contract |  |  |  | bound |
+| 04 | `DebugStateSnapshot::new` | `crates/freehand-debug/src/lib.rs` | build UI-consumable read-only debug snapshot | semantic position plus scene position plus status/detail text | debug snapshot | module emitters/UI protocol tests | debug contract |  |  |  | bound |
+| 05 | `DebugHub::emit` | `crates/freehand-debug/src/lib.rs` | fan out emitted debug events to subscribers and sinks | debug event | delivered debug event | owner modules | debug hub |  |  |  | bound |
+| 06 | `DebugHub::subscribe` | `crates/freehand-debug/src/lib.rs` | register read-only debug subscribers | subscriber request | subscription handle | UI/debug tools | debug hub |  |  |  | bound |
+| 07 | `DebugHub::subscribe_failures` | `crates/freehand-debug/src/lib.rs` | register read-only subscribers for observation failures | failure-subscriber request | observation-failure subscription handle | reason/provider/node/UI debug tools | debug hub |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

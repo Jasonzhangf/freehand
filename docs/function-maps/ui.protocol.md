@@ -5,6 +5,9 @@
 - owner module: `crates/freehand-ui-protocol/src/lib.rs`
 - mainline call source: `docs/mainline-calls/ui.protocol.json`
 - generated wiki: `docs/wiki/ui.protocol.md`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `task.project_to_ui`
 - owner entry symbols:
   - `validate_command`
   - `accept_command_ingress`
@@ -16,6 +19,22 @@
   - `subscription_selector`
   - `subscription_matches`
   - `debug_projection_from_event`
+
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `ui_projection`
+- touched resources:
+  - `task`
+  - `session`
+  - `node_pairing`
+- resource operations:
+  - `task.project_to_ui`
+- forbidden shortcuts:
+  - UI projection must not mutate task truth directly.
+  - UI projection must not synthesize persisted sessions from temporary subagent turns.
+  - UI projection must not mutate or synthesize node pairing truth directly.
   - `turn_projection_from_events`
   - `public_conversation_items`
   - `public_turn_projection`
@@ -85,8 +104,9 @@
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation session selection stays explicit: submit can target a selected session id, and session-level transcript queries stay separate from the global latest turn
 - session list and transcript projections expose session `cwd`, and turn projections carry `cwd` when the runtime owner has bound a session to a workspace
-- session list projections expose owner-supplied session `title` and `archived` metadata so WebUI, Android, CLI, and headless ADP clients share one CRUD truth
-- session list projections hide internal framework lifecycle sessions such as `master-lifecycle-*` from user-facing active and archived lists, while explicit `QuerySessionTurns { session_id }` remains queryable for debug/replay truth
+- session list projections expose only owner-supplied persisted session metadata (`CreateSession` / session metadata truth) as top-level active or archived sessions, so WebUI, Android, CLI, and headless ADP clients share one CRUD truth instead of deriving global sessions from raw turns
+- session list projections hide internal framework sessions such as `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` from user-facing active and archived lists, while explicit `QuerySessionTurns { session_id }` remains queryable for debug/replay truth
+- task board projections carry `parent_session_id` for worker-created task summaries so WebUI can render worker transcript sessions only as child rows under the owning persisted master session
 - rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth
 - task list and task history query results expose UI-safe task snapshot and ledger-event projections supplied by runtime owner code through `UiRuntimeQueryPort`
 - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results expose UI-safe board/lifecycle projections supplied by runtime owner code through `UiRuntimeQueryPort`

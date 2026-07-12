@@ -3,9 +3,25 @@
 - feature_id: `reason.context-planner`
 - owner crate: `crates/freehand-blocks`
 - owner module: `crates/freehand-blocks/src/lib.rs`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `turn.plan_request_context`
 - owner entry symbols:
   - `plan_context`
   - `render_context_segments_as_text`
+
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `request_context`
+- touched resources:
+  - `turn`
+- resource operations:
+  - `turn.plan_request_context`
+- forbidden shortcuts:
+  - Metadata/control/debug state must not be smuggled into request context as ordinary model-visible payload.
+  - Turns must not build provider requests without this typed context-planner resource.
 
 ## Request Mainline
 
@@ -15,6 +31,7 @@
 - it asks the planner owner path to classify context into stable and volatile segments
 - task contract segments are session-stable/cacheable and task-space snapshots are turn-volatile/no-cache, so task state can be visible without poisoning the stable cache prefix
 - the planner admits additional context only through typed segment rules
+- instruction capability content enters only as `ContextSegmentKind::InstructionCapability`, with instruction owner provenance and session-stable cacheable semantics
 - preferred context expansion path is subagent search final report -> `SubagentConclusion`
 - the planner returns request-content-only output; metadata/cache/debug stay outside this mainline
 
@@ -86,6 +103,7 @@
 - current `freehand-reason` baseline now routes turn startup through `plan_context`
 - current baseline enforces segment ordering, segment-contract validation, token-budget rejection, user-turn append ownership, raw-subagent-transcript rejection by provenance, and rewrite-base validation for session history
 - current baseline includes first-class `TaskContract` and `TaskSpaceSnapshot` segment kinds with cache-shape coverage
+- current baseline includes first-class `InstructionCapability` segment kind for instruction owner output admitted into request context
 - current baseline emits cache diagnostics separated from request content for both ordinary turns and explicit rewrite ledger events
 - rewrite-mode and rewrite-version are now sourced from persistent `SessionHistory` truth instead of turn-local constants
 - runtime live bridge now wires deterministic tool-schema fingerprint truth from `tool.registry` into planner diagnostics without moving tool schema semantics into reason owners

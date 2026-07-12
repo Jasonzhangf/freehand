@@ -5,8 +5,24 @@
 - owner module: `crates/freehand-runtime/src/lib.rs`
 - mainline call source: `docs/mainline-calls/provider.reason-live-bridge.json`
 - generated wiki: `docs/wiki/provider.reason-live-bridge.md`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `request_context.build_provider_request`
 - owner entry symbols:
   - `run_live_reason_turn`
+
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `provider_request`
+- touched resources:
+  - `request_context`
+- resource operations:
+  - `request_context.build_provider_request`
+- forbidden shortcuts:
+  - Runtime must not patch provider payloads from turn truth without going through typed request context.
+  - Instruction manifests must not patch provider requests directly.
 
 ## Request Mainline
 
@@ -14,6 +30,11 @@
 - live bridge restores or creates the requested session through `ReasonPersistence` before round execution
 - when restoring an existing session, live bridge rebuilds future prompt context from effective persisted turns and keeps only the latest round for each repaired logical turn, so superseded failed repair attempts stay in ledgers/UI truth but do not enter the next default prompt context
 - the original operator task enters the planner as an `original-task` `TaskContract` segment with a budget derived from actual content size plus margin; runtime must not use a fixed tiny prompt cap that rejects ordinary multi-step master instructions before provider execution
+- every Master live round includes a volatile `TaskSpaceSnapshot` segment before
+  the original task, sourced from TaskBoard, AgentBoard, and EventInbox owner
+  truth, so the model can see known tasks, configured Worker, valid status
+  filters, blocked/review-ready ids, and recent framework events before it
+  calls task query/list/history tools
 - multi-round carryover retains completion contract, control status contract, runtime tool guidance, and `TaskContract` before volatile `previous-visible-output` or schema feedback; runtime must not impose arbitrary small input caps such as 512 tokens on model-visible context, while the planner remains responsible for rejecting context that truly exceeds the model/context policy
 - Anthropic request rendering uses the provider adapter default output budget `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`; runtime must not add a smaller ad hoc output cap in the live bridge
 - master task creation/dispatch is model-decided from the runtime prompt contract, the exposed `task` tool schema, tool field descriptions, dispatch/no-dispatch conditions, workspace-boundary rule, concurrency/flow-control guidance, and model-visible samples for cross-workspace dispatch, success, execution error, and rejected-review retry; runtime must not infer task creation from prose outside the tool call path
@@ -21,13 +42,30 @@
 - bridge derives provider descriptor and executor config from selected provider truth
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
-- the first master tool-capable request exposes the Reasonix-aligned master-safe registry subset through provider-neutral request metadata
-- the master-safe registry subset omits unrestricted shell scope and exports the matching deterministic schema fingerprint stamped into planner diagnostics
+- the first master tool-capable request exposes the Reasonix-aligned
+  framework-only master-safe registry subset through provider-neutral request
+  metadata: `task` and `timer` only
+- the master-safe registry subset omits file/search/write tools, unrestricted
+  shell scope, `todo_write`, and `complete_step`, and exports the matching
+  deterministic schema fingerprint stamped into planner diagnostics
 - the first master-task-capable request includes owner-scoped task orchestration guidance and examples that teach the model to use `task(op=...)` instead of standalone semantic-action tool names
+- the Master task snapshot guidance tells the model not to call
+  `status="all"` and to use the injected current framework truth before
+  exploratory task/agent calls, reducing multi-round tool probing
 - runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text
 - Anthropic live executor runs the HTTP/SSE request through raw-capable callbacks so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
-- completed provider tool calls are classified by registry execution scope; framework tools remain available to the Master; read-only path tools may inspect readable external paths; writable tools remain locked to the current agent cwd; unrestricted shell is unavailable on Master/Worker provider surfaces and returns a paired failed result if injected; incomplete `tool_use` calls are converted into failed tool-result re-entry truth instead of schema retry; writable in-root calls first go through runtime checkpoint preview/snapshot/execute gating, then success or execution-failure results are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request as a paired tool result exchange
+- completed provider tool calls are classified by registry execution scope; only
+  `task` and `timer` remain available to the Master; injected Master
+  file/search/write, shell, `todo_write`, or `complete_step` calls return a
+  paired failed capability-boundary result with Worker dispatch guidance and no
+  file-content leak; Worker read/search/write tools remain governed by the
+  locked task workspace; incomplete `tool_use` calls are converted into failed
+  tool-result re-entry truth instead of schema retry; writable in-root Worker
+  calls first go through runtime checkpoint preview/snapshot/execute gating,
+  then success or execution-failure results are written back through
+  `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next
+  Anthropic request as a paired tool result exchange
 - runtime emits tool execution lifecycle debug snapshots through `debug.core` without tool-result content
 - completion schema is parsed only when the provider finish reason is a terminal completion candidate such as `stop` or `end_turn`; it is then validated and either accepted, rejected with field-level feedback plus UI-visible retry waiting projection, or used to schedule the next round
 - runtime emits terminal lifecycle debug snapshots through `debug.core` before terminal persistence
@@ -39,7 +77,9 @@
 - provider-neutral outputs are applied back into the active round through `ReasonTurnEngine::apply_provider_output`
 - every applied live semantic output is recorded through `ReasonPersistence::record_provider_output_applied`
 - tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures; runtime publishes a model-continuation waiting event after tool results are paired for the next provider request
-- master workspace-boundary failures and forbidden shell calls remain paired failed tool results, so the model can create and assign external work through `task`
+- master capability-boundary failures for injected non-framework tools remain
+  paired failed tool results, so the model can create and assign external work
+  through `task`
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
 - schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`

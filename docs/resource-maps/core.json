@@ -1,0 +1,782 @@
+{
+  "schema_version": 1,
+  "resource_map_id": "freehand.core-resource-map",
+  "resources": [
+    {
+      "resource_type": "config",
+      "owner_feature_id": "config.core",
+      "owner_crate": "crates/freehand-config",
+      "identity": "agent profile plus config source path",
+      "truth_store": "~/.freehand/config.toml",
+      "operations": ["load", "validate", "project_safe_config", "bootstrap_node_pairing", "compile_instruction_capability"],
+      "projections": ["runtime bootstrap config", "safe CLI/ADP config query"]
+    },
+    {
+      "resource_type": "session",
+      "owner_feature_id": "reason.persistence",
+      "owner_crate": "crates/freehand-reason",
+      "identity": "session_id",
+      "truth_store": "~/.freehand/state/turns and ~/.freehand/ledgers/reason",
+      "operations": ["create", "append_turn", "append_turn_to_turn", "restore", "list_persisted"],
+      "projections": ["ui_session_list", "ui_session_turns"]
+    },
+    {
+      "resource_type": "turn",
+      "owner_feature_id": "reason.turn",
+      "owner_crate": "crates/freehand-reason",
+      "identity": "session_id plus turn_id",
+      "truth_store": "~/.freehand/state/turns and reason ledger rows",
+      "operations": ["start", "apply_provider_output", "apply_tool_result", "terminalize", "plan_request_context"],
+      "projections": ["public conversation", "runtime turn status"]
+    },
+    {
+      "resource_type": "request_context",
+      "owner_feature_id": "reason.context-planner",
+      "owner_crate": "crates/freehand-blocks",
+      "identity": "session_id plus turn_id plus context plan version",
+      "truth_store": "typed in-memory context segments plus reason/debug evidence",
+      "operations": ["plan_segments", "admit_model_visible_context", "reject_over_budget_context", "build_provider_request"],
+      "projections": ["provider-neutral request context"]
+    },
+    {
+      "resource_type": "provider_request",
+      "owner_feature_id": "provider.reason-live-bridge",
+      "owner_crate": "crates/freehand-runtime",
+      "identity": "trace_id plus turn_id plus provider attempt",
+      "truth_store": "provider debug ledger when enabled and live bridge attempt state",
+      "operations": ["build", "send", "retry_recoverable"],
+      "projections": ["provider attempt evidence", "error-center metadata"]
+    },
+    {
+      "resource_type": "provider_response",
+      "owner_feature_id": "provider.semantic",
+      "owner_crate": "crates/freehand-provider-core",
+      "identity": "trace_id plus turn_id plus provider event index",
+      "truth_store": "provider semantic event stream and debug raw ledgers",
+      "operations": ["normalize", "classify_finish", "map_tool_call", "map_error", "apply_to_turn"],
+      "projections": ["reason provider output events", "error-center observed failure"]
+    },
+    {
+      "resource_type": "tool_call",
+      "owner_feature_id": "tool.registry",
+      "owner_crate": "crates/freehand-tools",
+      "identity": "turn_id plus provider tool_call_id",
+      "truth_store": "reason turn event plus tool owner execution state",
+      "operations": ["declare_schema", "classify_scope", "execute", "execute_workspace_path"],
+      "projections": ["tool result text", "tool display semantics"]
+    },
+    {
+      "resource_type": "workspace_path",
+      "owner_feature_id": "tool.registry",
+      "owner_crate": "crates/freehand-tools",
+      "identity": "locked workspace root plus canonicalized path",
+      "truth_store": "filesystem under owner-supplied workspace root",
+      "operations": ["read_file", "glob", "grep", "ls", "write_file", "edit_file", "multi_edit", "checkpoint_before_write"],
+      "projections": ["tool result text", "checkpoint preview"]
+    },
+    {
+      "resource_type": "task",
+      "owner_feature_id": "task.orchestration",
+      "owner_crate": "crates/freehand-task",
+      "identity": "task_id",
+      "truth_store": "~/.freehand/state/tasks and ~/.freehand/ledgers/tasks",
+      "operations": ["create", "assign", "record_execution", "submit_review", "approve_review", "reject_review", "close", "recover_interrupted", "project_to_ui"],
+      "projections": ["TaskBoard", "TaskSpaceSnapshot", "ui_task_snapshot"]
+    },
+    {
+      "resource_type": "agent",
+      "owner_feature_id": "agent.lifecycle",
+      "owner_crate": "crates/freehand-task",
+      "identity": "agent_id",
+      "truth_store": "AgentBoard projection from lifecycle events",
+      "operations": ["register", "heartbeat", "claim_task", "release_task"],
+      "projections": ["AgentBoard", "TaskSpaceSnapshot"]
+    },
+    {
+      "resource_type": "timer",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "owner_crate": "crates/freehand-runtime",
+      "identity": "timer_id",
+      "truth_store": "~/.freehand/state/timers and ~/.freehand/ledgers/timers",
+      "operations": ["schedule", "cancel", "list", "fire_due", "fire_master_wakeup", "reschedule_recurring"],
+      "projections": ["timer tool result", "internal master wakeup turn"]
+    },
+    {
+      "resource_type": "error",
+      "owner_feature_id": "error.center",
+      "owner_crate": "crates/freehand-control",
+      "identity": "trace_id plus domain plus attempt",
+      "truth_store": "~/.freehand/ledgers/metadata error.center rows",
+      "operations": ["classify", "record", "record_metadata", "decide_recovery", "query_projection"],
+      "projections": ["ADP error query", "runtime recovery decision"]
+    },
+    {
+      "resource_type": "metadata",
+      "owner_feature_id": "metadata.core",
+      "owner_crate": "crates/freehand-metadata",
+      "identity": "metadata entry id plus writer owner plus write node",
+      "truth_store": "~/.freehand/ledgers/metadata",
+      "operations": ["validate_entry", "append", "query"],
+      "projections": ["owner-scoped metadata query"]
+    },
+    {
+      "resource_type": "debug_trace",
+      "owner_feature_id": "debug.core",
+      "owner_crate": "crates/freehand-debug",
+      "identity": "trace_id plus scene coordinate",
+      "truth_store": "~/.freehand/logs and debug snapshots",
+      "operations": ["emit_snapshot", "fanout", "read_snapshot"],
+      "projections": ["debug artifacts"]
+    },
+    {
+      "resource_type": "ui_projection",
+      "owner_feature_id": "ui.protocol",
+      "owner_crate": "crates/freehand-ui-protocol",
+      "identity": "query type plus resource id",
+      "truth_store": "derived protocol projection, not independent truth",
+      "operations": ["query", "subscribe", "project_public_state", "dispatch_command"],
+      "projections": ["CLI/WebUI/Android protocol frames"]
+    },
+    {
+      "resource_type": "runtime_command",
+      "owner_feature_id": "runtime.ui-command-dispatch",
+      "owner_crate": "crates/freehand-runtime",
+      "identity": "command id plus target feature id",
+      "truth_store": "runtime command dispatcher state and owner module effects",
+      "operations": ["dispatch", "route_to_owner", "return_receipt", "rewind_checkpoint"],
+      "projections": ["UI command receipt", "owner operation effect"]
+    },
+    {
+      "resource_type": "checkpoint",
+      "owner_feature_id": "runtime.checkpoint-rewind",
+      "owner_crate": "crates/freehand-runtime",
+      "identity": "agent id plus session id plus checkpoint id",
+      "truth_store": "~/.freehand/state/checkpoints and ~/.freehand/ledgers/checkpoints",
+      "operations": ["preview", "snapshot", "apply_tool_after_checkpoint", "rewind", "list"],
+      "projections": ["checkpoint summary", "rewind command receipt"]
+    },
+    {
+      "resource_type": "node_pairing",
+      "owner_feature_id": "node.master-slave",
+      "owner_crate": "crates/freehand-node",
+      "identity": "source node id plus target node id plus pair token boundary",
+      "truth_store": "node runtime pairing state plus metadata/debug evidence",
+      "operations": ["validate_pairing", "accept_pairing", "lose_pairing", "delegate_task", "publish_slave_turn", "query_status", "project_to_ui"],
+      "projections": ["node status", "delegated task progress", "slave turn stream"]
+    },
+    {
+      "resource_type": "instruction_capability",
+      "owner_feature_id": "instruction.capability-loader",
+      "owner_crate": "crates/freehand-instructions",
+      "identity": "capability source path plus scope plus precedence",
+      "truth_store": "compiled deterministic instruction capability manifest under runtime state",
+      "operations": ["discover", "validate", "compile_manifest", "write_manifest", "admit_request_context"],
+      "projections": ["instruction capability manifest", "manifest error records"]
+    }
+  ],
+  "operation_bindings": [
+    {
+      "operation_id": "session.append_turn_to_turn",
+      "owner_feature_id": "reason.persistence",
+      "source_resource": "session",
+      "target_resource": "turn",
+      "effect": "append a turn under one persisted session",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "turn.plan_request_context",
+      "owner_feature_id": "reason.context-planner",
+      "source_resource": "turn",
+      "target_resource": "request_context",
+      "effect": "derive model-visible context through the planner owner",
+      "mainline_call_doc": "docs/mainline-calls/reason.context-planner.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "request_context.build_provider_request",
+      "owner_feature_id": "provider.reason-live-bridge",
+      "source_resource": "request_context",
+      "target_resource": "provider_request",
+      "effect": "build provider-selected live request without provider DTO leakage",
+      "mainline_call_doc": "docs/mainline-calls/provider.reason-live-bridge.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "provider_response.apply_to_turn",
+      "owner_feature_id": "reason.turn",
+      "source_resource": "provider_response",
+      "target_resource": "turn",
+      "effect": "apply normalized provider output to turn truth",
+      "mainline_call_doc": "docs/mainline-calls/reason.turn.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "tool_call.execute_workspace_path",
+      "owner_feature_id": "tool.registry",
+      "source_resource": "tool_call",
+      "target_resource": "workspace_path",
+      "effect": "execute governed workspace file/search/write operation",
+      "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "task.project_to_ui",
+      "owner_feature_id": "ui.protocol",
+      "source_resource": "task",
+      "target_resource": "ui_projection",
+      "effect": "project task truth to UI without UI owning task state",
+      "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "timer.fire_master_wakeup",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "source_resource": "timer",
+      "target_resource": "turn",
+      "effect": "fire due timer as an internal master wakeup turn",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "error.record_metadata",
+      "owner_feature_id": "error.center",
+      "source_resource": "error",
+      "target_resource": "metadata",
+      "effect": "write classified error truth through metadata owner constraints",
+      "mainline_call_doc": "docs/mainline-calls/error.center.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "workspace_path.checkpoint_before_write",
+      "owner_feature_id": "runtime.checkpoint-rewind",
+      "source_resource": "workspace_path",
+      "target_resource": "checkpoint",
+      "effect": "create checkpoint truth from writable-tool preview before workspace mutation",
+      "mainline_call_doc": "docs/mainline-calls/runtime.checkpoint-rewind.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "runtime_command.rewind_checkpoint",
+      "owner_feature_id": "runtime.checkpoint-rewind",
+      "source_resource": "runtime_command",
+      "target_resource": "checkpoint",
+      "effect": "route explicit rewind commands through checkpoint owner before workspace restore",
+      "mainline_call_doc": "docs/mainline-calls/runtime.checkpoint-rewind.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "config.bootstrap_node_pairing",
+      "owner_feature_id": "node.master-slave",
+      "source_resource": "config",
+      "target_resource": "node_pairing",
+      "effect": "materialize configured reciprocal master/slave pairing into node runtime state",
+      "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "node_pairing.project_to_ui",
+      "owner_feature_id": "node.master-slave",
+      "source_resource": "node_pairing",
+      "target_resource": "ui_projection",
+      "effect": "project node status, delegated progress, and slave turns without UI owning pairing truth",
+      "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "config.compile_instruction_capability",
+      "owner_feature_id": "instruction.capability-loader",
+      "source_resource": "config",
+      "target_resource": "instruction_capability",
+      "effect": "compile deterministic instruction capability manifest from configured global and local sources",
+      "mainline_call_doc": "docs/mainline-calls/instruction.capability-loader.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "instruction_capability.admit_request_context",
+      "owner_feature_id": "instruction.capability-loader",
+      "source_resource": "instruction_capability",
+      "target_resource": "request_context",
+      "effect": "admit compiled instruction capabilities into provider-visible request context only as typed context-planner segments",
+      "mainline_call_doc": "docs/mainline-calls/instruction.capability-loader.json",
+      "binding_status": "bound"
+    }
+  ],
+  "source_edge_registry": [
+    {
+      "edge_id": "reason.persistence#06",
+      "operation_id": "session.append_turn_to_turn",
+      "source_resource": "session",
+      "target_resource": "turn",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "call_table_step": "06",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "symbol_path": "ReasonPersistence::record_turn_started",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "reason.context-planner#01",
+      "operation_id": "turn.plan_request_context",
+      "source_resource": "turn",
+      "target_resource": "request_context",
+      "mainline_call_doc": "docs/mainline-calls/reason.context-planner.json",
+      "call_table_step": "01",
+      "file_path": "crates/freehand-blocks/src/lib.rs",
+      "symbol_path": "plan_context",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "provider.reason-live-bridge#08",
+      "operation_id": "request_context.build_provider_request",
+      "source_resource": "request_context",
+      "target_resource": "provider_request",
+      "mainline_call_doc": "docs/mainline-calls/provider.reason-live-bridge.json",
+      "call_table_step": "08",
+      "file_path": "crates/freehand-provider-core/src/lib.rs",
+      "symbol_path": "build_semantic_request",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "reason.turn#02",
+      "operation_id": "provider_response.apply_to_turn",
+      "source_resource": "provider_response",
+      "target_resource": "turn",
+      "mainline_call_doc": "docs/mainline-calls/reason.turn.json",
+      "call_table_step": "02",
+      "file_path": "crates/freehand-reason/src/lib.rs",
+      "symbol_path": "ReasonTurnEngine::apply_provider_output",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "tool.registry#05",
+      "operation_id": "tool_call.execute_workspace_path",
+      "source_resource": "tool_call",
+      "target_resource": "workspace_path",
+      "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
+      "call_table_step": "05",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "symbol_path": "BuiltinToolRegistry::execute",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "ui.protocol#26",
+      "operation_id": "task.project_to_ui",
+      "source_resource": "task",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
+      "call_table_step": "26",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "symbol_path": "UiCommand::QueryTaskBoard / UiCommand::QueryAgentBoard / UiCommand::QueryAgentLifecycle",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.master-worker-loop#12",
+      "operation_id": "timer.fire_master_wakeup",
+      "source_resource": "timer",
+      "target_resource": "turn",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "call_table_step": "12",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "symbol_path": "ProductionMasterRunner::handle_due_timer",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "error.center#04",
+      "operation_id": "error.record_metadata",
+      "source_resource": "error",
+      "target_resource": "metadata",
+      "mainline_call_doc": "docs/mainline-calls/error.center.json",
+      "call_table_step": "04",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "write_error_center_metadata",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.checkpoint-rewind#03",
+      "operation_id": "workspace_path.checkpoint_before_write",
+      "source_resource": "workspace_path",
+      "target_resource": "checkpoint",
+      "mainline_call_doc": "docs/mainline-calls/runtime.checkpoint-rewind.json",
+      "call_table_step": "03",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "RuntimeCheckpointStore::create_from_preview",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.checkpoint-rewind#05",
+      "operation_id": "runtime_command.rewind_checkpoint",
+      "source_resource": "runtime_command",
+      "target_resource": "checkpoint",
+      "mainline_call_doc": "docs/mainline-calls/runtime.checkpoint-rewind.json",
+      "call_table_step": "05",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "rewind_checkpoint",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "node.master-slave#01",
+      "operation_id": "config.bootstrap_node_pairing",
+      "source_resource": "config",
+      "target_resource": "node_pairing",
+      "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
+      "call_table_step": "01",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "symbol_path": "LocalNodeRuntime::new",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "node.master-slave#08",
+      "operation_id": "node_pairing.project_to_ui",
+      "source_resource": "node_pairing",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
+      "call_table_step": "08",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "symbol_path": "LocalNodeRuntime::query_node_status",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "instruction.capability-loader#02",
+      "operation_id": "config.compile_instruction_capability",
+      "source_resource": "config",
+      "target_resource": "instruction_capability",
+      "mainline_call_doc": "docs/mainline-calls/instruction.capability-loader.json",
+      "call_table_step": "02",
+      "file_path": "crates/freehand-instructions/src/lib.rs",
+      "symbol_path": "compile_instruction_capability_manifest",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "instruction.capability-loader#07",
+      "operation_id": "instruction_capability.admit_request_context",
+      "source_resource": "instruction_capability",
+      "target_resource": "request_context",
+      "mainline_call_doc": "docs/mainline-calls/instruction.capability-loader.json",
+      "call_table_step": "07",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "instruction_capability_segment",
+      "binding_status": "bound"
+    }
+  ],
+  "relation_rules": [
+    {
+      "rule_id": "session-appends-turn-direct",
+      "source_resource": "session",
+      "target_resource": "turn",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Session persistence owner may append turn truth under the persisted session."
+    },
+    {
+      "rule_id": "turn-plans-request-context-direct",
+      "source_resource": "turn",
+      "target_resource": "request_context",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Turn execution may enter the context planner to derive provider-neutral request context."
+    },
+    {
+      "rule_id": "request-context-builds-provider-request-direct",
+      "source_resource": "request_context",
+      "target_resource": "provider_request",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The live bridge may build provider request truth from typed request context."
+    },
+    {
+      "rule_id": "provider-response-applies-to-turn-direct",
+      "source_resource": "provider_response",
+      "target_resource": "turn",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Reason turn owner may apply normalized provider semantic output into turn truth."
+    },
+    {
+      "rule_id": "tool-call-executes-workspace-path-direct",
+      "source_resource": "tool_call",
+      "target_resource": "workspace_path",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Tool registry owner may execute governed workspace path operations for a tool call."
+    },
+    {
+      "rule_id": "task-projects-to-ui-direct",
+      "source_resource": "task",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Task owner truth may be projected into UI protocol without UI owning task state."
+    },
+    {
+      "rule_id": "timer-fires-master-wakeup-direct",
+      "source_resource": "timer",
+      "target_resource": "turn",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Due timers resume Master through an internal wakeup turn."
+    },
+    {
+      "rule_id": "error-records-metadata-direct",
+      "source_resource": "error",
+      "target_resource": "metadata",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Error center may record classified error truth through metadata owner constraints."
+    },
+    {
+      "rule_id": "workspace-path-checkpoints-before-write-direct",
+      "source_resource": "workspace_path",
+      "target_resource": "checkpoint",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Writable workspace path effects must create checkpoint truth before mutation."
+    },
+    {
+      "rule_id": "runtime-command-rewinds-checkpoint-direct",
+      "source_resource": "runtime_command",
+      "target_resource": "checkpoint",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Runtime rewind commands route to checkpoint owner instead of mutating workspace paths directly."
+    },
+    {
+      "rule_id": "config-bootstraps-node-pairing-direct",
+      "source_resource": "config",
+      "target_resource": "node_pairing",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Config truth materializes reciprocal master/slave topology into node pairing state."
+    },
+    {
+      "rule_id": "node-pairing-through-ui-projection",
+      "source_resource": "node_pairing",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Node pairing owner may publish status/progress/slave-turn projections through UI protocol."
+    },
+    {
+      "rule_id": "config-compiles-instruction-capability-direct",
+      "source_resource": "config",
+      "target_resource": "instruction_capability",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Config-owned instruction sources may compile into deterministic instruction capability manifests."
+    },
+    {
+      "rule_id": "ui-to-task-through-projection",
+      "source_resource": "ui_projection",
+      "target_resource": "task",
+      "allowed_direct": false,
+      "via_resources": ["runtime_command", "task"],
+      "reason": "UI may dispatch commands and read projections, but must not mutate or parse task truth directly."
+    },
+    {
+      "rule_id": "session-list-through-persistence",
+      "source_resource": "ui_projection",
+      "target_resource": "session",
+      "allowed_direct": false,
+      "via_resources": ["session"],
+      "reason": "Global session lists must show persisted session metadata, not temporary turn-only worker sessions."
+    },
+    {
+      "rule_id": "timer-not-task-state",
+      "source_resource": "timer",
+      "target_resource": "task",
+      "allowed_direct": false,
+      "via_resources": ["turn", "task"],
+      "reason": "Waiting and wakeup are independent timer resources; task lifecycle state must not encode timer schedules."
+    },
+    {
+      "rule_id": "provider-request-through-context",
+      "source_resource": "turn",
+      "target_resource": "provider_request",
+      "allowed_direct": false,
+      "via_resources": ["request_context"],
+      "reason": "Turns must build provider requests through typed context planning, not by ad hoc prompt/provider payload rewrites."
+    },
+    {
+      "rule_id": "workspace-write-through-checkpoint",
+      "source_resource": "runtime_command",
+      "target_resource": "workspace_path",
+      "allowed_direct": false,
+      "via_resources": ["checkpoint", "workspace_path"],
+      "reason": "Workspace restore commands must pass through checkpoint truth before mutating workspace paths."
+    },
+    {
+      "rule_id": "metadata-to-request-context-forbidden-through-owner",
+      "source_resource": "metadata",
+      "target_resource": "request_context",
+      "allowed_direct": false,
+      "via_resources": ["request_context"],
+      "reason": "Metadata may observe provenance and control watermarks, but must not recover or mutate request-context payload truth directly."
+    },
+    {
+      "rule_id": "instructions-through-context-planner",
+      "source_resource": "instruction_capability",
+      "target_resource": "provider_request",
+      "allowed_direct": false,
+      "via_resources": ["request_context", "provider_request"],
+      "reason": "Instruction capabilities may become model-visible only through typed context-planner admission, not provider payload patching."
+    },
+    {
+      "rule_id": "instruction-capability-admits-request-context-direct",
+      "source_resource": "instruction_capability",
+      "target_resource": "request_context",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Instruction capability owner output may enter provider-visible context only by constructing a typed InstructionCapability context segment for the context planner."
+    },
+    {
+      "rule_id": "ui-to-node-pairing-through-runtime-command",
+      "source_resource": "ui_projection",
+      "target_resource": "node_pairing",
+      "allowed_direct": false,
+      "via_resources": ["runtime_command", "node_pairing"],
+      "reason": "UI may render node pairing projections and dispatch commands, but must not own or mutate node pairing transport truth directly."
+    }
+  ],
+  "forbidden_direct_relations": [
+    {
+      "source_resource": "ui_projection",
+      "target_resource": "task",
+      "required_via": ["runtime_command", "task"],
+      "source_gate_status": "checked",
+      "source_gate_reason": "source_shortcut_gates blocks freehand-ui-protocol from depending on or importing freehand-task",
+      "reason": "UI code must not directly mutate task truth."
+    },
+    {
+      "source_resource": "ui_projection",
+      "target_resource": "session",
+      "required_via": ["session"],
+      "source_gate_status": "checked",
+      "source_gate_reason": "source_shortcut_gates blocks freehand-ui-protocol from depending on or importing freehand-reason",
+      "reason": "UI code must not synthesize global persisted sessions from temporary subagent turns."
+    },
+    {
+      "source_resource": "timer",
+      "target_resource": "task",
+      "required_via": ["turn", "task"],
+      "source_gate_status": "precise_checked",
+      "source_gate_reason": "precise_source_edge_gates checks ProductionMasterRunner::handle_due_timer so due timers enter a timer wakeup turn and do not call Task Center mutation paths directly",
+      "reason": "Timer schedules are independent resources, not task lifecycle states."
+    },
+    {
+      "source_resource": "metadata",
+      "target_resource": "request_context",
+      "required_via": ["request_context"],
+      "source_gate_status": "checked",
+      "source_gate_reason": "source_shortcut_gates blocks freehand-metadata from depending on or importing freehand-blocks",
+      "reason": "Metadata/control state must not be smuggled into request content."
+    },
+    {
+      "source_resource": "runtime_command",
+      "target_resource": "workspace_path",
+      "required_via": ["checkpoint", "workspace_path"],
+      "source_gate_status": "precise_checked",
+      "source_gate_reason": "precise_source_edge_gates checks rewind_checkpoint so runtime command admission enters RuntimeCheckpointStore::rewind and does not mutate workspace paths directly",
+      "reason": "Runtime commands must not mutate workspace paths directly without checkpoint owner admission."
+    },
+    {
+      "source_resource": "instruction_capability",
+      "target_resource": "provider_request",
+      "required_via": ["request_context", "provider_request"],
+      "source_gate_status": "checked",
+      "source_gate_reason": "source_shortcut_gates blocks freehand-instructions from depending on or importing runtime/provider request owner crates",
+      "reason": "Instruction manifests must not patch provider requests directly."
+    },
+    {
+      "source_resource": "ui_projection",
+      "target_resource": "node_pairing",
+      "required_via": ["runtime_command", "node_pairing"],
+      "source_gate_status": "checked",
+      "source_gate_reason": "source_shortcut_gates blocks freehand-ui-protocol from depending on or importing freehand-node",
+      "reason": "UI code must not mutate or synthesize node pairing truth directly."
+    }
+  ],
+  "source_shortcut_gates": [
+    {
+      "source_resource": "ui_projection",
+      "target_resource": "task",
+      "forbidden_packages": ["freehand-task"],
+      "forbidden_import_tokens": ["freehand_task"],
+      "reason": "UI protocol must not depend on or import task truth owner directly."
+    },
+    {
+      "source_resource": "ui_projection",
+      "target_resource": "session",
+      "forbidden_packages": ["freehand-reason"],
+      "forbidden_import_tokens": ["freehand_reason"],
+      "reason": "UI protocol must not depend on or import reason persistence session truth directly."
+    },
+    {
+      "source_resource": "metadata",
+      "target_resource": "request_context",
+      "forbidden_packages": ["freehand-blocks"],
+      "forbidden_import_tokens": ["freehand_blocks"],
+      "reason": "Metadata owner must not depend on or import request-context planner truth directly."
+    },
+    {
+      "source_resource": "instruction_capability",
+      "target_resource": "provider_request",
+      "forbidden_packages": [
+        "freehand-runtime",
+        "freehand-provider-core",
+        "freehand-provider-anthropic",
+        "freehand-provider-openai"
+      ],
+      "forbidden_import_tokens": [
+        "freehand_runtime",
+        "freehand_provider_core",
+        "freehand_provider_anthropic",
+        "freehand_provider_openai"
+      ],
+      "reason": "Instruction capability loader must not patch provider request/runtime/provider owners directly."
+    },
+    {
+      "source_resource": "ui_projection",
+      "target_resource": "node_pairing",
+      "forbidden_packages": ["freehand-node"],
+      "forbidden_import_tokens": ["freehand_node"],
+      "reason": "UI protocol must not depend on or import node pairing truth directly."
+    }
+  ],
+  "precise_source_edge_gates": [
+    {
+      "source_resource": "timer",
+      "target_resource": "task",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "symbol_path": "ProductionMasterRunner::handle_due_timer",
+      "required_tokens": [
+        "claim_due_timer_schedule",
+        "timer_live_request",
+        "execute_timer",
+        "complete_due_timer_schedule"
+      ],
+      "forbidden_tokens": [
+        "open_task_center",
+        "TaskRuntime",
+        "TaskMutationRequest",
+        "record_execution",
+        "submit_review",
+        "approve_review",
+        "close_task"
+      ],
+      "reason": "Timer firing must start an internal Master wakeup turn and may not directly mutate Task Center truth."
+    },
+    {
+      "source_resource": "runtime_command",
+      "target_resource": "workspace_path",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "rewind_checkpoint",
+      "required_tokens": ["RuntimeCheckpointStore::new", "store.rewind"],
+      "forbidden_tokens": [
+        "fs::",
+        "write_text_atomic",
+        "with_workspace_root",
+        "execute_registry_tool_call"
+      ],
+      "reason": "Runtime command rewind admission must route through checkpoint owner before any workspace restore work happens."
+    }
+  ]
+}

@@ -35,11 +35,11 @@ Generated from `docs/mainline-calls/provider.openai-adapter.json`. Do not edit b
 
 ## Function Call Table
 
-| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `OpenAiAdapter::render_request` | `crates/freehand-provider-openai/src/lib.rs` | render semantic request to OpenAI wire request | provider semantic request | OpenAI path plus JSON body | runtime/provider caller | adapter renderer | bound |
-| 02 | `OpenAiAdapter::parse_response` | `crates/freehand-provider-openai/src/lib.rs` | parse single-shot OpenAI response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser | bound |
-| 03 | `OpenAiAdapter::parse_stream_event` | `crates/freehand-provider-openai/src/lib.rs` | parse one OpenAI stream event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser | bound |
+| step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 | `OpenAiAdapter::render_request` | `crates/freehand-provider-openai/src/lib.rs` | render semantic request to OpenAI wire request | provider semantic request | OpenAI path plus JSON body | runtime/provider caller | adapter renderer |  |  |  | bound |
+| 02 | `OpenAiAdapter::parse_response` | `crates/freehand-provider-openai/src/lib.rs` | parse single-shot OpenAI response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser |  |  |  | bound |
+| 03 | `OpenAiAdapter::parse_stream_event` | `crates/freehand-provider-openai/src/lib.rs` | parse one OpenAI stream event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

@@ -2,6 +2,16 @@
 
 - feature_id: `provider.reason-live-bridge`
 - owner: `crates/freehand-runtime`
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `request_context.build_provider_request`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `request_context.build_provider_request` | bound | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers provider descriptor, request/tool/terminal metadata, schema retry, provider retry, tool re-entry, and master framework request-contract tests | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers selected provider bridge smokes for text/tool/writable/checkpoint/schema/provider-retry/task-tool paths | `scripts/verify-provider-retry-online.sh` covers CLI/daemon live bridge proof through provider -> reason -> tool -> persistence -> UI projection for provider retry behavior |
+
 - lifecycle path under test:
   - selected config resolves one anthropic provider
   - runtime-owned live bridge restores existing session truth or explicitly creates a new session when recovery truth is missing
@@ -48,7 +58,13 @@
   - long operator prompts for master task orchestration reach the provider request with their tail sentinel intact instead of failing the `original-task` segment with a fixed 128-token budget
   - long previous-round visible output reaches the next provider request with its tail sentinel intact instead of failing `previous-visible-output` with a fixed 512-token budget
   - every live round includes completion contract, control status contract, runtime tool guidance, and the task contract before volatile carryover
+  - every Master live round includes TaskSpaceSnapshot with configured Worker,
+    known tasks, agents, recent events, valid status filters, and the explicit
+    no-`status="all"` instruction before the original task
   - master-task prompt contract, exposed `task` tool schema, tool field descriptions, dispatch conditions, workspace-boundary rule, concurrency/flow-control guidance, cross-workspace sample, and success/error/retry samples are present in the first provider request before any model task creation decision
+  - master-task request contract tells the model every task call needs
+    top-level `op`, shows valid create/assign examples, and says `target_cwd`
+    must be an expanded absolute existing repository/workspace path
   - master-autonomous success path: mock provider emits `task` tool calls for create_agent/create/assign/claim_next/running/review_ready/approve/close, each tool result is paired back to the next provider request, and Task Center truth closes only after review approval
   - master-autonomous execution-error path: mock provider emits a worker `blocked` execution fact, runtime returns it as a normal tool result, and Task Center truth remains blocked without review approval or close
   - master-autonomous rejected-review path: mock provider emits review_ready, reject, recovering with retry_count, second review_ready, approve, and close; Task Center truth preserves the reject-before-retry-before-close event order
@@ -57,17 +73,17 @@
   - provider raw debug-ledger failure path is explicit and aborts the live bridge
   - registry-backed tool schema export path
   - registry-backed tool schema fingerprint reaches planner diagnostics
-  - master-safe tool schema export omits unsandboxed `bash` while retaining
-    `task` and workspace-scoped file/search tools
-  - master workspace-scoped tool execution uses runtime home as the only allowed
-    root, regardless of a requested external session cwd
-  - external session cwd plus a workspace-scoped tool returns one paired failed
-    tool result that names the workspace boundary and instructs the model to use
-    `task` with a worker; it does not fail or terminalize the turn
+  - master-safe tool schema export is framework-only: it includes `task` and
+    `timer`, and omits file/search/write tools, unsandboxed `bash`,
+    `todo_write`, and `complete_step`
+  - injected Master file/search/write, shell, `todo_write`, or `complete_step`
+    calls return one paired failed capability-boundary tool result that
+    instructs the model to use `task` with a worker; it does not execute, leak
+    file content, fail, or terminalize the turn
   - `task` remains executable when the requested target cwd is outside the master
     runtime home so the model can create and assign delegated work
-  - a hidden/forbidden `bash` call returns a paired failed tool result with worker
-    delegation guidance instead of executing
+  - a hidden/forbidden `read_file` or `bash` call returns a paired failed tool
+    result with worker delegation guidance instead of executing
   - implemented registry read-only tool execution path
   - implemented registry read-only tool execution failure path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and lets the model continue to a later terminal schema
   - incomplete `tool_use` path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, keeps `schema_rejections=0`, and lets the model continue to a later terminal schema
@@ -98,7 +114,9 @@
   - repaired failed-tool logical turn remains fully visible in persisted/UI truth while future prompt context admits only the final repaired round by default
   - long master-task prompt admission preserves semantic payload while still reporting planner token diagnostics
   - long multi-round carryover admission preserves semantic payload while still reporting planner token diagnostics
-  - multi-round provider requests retain status schema and task-tool guidance after tool-result continuation, `continue`, or schema-polishing re-entry
+  - multi-round provider requests retain status schema, fresh TaskSpaceSnapshot,
+    and task-tool guidance after tool-result continuation, `continue`, or
+    schema-polishing re-entry
   - master-autonomy mock-provider scenarios prove model-output tool chains route through the live bridge and Task Center owner truth for success, execution-error blocked, and rejected-review retry outcomes
   - cross-workspace master fixture first attempts direct workspace access, receives
     boundary guidance, then calls `task` to create and assign worker work without

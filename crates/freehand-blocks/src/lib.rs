@@ -106,7 +106,10 @@ pub fn completion_schema_guidance() -> CompletionSchemaGuidance {
             "}\n",
             "</freehand_completion>\n",
             "Do not omit the tag. Invalid or missing schema will be rejected with field-level feedback.\n",
-            "Use plain string values for required text fields; do not emit arrays or objects for those fields."
+            "Use plain string values for required text fields; do not emit arrays or objects for those fields.\n",
+            "Claim semantics: `continue` means Freehand should immediately run another model round in this same turn. ",
+            "Do not use `continue` to wait for a Worker, timer, user, or external future event. ",
+            "After dispatching work and scheduling any needed timer, finish the current turn with `claim=\"complete\"` and explain the pending async follow-up in `completion_reason`, `summary`, `evidence`, and `learned`."
         )
         .to_owned(),
     }
@@ -575,6 +578,7 @@ fn context_segment_kind_label(kind: ContextSegmentKind) -> &'static str {
         ContextSegmentKind::DeveloperPolicy => "developer_policy",
         ContextSegmentKind::SessionMemory => "session_memory",
         ContextSegmentKind::SessionSummary => "session_summary",
+        ContextSegmentKind::InstructionCapability => "instruction_capability",
         ContextSegmentKind::TaskContract => "task_contract",
         ContextSegmentKind::TaskSpaceSnapshot => "task_space_snapshot",
         ContextSegmentKind::SubagentConclusion => "subagent_conclusion",
@@ -707,6 +711,11 @@ fn expected_segment_contract(
             ContextCachePolicy::Cacheable,
             None,
         ),
+        ContextSegmentKind::InstructionCapability => (
+            ContextStability::SessionStable,
+            ContextCachePolicy::Cacheable,
+            Some(ContextRole::Developer),
+        ),
         ContextSegmentKind::TaskContract => (
             ContextStability::SessionStable,
             ContextCachePolicy::Cacheable,
@@ -816,13 +825,14 @@ fn segment_order_key(kind: ContextSegmentKind) -> u8 {
         ContextSegmentKind::SystemAnchor => 0,
         ContextSegmentKind::DeveloperPolicy => 1,
         ContextSegmentKind::CompletionContract => 2,
-        ContextSegmentKind::TaskContract => 3,
-        ContextSegmentKind::SessionMemory => 4,
-        ContextSegmentKind::SessionSummary => 5,
-        ContextSegmentKind::TaskSpaceSnapshot => 6,
-        ContextSegmentKind::SubagentConclusion => 7,
-        ContextSegmentKind::ToolResultEvidence => 8,
-        ContextSegmentKind::UserTurnInput => 9,
+        ContextSegmentKind::InstructionCapability => 3,
+        ContextSegmentKind::TaskContract => 4,
+        ContextSegmentKind::SessionMemory => 5,
+        ContextSegmentKind::SessionSummary => 6,
+        ContextSegmentKind::TaskSpaceSnapshot => 7,
+        ContextSegmentKind::SubagentConclusion => 8,
+        ContextSegmentKind::ToolResultEvidence => 9,
+        ContextSegmentKind::UserTurnInput => 10,
     }
 }
 
@@ -1051,6 +1061,7 @@ mod tests {
             ),
             ContextSegmentKind::SessionMemory
             | ContextSegmentKind::SessionSummary
+            | ContextSegmentKind::InstructionCapability
             | ContextSegmentKind::TaskContract => (
                 ContextStability::SessionStable,
                 ContextCachePolicy::Cacheable,
@@ -1262,6 +1273,75 @@ mod tests {
         })
         .expect("planned b");
 
+        assert_ne!(
+            planned_a.diagnostics.stable_prefix_hash,
+            planned_b.diagnostics.stable_prefix_hash
+        );
+    }
+
+    #[test]
+    fn instruction_capability_segment_is_stable_typed_context() {
+        let planned_a = plan_context(ContextPlannerInput {
+            candidate_segments: vec![segment(
+                "instruction-capability",
+                ContextSegmentKind::InstructionCapability,
+                "manifest fingerprint: abc",
+                16,
+                "instruction_capability",
+            )],
+            current_user_text: "continue".to_owned(),
+            user_segment_id: ContextSegmentId::new("turn-user"),
+            user_provenance: ContextProvenance {
+                source: "turn_input".to_owned(),
+                reference: None,
+            },
+            rewrite_mode: ContextRewriteMode::OrdinaryTurn,
+            rewrite_version: 0,
+            tool_schema_fingerprint: None,
+        })
+        .expect("planned a");
+        let planned_b = plan_context(ContextPlannerInput {
+            candidate_segments: vec![segment(
+                "instruction-capability",
+                ContextSegmentKind::InstructionCapability,
+                "manifest fingerprint: def",
+                16,
+                "instruction_capability",
+            )],
+            current_user_text: "continue".to_owned(),
+            user_segment_id: ContextSegmentId::new("turn-user"),
+            user_provenance: ContextProvenance {
+                source: "turn_input".to_owned(),
+                reference: None,
+            },
+            rewrite_mode: ContextRewriteMode::OrdinaryTurn,
+            rewrite_version: 0,
+            tool_schema_fingerprint: None,
+        })
+        .expect("planned b");
+
+        let instruction_segment = planned_a
+            .ordered_segments
+            .iter()
+            .find(|segment| segment.segment_id.as_str() == "instruction-capability")
+            .expect("instruction segment");
+        assert_eq!(
+            instruction_segment.kind,
+            ContextSegmentKind::InstructionCapability
+        );
+        assert_eq!(
+            instruction_segment.stability,
+            ContextStability::SessionStable
+        );
+        assert_eq!(
+            instruction_segment.cache_policy,
+            ContextCachePolicy::Cacheable
+        );
+        assert_eq!(instruction_segment.role, ContextRole::Developer);
+        assert!(
+            render_context_segments_as_text(&planned_a.ordered_segments)
+                .contains("kind=\"instruction_capability\"")
+        );
         assert_ne!(
             planned_a.diagnostics.stable_prefix_hash,
             planned_b.diagnostics.stable_prefix_hash

@@ -2,6 +2,16 @@
 
 - feature_id: `reason.persistence`
 - owner: `crates/freehand-reason`
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `session.append_turn_to_turn`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `session.append_turn_to_turn` | bound | `cargo test -p freehand-reason -- --nocapture` covers session snapshot, reason-ledger append, sequence, rollback, and recovery tests | `cargo test -p freehand-reason -- --nocapture` covers persistence save/reload, active-turn update, terminal materialization, sidecar rebuild, and metadata reload smokes | `cargo test -p freehand-runtime session_continue -- --nocapture` covers CLI/shared runtime persistence restore smokes and replay/debug inspection without provider raw truth |
+
 - lifecycle path under test:
   - authoritative session rewrite truth is snapshotted under `~/.freehand/state/turns`
   - active turn truth is refreshed after durable reason-ledger append

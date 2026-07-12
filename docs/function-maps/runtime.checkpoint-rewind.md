@@ -5,6 +5,10 @@
 - owner module: `crates/freehand-runtime/src/lib.rs`
 - mainline call source: `docs/mainline-calls/runtime.checkpoint-rewind.json`
 - generated wiki: `docs/wiki/runtime.checkpoint-rewind.md`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `workspace_path.checkpoint_before_write`
+  - `runtime_command.rewind_checkpoint`
 - owner entry symbols:
   - `RuntimeCheckpointStore::new`
   - `RuntimeCheckpointStore::create_from_preview`
@@ -12,6 +16,21 @@
   - `list_checkpoints`
   - `execute_registry_tool_call`
   - `rewind_checkpoint`
+
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `checkpoint`
+- touched resources:
+  - `workspace_path`
+  - `runtime_command`
+- resource operations:
+  - `workspace_path.checkpoint_before_write`
+  - `runtime_command.rewind_checkpoint`
+- forbidden shortcuts:
+  - Runtime commands must not mutate workspace paths directly without checkpoint owner admission.
+  - UI projection must not become checkpoint recovery truth.
 
 ## Request Mainline
 

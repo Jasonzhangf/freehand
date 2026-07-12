@@ -2,6 +2,16 @@
 
 - feature_id: `error.center`
 - owner: `crates/freehand-control`
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `error.record_metadata`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `error.record_metadata` | bound | `cargo test -p freehand-control` covers classifier tests for schema/tool/provider/runtime failures and raw-text exclusion | `cargo test -p freehand-runtime live_bridge_records_error_center_metadata_for_schema_repair -- --nocapture` covers runtime metadata write/query smokes and CLI `adp-error-query` projection coverage | `scripts/verify-provider-retry-online.sh` covers S-profile provider retry/error-center proof showing retry_same_step rows and final fail_turn metadata through ADP query |
+
 - lifecycle path under test:
   - runtime observes schema/tool/provider failure
   - error center classifies domain, class, recovery action, retry fields, and visibility

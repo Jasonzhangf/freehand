@@ -2,6 +2,18 @@
 
 - feature_id: `runtime.checkpoint-rewind`
 - owner: `crates/freehand-runtime`
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `workspace_path.checkpoint_before_write`
+  - `runtime_command.rewind_checkpoint`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `workspace_path.checkpoint_before_write` | bound | `cargo test -p freehand-runtime checkpoint -- --nocapture` covers checkpoint manifest, preview path-set snapshot, runtime-home root, no-preview rejection, and corrupt ledger tests | `cargo test -p freehand-runtime checkpoint -- --nocapture` covers writable tool loop creates checkpoint before execute and can list checkpoint summaries from owner truth | `cargo test -p freehand-daemon checkpoint -- --nocapture` covers daemon/CLI writable-tool path mutating files only after checkpoint owner admission |
+| `runtime_command.rewind_checkpoint` | bound | `cargo test -p freehand-runtime checkpoint -- --nocapture` covers rewind restore create/modify/delete, missing manifest/blob, corrupt ledger, and bootstrap failure tests | `cargo test -p freehand-runtime checkpoint -- --nocapture` covers runtime dispatcher routes explicit rewind to checkpoint owner and refreshes protocol state | `cargo test -p freehand-daemon checkpoint -- --nocapture` covers daemon HTTP/ADP command ingress returning owner-backed rewind receipt or explicit target-not-found failure |
+
 - lifecycle path under test:
   - runtime receives writable tool execution intent
   - runtime requests preview truth from `tool.preview`

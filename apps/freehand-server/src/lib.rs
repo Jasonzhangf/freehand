@@ -1316,9 +1316,9 @@ mod tests {
         assert!(webui_css_body.contains(".phase2-action-row"));
         assert!(webui_css_body.contains(".phase2-action.danger"));
         assert!(!webui_css_body.contains(".settings-readonly-action"));
-        assert!(webui_css_body.contains(".session-agent-group"));
-        assert!(webui_css_body.contains(".session-agent-button"));
-        assert!(webui_css_body.contains(".session-agent-sessions"));
+        assert!(webui_css_body.contains(".session-with-workers"));
+        assert!(webui_css_body.contains(".session-worker-children"));
+        assert!(webui_css_body.contains(".session-item[data-session-kind=\"worker\"]"));
         assert!(webui_css_body.contains(".session-item[data-session-kind=\"task\"]"));
         assert!(webui_css_body.contains("env(safe-area-inset-bottom)"));
         assert!(!webui_css_body.contains(".work-context-tags"));
@@ -1490,13 +1490,12 @@ mod tests {
         assert!(js_body.contains("startNewConversation"));
         assert!(js_body.contains("startNewTask"));
         assert!(js_body.contains("selectedSessionIds"));
-        assert!(js_body.contains("expandedAgentIds"));
-        assert!(js_body.contains("function sessionAgentId"));
-        assert!(js_body.contains("function groupedSessionsByAgent"));
-        assert!(js_body.contains("function renderSessionAgentGroup"));
+        assert!(js_body.contains("function workerChildSessionsForParent"));
+        assert!(js_body.contains("parent_session_id"));
+        assert!(js_body.contains("function renderSessionWithWorkerChildren"));
         assert!(js_body.contains("function renderSessionItem"));
-        assert!(js_body.contains("session.source_agent_id"));
-        assert!(js_body.contains("state.turn.source.source_agent_id"));
+        assert!(js_body.contains("worker-task-"));
+        assert!(js_body.contains("session.temporary"));
         assert!(js_body.contains("selectAllSessions"));
         assert!(js_body.contains("draftSessionId: null"));
         assert!(js_body.contains("state.draftSessionId === sessionId"));
@@ -1665,6 +1664,7 @@ mod tests {
         assert!(js_body.contains("submitStartedAt"));
         assert!(js_body.contains("pendingSubmitId"));
         assert!(js_body.contains("pendingSubmitSessionId"));
+        assert!(js_body.contains("pendingSubmitError"));
         assert!(js_body.contains("turn.submit_id !== submitId"));
         assert!(js_body.contains("turn.session_id !== submitSessionId"));
         assert!(js_body.contains("modelRequestTimingKey"));
@@ -1727,7 +1727,14 @@ mod tests {
         assert!(js_body.contains("renderAttachmentTray"));
         assert!(js_body.contains("textWithAttachmentPlaceholders"));
         assert!(js_body.contains("clearCurrentAttachments"));
-        assert!(js_body.contains("dispatch failed; use ↑ to recall input"));
+        assert!(js_body.contains("dispatch status unknown; refresh before duplicate send"));
+        assert!(
+            js_body
+                .contains("Dispatch status is unknown. The service may still finish this request.")
+        );
+        assert!(js_body.contains("Refresh service state before sending a duplicate."));
+        assert!(js_body.contains("if (!state.selectedSessionId)"));
+        assert!(js_body.contains("state.draftSessionId = sessionId"));
         assert!(js_body.contains("case \"/attachments\""));
         assert!(js_body.contains("case \"/model\""));
         assert!(js_body.contains("model selector is read-only"));

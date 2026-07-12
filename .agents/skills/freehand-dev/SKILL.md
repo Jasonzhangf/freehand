@@ -10,28 +10,47 @@ Use this skill for any non-trivial work in this repo.
 ## Start
 
 1. Read `AGENTS.md`, `CACHE.md`, `MEMORY.md`, `note.md`.
-2. Read `docs/architecture/feature-map.md`.
-3. Use `Owner Routing Index` to map the problem area to exactly one `feature_id`.
-4. Read the feature's bound function-map doc before non-trivial implementation or debug.
-5. Read the feature's bound test-design doc before non-trivial implementation or debug.
-6. Identify the target `feature_id`, owning crate, allowed paths, forbidden paths, required checks, debug artifacts, runtime paths, `test_design_doc`, `function_map_doc`, and `lifecycle_checks`.
-7. If ownership is unclear, fix the map first or stop and ask.
-8. Before coding, ask three questions:
+2. Read `docs/resource-maps/core.json`.
+3. Identify the source resource, target resource, and whether the relation is direct or indirect.
+4. If the relation is indirect, follow the required intermediate resource; do not implement a direct shortcut.
+5. Confirm every involved resource declares at least one projection; resources without observable/testable projections are incomplete.
+6. For direct resource edges, require both an `allowed_direct=true` relation rule and a `source_edge_registry` row before treating a feature-local mainline row as source truth.
+7. Confirm operation bindings have non-empty `operation_id`, `owner_feature_id`, `source_resource`, `target_resource`, `effect`, `mainline_call_doc`, and `binding_status`.
+   - If `binding_status=pending`, require `pending_reason`, `pending_closure_doc`, and `pending_verification`; pending must name the closeout owner doc and verification entrance.
+8. Confirm operation ids use `<source_resource>.<operation>` and the operation suffix is listed in the source resource's `operations`; operation bindings must not create unlisted capabilities.
+9. Bound source edges must have `operation_id`, endpoints, mainline doc, step, file path, and symbol path registered in `source_edge_registry`; the registry file path must exist and the symbol path must resolve in source. Pending operations must not fake source edges.
+10. Operation bindings do not imply direct relation permission by themselves. If a bound operation pair lacks an `allowed_direct` relation rule with a non-empty reason, fix the resource map before code.
+11. For forbidden direct relations, confirm the same source/target pair is not also declared as `allowed_direct=true`; one resource pair cannot be both directly allowed and forbidden. Each forbidden direct relation must declare a non-empty `reason` and `required_via`, and the same source/target pair must have a matching `allowed_direct=false` relation rule with identical `via_resources`.
+12. For forbidden direct relations, check `source_gate_status`; `checked` means one unique source shortcut gate with a non-empty reason and at least one actual forbidden package/import check enforces the boundary, `precise_checked` means one unique specific file/symbol body gate is checked, and `deferred` is invalid in gated resource truth.
+13. Read `docs/architecture/feature-map.md`.
+14. Confirm the feature-map `Resource Ownership Index` backlinks the resource owner feature to the same `resource_type`.
+15. Use `Owner Routing Index` to map the problem area to exactly one `feature_id`.
+16. Read the feature's bound function-map doc before non-trivial implementation or debug.
+17. Read the feature's bound test-design doc before non-trivial implementation or debug.
+18. Identify the target `feature_id`, owning crate, allowed paths, forbidden paths, required checks, debug artifacts, runtime paths, `test_design_doc`, `function_map_doc`, and `lifecycle_checks`.
+19. If ownership is unclear, fix the map first or stop and ask.
+20. Before coding, ask three questions:
    - is the information sufficient
    - is the logic closed-loop
    - is lifecycle management complete
-9. If any answer is no, do read-only tracing and source search first. Ask the user only after read-only search cannot close the gap.
-10. Before implementation for each module feature, write or update its test-design record first.
-11. Test-design record must capture:
+21. If any answer is no, do read-only tracing and source search first. Ask the user only after read-only search cannot close the gap.
+22. Before implementation for each module feature, write or update its test-design record first.
+23. Test-design record must capture:
    - target feature and owner
    - lifecycle and logic path
+   - `## Resource Operation Test Coverage` for every bound resource operation
+   - each resource operation row maps status, white-box, module black-box, and project black-box coverage
+   - `bound` rows must name current verification entrances; do not write pending/future placeholders in bound coverage cells
+   - each `bound` coverage cell must include a command-style verification entry, not only prose
+   - repo-owned command targets must exist: cargo package names, `scripts/...` files, and `make` targets are gate-checked
    - white-box coverage plan
    - module black-box coverage plan
    - project black-box coverage impact
    - known gaps and non-goals
-12. Function-map record must capture:
+24. Function-map record must capture:
    - owner crate and owner module
    - code-bound entry symbols
+   - gated `## Resource Map Binding` with non-empty owned resources, touched resources, resource operations, forbidden shortcuts, and the source/target resources for each operation
    - request mainline
    - response mainline
    - error mainline
@@ -39,13 +58,13 @@ Use this skill for any non-trivial work in this repo.
    - generated wiki path when the feature is migrated
    - shared multi-reference functions and why they are reused
    - call table bound to code paths
-13. Tool-owning features must also capture:
+25. Tool-owning features must also capture:
    - tool spec owner
    - implemented vs unimplemented state
    - runtime exposure gate
    - execution owner symbol
    - side-effect and permission notes when relevant
-14. If another worker cannot read the test design and function map and understand where coverage lives, where the mainline runs, and what remains risky, the design is incomplete.
+26. If another worker cannot read the resource map, test design, and function map and understand where coverage lives, where the mainline runs, where source edges are registered, and what remains risky, the design is incomplete.
 
 ## Problem Routing
 
@@ -145,7 +164,8 @@ Use this skill for any non-trivial work in this repo.
 - WebUI session-list truth is the render gate after it has loaded. Latest-active query, latest-turn ADP/SSE updates, and selected-session transcript projections may render only when the session id is listed, current draft, or current pending-submit; non-destructive `DeleteSession` can leave old turn truth queryable, so never use latest-active as a fallback after session-list truth exists.
 - WebUI live transcript scrolling must preserve the operator's manual read position. Render updates may auto-follow only when the conversation scroll host is already near bottom or a local submit explicitly forces the new turn into view; ordinary render updates must not call `scrollIntoView`. Online proof must cover both "scrolled up stays put" and "bottom-pinned latest row remains visible above composer".
 - WebUI fixed/sticky composer clearance must come from the measured composer height (`--composer-clearance`), not fixed mobile padding guesses. Online proof must compare the latest message rect with the composer rect.
-- Internal framework sessions such as `master-lifecycle-*` are owner/debug truth, not user conversations. Hide them in protocol-owned user-facing session-list projection, keep direct transcript/debug query paths available, and do not make WebUI guess by id locally.
+- WebUI submit timeout/transport failure is ambiguous. Do not clear selected/draft session, pending user input, or draft attachments on submit failure; keep a visible pending card with unknown-dispatch status and instruct refresh before duplicate send. Online proof should force a deterministic WebSocket/offline failure from a draft session and assert the DOM is not `no sessions` / empty conversation.
+- Internal framework sessions such as `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` are owner/debug truth, not top-level user conversations. User-facing global session lists must be protocol-owned persisted session metadata only. Keep direct transcript/debug query paths available. WebUI may render `worker-task-*` only as indented temporary child rows under the owning persisted master session, using TaskBoard `parent_session_id` owner truth; do not make WebUI guess top-level visibility by id locally.
 - ADP WebSocket is UI/control/status transport, not node master/slave pairing transport; keep node pairing WebSocket semantics separate.
 - Command ingress must stay split from query/subscribe routes. Query/subscribe commands are not valid command-ingress payloads and must be rejected explicitly.
 - Before a UI command leaves `freehand-ui-protocol`, it must be wrapped in a protocol-owned owner-routing envelope; app boundaries must not invent their own command-to-owner routing.
@@ -185,6 +205,19 @@ Use this skill for any non-trivial work in this repo.
 - runtime must not hardcode demo tool schemas or demo tool execution outside `crates/freehand-tools`
 - every new built-in tool must first land as a spec in the tool owner with explicit `implemented` state
 - no tool may be exposed on the live provider path until its function map and test-design docs are updated in the same change set
+- Tool schemas must teach correct first calls, not rely on model trial/error. Keep descriptions concise but explicit about path/status/dispatch constraints, include one valid production pattern, and add prompt-guard tests for observed bad calls such as absolute/tilde `glob` and `task(status="all")`.
+- Worker `glob` is locked-workspace scoped, not relative-only: accept relative patterns and absolute patterns only when they remain under the canonical locked workspace; reject `~`, `..`, and external absolute patterns. If online samples show repeated `glob` absolute-path failures inside the Worker `target_cwd`, fix owner semantics/tests instead of only adding prose.
+- Treat user-facing symlink paths as first-class path truth. Worker path tools must canonicalize symlink aliases before workspace-boundary decisions; positive tests should cover `glob`, `grep`, `read_file`, `ls`, and `write_file` through an absolute symlink alias that resolves inside the locked task cwd.
+- Worker file probes should guide the model away from avoidable failures: `ls` can list directories or report one file entry for existence checks; `read_file` is only for existing UTF-8 files and should not be used on directories, generated files that do not exist yet, or binary sidecars like `.DS_Store`.
+- Master provider context must carry current framework behavior and Task Center truth before the model decides to call tools. Inject and test `TaskSpaceSnapshot` with configured Worker, valid status filters, known tasks, agents, and recent events so the model does not spend turns probing `list_agents`, `list_tasks`, or history just to understand the framework.
+- Master live provider tool surface is framework-only: expose `task` and `timer`, not file/search/write tools, shell, `todo_write`, or `complete_step`. Worker owns external repo read/search/write through its task `target_cwd`; injected Master non-framework calls must return a failed capability-boundary tool result with Worker dispatch guidance and no file-content leak.
+- Task tool guidance must include concrete argument shape, not only semantic prose. Lock top-level `op` in schema/tests/error text; show create/assign examples; require expanded absolute existing repository/workspace `target_cwd` instead of `~`, glob, or output paths.
+- Internal timing/wakeup capability is a standard `timer` framework tool, not task truth. Do not encode wait/schedule semantics as `task(op="wait")`, task notes, or task lifecycle state; `freehand-tools` owns the schema, and `freehand-runtime` owns durable timer state under `~/.freehand/state/timers` plus timer ledgers under `~/.freehand/ledgers/timers`.
+- Timer wakeups must persist the wakeup prompt and resume Master through an internal turn when due. Relative, absolute, local-time daily/weekly, and local-time 5-field cron semantics stay independent from Task Center truth; Worker tool surfaces must not expose `timer`.
+- If the next useful Master wait exceeds 3 minutes, the model-visible guidance must require `timer(op="schedule")` instead of dead-waiting in the current turn. After scheduling, Master should continue other ready Master-side work. The persisted timer prompt must say what current truth to inspect, what waited condition to revisit, and what decision to make.
+- Do not accept verbal timer claims as proof. Master may say a timer was
+  scheduled only after the `timer` tool returns `Timer scheduled` in that turn;
+  otherwise the wakeup is not durable truth and must be fixed in guidance/tests.
 - writable file-mutation tools may not reach the live provider path without a preview path in `freehand-tools` and checkpoint/rewind gating in `freehand-runtime`
 - `reason.session-history` inside `freehand-reason` owns base context, rewrite mode/version, rewrite ledger, and persisted session-history snapshots.
 - `reason.persistence` inside `freehand-reason` owns authoritative snapshot and reason-ledger persistence; UI sidecars and provider raw ledgers remain derived or debug-only.
@@ -200,7 +233,7 @@ Use this skill for any non-trivial work in this repo.
 - Shared contract types should default to serializable, replayable, and persistable unless a higher-priority truth source says otherwise.
 - Freehand AGENTS.md and skills discovery belongs to `instruction.capability-loader` in `crates/freehand-instructions`.
 - Runtime, UI, and provider code must not scan AGENTS.md or skills authoring directories directly; they must consume the deterministic manifest compiled from `~/.freehand/AGENTS.md`, `~/.freehand/skills`, local `AGENTS.md`, and local `.agents/skills`.
-- The first instruction capability slice is index-only. Provider-visible instruction injection must be added later through typed context-planner segments with explicit token budgets.
+- Provider-visible instruction admission must use `freehand-instructions::render_instruction_capability_context` plus `ContextSegmentKind::InstructionCapability`; provider adapters must not patch instruction content into wire payloads directly.
 
 ## Debug Workflow
 
@@ -235,7 +268,7 @@ Use this skill for any non-trivial work in this repo.
 - For master/worker or multi-agent autonomy claims, command-driven task samples are not sufficient. The proof must include a `SubmitUserInput`-only headless path, reject direct CLI task mutation in the mock proof, drive model/provider `task(op=...)` tool calls through a deterministic fixture or real provider, query transcript plus TaskBoard/AgentBoard/AgentLifecycle/TaskHistory truth, and verify the same task/execution/agent ids after S-profile restart.
 - A daemon Slave Worker loop is synchronous blocking runtime work and must not run inline on the Tokio async host thread. Route the long-running Worker/provider service through one explicit `tokio::task::spawn_blocking` owner boundary. Lock both directions: a nested runtime can be created/dropped successfully inside the boundary, and a blocking-task panic/join failure becomes an explicit daemon error.
 - Production Worker online closure must use a clean external target cwd and a real deliverable. Require Worker-owned `TaskResumed`, initial plus periodic `TaskHeartbeat`, `TaskReviewSubmitted`, a concrete artifact verified from disk, Master-owned approve/close, and same task/execution/agent history after explicit Worker restart. A created/assigned/interrupted task is red evidence.
-- Master/Worker cwd delegation must distinguish read from write. `target_cwd` is the current agent cwd/workspace root (`A`). External target path `B` is not automatically a new cwd. Read/query tools may inspect readable `B`; write/edit/delete outside `A` must return a paired failed tool result that says the write target is outside current cwd and instructs the agent to confirm/select the correct target workspace cwd, then delegate via task/worker. Do not collapse write-boundary failures into "path missing".
+- Master/Worker cwd delegation must distinguish Master orchestration from Worker execution. Master cannot directly read/search/write external repo paths; it creates/assigns Worker tasks with the correct existing `target_cwd`. Worker `target_cwd` is the current agent cwd/workspace root (`A`). External target path `B` is not automatically a new cwd. Worker read/query tools may inspect readable `B`; Worker write/edit/delete outside `A` must return a paired failed tool result that says the write target is outside current cwd and instructs the agent to report the correct target workspace cwd back to Master. Do not collapse boundary failures into "path missing".
 - Unrestricted shell cannot be exposed to Worker provider turns until there is a real write-boundary sandbox. Worker provider tool surfaces must exclude `bash`; injected shell calls must return a paired failed tool result instead of executing.
 - Do not invent `/workspace`, `/tmp`, or sibling output directories when the user supplied a repo path. Missing target paths must report exact original/expanded/canonicalization evidence rather than broad searching or path substitution.
 - For real-provider master/worker claims, task creation and assignment alone are failure evidence, not partial success. Run `scripts/verify-real-provider-master-worker-history.sh --task <task_id>` against every real-provider-created worker task; any history that is empty or only `TaskCreated,TaskAssigned` means the production worker runner/scheduler did not execute and the claim must stay red.
@@ -317,7 +350,7 @@ Use this skill for any non-trivial work in this repo.
 - Record exploration in `note.md`.
 - Promote only verified, durable conclusions into `MEMORY.md`.
 - Keep `CACHE.md` short and current for the next session.
-- If feature truth changed, update function map, architecture docs, skill workflow, and memory files in the same task.
+- If feature truth changed, update resource map, function map, architecture docs, skill workflow, and memory files in the same task.
 
 ## Closure Checklist
 
