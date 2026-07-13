@@ -5007,3 +5007,557 @@ Current real root cause split:
 - validation pending:
   - rerun resource-map JSON parse, fmt, xtask check/tests, mainlines generate/check, gates check, diff check, and MemoryPalace mine/search after this note update.
   - `rg -n "docs/mainlines|docs/test-designs" docs/goals/resource-center-top-down-refactor-plan.md docs/resource-maps/README.md .agents/skills/freehand-dev/SKILL.md docs/architecture/dev-gates.md` returned no matches.
+
+# 2026-07-12 Master lifecycle waiting and WebUI observer repair
+
+- finding:
+  - Completion guidance incorrectly told Master to use `claim="complete"` after dispatching Worker work or scheduling timers.
+  - That allowed a user-facing Master turn to look completed even when the user objective still depended on future Worker review/close truth.
+  - WebUI right inspector was still titled/debug-framed, and AgentBoard did not prioritize/click active Workers as lifecycle observation targets.
+- implementation:
+  - Added completion claim `waiting`, mapped to `TerminalStatus::ToolPending`, for durable async lifecycle waits after Worker dispatch/timer scheduling.
+  - Runtime/reason accept `CompletionDecision::Waiting` as terminal turn truth with `ToolPending`; UI protocol projects it as `Lifecycle` / `running`, not `Final` / `completed`.
+  - Runtime/tool guidance now says dispatch/heartbeat/timer/review pending are lifecycle progress, not final user-task completion.
+  - WebUI lifecycle observer title/copy replace debug framing; AgentBoard sorts active Workers first, styles them distinctly, and clicking an active Worker opens the TaskBoard-parented temporary worker session while refreshing TaskHistory/WorkerControl.
+  - Fixed the WebUI worker-control JS parse risk by ensuring only one `target` declaration remains.
+  - Updated function maps, test designs, and local skill with the waiting lifecycle rule.
+- validation:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `cargo test -p freehand-blocks completion -- --nocapture` passed 8 focused tests.
+  - `cargo test -p freehand-ui-protocol tool_pending_terminal_projects_as_lifecycle_running_not_final_completed -- --nocapture` passed.
+  - `cargo test -p freehand-server webui -- --nocapture` passed 3 focused tests.
+  - `cargo check -p freehand-reason -p freehand-runtime -p freehand-ui-protocol` passed.
+  - `cargo fmt --check`, `git diff --check`, `cargo run -p xtask -- mainlines check`, and `cargo run -p xtask -- gates check` passed.
+  - S-profile `scripts/install-launchd.sh restartS` completed; `curl -4fsS http://127.0.0.1:4042/health` returned `ok`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+  - Served HTML/CSS/JS on `4042` include lifecycle observer, active Worker styling, resizers, `phase2SortedAgents`, `openWorkerTaskSession`, and `waiting lifecycle`.
+  - Playwright DOM proof on `4042`: title `Task and Agent Lifecycle`, eyebrow `lifecycle observer`, copy names active Worker click behavior, both layout resizers present, grid `56px 254px 10px 866px 10px 244px`, AgentBoard container present.
+  - Final S-profile config remained minimax/MiniMax-M3/api.minimaxi.com inline auth; fixture env grep returned 0 matches.
+- remaining:
+  - This did not run a new real-provider long Worker task to completion; it verified the fixed lifecycle semantics, WebUI projection, S-profile service, and ADP transport.
+  - `output/` remains unrelated untracked work and was not touched.
+
+# 2026-07-12 Xiaozhi lifecycle E2E attempt blocked by provider quota
+
+- objective:
+  - Use fixed session `webui-session-fixed-xiaozhi-lifecycle-e2e` on S-profile `4042` to submit the user's xiaozhi analysis prompt and prove full lifecycle: Master dispatch -> Worker execution/report -> Master review/close -> user summary with WebUI worker-session evidence.
+- evidence:
+  - S-profile config stayed `provider=minimax`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`.
+  - Target repo exists at `/Users/fanzhang/Documents/github/xiaozhi-esp32-2.2.4`.
+  - Fixed session query after submit: `webui-session-fixed-xiaozhi-lifecycle-e2e:1:failed`, turn `runtime-turn-283`.
+  - Error-center for the fixed session: 10 provider rows, `anthropic_http_status_429`; first 9 `retry_same_step`, 10th `fail_turn`.
+  - HTTP command failure payload: `已达到 Token Plan 用量上限：请升级 Token Plan 套餐或购买积分补充用量。 (2056)`.
+  - WebUI screenshot saved to `output/xiaozhi-lifecycle-provider-429.png`, showing fixed session, submitted prompt, failed assistant terminal, lifecycle observer panel, TaskBoard/AgentBoard summary.
+  - `/Users/fanzhang/Documents/github/xiaozhi-esp32-2.2.4/analysis/project_analysis.html` does not exist after the run.
+- conclusion:
+  - Full lifecycle objective is blocked before Worker execution by external provider quota.
+  - Existing task `task-1783858124` remains only `TaskCreated,TaskWaitingAgent,TaskAssigned`; it has no `TaskResumed`, `TaskHeartbeat`, `TaskReviewSubmitted`, `TaskReviewApproved`, or `TaskClosed`.
+  - Do not claim Worker delivered or Master summarized until provider quota is restored or Jason explicitly authorizes a different provider/fixture path.
+
+# 2026-07-12 Provider-neutral OpenAI Responses wire proof
+
+- objective:
+  - Remove the live bridge's Anthropic-only assumption and keep provider-specific wire rendering/execution inside the selected provider adapter/executor.
+  - Validate RCC `cc` OpenAI Responses on S-profile `4042` without touching release `4041`.
+- implementation:
+  - `freehand-provider-openai` now owns `OpenAiExecutor`, endpoint selection, HTTP/SSE execution, raw response/error/stream capture, Responses tool declarations, Responses `function_call` / `function_call_output` re-entry, Chat Completions tool declarations, and Chat Completions `assistant.tool_calls` / `tool` re-entry.
+  - `freehand-runtime` now selects a provider-neutral `LiveProviderDriver` from config. Runtime maps Anthropic/messages, OpenAI/responses, and OpenAI/chat_completions descriptors, but does not build OpenAI wire bodies itself.
+  - Function map and mainline call map were synced for `provider.openai-adapter`, `provider.reason-live-bridge`, and stale error-center naming.
+- local validation:
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo test -p freehand-provider-openai -- --nocapture` passed 8 tests.
+  - `cargo check -p freehand-runtime` passed.
+  - `cargo test -p freehand-runtime live_bridge_maps_openai_protocols_to_provider_descriptor -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_rejects_unsupported_provider_selection -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_writes_provider_error_metadata_on_executor_failure -- --nocapture` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- online validation:
+  - S-profile config after restart: `provider=cc`, `provider_type=openai`, `provider_protocol=responses`, `base_url_host=api.anyint.ai`, `default_model=gpt-5.5`, `auth_source=env`.
+  - `scripts/install-launchd.sh restartS` and `scripts/install-launchd.sh restartWorkerS` completed service-scoped restarts; 4042 health returned `ok`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+  - Fixed proof task `provider-openai-tool-proof-fixed` reached `TaskCreated,TaskAssigned,TaskResumed,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskHeartbeat,TaskReviewSubmitted`.
+  - Worker session `worker-task-provider-openai-tool-proof-fixed`, turn `worker-turn-exec-worker-worker-1783864675743871000-122-r4`, ended `TerminalStatus::Success`.
+  - Provider raw ledgers under `~/.freehand/ledgers/providers/openai-compatible/worker/worker-task-provider-openai-tool-proof-fixed/` show OpenAI Responses returned tool schema names `complete_step,delete_range,edit_file,glob,grep,ls,multi_edit,read_file,todo_write,write_file`; model emitted `ls` calls in the first provider response, `read_file` in the second, `complete_step` in the third, and final completion in the fourth.
+  - Worker final summary: first markdown heading read from `AGENTS.md` is `# Freehand Project AGENTS`.
+  - `freehand-cliS adp-error-query --url ws://127.0.0.1:4042/adp --session worker-task-provider-openai-tool-proof-fixed --domain provider` returned `count=0`.
+  - Fixture env grep for provider retry and master autonomy fixture keys returned 0 matches.
+- remaining:
+  - Master background runner did not approve/close the fixed proof task within the short observation window; do not claim full Master close for this proof.
+  - Xiaozhi full E2E and `analysis/project_analysis.html` remain incomplete in this slice.
+  - S-profile is intentionally left on RCC `cc/openai/responses` for continued Responses verification, not restored to Minimax.
+
+# 2026-07-12 Submit failure observability and first-launch permission preflight
+
+- user correction:
+  - Worker execution errors are normal lifecycle facts. Correct flow is Worker returns error/block/interrupted truth to Master; Master continues processing from TaskBoard/EventInbox instead of treating worker failure as whole-system completion/failure.
+  - Online verification must observe subagent/worker state through session/task/agent truth, not just wait on command receipts.
+  - Install/first launch should request/check file permissions up front to avoid runtime task failures.
+- implementation:
+  - `RuntimeCommandDispatcher::prepare_live_submit_user_input` now returns explicit errors instead of swallowing selected-session/cwd resolution failures and falling back to non-live submit.
+  - `finish_live_submit` now calls `restore_or_materialize_failed_live_submit`: if live bridge already persisted failed turn truth, restore it; if provider/protocol failed before recovery truth exists, persist a failed turn under the selected session and project it to `UiProtocolState`; if persistence is corrupt/unreadable, fail explicitly.
+  - Added regression `live_dispatch_materializes_failed_turn_when_provider_fails_before_persistence`.
+  - Added `scripts/freehand-file-permission-preflight.sh` and wired `scripts/install-launchd.sh` install/restart paths to run it before launchd bootstrap/restart. On macOS it checks runtime home, workdir, Documents, Desktop, Downloads, optional extra paths, writes `~/.freehand/state/file-permission-preflight.json`, opens Full Disk Access settings on denial, and fails by default unless `FREEHAND_FILE_PERMISSION_PREFLIGHT=warn` is explicitly set.
+  - Updated runtime dispatch and foundation workspace function maps, mainline JSON, test designs, generated wiki, and local skill.
+- validation:
+  - `bash -n scripts/freehand-file-permission-preflight.sh` passed.
+  - `bash -n scripts/install-launchd.sh` passed.
+  - `FREEHAND_FILE_PERMISSION_PREFLIGHT=warn scripts/freehand-file-permission-preflight.sh` passed and wrote status ok.
+  - `jq empty docs/mainline-calls/runtime.ui-command-dispatch.json docs/mainline-calls/foundation.workspace.json` passed.
+  - `cargo test -p freehand-runtime live_dispatch_materializes_failed_turn_when_provider_fails_before_persistence -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_dispatch_failure_preserves_other_session_transcripts -- --nocapture` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p freehand-runtime` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+  - `scripts/install-launchd.sh restartS` passed with permission preflight ok and restarted `com.freehand.daemonS` on 4042.
+  - `curl -4fsS http://127.0.0.1:4042/health` returned ok.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+  - S config stayed `provider=cc`, `provider_type=openai`, `provider_protocol=responses`, `base_url_host=api.anyint.ai`, `default_model=gpt-5.5`, `auth_source=env`.
+  - fixture env grep for provider retry/master autonomy keys returned 0 matches.
+  - Correct internally tagged ADP online submit to fixed session `online-fixed-observable-submit-proof` showed after 2s `QuerySessionTurns` already had `runtime-turn-287`, original user_text, no terminal yet; final query showed `turn_count=1`, `terminal_status=Success`, original user_text and terminal_text visible. This proves submit does not collapse into an empty session while provider runs.
+  - Concurrent `QueryAgentBoard` showed worker truth: `worker state=blocked`, `current_task_id=task-1783787230`, `current_execution_id=exec-worker-worker-1783866078571451000-1266`, current_activity reason `worker live execution failed: provider live executor failed: openai_http_request_failed: error sending request for url (https://api.anyint.ai/openai/v1/responses)`.
+- correction:
+  - An earlier manual WebSocket proof used the wrong ADP envelope shape (`{"Command":...}`) and returned `invalid_adp_message: missing field kind`; that was not system evidence. Correct ADP JSON is internally tagged with `kind`.
+  - Do not use receipt waiting as sole progress proof; always query session/task/agent truth in parallel.
+- remaining:
+  - `cargo test -p freehand-runtime live_dispatch -- --nocapture` has one pre-existing/adjacent red test `live_dispatch_projects_failed_tool_result_without_command_failure` due strict unknown-tool request text assertion; the two focused submit-failure tests passed. This was not fixed in this slice.
+  - Worker task `task-1783787230` remains blocked on current provider request failure; this is observable task/agent truth, not a hidden empty-session state.
+
+# 2026-07-12 Standard fixed-session ADP observability script
+
+- correction:
+  - User correctly pointed out that online testing should use a standard fixed script and observe subagent/worker state instead of waiting.
+- implementation:
+  - Added `scripts/verify-adp-fixed-session-observability-online.py`.
+  - The script sends the correct internally tagged ADP command envelope (`kind=command`) to a fixed session, queries pending selected-session turns after a short delay, then waits for receipt or timeout and queries final selected-session turns plus TaskBoard/AgentBoard truth.
+  - It outputs one JSON proof with `pending`, `receipt`, `final`, and worker/blocked task summaries.
+  - Updated local Freehand skill and foundation workspace docs/mainline/test design to prefer this script for fixed-session ADP online submit validation.
+- validation:
+  - `python3 -m py_compile scripts/verify-adp-fixed-session-observability-online.py` passed.
+  - `scripts/verify-adp-fixed-session-observability-online.py --url ws://127.0.0.1:4042/adp --session online-fixed-observability-standard` passed with `ok=true`.
+  - Proof session `online-fixed-observability-standard`: pending had `runtime-turn-288`, original user_text, terminal_status=null; final had the same turn with `terminal_status=Success`; receipt was `reason_live_turn_completed rounds=1 schema_rejections=0 tool_executions=0`.
+  - Same proof exposed Worker owner truth: `worker state=blocked`, `current_task_id=task-1783787230`, `current_execution_id=exec-worker-worker-1783866078571451000-1266`, reason `openai_http_request_failed` to `https://api.anyint.ai/openai/v1/responses`.
+
+# 2026-07-12 Worker/Master observability closeout rerun and OpenAI provider failure classification
+
+- objective:
+  - Continue the active closeout goal from `/Users/fanzhang/.codex/attachments/ef38b4c5-a8ef-463a-9612-aaf6c24d9bba/pasted-text-1.txt`.
+  - Preserve S-profile `127.0.0.1:4042`, fixed session validation, no release `4041`, no broad kill, no commit, no `output/` cleanup.
+- gap found:
+  - `worker_execution_error_is_retryable_system_failure` classified Anthropic provider/network failures as retryable but did not include OpenAI-compatible provider error codes.
+  - Current S-profile uses `cc/openai/responses`; an `openai_http_request_failed` Worker provider failure could therefore be written as `TaskBlocked` instead of retryable `TaskInterrupted`.
+- implementation:
+  - Added OpenAI-compatible retryable provider/network codes to Worker classification: `openai_http_request_failed`, `openai_stream_read_failed`, and retryable `openai_http_status_*` values.
+  - Left `openai_adapter_failed`, `openai_callback_failed`, and content/deliverable errors non-retryable so they still map to `TaskBlocked`.
+  - Updated `production_worker_runner_provider_error_records_interrupted_and_requeues_same_task` to use the current `openai_http_request_failed` sample.
+  - Added classifier coverage for Anthropic/OpenAI retryable codes and non-retryable OpenAI adapter/callback/content examples.
+  - Updated `docs/testing/runtime.master-worker-loop.md`, regenerated wiki, and updated `.agents/skills/freehand-dev/SKILL.md`.
+- local validation:
+  - `bash -n scripts/freehand-file-permission-preflight.sh` passed.
+  - `bash -n scripts/install-launchd.sh` passed.
+  - `python3 -m py_compile scripts/verify-adp-fixed-session-observability-online.py` passed.
+  - `FREEHAND_FILE_PERMISSION_PREFLIGHT=warn scripts/freehand-file-permission-preflight.sh` passed and wrote `~/.freehand/state/file-permission-preflight.json` with `status=ok`.
+  - `jq empty docs/mainline-calls/runtime.ui-command-dispatch.json docs/mainline-calls/runtime.master-worker-loop.json docs/mainline-calls/foundation.workspace.json` passed.
+  - `cargo test -p freehand-runtime live_dispatch_materializes_failed_turn_when_provider_fails_before_persistence -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_dispatch_failure_preserves_other_session_transcripts -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_worker_runner_provider_error_records_interrupted_and_requeues_same_task -- --nocapture` passed with OpenAI request-failure sample.
+  - `cargo test -p freehand-runtime production_worker_runner_non_provider_execution_error_records_blocked_not_retryable -- --nocapture` passed.
+  - `cargo test -p freehand-runtime worker_retryable_provider_error_classifier_covers_supported_provider_families -- --nocapture` passed.
+  - `cargo fmt --check` passed.
+  - `cargo check -p freehand-runtime` passed.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- online validation:
+  - `scripts/install-launchd.sh restartS` completed service-scoped restart of `com.freehand.daemonS`; no broad kill used.
+  - `scripts/install-launchd.sh restartWorkerS` completed service-scoped restart of `com.freehand.workerS` so Worker loaded the new classifier.
+  - `curl -4fsS http://127.0.0.1:4042/health` returned `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` returned `adp_smoke_ok`.
+  - S config remained current RCC truth: `provider=cc`, `provider_type=openai`, `provider_protocol=responses`, `base_url_host=api.anyint.ai`, `default_model=gpt-5.5`, `auth_source=env`.
+  - `~/.freehand/state/file-permission-preflight.json` reported `status=ok`, `runtime_home=/Users/fanzhang/.freehand`, `workdir=/Users/fanzhang/.freehand`.
+  - Fixed session script passed: `scripts/verify-adp-fixed-session-observability-online.py --url ws://127.0.0.1:4042/adp --session online-fixed-observability-standard` returned `ok=true`.
+  - Fixed session proof: pending `turn_count=2`, current `runtime-turn-289` had original `user_text` and `terminal_status=null`; final still in the same session, `runtime-turn-289` reached `terminal_status=Success` with original `user_text`.
+  - Receipt: `reason_live_turn_completed rounds=1 schema_rejections=0 tool_executions=0 restored_closed_turns=1`.
+  - AgentBoard proof still exposes historical Worker failure truth: `worker state=blocked`, `current_task_id=task-1783787230`, `current_execution_id=exec-worker-worker-1783866078571451000-1266`, current activity reason `openai_http_request_failed` to `https://api.anyint.ai/openai/v1/responses`.
+  - Fixture env grep for provider retry/master autonomy keys returned 0 matches.
+- remaining:
+  - Historical task `task-1783787230` remains blocked from pre-fix/current provider failure truth; it is observable, but this rerun did not mutate historical blocked truth into interrupted truth.
+  - `output/` remains unrelated untracked work and was not touched.
+  - No commit was made.
+
+# 2026-07-12 Fixed-session online full validation rerun
+
+- objective:
+  - Clean top-level visible sessions, keep one fixed persisted session, and rerun S-profile `4042` provider retry plus normal Master/Worker E2E with active session/task/agent inspection instead of passive waiting.
+- implementation:
+  - `scripts/verify-provider-retry-online.sh` now validates the provider-retry sample session by direct session-turn query instead of requiring hidden sample sessions to appear in the global session list.
+  - `scripts/verify-master-worker-autonomy-online.sh` now has a 90s health wait with launchd/log diagnostics and `FREEHAND_MASTER_AUTONOMY_LEAVE_SERVICES_STOPPED=1` for callers that need fixture config restored without immediately restarting production services.
+  - `scripts/verify-normal-master-worker-e2e.sh` now calls autonomy with services-left-stopped, waits for health with diagnostics, sources S daemon env for seeded restart tasks, and prints task history plus AgentBoard observations while waiting for branch transitions.
+- online validation:
+  - Top-level ADP session list after cleanup stayed `sessions=1 ids=online-clean-full-validation:1:success`, turn `runtime-turn-290`.
+  - Provider retry online passed: `provider_retry_online_ok session=cli-adp-sample-provider-retry-1783870115617254000 mock_attempts=10 session_status=Failed`; provider error-center rows were 9 `retry_same_step` and 1 `fail_turn` for `anthropic_http_status_500`.
+  - Normal Master/Worker E2E passed: `normal_master_worker_e2e_ok url=ws://127.0.0.1:4042/adp`.
+  - Autonomy success task `task-cli-master-autonomy-success-FHAUTO1783871236726229000` events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskExecutionRecorded,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`; no `TaskBlocked`.
+  - Autonomy execution-error task `task-cli-master-autonomy-execution-error-FHAUTO1783871242940445000` immediate verify events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskExecutionRecorded,TaskBlocked`; no review/approve/close in the captured fixture proof.
+  - Autonomy reject-retry task `task-cli-master-autonomy-reject-retry-FHAUTO1783871247523130000` events: `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskReviewSubmitted,TaskReviewRejected,TaskResumed,TaskHeartbeat,TaskExecutionRecovering,TaskReviewSubmitted,TaskReviewApproved,TaskClosed`.
+  - Production rejected retry branch task `task-normal-rejected-1781783871279` reached `TaskReviewRejected -> TaskAssigned -> TaskResumed -> ... -> TaskReviewSubmitted -> TaskReviewApproved -> TaskClosed`, with AgentBoard showing `worker` on that same task.
+  - Blocked decision branch task `task-normal-blocked-1781783871376` reached `TaskBlocked,TaskProgressed`, with AgentBoard showing `worker:blocked`.
+  - Crash recovery branch task `task-normal-crash-1781783871411` stayed same-id and reached `TaskInterrupted -> TaskAssigned -> TaskResumed -> ... -> TaskReviewSubmitted -> TaskReviewApproved -> TaskClosed`; AgentBoard showed `worker` running the same task and later `waiting_review`.
+  - Final S config restored to current RCC truth: `provider=cc`, `provider_type=openai`, `provider_protocol=responses`, `base_url_host=api.anyint.ai`, `default_model=gpt-5.5`, `auth_source=env`.
+  - Final fixture env grep returned 0 matches for provider retry and master autonomy fixture keys.
+- local validation:
+  - `bash -n scripts/verify-master-worker-autonomy-online.sh` passed.
+  - `bash -n scripts/verify-normal-master-worker-e2e.sh` passed.
+  - `cargo test -p freehand-runtime live_bridge_fails_after_ten_provider_retries_with_error_code -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_worker_runner_provider_error_records_interrupted_and_requeues_same_task -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_worker_runner_non_provider_execution_error_records_blocked_not_retryable -- --nocapture` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- remaining:
+  - `cargo test -p freehand-task execution_fact_interrupted_marks_task_retryable_without_blocked_truth -- --nocapture` could not produce fresh evidence in this run: repeated exec sessions hung with no cargo/rustc/test process visible, and were interrupted. Do not report it as newly passed.
+  - Historical archived metadata rows remain because `DeleteSession` is non-destructive archive/delete-as-hidden; active top-level session list is clean.
+  - Historical TaskBoard/AgentBoard rows remain observable owner truth and include old polluted autonomy fixture tasks; final evidence uses the latest immediate fixture verify lines and latest production branch task histories.
+  - `output/` remains unrelated untracked work and was not touched.
+
+# 2026-07-13 Cargo focused-test hang investigation
+
+- finding:
+  - The previously reported `freehand-task` focused-test "hang" was not a Rust test deadlock.
+  - Re-running the exact test through `/opt/homebrew/bin/timeout` showed `RC=0`; the test itself ran in `0.01s` and passed.
+  - Direct focused `cargo test -p freehand-task execution_fact_interrupted_marks_task_retryable_without_blocked_truth -- --nocapture` now returns normally.
+  - The confusing cases were compile/no-output windows and pipeline/list probes. Process inspection must account for the local command wrapper (`rtk cargo`) plus `rustc`; a narrow process grep can miss the active compile child and falsely suggest "no cargo process".
+- implementation:
+  - Added `scripts/run-cargo-test-with-evidence.sh`.
+  - The script wraps `cargo test` with a bounded timeout, writes stdout/stderr logs under `/tmp` by default, prints status/log paths/captured output, and returns the real cargo/timeout exit code.
+  - Updated `.agents/skills/freehand-dev/SKILL.md` to use the evidence script for focused cargo tests that appear to hang or emit no output, and to avoid narrow process-grep conclusions.
+- validation:
+  - `bash -n scripts/run-cargo-test-with-evidence.sh` passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-task execution_fact_interrupted_marks_task_retryable_without_blocked_truth -- --nocapture` passed with `status=0`; stdout showed `1 passed; 0 failed; 46 filtered out`; stderr showed `Finished test profile` and the `freehand_task` unit-test binary path.
+
+# 2026-07-13 Master three-worker parent-session lifecycle proof
+
+- user expectation checked:
+  - Expected flow is one user-visible Master session dispatching three Worker tasks, Workers returning results, Master reviewing all three, and then Master presenting one final user-facing summary.
+  - Previous `scripts/verify-normal-master-worker-e2e.sh` did not prove this full parent-session flow; it proved separate lifecycle branches.
+- implementation:
+  - Added a runtime Master completion gate in `crates/freehand-runtime/src/lib.rs`: user-session Master `claim="complete"` is rejected while any Task Center child task with the same `parent_session_id` is not `Closed`.
+  - Added regression `live_master_rejects_complete_while_parent_child_task_open`.
+  - Added `scripts/verify-master-three-worker-e2e-online.sh` and switched its stable fixed session to `online-master-three-worker-e2e-current` because the earlier fixed session `online-master-three-worker-e2e` contains an old persisted active/tool-running turn and current rollback rejects active-turn sessions.
+  - Updated runtime master-worker function map, test design, and local skill to record that parent/child lifecycle closure is runtime-gated, not prompt-only.
+- local validation:
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime live_master_rejects_complete_while_parent_child_task_open -- --nocapture` passed.
+  - `cargo test -p freehand-runtime master_lifecycle_closes_in_same_round_as_target_task_mutation -- --nocapture` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- online evidence:
+  - S-profile restored after each script run: `provider=cc`, `provider_type=openai`, `provider_protocol=responses`, `base_url_host=api.anyint.ai`, `default_model=gpt-5.5`, `auth_source=env`; fixture env grep returned 0 matches.
+  - First old-session run against `online-master-three-worker-e2e` exposed the fixed-session cleanup gap: no fixture requests and no new turn because the fixed session still had old active/tool-running truth.
+  - Stable current-session run `online-master-three-worker-e2e-current` created three child tasks under the same parent session with stamp `1781783908345`.
+  - Runtime rejected premature Master final completion while children were open; parent terminal became `Blocked`, not `Success`, with rejection message naming open child tasks `task-three-worker-1781783908345-beta:Running` and `task-three-worker-1781783908345-gamma:Assigned`.
+  - Child tasks eventually reached:
+    - alpha: `TaskCreated, TaskWaitingAgent, TaskAssigned, TaskResumed, TaskHeartbeat..., TaskReviewSubmitted, TaskReviewApproved, TaskClosed`
+    - beta: `TaskCreated, TaskWaitingAgent, TaskAssigned, TaskResumed, TaskHeartbeat..., TaskReviewSubmitted, TaskReviewApproved, TaskClosed`
+    - gamma: `TaskCreated, TaskWaitingAgent, TaskAssigned, TaskResumed, TaskHeartbeat...`, then later `review_submitted`, then `closed`.
+- remaining product gap:
+  - The premature-success bug is fixed, but the full expected flow is still not closed.
+  - After all three child tasks closed, the parent user session did not automatically resume and synthesize the final user-facing answer.
+  - Missing owner behavior is a parent-session aggregator/resume path: when all child tasks for a parent session close, runtime should trigger a Master follow-up turn in the same persisted parent session, inspect child review summaries, and write the final answer.
+
+# 2026-07-13 Parent-session aggregator/resume gap source trace
+
+- status:
+  - No code changed in this trace; evidence is source/docs inspection only.
+  - `TaskClosed` already projects into Master-visible EventInbox as `task_closed`.
+  - `ProductionMasterRunner::handle_event` only treats `review_ready`, `execution_blocked`, and `execution_interrupted` as actionable, so `task_closed` is consumed as non-actionable and cannot trigger parent aggregation.
+  - `master_parent_session_completion_rejection` correctly blocks user-session Master `claim="complete"` while same-`parent_session_id` child tasks remain open, but it is only a rejection gate, not a resume trigger.
+  - `ReasonPersistence::restore_turn_snapshots_for_ui` already exists, and `UiProtocolState::replace_session_turn_projections` can refresh one session transcript; a background parent aggregation turn still needs query/projection refresh so ADP/WebUI sees the persisted follow-up turn.
+- fix direction:
+  - Add `task_closed` handling in `runtime.master-worker-loop`.
+  - For the closed task's `parent.session_id`, query all terminal-included TaskBoard children with the same parent session.
+  - If any child is not `Closed`, no-op and advance cursor.
+  - If all required children are `Closed`, collect latest `TaskReviewSubmitted` summary/deliverables/evidence from each child history and run a follow-up Master turn in the same parent session.
+  - Add durable idempotency keyed by `parent_session_id` plus closed child task set/version to avoid duplicate summaries on cursor replay/restart.
+  - Add runtime/UI query projection coverage proving `QuerySessionTurns` sees the background-persisted parent aggregation turn.
+
+# 2026-07-13 Parent-session aggregator/resume implementation and online closure
+
+- implementation:
+  - `ProductionMasterRunner::handle_event` now routes `task_closed` to `handle_parent_task_closed`.
+  - The handler requires `closed_task.parent.session_id`, queries terminal-included Task Center truth, filters all children with the same parent session, and no-ops while any sibling is not `Closed`.
+  - Closed children are deterministically sorted; each child contributes only its latest `TaskReviewSubmitted` `summary`, `deliverables`, and `evidence`.
+  - The follow-up Master turn runs through the ordinary live reason path in the original persisted parent session. Its internal prompt forbids raw Worker transcripts and additional task lifecycle mutations.
+  - Aggregation identity uses the parent session plus sorted child ids and each child `last_event_seq`, rendered as a stable `<freehand_parent_aggregation id="...">` marker.
+  - Restart/crash idempotency checks successful reason persistence for that marker before provider execution. This covers the window where the reason turn closed successfully but the Master cursor or `completed_parent_aggregations` state was not persisted.
+  - Runtime-backed `QuerySessionTurns` now restores current snapshots from `ReasonPersistence` and replaces the selected session projection, so a background-created aggregation turn becomes visible without daemon restart.
+  - UI user-text projection suppresses internal parent-aggregation prompts; the final assistant summary remains visible.
+- tests and maps:
+  - Added positive `production_master_runner_aggregates_closed_children_in_parent_session`.
+  - Added negative `production_master_runner_does_not_aggregate_while_sibling_open`.
+  - Added replay/restart `production_master_runner_parent_aggregation_is_idempotent_on_event_replay`.
+  - Added runtime/query projection `runtime_query_session_turns_restores_background_parent_aggregation`.
+  - Retained the earlier negative gate `live_master_rejects_complete_while_parent_child_task_open`.
+  - Updated runtime Master/Worker and UI command-dispatch function maps, test designs, mainline-call manifests, and generated wiki.
+- online verifier:
+  - `scripts/verify-master-three-worker-e2e-online.sh` now creates an isolated temporary `HOME/.freehand`, uses isolated port `4142`, switches both Master and Worker configs to the deterministic fixture before submission, records explicit PIDs, and stops only those PIDs.
+  - Isolation is required because global `~/.freehand` contains an unrelated old EventInbox event for missing task `task-three-worker-1781783906334-beta`; no global Task Center/EventInbox truth was cleaned, skipped, or rewritten.
+  - Acceptance checks the original parent prompt, three same-parent tasks, full `TaskCreated -> TaskAssigned -> TaskResumed -> TaskReviewSubmitted -> TaskReviewApproved -> TaskClosed` lifecycle, a later successful aggregation turn, all three result tokens, hidden synthetic prompt text, and restart non-duplication.
+- verified online evidence:
+  - Session: `online-master-three-worker-aggregator-1783916209`.
+  - Tasks: `task-three-worker-1781783916209-alpha`, `task-three-worker-1781783916209-beta`, `task-three-worker-1781783916209-gamma`.
+  - Every task was `closed`, shared the parent session, and contained `TaskCreated`, `TaskWaitingAgent`, `TaskAssigned`, `TaskResumed`, `TaskHeartbeat`, `TaskReviewSubmitted`, `TaskReviewApproved`, and `TaskClosed`.
+  - Parent aggregation: `turn_id=runtime-turn-2`, `terminal_status=Success`, `turn_count=11`.
+  - Final visible text contained `worker_result_alpha=1781783916209`, `worker_result_beta=1781783916209`, and `worker_result_gamma=1781783916209`.
+  - Original parent submit receipt had `rounds=10 schema_rejections=3 tool_executions=7`, proving premature completion was rejected before the automatic follow-up succeeded.
+  - Restart proof: `aggregation_count=1`, `aggregation_turn_id=runtime-turn-2`, `restart_idempotent=true`, `turn_count=11`.
+- local evidence already obtained:
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_master_runner_ -- --nocapture`: 14 passed.
+  - Focused tests `live_master_rejects_complete_while_parent_child_task_open`, `runtime_query_session_turns_restores_background_parent_aggregation`, and `live_bootstrap_restores_all_persisted_sessions_into_ui_state` passed.
+  - `cargo clippy -p freehand-runtime --all-targets -- -D warnings`, `cargo fmt --check`, `cargo run -p xtask -- mainlines generate/check`, `cargo run -p xtask -- gates check`, `git diff --check`, JSON parse checks, and verifier shell syntax passed.
+- known regression status:
+  - Full `cargo test -p freehand-runtime -- --nocapture --test-threads=1` is not green: 132 passed and 12 failed in pre-existing/adjacent live-tool, checkpoint rewind, autonomy boundary, and task-list publication tests.
+  - Aggregator-focused coverage passed. Do not claim the entire `freehand-runtime` package suite is green.
+  - No commit was made. Unrelated dirty/untracked work, including `output/`, remains untouched.
+
+# 2026-07-13 Parent-session aggregator/resume continuation verification
+
+- restored context:
+  - MemoryPalace search for `parent session aggregator resume child closed master worker` returned the existing gap and implementation records.
+  - Current worktree already contains an uncommitted parent-session aggregator/resume implementation plus unrelated dirty/untracked files.
+- local validation rerun:
+  - `FREEHAND_CARGO_TEST_TIMEOUT_SECONDS=600 scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_master_runner_ -- --nocapture` passed: 14 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime live_master_rejects_complete_while_parent_child_task_open -- --nocapture` passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime runtime_query_session_turns_restores_background_parent_aggregation -- --nocapture` passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime live_bootstrap_restores_all_persisted_sessions_into_ui_state -- --nocapture` passed.
+  - `cargo fmt --check` passed.
+  - `cargo clippy -p freehand-runtime --all-targets -- -D warnings` passed.
+  - `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- full package status:
+  - `FREEHAND_CARGO_TEST_TIMEOUT_SECONDS=1200 scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime -- --nocapture --test-threads=1` remains non-green with 132 passed and 12 failed.
+  - The 12 failures are in existing/adjacent live-tool, checkpoint rewind, autonomy boundary, and task-list publication tests; parent aggregation tests passed in the same full run.
+- online validation rerun:
+  - `scripts/verify-master-three-worker-e2e-online.sh` passed in isolated HOME/port 4142 with deterministic fixture.
+  - Session: `online-master-three-worker-aggregator-1783918267`.
+  - Tasks: `task-three-worker-1781783918267-alpha`, `task-three-worker-1781783918267-beta`, `task-three-worker-1781783918267-gamma`.
+  - Each task reached `TaskCreated, TaskWaitingAgent, TaskAssigned, TaskResumed, TaskHeartbeat, TaskReviewSubmitted, TaskReviewApproved, TaskClosed`.
+  - Parent aggregation turn: `runtime-turn-2`, `terminal_status=Success`, `turn_count=11`.
+  - Final visible text contained `worker_result_alpha=1781783918267`, `worker_result_beta=1781783918267`, and `worker_result_gamma=1781783918267`.
+  - Original submit receipt: `reason_live_turn_completed rounds=10 schema_rejections=3 tool_executions=7 restored_closed_turns=0`.
+  - Restart idempotency proof: `aggregation_count=1`, `aggregation_turn_id=runtime-turn-2`, `restart_idempotent=true`.
+- remaining:
+  - No commit made.
+  - Unrelated dirty/untracked work, including `output/`, remains untouched.
+
+# 2026-07-13 User correction: parent evaluation is not result aggregation
+
+- corrected objective:
+  - Closing all current Worker child tasks is not evidence that the overall user
+    goal is complete.
+  - The all-children-closed event must resume Master evaluation in the original
+    parent session.
+  - Master must compare original user objective history, decomposed child
+    goals/deliverables/acceptance, and accepted Worker review results.
+  - The decision is one of: reject/rework before child close, create correction
+    or improvement work, create newly discovered next-round work, record an
+    explicit external blocker, or claim final completion only when the overall
+    objective is verified complete.
+- identified design error:
+  - The current `<freehand_parent_aggregation>` prompt instructs the Master to
+    synthesize a final answer and forbids task lifecycle mutations.
+  - That design can summarize accepted work without proving the total goal and
+    therefore is not a complete Master/Worker autonomy loop.
+- required repair:
+  - Replace aggregation semantics with an idempotent parent evaluation loop.
+  - Include parent objective truth and full child task acceptance semantics in
+    the evaluation input.
+  - Permit next-round task creation/assignment.
+  - Add an online proof where the first completed child set causes a new
+    improvement task, and only the later evaluation reaches final success.
+
+# 2026-07-13 Parent-session evaluation loop implementation and closure
+
+- implementation:
+  - Replaced `ParentAggregated` and `<freehand_parent_aggregation>` runtime
+    semantics with `ParentEvaluated` and `<freehand_parent_evaluation>`.
+  - Parent evaluation input now contains deduplicated root user objective turns
+    only; repair rounds such as `runtime-turn-N-r2` are excluded.
+  - Each completed child contributes its task `content`, `goal`, required
+    `deliverables`, `acceptance`, and latest accepted `TaskReviewSubmitted`
+    summary/deliverables/evidence.
+  - The evaluation prompt explicitly requires comparing total objective and
+    decomposed task truth, permits correction/improvement/new task creation,
+    permits an explicit blocker, and forbids final `claim="complete"` unless the
+    overall objective is verified complete.
+  - Parent evaluation idempotency is keyed by parent session plus sorted child
+    ids/event versions. Persisted `Success`, `ToolPending`, or `Blocked`
+    evaluation turns count as durable decisions because they may already have
+    created next-round tasks; failed/interrupted/cancelled evaluations retry.
+  - `QuerySessionTurns` hides all `<freehand_parent_...>` synthetic prompts and
+    restores the evaluation/final assistant result from reason persistence.
+- tests:
+  - `production_master_runner_` passed 16/16.
+  - Coverage includes overall-goal input, internal repair-text exclusion,
+    missing parent goal explicit failure, open sibling no-op, next-round task
+    creation, and ToolPending replay/restart idempotency.
+  - `runtime_query_session_turns_restores_background_parent_evaluation` passed.
+  - `cargo fmt --check`, `cargo clippy -p freehand-runtime --all-targets -- -D warnings`,
+    `xtask mainlines generate/check`, `xtask gates check`, and
+    `git diff --check` passed.
+  - Full `freehand-runtime` run: 134 passed / 12 failed. The same adjacent
+    live-tool/checkpoint/autonomy/task-list tests remain failing; no new parent
+    evaluation failure appeared.
+- online iteration:
+  - First corrected verifier run used a stale `target/debug/freehand-daemon`;
+    persisted prompt evidence still showed `<freehand_parent_aggregation>`.
+    Rebuilding the exact daemon binary fixed that validation error.
+  - The next run exposed fixture truth pollution: the fixture treated the
+    expected integration token in task input as completed Worker output. The
+    runtime completion gate correctly rejected final completion while the
+    integration task remained open. The fixture now reads only
+    `review_summary` truth.
+- final online proof:
+  - Session: `online-master-three-worker-evaluation-1783921598`.
+  - Initial tasks: alpha, beta, gamma.
+  - Beta history proved quality review and rework:
+    `TaskReviewSubmitted -> TaskReviewRejected -> TaskAssigned -> TaskResumed -> TaskReviewSubmitted -> TaskReviewApproved -> TaskClosed`.
+  - After the first accepted child set closed, parent evaluation created and
+    assigned `task-three-worker-1781783921598-integration`.
+  - Integration reached full review/approve/close lifecycle.
+  - A second parent evaluation produced final `runtime-turn-3` only after all
+    four accepted results satisfied the overall goal.
+  - Final text contained alpha, corrected beta, gamma, and integration result
+    tokens.
+  - Restart proof: `final_evaluation_count=1`,
+    `final_evaluation_turn_id=runtime-turn-3`, `restart_idempotent=true`,
+    `turn_count=16`.
+- remaining:
+  - No commit made because the worktree still contains broad pre-existing
+    dirty/untracked changes interleaved with this runtime batch.
+  - `output/` and unrelated dirty files remain untouched.
+
+# 2026-07-13 Multi-agent dashboard static WebUI prototype
+
+- scope:
+  - Research and produce a review-only static WebUI design.
+  - Do not modify existing Freehand WebUI assets, UI protocol, or runtime.
+- research direction:
+  - Codex: project/session switching, parallel task supervision, and reviewable
+    work progress.
+  - Claude Code Remote Control: mobile as a remote view/control surface for a
+    computer-hosted session.
+  - OpenMinis: phone-first agent/settings information architecture only; do not
+    copy phone-local storage/mount semantics.
+  - Manus: task/subtask and autonomous execution status cues.
+- design decision:
+  - Desktop keeps a Codex-like left session rail and conversation canvas.
+  - The middle-top dashboard shows total goal, Master phase, Worker task/review
+    state, and the decision queue.
+  - Master semantics are quality evaluation, reject/rework, next-round task,
+    blocker, or overall completion; Worker results are not treated as a final
+    aggregation.
+  - Tablet portrait and phone use a session drawer, compact agent status strip,
+    and detailed agent bottom sheet.
+- artifact:
+  - `docs/prototypes/freehand-agent-dashboard/index.html`
+  - Single-file offline HTML/CSS/JS with explicit mock-data labeling and seven
+    lifecycle state scenarios.
+- verification:
+  - Playwright rendered `1440x900`, `834x1112`, and `390x844`.
+  - No horizontal overflow.
+  - Desktop rail/dashboard visibility and portrait drawer/status-strip layout
+    passed.
+  - Drawer open/close, sheet open, close button, scrim close, seven state
+    transitions, three Worker cards, decision rows, and mobile composer
+    clearance passed.
+  - Screenshot visual inspection passed for desktop, phone, phone drawer, and
+    phone agent sheet.
+- boundary:
+  - Existing `apps/freehand-server/assets/webui.js`, `webui.css`, protocol, and
+    runtime were not modified by this design task.
+
+# 2026-07-13 Multi-agent dashboard visual confirmation
+
+- user feedback:
+  - Original prototype was functionally acceptable but slightly too plain and
+    warm-toned.
+  - Preferred visual direction is black/white/gray with only a small amount of
+    blue or green accent.
+  - Mobile implementation should follow this confirmed prototype direction.
+- update:
+  - Adjusted `docs/prototypes/freehand-agent-dashboard/index.html` palette to
+    black/white/gray base.
+  - Kept blue for active/running/evaluation accents and green for accepted/OK.
+  - Converted rework/review/neutral statuses to gray instead of loud warm/red
+    colors.
+  - Structure and mobile layout were unchanged.
+- verification:
+  - Playwright smoke passed at `1440x900`, `834x1112`, and `390x844`.
+  - Verified no horizontal overflow, three Worker cards, `Master reviewing`
+    default phase, and hidden closed sheet.
+  - Visual screenshots reviewed for desktop and phone after palette change.
+- product direction:
+  - Future mobile WebUI implementation should use this prototype as the target
+    layout and visual baseline, but must still bind to owner-backed projections
+    and run normal WebUI/mobile online gates when implementation begins.
+
+# 2026-07-13 Production mobile Agent Dashboard closeout
+
+- owner/scope:
+  - `app.webui-smoke`
+  - production WebUI shell/JS/CSS/tests/verifier only
+  - no runtime/provider/protocol truth changes
+- implementation:
+  - phone/tall-phone/tablet portrait keep conversation-first layout
+  - compact top Agent strip opens a bottom sheet containing Master decision,
+    Worker tasks, Agents, review history, and Worker control
+  - session navigation remains a left drawer with one expandable Master agent
+    group; persisted parent sessions contain TaskBoard-parented temporary Worker
+    child rows
+  - drawer and Agent sheet are mutually exclusive
+  - black/white/gray base with minimal blue active/evaluation and green accepted
+    accents
+  - mobile dashboard derives presentation only from TaskBoard, AgentBoard,
+    EventInbox, TaskHistory, WorkerControl, and selected-session turn truth
+  - all Worker children closed without selected parent Success renders
+    `Awaiting Master evaluation`, not `Goal complete`
+- online gaps found and fixed:
+  - New conversation previously existed only as a browser draft, so turns were
+    queryable while `QuerySessionList` returned zero sessions after reload;
+    `startNewConversation` now sends protocol-owned `CreateSession`, refreshes
+    session list, and refreshes the selected transcript
+  - mobile drawer CSS/verifier expected an agent -> sessions hierarchy while JS
+    emitted only flat parent wrappers; `renderSessionAgentGroup` now owns the
+    Master group presentation without changing session truth
+  - verifier now recognizes blocked/failed/cancelled/interrupted terminal turns,
+    uses a genuinely scrollable portrait viewport for scroll-lock proof, checks
+    left-edge styling only on cards actually emitted by the live provider, and
+    waits for mobile sheet geometry to settle before screenshots
+- verification:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `node --check scripts/webui_verify_online.mjs`
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-server -- --nocapture`
+    passed 13 tests
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+  - S-profile health and `freehand-cliS adp-smoke` passed
+  - final browser/ADP proof:
+    `artifacts/webui-online/20260713-verify-4042-1783933067766/summary.json`
+  - all summary checks are true, including mobile strip/sheet, close/scrim,
+    drawer mutual exclusion, state preservation, service-truth matching,
+    no raw internal chrome, closed-child evaluation semantics, tablet portrait,
+    desktop regression, drawer swipe/hierarchy, and scroll-lock proof
+  - visually reviewed final screenshots:
+    `19-mobile-session-drawer-open-swipe.png`,
+    `32-mobile-agent-dashboard-main.png`,
+    `33-mobile-agent-dashboard-sheet.png`,
+    `37-tablet-agent-dashboard-sheet.png`,
+    `38-desktop-agent-dashboard-regression.png`
+- restored runtime profile:
+  - provider `cc`
+  - provider type `openai`
+  - protocol `responses`
+  - host `api.anyint.ai`
+  - model `gpt-5.5`
+  - auth source `env`
+  - verifier credential env marker absent

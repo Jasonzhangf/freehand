@@ -1,0 +1,1911 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freehand Agent Dashboard Prototype</title>
+    <style>
+      :root {
+        --bg: #f5f5f5;
+        --panel: #fafafa;
+        --panel-strong: #ffffff;
+        --rail: #eeeeee;
+        --border: rgba(0, 0, 0, 0.1);
+        --border-strong: rgba(0, 0, 0, 0.18);
+        --text: #111111;
+        --muted: #5f6368;
+        --muted-2: #8a8f94;
+        --shadow: 0 18px 42px rgba(0, 0, 0, 0.1);
+        --blue: #1f5fbf;
+        --blue-bg: #edf4ff;
+        --amber: #4b5563;
+        --amber-bg: #f1f3f5;
+        --green: #1f7a4d;
+        --green-bg: #edf8f2;
+        --red: #3f4650;
+        --red-bg: #f1f3f5;
+        --purple: #2f6fd6;
+        --purple-bg: #edf4ff;
+        --radius-lg: 24px;
+        --radius-md: 18px;
+        --radius-sm: 12px;
+        --composer-h: 126px;
+        color-scheme: light;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "SF Pro Text", "Segoe UI", sans-serif;
+      }
+
+      [data-theme="dark"] {
+        --bg: #0f0f0f;
+        --panel: #171717;
+        --panel-strong: #202020;
+        --rail: #141414;
+        --border: rgba(255, 255, 255, 0.1);
+        --border-strong: rgba(255, 255, 255, 0.18);
+        --text: #f5f5f5;
+        --muted: #b7b7b7;
+        --muted-2: #7c7c7c;
+        --shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+        --blue-bg: rgba(76, 132, 255, 0.16);
+        --amber-bg: rgba(255, 255, 255, 0.08);
+        --green-bg: rgba(71, 177, 109, 0.16);
+        --red-bg: rgba(255, 255, 255, 0.08);
+        --purple-bg: rgba(76, 132, 255, 0.16);
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.7), transparent 32rem),
+          var(--bg);
+        color: var(--text);
+      }
+
+      button,
+      textarea,
+      input {
+        font: inherit;
+      }
+
+      button {
+        color: inherit;
+      }
+
+      .prototype-shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+      }
+
+      .left-rail {
+        min-height: 100vh;
+        background: var(--rail);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        padding: 16px 14px;
+        gap: 14px;
+      }
+
+      .brand-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 6px 12px;
+      }
+
+      .brand-mark {
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        background: #171817;
+        color: #fbfaf7;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      [data-theme="dark"] .brand-mark {
+        background: #fbfaf7;
+        color: #171817;
+      }
+
+      .brand-title {
+        font-weight: 720;
+        letter-spacing: -0.02em;
+      }
+
+      .brand-subtitle {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 1px;
+      }
+
+      .nav-group {
+        display: grid;
+        gap: 4px;
+      }
+
+      .nav-title {
+        margin: 14px 8px 4px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted-2);
+      }
+
+      .nav-item,
+      .session-item,
+      .plain-button {
+        border: 0;
+        background: transparent;
+        border-radius: 14px;
+        min-height: 38px;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 10px;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .nav-item.active,
+      .nav-item:hover,
+      .session-item.active,
+      .session-item:hover {
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      [data-theme="dark"] .nav-item.active,
+      [data-theme="dark"] .nav-item:hover,
+      [data-theme="dark"] .session-item.active,
+      [data-theme="dark"] .session-item:hover {
+        background: rgba(255, 255, 255, 0.07);
+      }
+
+      .nav-icon {
+        width: 24px;
+        height: 24px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      [data-theme="dark"] .nav-icon {
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .session-list {
+        display: grid;
+        gap: 6px;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .session-item {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px;
+        padding: 10px;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .session-name {
+        font-size: 13px;
+        font-weight: 650;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .session-meta {
+        grid-column: 1 / -1;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .session-state {
+        font-size: 11px;
+        color: var(--blue);
+        background: var(--blue-bg);
+        padding: 3px 7px;
+        border-radius: 999px;
+        white-space: nowrap;
+        height: max-content;
+      }
+
+      .session-child {
+        margin-left: 18px;
+        border-left: 2px solid var(--border);
+        border-radius: 0 14px 14px 0;
+      }
+
+      .rail-footer {
+        margin-top: auto;
+        display: flex;
+        gap: 8px;
+      }
+
+      .plain-button {
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        padding: 9px 11px;
+        color: var(--muted);
+      }
+
+      .main-shell {
+        min-width: 0;
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
+        min-height: 100vh;
+      }
+
+      .topbar {
+        min-height: 66px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--panel) 86%, transparent);
+        backdrop-filter: blur(18px);
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 10px 22px;
+        position: sticky;
+        top: 0;
+        z-index: 15;
+      }
+
+      .mobile-menu-button,
+      .mobile-agent-button {
+        display: none;
+      }
+
+      .title-stack {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .eyebrow {
+        color: var(--muted);
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+      }
+
+      .header-title {
+        font-size: 18px;
+        line-height: 1.25;
+        font-weight: 730;
+        letter-spacing: -0.02em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .topbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .segmented {
+        display: inline-flex;
+        gap: 4px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 3px;
+        background: var(--panel-strong);
+      }
+
+      .segmented button {
+        border: 0;
+        background: transparent;
+        border-radius: 999px;
+        padding: 6px 10px;
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .segmented button.active {
+        background: #171817;
+        color: #fff;
+      }
+
+      [data-theme="dark"] .segmented button.active {
+        background: #f5f2ea;
+        color: #171817;
+      }
+
+      .agent-dashboard {
+        border-bottom: 1px solid var(--border);
+        background: var(--panel);
+      }
+
+      .dashboard-inner {
+        padding: 14px 22px 16px;
+        display: grid;
+        grid-template-columns: minmax(250px, 0.74fr) minmax(390px, 1.45fr) minmax(260px, 0.86fr);
+        gap: 14px;
+        align-items: stretch;
+      }
+
+      .dashboard-card {
+        background: var(--panel-strong);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 14px;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset;
+        min-width: 0;
+      }
+
+      .dashboard-card h2,
+      .dashboard-card h3 {
+        margin: 0;
+        letter-spacing: -0.02em;
+      }
+
+      .dashboard-card h2 {
+        font-size: 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .dashboard-card h3 {
+        font-size: 13px;
+      }
+
+      .goal-card {
+        display: grid;
+        gap: 12px;
+      }
+
+      .goal-copy {
+        font-size: 13px;
+        line-height: 1.48;
+        color: var(--muted);
+      }
+
+      .stage-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 5px;
+      }
+
+      .stage {
+        height: 7px;
+        border-radius: 999px;
+        background: var(--border);
+        overflow: hidden;
+      }
+
+      .stage.active {
+        background: var(--blue-bg);
+      }
+
+      .stage.active::before {
+        content: "";
+        display: block;
+        height: 100%;
+        width: 72%;
+        background: var(--blue);
+        border-radius: inherit;
+      }
+
+      .stage.done {
+        background: var(--green);
+      }
+
+      .agent-graph {
+        display: grid;
+        grid-template-columns: 110px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+      }
+
+      .master-node {
+        border: 1px solid var(--border-strong);
+        border-radius: 18px;
+        padding: 12px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.58), transparent),
+          var(--purple-bg);
+      }
+
+      .avatar {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: #171817;
+        color: #fff;
+        font-weight: 740;
+        margin-bottom: 8px;
+      }
+
+      [data-theme="dark"] .avatar {
+        background: #f5f2ea;
+        color: #171817;
+      }
+
+      .node-label {
+        font-weight: 720;
+        font-size: 13px;
+      }
+
+      .node-meta {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.36;
+        margin-top: 4px;
+      }
+
+      .worker-lanes {
+        display: grid;
+        gap: 8px;
+        position: relative;
+      }
+
+      .worker-lanes::before {
+        content: "";
+        position: absolute;
+        left: -12px;
+        top: 24px;
+        bottom: 24px;
+        width: 1px;
+        background: var(--border-strong);
+      }
+
+      .worker-card {
+        position: relative;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        padding: 10px 11px;
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+      }
+
+      .worker-card::before {
+        content: "";
+        position: absolute;
+        left: -12px;
+        width: 12px;
+        height: 1px;
+        background: var(--border-strong);
+      }
+
+      .worker-dot {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        font-weight: 760;
+        border: 1px solid var(--border);
+      }
+
+      .worker-copy {
+        min-width: 0;
+      }
+
+      .worker-title {
+        font-size: 13px;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .worker-sub {
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 2px;
+      }
+
+      .pill {
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 11px;
+        white-space: nowrap;
+        border: 1px solid transparent;
+      }
+
+      .pill.running,
+      .worker-card.running .worker-dot {
+        color: var(--blue);
+        background: var(--blue-bg);
+      }
+
+      .pill.review,
+      .worker-card.review .worker-dot {
+        color: var(--amber);
+        background: var(--amber-bg);
+      }
+
+      .pill.complete,
+      .worker-card.complete .worker-dot {
+        color: var(--green);
+        background: var(--green-bg);
+      }
+
+      .pill.rejected,
+      .worker-card.rejected .worker-dot {
+        color: var(--red);
+        background: var(--red-bg);
+      }
+
+      .pill.master,
+      .pill.next {
+        color: var(--purple);
+        background: var(--purple-bg);
+      }
+
+      .decision-card {
+        display: grid;
+        gap: 10px;
+      }
+
+      .decision-main {
+        display: grid;
+        gap: 8px;
+      }
+
+      .decision-row {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        padding: 9px 10px;
+        border-radius: 14px;
+        background: var(--bg);
+      }
+
+      .decision-index {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        font-size: 11px;
+        background: var(--panel-strong);
+        border: 1px solid var(--border);
+      }
+
+      .decision-text {
+        font-size: 12px;
+        line-height: 1.42;
+        color: var(--muted);
+      }
+
+      .decision-text strong {
+        display: block;
+        color: var(--text);
+        font-size: 12px;
+        margin-bottom: 1px;
+      }
+
+      .content-shell {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 18px;
+        padding: 18px 22px;
+      }
+
+      .conversation {
+        min-width: 0;
+        min-height: 0;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .conversation-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 15px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .conversation-title {
+        font-weight: 720;
+        letter-spacing: -0.02em;
+      }
+
+      .conversation-meta {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .timeline {
+        overflow: auto;
+        padding: 22px;
+        display: grid;
+        gap: 18px;
+        align-content: start;
+      }
+
+      .message {
+        max-width: 760px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .message.user {
+        justify-self: end;
+        max-width: 660px;
+      }
+
+      .bubble {
+        border-radius: 20px;
+        padding: 14px 16px;
+        border: 1px solid var(--border);
+        background: var(--panel-strong);
+        line-height: 1.55;
+        font-size: 14px;
+      }
+
+      .message.user .bubble {
+        background: #171817;
+        color: #fff;
+        border-color: #171817;
+      }
+
+      [data-theme="dark"] .message.user .bubble {
+        background: #f5f2ea;
+        color: #171817;
+        border-color: #f5f2ea;
+      }
+
+      .message-label {
+        color: var(--muted);
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .message.user .message-label {
+        justify-content: flex-end;
+      }
+
+      .event-card {
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: var(--panel-strong);
+        overflow: hidden;
+      }
+
+      .event-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 11px 13px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .event-title {
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .event-body {
+        padding: 12px 13px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.48;
+      }
+
+      .checklist {
+        display: grid;
+        gap: 7px;
+        margin-top: 9px;
+      }
+
+      .check-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+      }
+
+      .check-mark {
+        width: 18px;
+        height: 18px;
+        border-radius: 6px;
+        display: grid;
+        place-items: center;
+        font-size: 11px;
+        background: var(--green-bg);
+        color: var(--green);
+      }
+
+      .inspector {
+        min-width: 0;
+        display: grid;
+        gap: 14px;
+        align-content: start;
+      }
+
+      .inspector-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 14px;
+      }
+
+      .inspector-card h3 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        letter-spacing: -0.01em;
+      }
+
+      .source-list,
+      .mini-list {
+        display: grid;
+        gap: 9px;
+      }
+
+      .source-link,
+      .mini-row {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.42;
+      }
+
+      .source-link a {
+        color: inherit;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      .composer {
+        border-top: 1px solid var(--border);
+        background: color-mix(in srgb, var(--panel) 88%, transparent);
+        backdrop-filter: blur(18px);
+        padding: 13px 22px 16px;
+        position: sticky;
+        bottom: 0;
+        z-index: 16;
+      }
+
+      .composer-card {
+        max-width: 980px;
+        margin: 0 auto;
+        border: 1px solid var(--border-strong);
+        border-radius: 22px;
+        background: var(--panel-strong);
+        box-shadow: var(--shadow);
+        padding: 10px;
+      }
+
+      .composer textarea {
+        width: 100%;
+        min-height: 56px;
+        resize: none;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text);
+        padding: 5px 7px;
+      }
+
+      .composer-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding-top: 6px;
+      }
+
+      .composer-left,
+      .composer-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .primary-button {
+        border: 0;
+        background: #171817;
+        color: #fff;
+        border-radius: 999px;
+        padding: 9px 13px;
+        cursor: pointer;
+      }
+
+      [data-theme="dark"] .primary-button {
+        background: #f5f2ea;
+        color: #171817;
+      }
+
+      .mock-banner {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 5px 9px;
+        font-size: 12px;
+      }
+
+      .drawer-scrim,
+      .sheet-scrim {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.34);
+        opacity: 0;
+        pointer-events: none;
+        transition: 180ms ease;
+        z-index: 60;
+      }
+
+      .mobile-drawer {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: min(86vw, 340px);
+        transform: translateX(-104%);
+        transition: 210ms ease;
+        z-index: 70;
+        box-shadow: var(--shadow);
+      }
+
+      .agent-sheet {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        max-height: min(82vh, 760px);
+        transform: translateY(104%);
+        transition: transform 210ms ease;
+        z-index: 72;
+        background: var(--panel);
+        border-radius: 28px 28px 0 0;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .agent-sheet-inner {
+        padding: 10px 16px max(16px, env(safe-area-inset-bottom));
+        overflow: auto;
+        max-height: inherit;
+      }
+
+      .sheet-handle {
+        width: 42px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--border-strong);
+        margin: 0;
+      }
+
+      .sheet-top {
+        min-height: 28px;
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        margin: 4px 0 14px;
+      }
+
+      .sheet-top .sheet-handle {
+        grid-column: 2;
+      }
+
+      .sheet-close {
+        grid-column: 3;
+        justify-self: end;
+        border: 1px solid var(--border);
+        background: var(--panel-strong);
+        color: var(--muted);
+        border-radius: 999px;
+        padding: 5px 9px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      body.drawer-open .drawer-scrim,
+      body.sheet-open .sheet-scrim {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      body.drawer-open .mobile-drawer {
+        transform: translateX(0);
+      }
+
+      body.sheet-open .agent-sheet {
+        transform: translateY(0);
+        visibility: visible;
+        pointer-events: auto;
+      }
+
+      .viewport-controls {
+        display: flex;
+        gap: 7px;
+      }
+
+      .mini-progress {
+        height: 7px;
+        background: var(--border);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+
+      .mini-progress span {
+        display: block;
+        height: 100%;
+        width: var(--progress, 50%);
+        border-radius: inherit;
+        background: var(--blue);
+      }
+
+      .status-strip {
+        display: none;
+      }
+
+      .state-select {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--panel-strong);
+        color: var(--text);
+        padding: 7px 10px;
+        max-width: 250px;
+      }
+
+      .control-note {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (max-width: 1180px) {
+        .prototype-shell {
+          grid-template-columns: 240px minmax(0, 1fr);
+        }
+
+        .dashboard-inner {
+          grid-template-columns: 1fr;
+        }
+
+        .content-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .inspector {
+          display: none;
+        }
+      }
+
+      @media (max-width: 900px) {
+        body {
+          background: var(--panel);
+        }
+
+        .prototype-shell {
+          display: block;
+        }
+
+        .left-rail {
+          display: none;
+        }
+
+        .mobile-drawer .left-rail {
+          display: flex;
+        }
+
+        .main-shell {
+          min-height: 100vh;
+          display: grid;
+          grid-template-rows: auto auto minmax(0, 1fr) auto;
+          width: 100vw;
+          max-width: 100vw;
+          overflow-x: hidden;
+        }
+
+        .topbar {
+          min-height: 58px;
+          padding: 8px 12px;
+          gap: 9px;
+          border-bottom: 1px solid var(--border);
+          width: 100vw;
+          max-width: 100vw;
+          overflow: hidden;
+        }
+
+        .title-stack {
+          flex: 1 1 auto;
+          min-width: 0;
+          overflow: hidden;
+        }
+
+        .eyebrow {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .eyebrow .pill {
+          display: none;
+        }
+
+        .mobile-menu-button,
+        .mobile-agent-button {
+          display: grid;
+          place-items: center;
+          min-width: 38px;
+          height: 38px;
+          border: 1px solid var(--border);
+          border-radius: 14px;
+          background: var(--panel-strong);
+          cursor: pointer;
+          flex: 0 0 auto;
+        }
+
+        .mobile-menu-button {
+          width: 38px;
+        }
+
+        .mobile-agent-button {
+          width: auto;
+          padding: 0 10px;
+          font-size: 12px;
+          font-weight: 680;
+        }
+
+        .header-title {
+          font-size: 15px;
+        }
+
+        .eyebrow {
+          font-size: 11px;
+        }
+
+        .topbar-actions {
+          display: none;
+        }
+
+        .agent-dashboard {
+          border-bottom: 1px solid var(--border);
+          padding: 8px 12px;
+        }
+
+        .dashboard-inner {
+          display: none;
+        }
+
+        .status-strip {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          border: 1px solid var(--border);
+          background: var(--panel-strong);
+          border-radius: 17px;
+          padding: 9px 10px;
+          min-height: 48px;
+        }
+
+        .status-strip-main {
+          min-width: 0;
+        }
+
+        .status-strip-title {
+          font-size: 13px;
+          font-weight: 720;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .status-strip-sub {
+          color: var(--muted);
+          font-size: 11px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .content-shell {
+          padding: 0;
+          display: block;
+          min-height: 0;
+        }
+
+        .conversation {
+          border: 0;
+          border-radius: 0;
+          background: var(--panel);
+          min-height: 0;
+        }
+
+        .conversation-header {
+          display: none;
+        }
+
+        .timeline {
+          padding: 16px 12px 20px;
+          gap: 16px;
+        }
+
+        .message {
+          max-width: 92vw;
+        }
+
+        .message.user {
+          max-width: 86vw;
+        }
+
+        .bubble {
+          border-radius: 18px;
+          padding: 12px 13px;
+          font-size: 14px;
+        }
+
+        .event-card {
+          border-radius: 17px;
+        }
+
+        .composer {
+          padding: 8px 10px max(10px, env(safe-area-inset-bottom));
+          position: sticky;
+        }
+
+        .composer-card {
+          border-radius: 20px;
+          padding: 8px;
+        }
+
+        .composer textarea {
+          min-height: 44px;
+          max-height: 120px;
+          padding: 4px 5px;
+        }
+
+        .composer-left .plain-button:nth-child(n + 2),
+        .composer-right .control-note {
+          display: none;
+        }
+
+        .primary-button {
+          padding: 8px 12px;
+        }
+
+        .agent-sheet .dashboard-inner {
+          display: grid;
+          padding: 0;
+          gap: 10px;
+        }
+
+        .agent-sheet .dashboard-card {
+          border-radius: 18px;
+        }
+
+        .agent-graph {
+          grid-template-columns: 1fr;
+        }
+
+        .worker-lanes::before,
+        .worker-card::before {
+          display: none;
+        }
+
+        .worker-card {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+
+        .worker-card .pill {
+          grid-column: 2;
+          width: max-content;
+        }
+
+        .stage-grid {
+          grid-template-columns: repeat(4, 1fr);
+        }
+
+        .mock-banner {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="prototype-shell">
+      <aside class="left-rail" aria-label="Desktop navigation">
+        <div class="brand-row">
+          <div class="brand-mark">F</div>
+          <div>
+            <div class="brand-title">Freehand</div>
+            <div class="brand-subtitle">review-only static prototype</div>
+          </div>
+        </div>
+
+        <div class="nav-group">
+          <button class="nav-item active" type="button">
+            <span class="nav-icon">⌘</span>
+            <span>Workspace</span>
+          </button>
+          <button class="nav-item" type="button">
+            <span class="nav-icon">□</span>
+            <span>Scheduled</span>
+          </button>
+          <button class="nav-item" type="button">
+            <span class="nav-icon">◇</span>
+            <span>Agents</span>
+          </button>
+          <button class="nav-item" type="button">
+            <span class="nav-icon">⚙</span>
+            <span>Settings</span>
+          </button>
+        </div>
+
+        <div class="nav-title">Project sessions</div>
+        <div class="session-list">
+          <button class="session-item active" type="button">
+            <span class="session-name">Master · WebUI redesign</span>
+            <span class="session-state">reviewing</span>
+            <span class="session-meta">Parent session · 3 required worker tasks</span>
+          </button>
+          <button class="session-item session-child" type="button">
+            <span class="session-name">Worker alpha</span>
+            <span class="session-state">closed</span>
+            <span class="session-meta">IA research · approved</span>
+          </button>
+          <button class="session-item session-child" type="button">
+            <span class="session-name">Worker beta</span>
+            <span class="session-state">rework</span>
+            <span class="session-meta">Mobile layout · needs drawer fix</span>
+          </button>
+          <button class="session-item session-child" type="button">
+            <span class="session-name">Worker gamma</span>
+            <span class="session-state">running</span>
+            <span class="session-meta">Visual system · waiting review</span>
+          </button>
+          <button class="session-item" type="button">
+            <span class="session-name">Provider error closeout</span>
+            <span class="session-state">closed</span>
+            <span class="session-meta">Runtime · evidence archived</span>
+          </button>
+          <button class="session-item" type="button">
+            <span class="session-name">Android WebView proof</span>
+            <span class="session-state">closed</span>
+            <span class="session-meta">Mobile · release daemon</span>
+          </button>
+        </div>
+
+        <div class="rail-footer">
+          <button class="plain-button" type="button" id="toggleTheme">Theme</button>
+          <button class="plain-button" type="button">New task</button>
+        </div>
+      </aside>
+
+      <main class="main-shell">
+        <header class="topbar">
+          <button class="mobile-menu-button" type="button" id="openDrawer" aria-label="Open sessions">☰</button>
+          <div class="title-stack">
+            <div class="eyebrow">
+              <span>Freehand / workspace</span>
+              <span class="pill master" id="phasePill">Master reviewing</span>
+            </div>
+            <div class="header-title">Design WebUI with multi-agent review loop</div>
+          </div>
+          <div class="topbar-actions">
+            <select class="state-select" id="stateSelect" aria-label="Prototype state"></select>
+            <span class="mock-banner">Mock data · no runtime truth</span>
+          </div>
+          <button class="mobile-agent-button" type="button" id="openSheet" aria-label="Open agent dashboard">Agents</button>
+        </header>
+
+        <section class="agent-dashboard" aria-label="Multi-agent dashboard">
+          <div class="status-strip" id="mobileStatusStrip">
+            <div class="status-strip-main">
+              <div class="status-strip-title" id="mobileStripTitle">Master reviewing · 1 rework</div>
+              <div class="status-strip-sub" id="mobileStripSub">3 workers · next decision pending</div>
+            </div>
+            <span class="pill review" id="mobileStripPill">Open</span>
+          </div>
+
+          <div class="dashboard-inner" id="desktopDashboard">
+            <section class="dashboard-card goal-card">
+              <h2>
+                <span>Goal & round</span>
+                <span class="pill master" id="roundPill">Round 2</span>
+              </h2>
+              <div class="goal-copy" id="goalCopy">
+                Produce a Freehand WebUI direction that keeps conversation primary, adds a top agent review control, and maps phone navigation into drawers/sheets.
+              </div>
+              <div class="stage-grid" aria-label="Master lifecycle stages">
+                <span class="stage done"></span>
+                <span class="stage done"></span>
+                <span class="stage active" id="stageActive"></span>
+                <span class="stage" id="stageLast"></span>
+              </div>
+              <div class="mini-list">
+                <div class="mini-row">Plan → dispatch → review → decide next work.</div>
+                <div class="mini-row">Worker output is evidence for quality judgment, not final aggregation.</div>
+              </div>
+            </section>
+
+            <section class="dashboard-card">
+              <h2>
+                <span>Agent review board</span>
+                <span class="pill running" id="agentBoardCount">3 workers</span>
+              </h2>
+              <div class="agent-graph" style="margin-top: 12px">
+                <div class="master-node">
+                  <div class="avatar">M</div>
+                  <div class="node-label">Master</div>
+                  <div class="node-meta" id="masterMeta">Evaluating worker evidence against the original goal.</div>
+                </div>
+                <div class="worker-lanes" id="workerLanes"></div>
+              </div>
+            </section>
+
+            <section class="dashboard-card decision-card">
+              <h2>
+                <span>Decision queue</span>
+                <span class="pill next" id="decisionPill">Needs judgment</span>
+              </h2>
+              <div class="decision-main" id="decisionQueue"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="content-shell">
+          <article class="conversation">
+            <div class="conversation-header">
+              <div>
+                <div class="conversation-title">Conversation timeline</div>
+                <div class="conversation-meta">Readable execution flow; internal IDs hidden by default.</div>
+              </div>
+              <div class="segmented viewport-controls" aria-label="Viewport notes">
+                <button type="button" class="active">Desktop</button>
+                <button type="button">Tablet</button>
+                <button type="button">Phone</button>
+              </div>
+            </div>
+            <div class="timeline" id="timeline"></div>
+          </article>
+
+          <aside class="inspector" aria-label="Design notes">
+            <section class="inspector-card">
+              <h3>Design rules locked in prototype</h3>
+              <div class="mini-list">
+                <div class="mini-row">Conversation stays primary; dashboard is collapsible control context.</div>
+                <div class="mini-row">Master reviews worker quality and decides rework/next task/final completion.</div>
+                <div class="mini-row">Phone uses session drawer plus agent bottom sheet; no desktop compression.</div>
+                <div class="mini-row">Browser UI is projection-only; no business truth is created here.</div>
+              </div>
+            </section>
+            <section class="inspector-card">
+              <h3>Research references</h3>
+              <div class="source-list">
+                <div class="source-link">
+                  OpenAI Codex app: cloud tasks, parallel work, reviewable progress.
+                  <a href="https://developers.openai.com/codex/app/">source</a>
+                </div>
+                <div class="source-link">
+                  OpenAI Codex product: run many tasks in parallel and inspect results.
+                  <a href="https://developers.openai.com/codex/cloud/">source</a>
+                </div>
+                <div class="source-link">
+                  Claude Code Remote Control: mobile monitors local sessions and approvals.
+                  <a href="https://docs.anthropic.com/en/docs/claude-code/remote-control">source</a>
+                </div>
+                <div class="source-link">
+                  OpenMinis: phone-first agent setup and settings IA; not copied as phone-local storage.
+                  <a href="https://openminis.app/">source</a>
+                </div>
+                <div class="source-link">
+                  Manus app listing: tasks/subtasks and scheduled autonomous execution cues.
+                  <a href="https://apps.apple.com/us/app/manus-ai-agent/id6744450491">source</a>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </section>
+
+        <footer class="composer">
+          <div class="composer-card">
+            <textarea aria-label="Instruction composer">Review beta's drawer behavior; request rework or create the next task.</textarea>
+            <div class="composer-actions">
+              <div class="composer-left">
+                <button class="plain-button" type="button">Attach</button>
+                <button class="plain-button" type="button">Permission</button>
+                <button class="plain-button" type="button">Model</button>
+              </div>
+              <div class="composer-right">
+                <span class="control-note">Composer remains the primary operator action.</span>
+                <button class="primary-button" type="button">Send</button>
+              </div>
+            </div>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    <div class="drawer-scrim" id="drawerScrim" aria-hidden="true"></div>
+    <aside class="mobile-drawer" aria-label="Mobile sessions drawer">
+      <div class="left-rail">
+        <div class="brand-row">
+          <div class="brand-mark">F</div>
+          <div>
+            <div class="brand-title">Freehand</div>
+            <div class="brand-subtitle">sessions drawer</div>
+          </div>
+        </div>
+        <button class="nav-item active" type="button">
+          <span class="nav-icon">⌘</span>
+          <span>Workspace</span>
+        </button>
+        <button class="nav-item" type="button">
+          <span class="nav-icon">◇</span>
+          <span>Agents</span>
+        </button>
+        <div class="nav-title">Current parent session</div>
+        <div class="session-list">
+          <button class="session-item active" type="button">
+            <span class="session-name">Master · WebUI redesign</span>
+            <span class="session-state">reviewing</span>
+            <span class="session-meta">Parent session · workers nested below</span>
+          </button>
+          <button class="session-item session-child" type="button">
+            <span class="session-name">Worker alpha</span>
+            <span class="session-state">closed</span>
+            <span class="session-meta">Approved evidence</span>
+          </button>
+          <button class="session-item session-child" type="button">
+            <span class="session-name">Worker beta</span>
+            <span class="session-state">rework</span>
+            <span class="session-meta">Drawer/sheet issue</span>
+          </button>
+          <button class="session-item session-child" type="button">
+            <span class="session-name">Worker gamma</span>
+            <span class="session-state">running</span>
+            <span class="session-meta">Visual pass</span>
+          </button>
+        </div>
+        <div class="rail-footer">
+          <button class="plain-button" type="button" id="closeDrawer">Close</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="sheet-scrim" id="sheetScrim" aria-hidden="true"></div>
+    <section class="agent-sheet" aria-label="Mobile agent dashboard sheet">
+      <div class="agent-sheet-inner">
+        <div class="sheet-top">
+          <div class="sheet-handle"></div>
+          <button class="sheet-close" type="button" id="closeSheet">Close</button>
+        </div>
+        <div class="dashboard-inner" id="sheetDashboard"></div>
+      </div>
+    </section>
+
+    <script>
+      const states = [
+        {
+          id: "planning",
+          label: "1 · Planning",
+          phase: "Master planning",
+          round: "Round 1",
+          count: "0 workers",
+          decision: "Plan ready",
+          mobileTitle: "Master planning · no workers",
+          mobileSub: "Define task split before dispatch",
+          mobilePill: "Plan",
+          progress: ["active", "", "", ""],
+          master: "Breaking the total goal into reviewable worker tasks.",
+          goal:
+            "Produce a WebUI direction after research, with explicit desktop and phone layouts before implementation.",
+          workers: [
+            ["α", "Research task", "Not dispatched", "review"],
+            ["β", "Mobile layout task", "Not dispatched", "review"],
+            ["γ", "Visual system task", "Not dispatched", "review"],
+          ],
+          decisions: [
+            ["Scope", "Keep this as a static prototype, not product code."],
+            ["Split", "Research, mobile layout, and visual system can be reviewed separately."],
+            ["Next", "Dispatch only after each child task has a concrete acceptance target."],
+          ],
+          timeline: "planning",
+        },
+        {
+          id: "running",
+          label: "2 · 3 Workers running",
+          phase: "Workers running",
+          round: "Round 1",
+          count: "3 workers",
+          decision: "Waiting",
+          mobileTitle: "3 workers running",
+          mobileSub: "Master waits for reviewable evidence",
+          mobilePill: "Running",
+          progress: ["done", "active", "", ""],
+          master: "Waiting for worker evidence; final completion is not admissible.",
+          goal:
+            "Validate reference patterns and layout options before deciding if implementation work should begin.",
+          workers: [
+            ["α", "Research official sources", "Running · 03:12", "running"],
+            ["β", "Phone drawer/sheet model", "Running · 02:48", "running"],
+            ["γ", "Desktop dashboard density", "Running · 01:50", "running"],
+          ],
+          decisions: [
+            ["Gate", "Do not accept final complete while required worker tasks are open."],
+            ["Observe", "Render worker status as lifecycle progress, not final answer text."],
+            ["Next", "Review only after workers submit concrete evidence."],
+          ],
+          timeline: "running",
+        },
+        {
+          id: "review",
+          label: "3 · Review submitted",
+          phase: "Master reviewing",
+          round: "Round 1",
+          count: "3 workers",
+          decision: "Review evidence",
+          mobileTitle: "Master reviewing · 2 submitted",
+          mobileSub: "Compare worker evidence against goal",
+          mobilePill: "Review",
+          progress: ["done", "done", "active", ""],
+          master: "Checking worker evidence against the total goal and each split goal.",
+          goal:
+            "Decide whether current outputs satisfy WebUI desktop, phone, and multi-agent control requirements.",
+          workers: [
+            ["α", "Research official sources", "Review submitted", "review"],
+            ["β", "Phone drawer/sheet model", "Review submitted", "review"],
+            ["γ", "Desktop dashboard density", "Running · 00:41", "running"],
+          ],
+          decisions: [
+            ["Alpha", "Official source notes are sufficient for design rationale."],
+            ["Beta", "Needs explicit edge-swipe/drawer close rules before approval."],
+            ["Gamma", "Still running; do not create final completion."],
+          ],
+          timeline: "review",
+        },
+        {
+          id: "rework",
+          label: "4 · Rework required",
+          phase: "Master reviewing",
+          round: "Round 2",
+          count: "3 workers",
+          decision: "Rework beta",
+          mobileTitle: "Master reviewing · 1 rework",
+          mobileSub: "Beta rejected; next requirements issued",
+          mobilePill: "Rework",
+          progress: ["done", "done", "active", ""],
+          master: "Rejected beta's result because phone navigation still compresses desktop controls.",
+          goal:
+            "Phone UI must remain conversation-first and move navigation/agent detail into drawer and bottom sheet.",
+          workers: [
+            ["α", "Research official sources", "Approved · closed", "complete"],
+            ["β", "Phone drawer/sheet model", "Rejected · reworking", "rejected"],
+            ["γ", "Desktop dashboard density", "Review submitted", "review"],
+          ],
+          decisions: [
+            ["Reject", "Beta must replace desktop pane compression with drawer + bottom sheet."],
+            ["Improve", "Add safe-area composer behavior and compact agent summary strip."],
+            ["Hold", "Overall goal is not complete until beta rework passes."],
+          ],
+          timeline: "rework",
+        },
+        {
+          id: "evaluating",
+          label: "5 · All closed; evaluating",
+          phase: "Master evaluating",
+          round: "Round 2",
+          count: "3 closed",
+          decision: "Goal evaluation",
+          mobileTitle: "All workers closed · evaluating",
+          mobileSub: "Master decides whether goal is done",
+          mobilePill: "Eval",
+          progress: ["done", "done", "done", "active"],
+          master: "All required worker tasks are closed; now evaluating whether the overall goal is satisfied.",
+          goal:
+            "Worker evidence is complete, but the master still has to judge full goal closure and next work.",
+          workers: [
+            ["α", "Research official sources", "Approved · closed", "complete"],
+            ["β", "Phone drawer/sheet model", "Approved · closed", "complete"],
+            ["γ", "Desktop dashboard density", "Approved · closed", "complete"],
+          ],
+          decisions: [
+            ["Check", "Does the prototype show desktop, tablet, phone, drawer, and sheet states?"],
+            ["Check", "Does the dashboard express review/rework decisions, not aggregation?"],
+            ["Decide", "If a gap remains, create a new targeted task instead of final complete."],
+          ],
+          timeline: "evaluating",
+        },
+        {
+          id: "next",
+          label: "6 · Next-round task",
+          phase: "Master dispatching",
+          round: "Round 3",
+          count: "1 new task",
+          decision: "Next task",
+          mobileTitle: "Next-round task created",
+          mobileSub: "Implementation handoff after design review",
+          mobilePill: "Next",
+          progress: ["done", "active", "", ""],
+          master: "Current design is adequate for review, but implementation needs a separate task with product gates.",
+          goal:
+            "Design target is met; product implementation remains a new task with protocol/runtime verification.",
+          workers: [
+            ["δ", "Implementation plan", "Assigned · pending", "review"],
+            ["α", "Research official sources", "Closed", "complete"],
+            ["β", "Phone drawer/sheet model", "Closed", "complete"],
+          ],
+          decisions: [
+            ["Create", "Open next-round implementation task only after design is accepted."],
+            ["Bind", "Implementation must bind to app.webui-smoke and ui.protocol maps."],
+            ["Verify", "Future product work needs browser/phone online proof, not static prototype proof."],
+          ],
+          timeline: "next",
+        },
+        {
+          id: "complete",
+          label: "7 · Overall goal complete",
+          phase: "Goal complete",
+          round: "Round 3",
+          count: "0 open",
+          decision: "Complete",
+          mobileTitle: "Goal complete · no open workers",
+          mobileSub: "Final user-visible answer allowed",
+          mobilePill: "Done",
+          progress: ["done", "done", "done", "done"],
+          master: "No open required worker tasks remain, and the overall goal has passed quality evaluation.",
+          goal:
+            "Static WebUI design prototype is ready for review; product implementation is deliberately untouched.",
+          workers: [
+            ["α", "Research official sources", "Approved · closed", "complete"],
+            ["β", "Phone drawer/sheet model", "Approved · closed", "complete"],
+            ["γ", "Desktop dashboard density", "Approved · closed", "complete"],
+          ],
+          decisions: [
+            ["Complete", "Final answer can summarize design and evidence."],
+            ["Risk", "Static prototype is not production WebUI proof."],
+            ["Next", "If approved, start a separate implementation task."],
+          ],
+          timeline: "complete",
+        },
+      ];
+
+      const timelineTemplates = {
+        planning: [
+          ["user", "Jason", "搜索后给静态网页设计，不要直接改现有 WebUI。"],
+          ["assistant", "Master", "I will use official product references, keep this as a static review prototype, and model workers as reviewable evidence sources."],
+          ["event", "Plan", "Split the design work into research, mobile navigation, and desktop dashboard density. No runtime or protocol mutation is part of this prototype."],
+        ],
+        running: [
+          ["user", "Jason", "参考 Codex 界面，在中间顶部加入多 agent dashboard，手机左侧做 drawer。"],
+          ["event", "Dispatch", "Master dispatched three focused worker tasks. Completion is blocked until required worker tasks close."],
+          ["assistant", "Master", "Worker tasks are running. I will wait for evidence and then judge quality against the total goal."],
+        ],
+        review: [
+          ["event", "Worker alpha", "Submitted official source findings: Codex cloud tasks, Claude mobile remote sessions, OpenMinis phone-first settings IA, Manus task/subtask cues."],
+          ["event", "Worker beta", "Submitted a phone layout, but drawer and bottom-sheet behavior still need exact close/open rules."],
+          ["assistant", "Master review", "Alpha is acceptable. Beta needs a stricter phone navigation model. Gamma remains open, so final completion is not allowed."],
+        ],
+        rework: [
+          ["event", "Review rejected", "Beta's result compressed desktop controls into the phone surface. This violates conversation-first mobile behavior."],
+          ["assistant", "Master decision", "Rework requirement: phone shows a compact agent strip; sessions move to a left drawer; detailed agent review moves to a bottom sheet."],
+          ["event", "Worker gamma", "Desktop dashboard density is acceptable if it remains a collapsible context band above the conversation."],
+        ],
+        evaluating: [
+          ["event", "All worker tasks closed", "Alpha, beta, and gamma were reviewed and approved. Master now evaluates the total goal."],
+          ["assistant", "Master evaluation", "The design must prove desktop, tablet, phone, drawer, sheet, review, rework, next-round task, and final-complete states."],
+          ["event", "Quality gate", "If any state is missing, create a new targeted task instead of producing final completion."],
+        ],
+        next: [
+          ["assistant", "Master decision", "The static design goal is complete enough for review. Product implementation is a separate next-round task with its own owner maps and online gates."],
+          ["event", "New task", "Implementation plan task created: bind to WebUI protocol projections, avoid browser-owned truth, verify desktop and true mobile states online."],
+        ],
+        complete: [
+          ["event", "Goal evaluation", "All required states are present in the static prototype, and no existing product files were touched."],
+          ["assistant", "Final summary", "Static design prototype is ready. It intentionally models the Master as a quality reviewer and next-task decision maker, not a worker-output aggregator."],
+        ],
+      };
+
+      const stateSelect = document.querySelector("#stateSelect");
+      const phasePill = document.querySelector("#phasePill");
+      const roundPill = document.querySelector("#roundPill");
+      const agentBoardCount = document.querySelector("#agentBoardCount");
+      const decisionPill = document.querySelector("#decisionPill");
+      const goalCopy = document.querySelector("#goalCopy");
+      const masterMeta = document.querySelector("#masterMeta");
+      const workerLanes = document.querySelector("#workerLanes");
+      const decisionQueue = document.querySelector("#decisionQueue");
+      const timeline = document.querySelector("#timeline");
+      const mobileStripTitle = document.querySelector("#mobileStripTitle");
+      const mobileStripSub = document.querySelector("#mobileStripSub");
+      const mobileStripPill = document.querySelector("#mobileStripPill");
+      const sheetDashboard = document.querySelector("#sheetDashboard");
+      const desktopDashboard = document.querySelector("#desktopDashboard");
+      const stageNodes = Array.from(document.querySelectorAll(".stage-grid .stage"));
+
+      for (const state of states) {
+        const option = document.createElement("option");
+        option.value = state.id;
+        option.textContent = state.label;
+        stateSelect.append(option);
+      }
+
+      function renderState(id) {
+        const state = states.find((item) => item.id === id) || states[3];
+        stateSelect.value = state.id;
+        phasePill.textContent = state.phase;
+        roundPill.textContent = state.round;
+        agentBoardCount.textContent = state.count;
+        decisionPill.textContent = state.decision;
+        goalCopy.textContent = state.goal;
+        masterMeta.textContent = state.master;
+        mobileStripTitle.textContent = state.mobileTitle;
+        mobileStripSub.textContent = state.mobileSub;
+        mobileStripPill.textContent = state.mobilePill;
+        mobileStripPill.className = "pill " + (state.id === "complete" ? "complete" : state.id === "running" ? "running" : state.id === "rework" ? "rejected" : "review");
+
+        stageNodes.forEach((node, index) => {
+          node.className = "stage";
+          const stageClass = state.progress[index];
+          if (stageClass) node.classList.add(stageClass);
+        });
+
+        workerLanes.innerHTML = "";
+        for (const [letter, title, sub, status] of state.workers) {
+          const card = document.createElement("div");
+          card.className = `worker-card ${status}`;
+          card.innerHTML = `
+            <div class="worker-dot">${letter}</div>
+            <div class="worker-copy">
+              <div class="worker-title">${title}</div>
+              <div class="worker-sub">${sub}</div>
+            </div>
+            <span class="pill ${status}">${statusLabel(status)}</span>
+          `;
+          workerLanes.append(card);
+        }
+
+        decisionQueue.innerHTML = "";
+        state.decisions.forEach(([title, text], index) => {
+          const row = document.createElement("div");
+          row.className = "decision-row";
+          row.innerHTML = `
+            <span class="decision-index">${index + 1}</span>
+            <span class="decision-text"><strong>${title}</strong>${text}</span>
+          `;
+          decisionQueue.append(row);
+        });
+
+        timeline.innerHTML = "";
+        for (const item of timelineTemplates[state.timeline] || []) {
+          if (item[0] === "event") {
+            const event = document.createElement("div");
+            event.className = "event-card";
+            event.innerHTML = `
+              <div class="event-head">
+                <div class="event-title">${item[1]}</div>
+                <span class="pill review">lifecycle</span>
+              </div>
+              <div class="event-body">
+                ${item[2]}
+                <div class="checklist">
+                  <div class="check-item"><span class="check-mark">✓</span><span>Projection-only display; no browser-owned truth.</span></div>
+                  <div class="check-item"><span class="check-mark">✓</span><span>Visible state supports audit before next action.</span></div>
+                </div>
+              </div>
+            `;
+            timeline.append(event);
+            continue;
+          }
+          const message = document.createElement("div");
+          message.className = `message ${item[0]}`;
+          message.innerHTML = `
+            <div class="message-label">${item[1]}</div>
+            <div class="bubble">${item[2]}</div>
+          `;
+          timeline.append(message);
+        }
+
+        sheetDashboard.innerHTML = desktopDashboard.innerHTML;
+        sheetDashboard.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+      }
+
+      function statusLabel(status) {
+        if (status === "complete") return "accepted";
+        if (status === "rejected") return "rework";
+        if (status === "running") return "running";
+        return "review";
+      }
+
+      stateSelect.addEventListener("change", () => renderState(stateSelect.value));
+
+      document.querySelector("#toggleTheme").addEventListener("click", () => {
+        const current = document.documentElement.dataset.theme || "light";
+        document.documentElement.dataset.theme = current === "dark" ? "light" : "dark";
+      });
+
+      document.querySelector("#openDrawer").addEventListener("click", () => document.body.classList.add("drawer-open"));
+      document.querySelector("#closeDrawer").addEventListener("click", () => document.body.classList.remove("drawer-open"));
+      document.querySelector("#drawerScrim").addEventListener("click", () => document.body.classList.remove("drawer-open"));
+      document.querySelector("#openSheet").addEventListener("click", () => document.body.classList.add("sheet-open"));
+      document.querySelector("#closeSheet").addEventListener("click", () => document.body.classList.remove("sheet-open"));
+      document.querySelector("#sheetScrim").addEventListener("click", () => document.body.classList.remove("sheet-open"));
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          document.body.classList.remove("drawer-open");
+          document.body.classList.remove("sheet-open");
+        }
+      });
+
+      let touchStartX = null;
+      let touchStartY = null;
+      document.addEventListener(
+        "touchstart",
+        (event) => {
+          const touch = event.touches[0];
+          touchStartX = touch.clientX;
+          touchStartY = touch.clientY;
+        },
+        { passive: true },
+      );
+      document.addEventListener(
+        "touchend",
+        (event) => {
+          if (touchStartX == null || touchStartY == null) return;
+          const touch = event.changedTouches[0];
+          const dx = touch.clientX - touchStartX;
+          const dy = Math.abs(touch.clientY - touchStartY);
+          if (touchStartX < 28 && dx > 72 && dy < 48) {
+            document.body.classList.add("drawer-open");
+          }
+          if (document.body.classList.contains("drawer-open") && dx < -72 && dy < 48) {
+            document.body.classList.remove("drawer-open");
+          }
+          touchStartX = null;
+          touchStartY = null;
+        },
+        { passive: true },
+      );
+
+      renderState("rework");
+    </script>
+  </body>
+</html>

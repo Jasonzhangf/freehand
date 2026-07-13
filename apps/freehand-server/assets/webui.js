@@ -80,6 +80,14 @@ const closeSessionDrawerButton = document.getElementById("close-session-drawer-b
 const openDetailDrawerButton = document.getElementById("open-detail-drawer-button");
 const openSettingsDrawerButton = document.getElementById("open-settings-drawer-button");
 const closeDetailDrawerButton = document.getElementById("close-detail-drawer-button");
+const mobileAgentSummaryStrip = document.getElementById("mobile-agent-summary-strip");
+const openMobileAgentSheetButton = document.getElementById("open-mobile-agent-sheet-button");
+const closeMobileAgentSheetButton = document.getElementById("close-mobile-agent-sheet-button");
+const mobileAgentSheet = document.getElementById("mobile-agent-sheet");
+const mobileAgentTaskList = document.getElementById("mobile-agent-task-list");
+const mobileAgentAgentList = document.getElementById("mobile-agent-agent-list");
+const mobileAgentHistoryList = document.getElementById("mobile-agent-history-list");
+const mobileAgentControlList = document.getElementById("mobile-agent-control-list");
 const settingsShellToggle = document.getElementById("settings-shell-toggle");
 const inspectorEyebrow = document.getElementById("inspector-eyebrow");
 const inspectorTitle = document.getElementById("inspector-title");
@@ -146,6 +154,7 @@ const samplePrompts = {
 const selectedSessionStorageKey = "freehand-webui-selected-session";
 const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
+const layoutWidthsStorageKey = "freehand-webui-layout-widths-v1";
 const adpRequestTimeoutMs = 8000;
 const shortcutHelp =
   "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success · Cmd/Ctrl+2 failure. Slash: /help /new /task /settings /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
@@ -201,6 +210,7 @@ const state = {
   inputHistory: [],
   inputHistoryIndex: null,
   mobileDrawer: null,
+  mobileAgentSheetOpen: false,
   inspectorPanel: "debug",
   submitStartedAt: null,
   submitInFlight: false,
@@ -222,6 +232,7 @@ const state = {
   rollbackArmedAt: 0,
   composerFocused: false,
   newSessionKind: "conversation",
+  layoutResize: null,
 };
 
 function shellConfig() {
@@ -254,13 +265,41 @@ function applyMobileDrawerState() {
     openSessionDrawerButton.setAttribute("aria-expanded", drawer === "sessions" ? "true" : "false");
   }
   if (openDetailDrawerButton) {
-    openDetailDrawerButton.setAttribute("aria-expanded", drawer === "details" ? "true" : "false");
+    openDetailDrawerButton.setAttribute("aria-expanded", state.mobileAgentSheetOpen ? "true" : "false");
   }
   if (openSettingsDrawerButton) {
     openSettingsDrawerButton.setAttribute("aria-expanded", drawer === "settings" ? "true" : "false");
   }
   if (mobileDrawerScrim) {
-    mobileDrawerScrim.setAttribute("aria-hidden", drawer ? "false" : "true");
+    mobileDrawerScrim.setAttribute("aria-hidden", drawer || state.mobileAgentSheetOpen ? "false" : "true");
+  }
+}
+
+function applyMobileAgentSheetState() {
+  const shape = document.body.dataset.layoutShape || applyLayoutShape();
+  const open = isMobileDrawerLayout(shape) && state.mobileAgentSheetOpen;
+  if (open) {
+    document.body.dataset.mobileAgentSheet = "open";
+    if (shell) {
+      shell.dataset.mobileAgentSheet = "open";
+    }
+  } else {
+    delete document.body.dataset.mobileAgentSheet;
+    if (shell) {
+      delete shell.dataset.mobileAgentSheet;
+    }
+  }
+  if (mobileAgentSheet) {
+    mobileAgentSheet.setAttribute("aria-hidden", open ? "false" : "true");
+  }
+  if (openMobileAgentSheetButton) {
+    openMobileAgentSheetButton.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  if (openDetailDrawerButton) {
+    openDetailDrawerButton.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  if (mobileDrawerScrim) {
+    mobileDrawerScrim.setAttribute("aria-hidden", open || state.mobileDrawer ? "false" : "true");
   }
 }
 
@@ -282,18 +321,176 @@ function setComposerFocused(focused) {
 function setMobileDrawer(drawer) {
   const shape = document.body.dataset.layoutShape || applyLayoutShape();
   state.mobileDrawer = drawer && isMobileDrawerLayout(shape) ? drawer : null;
+  if (state.mobileDrawer) {
+    state.mobileAgentSheetOpen = false;
+  }
   applyMobileDrawerState();
+  applyMobileAgentSheetState();
 }
 
 function closeMobileDrawer() {
   setMobileDrawer(null);
 }
 
-function syncMobileDrawerForLayout() {
-  if (!isMobileDrawerLayout(document.body.dataset.layoutShape || applyLayoutShape())) {
+function setMobileAgentSheetOpen(open) {
+  const shape = document.body.dataset.layoutShape || applyLayoutShape();
+  state.mobileAgentSheetOpen = !!open && isMobileDrawerLayout(shape);
+  if (state.mobileAgentSheetOpen) {
     state.mobileDrawer = null;
   }
   applyMobileDrawerState();
+  applyMobileAgentSheetState();
+}
+
+function closeMobileOverlays() {
+  state.mobileDrawer = null;
+  state.mobileAgentSheetOpen = false;
+  applyMobileDrawerState();
+  applyMobileAgentSheetState();
+}
+
+function syncMobileDrawerForLayout() {
+  if (!isMobileDrawerLayout(document.body.dataset.layoutShape || applyLayoutShape())) {
+    state.mobileDrawer = null;
+    state.mobileAgentSheetOpen = false;
+  }
+  applyMobileDrawerState();
+  applyMobileAgentSheetState();
+}
+
+function desktopResizableLayoutActive() {
+  return (document.body.dataset.layoutShape || applyLayoutShape()) === "desktop_large";
+}
+
+function clampNumber(value, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, number));
+}
+
+function loadLayoutWidths() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(layoutWidthsStorageKey) || "{}");
+    return {
+      session: Number.isFinite(Number(parsed.session)) ? clampNumber(parsed.session, 180, 520) : 254,
+      detail: Number.isFinite(Number(parsed.detail)) ? clampNumber(parsed.detail, 180, 560) : 244,
+    };
+  } catch (_error) {
+    return { session: 254, detail: 244 };
+  }
+}
+
+function saveLayoutWidths(widths) {
+  window.localStorage.setItem(layoutWidthsStorageKey, JSON.stringify(widths));
+}
+
+function setLayoutWidths(widths, options = {}) {
+  if (!shell) {
+    return;
+  }
+  const viewportWidth = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+  const railWidth = 56;
+  const resizerTotal = 20;
+  const minWorkspace = Math.min(760, Math.max(360, viewportWidth * 0.36));
+  const available = Math.max(360, viewportWidth - railWidth - resizerTotal - minWorkspace);
+  const maxSide = Math.max(180, Math.floor(available * 0.72));
+  let session = clampNumber(widths.session, 180, Math.min(520, maxSide));
+  let detail = clampNumber(widths.detail, 180, Math.min(560, maxSide));
+  if (session + detail > available) {
+    const scale = available / (session + detail);
+    session = Math.max(180, Math.floor(session * scale));
+    detail = Math.max(180, Math.floor(detail * scale));
+  }
+  const next = { session, detail };
+  shell.style.setProperty("--session-panel-width", `${next.session}px`);
+  shell.style.setProperty("--detail-panel-width", `${next.detail}px`);
+  if (!options.skipSave) {
+    saveLayoutWidths(next);
+  }
+}
+
+function applySavedLayoutWidths() {
+  if (!desktopResizableLayoutActive()) {
+    return;
+  }
+  setLayoutWidths(loadLayoutWidths(), { skipSave: true });
+}
+
+function installDesktopLayoutResizers() {
+  const resizers = Array.from(document.querySelectorAll("[data-layout-resizer]"));
+  if (!shell || resizers.length === 0) {
+    return;
+  }
+  applySavedLayoutWidths();
+
+  const beginResize = (event, side) => {
+    if (!desktopResizableLayoutActive()) {
+      return;
+    }
+    event.preventDefault();
+    const widths = loadLayoutWidths();
+    state.layoutResize = {
+      side,
+      startX: event.clientX,
+      session: widths.session,
+      detail: widths.detail,
+    };
+    document.body.dataset.layoutResizing = side;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const moveResize = (event) => {
+    if (!state.layoutResize) {
+      return;
+    }
+    event.preventDefault();
+    const delta = event.clientX - state.layoutResize.startX;
+    const next = {
+      session:
+        state.layoutResize.side === "left"
+          ? state.layoutResize.session + delta
+          : state.layoutResize.session,
+      detail:
+        state.layoutResize.side === "right"
+          ? state.layoutResize.detail - delta
+          : state.layoutResize.detail,
+    };
+    setLayoutWidths(next);
+  };
+
+  const endResize = () => {
+    state.layoutResize = null;
+    delete document.body.dataset.layoutResizing;
+  };
+
+  resizers.forEach((resizer) => {
+    const side = resizer.dataset.layoutResizer;
+    resizer.addEventListener("pointerdown", (event) => beginResize(event, side));
+    resizer.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key) || !desktopResizableLayoutActive()) {
+        return;
+      }
+      event.preventDefault();
+      if (event.key === "Home") {
+        setLayoutWidths({ session: 254, detail: 244 });
+        return;
+      }
+      const step = event.shiftKey ? 40 : 16;
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const widths = loadLayoutWidths();
+      if (side === "left") {
+        widths.session += direction * step;
+      } else {
+        widths.detail -= direction * step;
+      }
+      setLayoutWidths(widths);
+    });
+  });
+  document.addEventListener("pointermove", moveResize, { passive: false });
+  document.addEventListener("pointerup", endResize, { passive: true });
+  document.addEventListener("pointercancel", endResize, { passive: true });
 }
 
 function shouldIgnoreSessionSwipeTarget(target) {
@@ -883,6 +1080,15 @@ function turnLifecycleForRender(turn) {
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
     const terminal = `${turn.terminal_status || "success"}`.toLowerCase();
     const phase = terminal === "success" ? "completed" : terminal;
+    if (terminal === "running") {
+      return {
+        phase: "waiting_lifecycle",
+        className: "running",
+        label: "waiting lifecycle",
+        isLive: false,
+        elapsed: "",
+      };
+    }
     return {
       phase,
       className: terminal === "failed" || terminal === "cancelled" ? "failed" : "success",
@@ -1120,6 +1326,9 @@ function chatAssistantStatusLabel(lifecycle, rows) {
   if (lifecycle.isLive) {
     return lifecycle.label || "running";
   }
+  if (rows.some((row) => row.kind === "final" && `${row.status || ""}`.toLowerCase() === "running")) {
+    return "waiting lifecycle";
+  }
   if (rows.some((row) => row.kind === "final")) {
     return "completed";
   }
@@ -1177,7 +1386,7 @@ function assistantSectionHeadingLabel(row) {
     return "";
   }
   if (row.kind === "final") {
-    return "Final";
+    return `${row.status || ""}`.toLowerCase() === "running" ? "Lifecycle" : "Final";
   }
   if (row.kind === "system") {
     return row.title || "Model";
@@ -2305,9 +2514,13 @@ function openNewSessionDialog(kind = "conversation") {
   state.newSessionKind = kind === "task" ? "task" : "conversation";
   if (!newSessionDialog || !newSessionForm) {
     if (state.newSessionKind === "task") {
-      startNewTask();
+      startNewTask().catch((error) => {
+        setCommandStatus(`new task failed: ${error.message}`, { stickyMs: 8000 });
+      });
     } else {
-      startNewConversation();
+      startNewConversation().catch((error) => {
+        setCommandStatus(`new conversation failed: ${error.message}`, { stickyMs: 8000 });
+      });
     }
     return;
   }
@@ -2361,7 +2574,7 @@ async function submitNewSessionDialog() {
     return;
   }
   closeNewSessionDialog();
-  startNewConversation();
+  await startNewConversation();
 }
 
 function sessionSummaryForSelected() {
@@ -2427,12 +2640,27 @@ function resetLocalConversationState(sessionId) {
   renderAll();
 }
 
-function startNewConversation() {
+async function startNewConversation() {
   const sessionId = newDraftSessionId();
   resetLocalConversationState(sessionId);
   setSelectedCwd("");
-  closeMobileDrawer();
-  setCommandStatus("new conversation ready", { stickyMs: 5000 });
+  setCommandStatus("creating conversation session...", { stickyMs: 5000 });
+  try {
+    await adpCommand({
+      CreateSession: {
+        session_id: sessionId,
+        title: "New conversation",
+      },
+    });
+    state.draftSessionId = null;
+    await refreshSessions();
+    await refreshSelectedSession();
+    closeMobileDrawer();
+    setCommandStatus("new conversation ready", { stickyMs: 5000 });
+  } catch (error) {
+    setCommandStatus(`new conversation failed: ${error.message}`, { stickyMs: 8000 });
+    throw error;
+  }
 }
 
 async function startNewTask(options = {}) {
@@ -3120,6 +3348,47 @@ function renderSessionWithWorkerChildren(session) {
   return section;
 }
 
+function renderSessionAgentGroup(sessions) {
+  const group = document.createElement("section");
+  group.className = "session-agent-group";
+  group.dataset.expanded = "true";
+
+  const toggle = document.createElement("button");
+  toggle.className = "session-agent-button";
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", "true");
+
+  const main = document.createElement("span");
+  main.className = "session-agent-main";
+  const chevron = document.createElement("span");
+  chevron.className = "session-agent-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "›";
+  const name = document.createElement("span");
+  name.className = "session-agent-name";
+  name.textContent = "Master";
+  main.append(chevron, name);
+
+  const count = document.createElement("span");
+  count.className = "session-agent-count";
+  count.textContent = `${sessions.length} session(s)`;
+  toggle.append(main, count);
+
+  const sessionNodes = document.createElement("div");
+  sessionNodes.className = "session-agent-sessions";
+  sessions.forEach((session) => {
+    sessionNodes.appendChild(renderSessionWithWorkerChildren(session));
+  });
+
+  toggle.addEventListener("click", () => {
+    const expanded = group.dataset.expanded !== "false";
+    group.dataset.expanded = expanded ? "false" : "true";
+    toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+  });
+  group.append(toggle, sessionNodes);
+  return group;
+}
+
 function renderSessionBulkToolbar() {
   if (!sessionBulkCount || !sessionDeleteSelectedButton) {
     return;
@@ -3161,9 +3430,7 @@ function renderSessions() {
     renderDraftSessionItem();
   }
 
-  state.sessions.forEach((session) => {
-    sessionList.appendChild(renderSessionWithWorkerChildren(session));
-  });
+  sessionList.appendChild(renderSessionAgentGroup(state.sessions));
   renderSessionBulkToolbar();
 }
 
@@ -3267,12 +3534,316 @@ function applyPhase2QueryResult(result) {
   return false;
 }
 
+function buildMobileAgentDashboardModel() {
+  const taskBoard = state.taskBoard;
+  const agentBoard = state.agentBoard;
+  const taskHistory = state.taskHistory;
+  const workerControl = state.workerControl;
+  const allTasks = phase2SortedTasks((taskBoard && taskBoard.tasks) || []);
+  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
+  const parentSessionId = selectedWorkerSession
+    ? selectedWorkerSession.parent_session_id
+    : state.selectedSessionId;
+  const parentTasks = parentSessionId
+    ? allTasks.filter((task) => task.parent_session_id === parentSessionId)
+    : [];
+  const tasks = parentTasks.length > 0 ? parentTasks : allTasks;
+  const taskStatuses = tasks.map((task) => `${task.status || ""}`.toLowerCase());
+  const allClosed = tasks.length > 0 && taskStatuses.every((status) => status === "closed");
+  const openTasks = tasks.filter((task) => `${task.status || ""}`.toLowerCase() !== "closed");
+  const blockedTasks = tasks.filter((task) =>
+    ["blocked", "failed", "cancelled"].includes(`${task.status || ""}`.toLowerCase())
+  );
+  const reviewTasks = tasks.filter((task) =>
+    ["review_ready", "review_submitted"].includes(`${task.status || ""}`.toLowerCase())
+  );
+  const historyEvents = (taskHistory && taskHistory.events) || [];
+  const inboxEvents = (state.eventInbox && state.eventInbox.events) || [];
+  const reworkSeen = [...historyEvents, ...inboxEvents].some((event) => {
+    const eventType = `${event.event_type || event.kind || ""}`.toLowerCase();
+    const status = `${event.to_status || event.payload?.to_status || event.payload?.status || ""}`.toLowerCase();
+    return eventType.includes("rejected") || status.includes("rejected") || status.includes("recovering");
+  });
+  const selectedTurns = logicalSessionTurns(state.sessionTurns || []).filter((turn) =>
+    !state.selectedSessionId || turn.session_id === state.selectedSessionId
+  );
+  const latestSelectedTurn = selectedTurns[selectedTurns.length - 1] || activeTurnForSelectedSession();
+  const terminalStatus = `${latestSelectedTurn?.terminal_status || ""}`.toLowerCase();
+  const finalComplete = parentTasks.length > 0 && allClosed && terminalStatus === "success";
+  const objectiveTurn = selectedWorkerSession
+    ? null
+    : selectedTurns.find((turn) => {
+      const text = `${turn && turn.user_text ? turn.user_text : ""}`.trim();
+      return text &&
+        !isInternalRuntimePrompt(turn) &&
+        !text.startsWith("<freehand_parent_evaluation") &&
+        !text.startsWith("<freehand_parent_aggregation");
+    });
+  const objective = objectiveTurn
+    ? compactSentence(objectiveTurn.user_text, 180)
+    : "Overall goal unavailable from the current projection";
+
+  let phase = "Status unavailable";
+  let decision = "Waiting for owner-backed Task Center and session truth.";
+  let tone = "unavailable";
+  if (taskBoard) {
+    if (finalComplete) {
+      phase = "Goal complete";
+      decision = "Master verified the overall goal after Worker review.";
+      tone = "accepted";
+    } else if (blockedTasks.length > 0 || terminalStatus === "blocked") {
+      phase = "Blocked";
+      decision = `${blockedTasks.length || 1} blocker(s) require an explicit Master decision.`;
+      tone = "blocked";
+    } else if (allClosed) {
+      phase = "Awaiting Master evaluation";
+      decision = "All current Worker tasks are closed; Master must evaluate the overall goal before completion.";
+      tone = "evaluating";
+    } else if (reworkSeen && openTasks.length > 0) {
+      phase = "Rework required";
+      decision = "Master rejected or reopened work; corrected Worker evidence is still required.";
+      tone = "review";
+    } else if (reviewTasks.length > 0) {
+      phase = "Master evaluating";
+      decision = `${reviewTasks.length} Worker result(s) are ready for quality review.`;
+      tone = "evaluating";
+    } else if (openTasks.length > 0) {
+      phase = "Workers active";
+      decision = `${openTasks.length} Worker task(s) remain open before the next Master decision.`;
+      tone = "active";
+    } else {
+      phase = "No delegated work";
+      decision = "The selected session has no current Worker task projection.";
+      tone = "neutral";
+    }
+  }
+
+  const taskCount = (taskBoard && taskBoard.tasks || []).length;
+  const blockedCount = (taskBoard && taskBoard.blocked || []).length;
+  const reviewCount = (taskBoard && taskBoard.review_ready || []).length;
+  const staleCount = (taskBoard && taskBoard.stale || []).length;
+  const agents = phase2SortedAgents((agentBoard && agentBoard.agents) || []);
+  const workerTarget = currentWorkerControlTarget();
+  const workerEvents = (workerControl && workerControl.events) || [];
+  const workerTask = (workerControl && workerControl.task) || (workerTarget && workerTarget.task) || null;
+
+  return {
+    phase,
+    decision,
+    tone,
+    objective,
+    roundLabel: "Current round unavailable",
+    terminalStatus,
+    taskBoardStatus: taskBoard
+      ? `${taskCount} task(s) · ${blockedCount} blocked · ${reviewCount} review · ${staleCount} stale`
+      : state.phase2StatusError
+        ? `status unavailable: ${state.phase2StatusError}`
+        : "waiting",
+    agentBoardStatus: agentBoard
+      ? `${agents.length} agent(s) · ${agents.filter((agent) => agent.alive).length} active`
+      : state.phase2StatusError
+        ? `status unavailable: ${state.phase2StatusError}`
+        : "waiting",
+    historyStatus: taskHistory
+      ? `${historyEvents.length} execution event(s)`
+      : taskBoard
+        ? "no task history"
+        : "waiting",
+    controlStatus: workerTarget || workerControl
+      ? `${statusLabel(workerTask && workerTask.status)} · ${workerEvents.length} control event(s)`
+      : "no active execution",
+    tasks,
+    agents,
+    historyEvents,
+    workerTask,
+    workerTarget,
+    workerEvents,
+  };
+}
+
+function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel()) {
+  if (!mobileAgentSummaryStrip) {
+    return;
+  }
+  mobileAgentSummaryStrip.dataset.tone = model.tone;
+  setText("mobile-agent-summary-title", model.phase);
+  const taskSummary = model.taskBoardStatus === "waiting"
+    ? "Waiting for Task Center truth"
+    : model.taskBoardStatus;
+  setText("mobile-agent-summary-copy", taskSummary);
+  setText("mobile-agent-summary-dot", "");
+  if (shell) {
+    shell.dataset.lifecycleClockCount = `${state.lifecycleClocks.size}`;
+    shell.dataset.selectedTerminalStatus = model.terminalStatus || "";
+  }
+}
+
+function renderMobileAgentSheet(model = buildMobileAgentDashboardModel()) {
+  if (!mobileAgentSheet) {
+    return;
+  }
+  mobileAgentSheet.dataset.tone = model.tone;
+  setText("mobile-agent-phase", model.phase);
+  setText("mobile-agent-decision", model.decision);
+  setText("mobile-agent-goal", `Overall goal · ${model.objective}`);
+  setText("mobile-agent-round", model.roundLabel);
+  setText("mobile-agent-task-status", model.taskBoardStatus);
+  setText("mobile-agent-agent-status", model.agentBoardStatus);
+  setText("mobile-agent-history-status", model.historyStatus);
+  setText("mobile-agent-control-status", model.controlStatus);
+  renderMobileAgentTaskList(model);
+  renderMobileAgentAgentList(model);
+  renderMobileAgentHistoryList(model);
+  renderMobileAgentControlList(model);
+  applyMobileAgentSheetState();
+}
+
+function renderMobileAgentTaskList(model) {
+  if (!mobileAgentTaskList) {
+    return;
+  }
+  mobileAgentTaskList.replaceChildren();
+  if (model.tasks.length === 0) {
+    mobileAgentTaskList.appendChild(mobileAgentEmptyCard("No Worker tasks in the current projection."));
+    return;
+  }
+  model.tasks.slice(0, 8).forEach((task) => {
+    const card = mobileAgentCard({
+      title: taskTitle(task),
+      meta: [statusLabel(task.status), assigneeLabel(task.assignee_agent_id), freshnessLabel(task.last_progress_at || task.updated_at)]
+        .filter(Boolean)
+        .join(" · "),
+      copy: compactSentence(task.goal || "Task goal unavailable", 132),
+      tone: phase2StatusClass(task.status),
+      interactive: true,
+    });
+    card.addEventListener("click", () => {
+      setMobileAgentSheetOpen(false);
+      openWorkerTaskSession(task);
+    });
+    mobileAgentTaskList.appendChild(card);
+  });
+}
+
+function renderMobileAgentAgentList(model) {
+  if (!mobileAgentAgentList) {
+    return;
+  }
+  mobileAgentAgentList.replaceChildren();
+  if (model.agents.length === 0) {
+    mobileAgentAgentList.appendChild(mobileAgentEmptyCard("No Worker activity in the current projection."));
+    return;
+  }
+  model.agents.slice(0, 8).forEach((agent, index) => {
+    const boundTask = taskForAgent(agent);
+    const card = mobileAgentCard({
+      title: phase2AgentLabel(agent.agent_id, index),
+      meta: [statusLabel(agent.state), agent.role || "agent"]
+        .filter(Boolean)
+        .join(" · "),
+      copy: lifecycleActivityLabel(agent) || (boundTask ? taskTitle(boundTask) : "idle"),
+      tone: agentIsActive(agent) ? "phase2-running" : "phase2-muted",
+      interactive: !!boundTask,
+    });
+    if (boundTask) {
+      card.addEventListener("click", () => {
+        setMobileAgentSheetOpen(false);
+        openWorkerTaskSession(boundTask);
+      });
+    }
+    mobileAgentAgentList.appendChild(card);
+  });
+}
+
+function renderMobileAgentHistoryList(model) {
+  if (!mobileAgentHistoryList) {
+    return;
+  }
+  mobileAgentHistoryList.replaceChildren();
+  if (model.historyEvents.length === 0) {
+    mobileAgentHistoryList.appendChild(mobileAgentEmptyCard("Select a Worker task to inspect review history."));
+    return;
+  }
+  model.historyEvents.slice(-8).reverse().forEach((event) => {
+    mobileAgentHistoryList.appendChild(mobileAgentCard({
+      title: eventKindLabel(event.event_type),
+      meta: [statusLabel(event.to_status), freshnessLabel(event.timestamp)]
+        .filter(Boolean)
+        .join(" · "),
+      copy: compactSentence(eventPayloadSummary({ kind: event.event_type, payload: event.payload || {} }), 132),
+      tone: phase2EventClass(event.event_type || event.to_status),
+    }));
+  });
+}
+
+function renderMobileAgentControlList(model) {
+  if (!mobileAgentControlList) {
+    return;
+  }
+  mobileAgentControlList.replaceChildren();
+  if (!model.workerTarget && !state.workerControl) {
+    mobileAgentControlList.appendChild(mobileAgentEmptyCard("Worker control appears when an execution is active."));
+    return;
+  }
+  mobileAgentControlList.appendChild(mobileAgentCard({
+    title: model.workerTask ? taskTitle(model.workerTask) : "Worker execution",
+    meta: [statusLabel(model.workerTask && model.workerTask.status), assigneeLabel(model.workerTask && model.workerTask.assignee_agent_id)]
+      .filter(Boolean)
+      .join(" · "),
+    copy: model.workerTask && model.workerTask.active_execution_id
+      ? "Execution is tracked by the service."
+      : "No active execution.",
+    tone: phase2StatusClass(model.workerTask && model.workerTask.status),
+  }));
+  mobileAgentControlList.appendChild(workerControlActionRow(model.workerTask, model.workerTarget));
+  model.workerEvents.slice(-4).reverse().forEach((event) => {
+    mobileAgentControlList.appendChild(mobileAgentCard({
+      title: workerControlOpLabel(event.op),
+      meta: [statusLabel(event.status), assigneeLabel(event.agent_id), freshnessLabel(event.created_at)]
+        .filter(Boolean)
+        .join(" · "),
+      copy: workerControlPayloadSummary(event),
+      tone: phase2ControlStatusClass(event.status),
+    }));
+  });
+}
+
+function mobileAgentCard({ title, meta, copy, tone = "phase2-muted", interactive = false }) {
+  const card = document.createElement(interactive ? "button" : "section");
+  card.className = `mobile-agent-card ${tone}`;
+  if (interactive) {
+    card.type = "button";
+  }
+  const titleNode = document.createElement("div");
+  titleNode.className = "mobile-agent-card-title";
+  titleNode.textContent = title;
+  const metaNode = document.createElement("div");
+  metaNode.className = "mobile-agent-card-meta";
+  metaNode.textContent = meta || "status unavailable";
+  const copyNode = document.createElement("div");
+  copyNode.className = "mobile-agent-card-copy";
+  copyNode.textContent = copy || "detail unavailable";
+  card.append(titleNode, metaNode, copyNode);
+  return card;
+}
+
+function mobileAgentEmptyCard(copy) {
+  return mobileAgentCard({
+    title: "Unavailable",
+    meta: "owner projection",
+    copy,
+  });
+}
+
 function renderPhase2Dashboard() {
   renderTaskBoardProjection();
   renderAgentBoardProjection();
   renderEventInboxProjection();
   renderTaskHistoryProjection();
   renderWorkerControlProjection();
+  const mobileModel = buildMobileAgentDashboardModel();
+  renderMobileAgentSummaryStrip(mobileModel);
+  renderMobileAgentSheet(mobileModel);
 }
 
 function renderTaskBoardProjection() {
@@ -3341,7 +3912,7 @@ function renderAgentBoardProjection() {
     agentBoardList.textContent = "-";
     return;
   }
-  const agents = board.agents || [];
+  const agents = phase2SortedAgents(board.agents || []);
   const activeCount = agents.filter((agent) => agent.alive).length;
   agentBoardStatus.textContent = `${agents.length} agent(s) · ${activeCount} active`;
   agentBoardList.replaceChildren();
@@ -3353,8 +3924,17 @@ function renderAgentBoardProjection() {
 }
 
 function agentBoardItem(agent, index) {
-  const item = document.createElement("section");
-  item.className = `phase2-card ${agent.alive ? "phase2-running" : "phase2-muted"}`;
+  const boundTask = taskForAgent(agent);
+  const item = document.createElement(boundTask ? "button" : "section");
+  item.className = `phase2-card phase2-agent-card ${agent.alive ? "phase2-agent-active" : "phase2-muted"}`;
+  if (boundTask) {
+    item.type = "button";
+    item.dataset.taskId = boundTask.task_id || "";
+    item.dataset.sessionId = workerSessionIdForTask(boundTask);
+    item.addEventListener("click", () => {
+      openWorkerTaskSession(boundTask);
+    });
+  }
   const title = document.createElement("div");
   title.className = "phase2-card-title";
   title.textContent = phase2AgentLabel(agent.agent_id, index);
@@ -3365,7 +3945,7 @@ function agentBoardItem(agent, index) {
     .join(" · ");
   const activity = document.createElement("div");
   activity.className = "phase2-card-copy";
-  activity.textContent = lifecycleActivityLabel(agent) || "idle";
+  activity.textContent = lifecycleActivityLabel(agent) || (boundTask ? taskTitle(boundTask) : "idle");
   item.append(title, meta, activity);
   return item;
 }
@@ -3560,6 +4140,80 @@ function phase2SortedTasks(tasks) {
       return leftTerminal - rightTerminal;
     }
     return Number(right.updated_at || 0) - Number(left.updated_at || 0);
+  });
+}
+
+function phase2SortedAgents(agents) {
+  return [...agents].sort((left, right) => {
+    const leftActive = agentIsActive(left) ? 1 : 0;
+    const rightActive = agentIsActive(right) ? 1 : 0;
+    if (leftActive !== rightActive) {
+      return rightActive - leftActive;
+    }
+    return normalizeAgentId(left.agent_id).localeCompare(normalizeAgentId(right.agent_id));
+  });
+}
+
+function agentIsActive(agent) {
+  if (!agent) {
+    return false;
+  }
+  if (agent.current_task_id || agent.current_execution_id) {
+    return true;
+  }
+  return !!agent.alive && !["idle", "available", ""].includes(`${agent.state || ""}`.toLowerCase());
+}
+
+function taskForAgent(agent) {
+  const agentId = normalizeAgentId(agent && agent.agent_id);
+  if (!agentId || !state.taskBoard) {
+    return null;
+  }
+  const tasks = phase2SortedTasks(state.taskBoard.tasks || []);
+  return tasks.find((task) => {
+    const taskAgent = normalizeAgentId(task.assignee_agent_id);
+    if (agent.current_task_id && task.task_id === agent.current_task_id) {
+      return true;
+    }
+    if (agent.current_execution_id && task.active_execution_id === agent.current_execution_id) {
+      return true;
+    }
+    return taskAgent === agentId && !terminalTaskStatus(task.status);
+  }) || null;
+}
+
+function openWorkerTaskSession(task) {
+  if (!task || !task.task_id) {
+    return;
+  }
+  const sessionId = workerSessionIdForTask(task);
+  if (sessionId) {
+    setSelectedSessionId(sessionId);
+  }
+  state.taskHistory = null;
+  state.workerControl = null;
+  renderAll();
+  adpQuery({ QueryTaskHistory: { task_id: task.task_id } })
+    .then((result) => applyPhase2QueryResult(result))
+    .catch((error) => {
+      state.phase2StatusError = error.message;
+      renderPhase2Dashboard();
+    });
+  if (task.active_execution_id) {
+    adpQuery({
+      QueryWorkerControl: {
+        task_id: task.task_id,
+        execution_id: task.active_execution_id,
+      },
+    })
+      .then((result) => applyPhase2QueryResult(result))
+      .catch((error) => {
+        state.phase2StatusError = error.message;
+        renderPhase2Dashboard();
+      });
+  }
+  refreshSelectedSession().catch((error) => {
+    setCommandStatus(`worker session refresh failed: ${error.message}`);
   });
 }
 
@@ -3832,15 +4486,15 @@ function showInspectorPanel(panel) {
     settingsShell.hidden = !showingSettings;
   }
   if (inspectorEyebrow) {
-    inspectorEyebrow.textContent = showingSettings ? "settings" : "detail region";
+    inspectorEyebrow.textContent = showingSettings ? "settings" : "lifecycle observer";
   }
   if (inspectorTitle) {
-    inspectorTitle.textContent = showingSettings ? "Provider Settings" : "Selected Turn Debug";
+    inspectorTitle.textContent = showingSettings ? "Provider Settings" : "Task and Agent Lifecycle";
   }
   if (inspectorCopy) {
     inspectorCopy.textContent = showingSettings
       ? "Edit provider endpoint, model, and credential environment variable. Runtime status lives under Status."
-      : "右侧只展示当前 turn 的调试摘要，不抢主消息流焦点。";
+      : "观察 Master/Worker 生命周期、当前执行、事件和必要的调试摘要；活跃 Worker 会高亮并可点击查看对应任务进度。";
   }
   if (settingsShellToggle) {
     settingsShellToggle.classList.toggle("is-active", showingSettings);
@@ -4414,12 +5068,6 @@ function renderDebugDetailsToggle() {
   debugDetailsToggle.textContent = state.debugDetailsVisible ? "Debug on" : "Debug off";
 }
 
-function openDebugPanel() {
-  showInspectorPanel("debug");
-  setMobileDrawer("details");
-  renderAll();
-}
-
 function openSettingsPanel() {
   showInspectorPanel("settings");
   setMobileDrawer("settings");
@@ -4461,11 +5109,17 @@ if (closeSessionDrawerButton) {
 }
 if (openDetailDrawerButton) {
   openDetailDrawerButton.addEventListener("click", () => {
-    if (state.mobileDrawer === "details" && state.inspectorPanel === "debug") {
-      closeMobileDrawer();
-      return;
-    }
-    openDebugPanel();
+    setMobileAgentSheetOpen(!state.mobileAgentSheetOpen);
+  });
+}
+if (openMobileAgentSheetButton) {
+  openMobileAgentSheetButton.addEventListener("click", () => {
+    setMobileAgentSheetOpen(!state.mobileAgentSheetOpen);
+  });
+}
+if (closeMobileAgentSheetButton) {
+  closeMobileAgentSheetButton.addEventListener("click", () => {
+    setMobileAgentSheetOpen(false);
   });
 }
 if (openSettingsDrawerButton) {
@@ -4496,7 +5150,7 @@ if (closeDetailDrawerButton) {
   closeDetailDrawerButton.addEventListener("click", closeMobileDrawer);
 }
 if (mobileDrawerScrim) {
-  mobileDrawerScrim.addEventListener("click", closeMobileDrawer);
+  mobileDrawerScrim.addEventListener("click", closeMobileOverlays);
 }
 if (newSessionForm) {
   newSessionForm.addEventListener("change", (event) => {
@@ -4615,6 +5269,18 @@ if (workerControlList) {
     });
   });
 }
+if (mobileAgentControlList) {
+  mobileAgentControlList.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target ? target.closest("[data-worker-control-op]") : null;
+    if (!button) {
+      return;
+    }
+    sendWorkerControl(button.dataset.workerControlOp).catch((error) => {
+      setCommandStatus(`worker control failed: ${error.message}`, { stickyMs: 9000 });
+    });
+  });
+}
 modelSelector.addEventListener("change", () => {
   modelSelector.value = "runtime";
   setCommandStatus("model selector is read-only; runtime config owns active model", { stickyMs: 6000 });
@@ -4635,21 +5301,25 @@ taskCwdInput.addEventListener("change", () => {
 applyLayoutShape();
 syncMobileDrawerForLayout();
 installMobileSessionSwipeGesture();
+installDesktopLayoutResizers();
 updateComposerClearance();
 window.addEventListener("resize", () => {
   applyLayoutShape();
   syncMobileDrawerForLayout();
+  applySavedLayoutWidths();
   updateComposerClearance();
 });
 window.addEventListener("orientationchange", () => {
   applyLayoutShape();
   syncMobileDrawerForLayout();
+  applySavedLayoutWidths();
   updateComposerClearance();
 });
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", () => {
     applyLayoutShape();
     syncMobileDrawerForLayout();
+    applySavedLayoutWidths();
     updateComposerClearance();
   });
   window.visualViewport.addEventListener("scroll", updateComposerClearance, { passive: true });
@@ -4712,6 +5382,10 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   event.preventDefault();
+  if (state.mobileAgentSheetOpen) {
+    setMobileAgentSheetOpen(false);
+    return;
+  }
   if (state.mobileDrawer) {
     closeMobileDrawer();
     return;

@@ -1222,6 +1222,13 @@ mod tests {
         assert!(root_body.contains("id=\"task-history-list\""));
         assert!(root_body.contains("id=\"worker-control-status\""));
         assert!(root_body.contains("id=\"worker-control-list\""));
+        assert!(root_body.contains("id=\"mobile-agent-summary-strip\""));
+        assert!(root_body.contains("id=\"open-mobile-agent-sheet-button\""));
+        assert!(root_body.contains("id=\"mobile-agent-sheet\""));
+        assert!(root_body.contains("id=\"close-mobile-agent-sheet-button\""));
+        assert!(root_body.contains("aria-modal=\"true\""));
+        assert!(root_body.contains("Task and Agent Lifecycle"));
+        assert!(root_body.contains("lifecycle observer"));
         assert!(root_body.contains("Save provider config"));
         assert!(!root_body.contains("id=\"settings-agent-value\""));
         assert!(!root_body.contains("Task settings pending"));
@@ -1302,7 +1309,6 @@ mod tests {
         assert!(webui_css_body.contains("body[data-layout-shape=\"foldable_unfolded\"]"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"desktop_large\"]"));
         assert!(webui_css_body.contains("body[data-mobile-drawer=\"sessions\"] .sidebar"));
-        assert!(webui_css_body.contains("body[data-mobile-drawer=\"details\"] .inspector"));
         assert!(webui_css_body.contains("body[data-mobile-drawer=\"settings\"] .inspector"));
         assert!(webui_css_body.contains(".mobile-drawer-scrim"));
         assert!(webui_css_body.contains(".settings-shell"));
@@ -1312,9 +1318,23 @@ mod tests {
         assert!(webui_css_body.contains(".phase2-board-block"));
         assert!(webui_css_body.contains(".phase2-list"));
         assert!(webui_css_body.contains(".phase2-card"));
+        assert!(webui_css_body.contains(".phase2-agent-card"));
+        assert!(webui_css_body.contains(".phase2-agent-active"));
         assert!(webui_css_body.contains(".phase2-event"));
         assert!(webui_css_body.contains(".phase2-action-row"));
         assert!(webui_css_body.contains(".phase2-action.danger"));
+        assert!(webui_css_body.contains(".mobile-agent-summary-strip"));
+        assert!(webui_css_body.contains(".mobile-agent-sheet"));
+        assert!(webui_css_body.contains(".mobile-agent-sheet-handle"));
+        assert!(
+            webui_css_body.contains("body[data-mobile-agent-sheet=\"open\"] .mobile-agent-sheet")
+        );
+        assert!(
+            webui_css_body.contains("body[data-mobile-agent-sheet=\"open\"] .mobile-drawer-scrim")
+        );
+        assert!(webui_css_body.contains("--mobile-agent-blue: #1f5fbf"));
+        assert!(webui_css_body.contains("--mobile-agent-green: #1f7a4d"));
+        assert!(webui_css_body.contains("--mobile-agent-panel: #ffffff"));
         assert!(!webui_css_body.contains(".settings-readonly-action"));
         assert!(webui_css_body.contains(".session-with-workers"));
         assert!(webui_css_body.contains(".session-worker-children"));
@@ -1387,10 +1407,22 @@ mod tests {
         assert!(js_body.contains("function renderPhase2Dashboard"));
         assert!(js_body.contains("function renderTaskBoardProjection"));
         assert!(js_body.contains("function renderAgentBoardProjection"));
+        assert!(js_body.contains("function phase2SortedAgents"));
+        assert!(js_body.contains("function openWorkerTaskSession"));
+        assert!(js_body.contains("waiting lifecycle"));
         assert!(js_body.contains("function renderEventInboxProjection"));
         assert!(js_body.contains("function renderTaskHistoryProjection"));
         assert!(js_body.contains("function renderWorkerControlProjection"));
         assert!(js_body.contains("function sendWorkerControl"));
+        assert!(js_body.contains("function buildMobileAgentDashboardModel"));
+        assert!(js_body.contains("function renderMobileAgentSummaryStrip"));
+        assert!(js_body.contains("function renderMobileAgentSheet"));
+        assert!(js_body.contains("function setMobileAgentSheetOpen"));
+        assert!(js_body.contains("state.mobileAgentSheetOpen"));
+        assert!(js_body.contains("Awaiting Master evaluation"));
+        assert!(js_body.contains("Master evaluating"));
+        assert!(js_body.contains("Rework required"));
+        assert!(js_body.contains("Goal complete"));
         assert!(js_body.contains("data-worker-control-op"));
         assert!(js_body.contains("state.taskBoard"));
         assert!(js_body.contains("state.agentBoard"));
@@ -1408,6 +1440,9 @@ mod tests {
         assert!(!js_body.contains("status.includes(\"reason_turn_started\")"));
         assert!(!js_body.contains("freehand-webui-task-board"));
         assert!(!js_body.contains("freehand-webui-worker-control"));
+        assert!(!js_body.contains("freehand-webui-mobile-agent-dashboard"));
+        assert!(!js_body.contains("aggregate worker results"));
+        assert!(!js_body.contains("allTasksClosed ? \"Goal complete\""));
         assert!(js_body.contains("refreshConfigStatus"));
         assert!(js_body.contains("variantPayload(result, \"ConfigStatus\")"));
         assert!(js_body.contains("state.configStatus"));
@@ -1489,10 +1524,24 @@ mod tests {
         assert!(js_body.contains("isDraftSessionId"));
         assert!(js_body.contains("startNewConversation"));
         assert!(js_body.contains("startNewTask"));
+        let start_new_conversation_pos = js_body
+            .find("async function startNewConversation()")
+            .expect("new conversation flow exists");
+        let start_new_task_pos = js_body
+            .find("async function startNewTask")
+            .expect("new task flow exists");
+        let start_new_conversation_body = &js_body[start_new_conversation_pos..start_new_task_pos];
+        assert!(start_new_conversation_body.contains("CreateSession"));
+        assert!(start_new_conversation_body.contains("title: \"New conversation\""));
+        assert!(start_new_conversation_body.contains("await refreshSessions();"));
+        assert!(start_new_conversation_body.contains("await refreshSelectedSession();"));
         assert!(js_body.contains("selectedSessionIds"));
         assert!(js_body.contains("function workerChildSessionsForParent"));
         assert!(js_body.contains("parent_session_id"));
         assert!(js_body.contains("function renderSessionWithWorkerChildren"));
+        assert!(js_body.contains("function renderSessionAgentGroup"));
+        assert!(js_body.contains("group.className = \"session-agent-group\""));
+        assert!(js_body.contains("sessionNodes.className = \"session-agent-sessions\""));
         assert!(js_body.contains("function renderSessionItem"));
         assert!(js_body.contains("worker-task-"));
         assert!(js_body.contains("session.temporary"));

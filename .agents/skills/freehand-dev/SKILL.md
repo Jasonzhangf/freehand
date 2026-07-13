@@ -125,6 +125,7 @@ Use this skill for any non-trivial work in this repo.
 - Do not add temporary helpers to `crates/freehand-reason` or `crates/freehand-node`.
 - If logic smells reusable, semantic, parser-like, builder-like, validator-like, or projector-like, put it in `crates/freehand-blocks`.
 - Provider wire DTOs stay inside `crates/freehand-provider-*`.
+- Provider live bridge may select a provider driver from config, but protocol-specific endpoints, request bodies, tool declaration shapes, tool-result re-entry shapes, SSE parsing, and raw provider capture belong inside the provider adapter/executor crate. Runtime must not hardcode Responses, Chat Completions, or Anthropic Messages wire bodies.
 - Provider semantic layer supports OpenAI-compatible and Anthropic first.
 - Provider payload wire DTOs stay private to provider adapters.
 - Turn semantics stay inside `crates/freehand-reason`.
@@ -212,6 +213,8 @@ Use this skill for any non-trivial work in this repo.
 - Master provider context must carry current framework behavior and Task Center truth before the model decides to call tools. Inject and test `TaskSpaceSnapshot` with configured Worker, valid status filters, known tasks, agents, and recent events so the model does not spend turns probing `list_agents`, `list_tasks`, or history just to understand the framework.
 - Master live provider tool surface is framework-only: expose `task` and `timer`, not file/search/write tools, shell, `todo_write`, or `complete_step`. Worker owns external repo read/search/write through its task `target_cwd`; injected Master non-framework calls must return a failed capability-boundary tool result with Worker dispatch guidance and no file-content leak.
 - Task tool guidance must include concrete argument shape, not only semantic prose. Lock top-level `op` in schema/tests/error text; show create/assign examples; require expanded absolute existing repository/workspace `target_cwd` instead of `~`, glob, or output paths.
+- Master dispatch is lifecycle progress, not user-task completion. If the Master only creates/assigns Worker work or schedules a timer while the user objective still depends on future Task Center/timer truth, the completion schema must use `claim="waiting"` and UI must project `TerminalStatus::ToolPending` as lifecycle/running, not `Final`/completed.
+- Do not rely on prompt guidance alone for parent/child lifecycle closure. Master user-session `claim="complete"` must be runtime-gated against Task Center child truth: if any task with the same `parent_session_id` is not closed, reject completion and force repair to `waiting` or further Task Center handling.
 - Internal timing/wakeup capability is a standard `timer` framework tool, not task truth. Do not encode wait/schedule semantics as `task(op="wait")`, task notes, or task lifecycle state; `freehand-tools` owns the schema, and `freehand-runtime` owns durable timer state under `~/.freehand/state/timers` plus timer ledgers under `~/.freehand/ledgers/timers`.
 - Timer wakeups must persist the wakeup prompt and resume Master through an internal turn when due. Relative, absolute, local-time daily/weekly, and local-time 5-field cron semantics stay independent from Task Center truth; Worker tool surfaces must not expose `timer`.
 - If the next useful Master wait exceeds 3 minutes, the model-visible guidance must require `timer(op="schedule")` instead of dead-waiting in the current turn. After scheduling, Master should continue other ready Master-side work. The persisted timer prompt must say what current truth to inspect, what waited condition to revisit, and what decision to make.
@@ -286,11 +289,15 @@ Use this skill for any non-trivial work in this repo.
 - For WebUI lifecycle/helper edits, `node --check` is only syntax coverage. Capture browser console/page errors during a real fixed-port WebUI submit, because undefined runtime helpers such as lifecycle phase functions can pass syntax checks and fail only in browser execution.
 - UI validation must prove the user's submitted text remains observable after send and after refresh, live lifecycle animation stops when the underlying ADP turn is terminal, and no historical turn keeps fake streaming/timer state after a newer turn starts.
 - WebUI online automation must operate the current UI surface, not stale shortcuts. If `/new` or New Conversation opens a dialog, the verifier must wait for the dialog and confirm the intended mode before submitting prompts; otherwise prompts can land in a stale localStorage-selected session and produce false history failures.
+- WebUI New conversation must persist session metadata through protocol-owned `CreateSession` before normal use. A browser-only draft can make `QuerySessionTurns` succeed while `QuerySessionList` remains empty; after reload the session-list truth gate will correctly reject those orphan turns.
+- WebUI online terminal waits must accept every protocol terminal projection that ends live work, including success/completed, blocked, failed, cancelled, and interrupted. Do not make verifier progress depend only on the word `completed`.
+- Animated mobile drawer/sheet screenshot proof must wait for settled viewport geometry, not only a body data attribute. For an opened bottom sheet, require its rect to occupy the intended viewport region; for a closed sheet, require it to move outside the viewport before capture.
 - Before claiming completion, run the feature's mapped test stack:
   - module white-box tests
   - module black-box tests
   - project black-box tests
 - Do not parallel-run multiple `cargo test` processes that rely on timestamp-based temp runtime helpers inside the same owner area; cross-process temp-path collisions can create false persistence/runtime failures during spot checks.
+- If a focused `cargo test` appears to hang or emits no output during compile, rerun it through `scripts/run-cargo-test-with-evidence.sh -- <cargo test args...>`. This wraps cargo with a bounded timeout, writes stdout/stderr logs, and prints the exit code. Do not conclude "no cargo process" from a narrow `ps | rg cargo` check alone because the local command wrapper may appear as `rtk cargo` and the active child may be `rustc`.
 - Canonical full local gate is `make ci`.
 - Release closeout must run `scripts/release.sh` end-to-end and prove staged artifacts exist; global install closeout must run `scripts/install-global.sh` with a temp `FREEHAND_PREFIX` and prove installed host binaries execute.
 - Installed daemon closeout must use a temp `HOME` plus real `~/.freehand/config.toml` shape, start `freehand-daemon serve --agent <name>`, curl `/health` and `/`, then stop only the exact daemon PID.
@@ -312,10 +319,12 @@ Use this skill for any non-trivial work in this repo.
   - `cargo run -p xtask -- gates check`
 - For state machine, stream, timeout, retry, error projection, or resource cleanup changes, add both positive and negative tests.
 - For live bridge error projection repairs, do not stop at persistence truth. Also verify runtime dispatch refreshes `UiProtocolState`, UI protocol marks user-visible activity status correctly, and fixed-port query plus SSE expose the same terminal/error state.
+- For ADP online submit validation, prefer `scripts/verify-adp-fixed-session-observability-online.py --url ws://127.0.0.1:4042/adp --session <fixed-id>`. Do not wait on command receipts as the only liveness signal. The proof must use the correct internally tagged ADP envelope (`kind=command|query|subscribe`) and query the same selected session plus TaskBoard/AgentBoard/TaskHistory/WorkerControl in parallel; a pending turn with original `user_text` is valid observable truth, while an empty session after a correctly accepted command is red evidence.
 - For WebUI/ADP state projection checks, use paired samples before claiming UI correctness. In dev mode prefer `freehand-cliS ... --url ws://127.0.0.1:4042/adp`; for release closeout use `freehand-cli ... --url ws://127.0.0.1:4041/adp`.
 - For multi-round tool-loop claims, one-round success is invalid evidence. Use `freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample failure` and require `rounds>=2`, `tool_executions>=1`, `failed_tools>=1`, plus terminal success from ADP/session truth before claiming closure.
 - For completion-schema mismatch/live-tool bugs, verify the provider finish reason gate before UI work: completion-schema mismatch handling may run only on terminal-candidate finish reasons such as `stop` / `end_turn`; it is model response polishing, not system schema repair and not provider failure. `tool_use` and incomplete tool calls must become paired tool results back to the model, not schema polishing or terminal failures.
 - For provider/network executor failures, keep them separate from schema mismatch and tool-result failures. Recoverable non-stream provider errors retry exactly ten attempts inside provider/runtime before task/user-visible final failure; production backoff varies between 1s and 20s. Intermediate retries are internal evidence only, not task-visible state. Final provider/network exhaustion in a Worker task is `TaskInterrupted` so the same task can be retried with a new execution; content/path/model-terminal failures remain `TaskBlocked`.
+- When the active provider family changes, update Worker retryable provider error classification for that family. OpenAI-compatible network/status failures such as `openai_http_request_failed`, `openai_stream_read_failed`, and retryable `openai_http_status_*` must map to `TaskInterrupted`; adapter/callback/content failures must not.
 - For provider-retry proof, model prose claiming retries is not evidence. Require provider-domain retry truth from error-center metadata, provider fixture/error injection, or runtime event projection; prompt-only sampling must fail.
 - For master-worker autonomy fixtures while production workerS is online, every created Worker task must include a real existing `target_cwd`. A no-cwd fixture task can be claimed by the production Worker and correctly blocked before the deterministic fixture finishes, creating false success-path `TaskBlocked` events.
 - For task lifecycle headless proof, do not rely on a model prompt to create/review/approve/close tasks. Use protocol-owned task mutation commands over ADP, then verify `task.orchestration` list/history truth.
@@ -323,6 +332,34 @@ Use this skill for any non-trivial work in this repo.
 - For multi-task Phase 2A headless proof, use the S-profile `master-worker-foundation-sample` create path first, then restart `com.freehand.daemonS` and run verify mode against the same task, execution, and worker agent ids. A fresh sample after restart is not recovery proof, and model prose is not task-loop evidence.
 - For multi-task Phase 2B EventInbox/MasterPoll proof, require four-part event cursors that include `event_id`, legacy three-part cursor compatibility tests, `replay_from_start=true` plus omitted limits for full drain, a final owner-backed non-replay cursor reread, and same-cursor verify after `restartS` returning zero events after cursor. Finite page limits or fresh post-restart samples are not cursor recovery proof.
 - For multi-task Phase 2C worker-control proof, stateful task consequences such as pause, resume, and cancel must route through Task Center first and persist `applied` worker-control events only after the Task Center consequence succeeds. Safe-point requests persist `queued`; status queries persist `observed`. Restart proof must verify the same task, execution, agent, and control ids after `restartS`; a fresh sample is not recovery evidence.
+- For parent-session Master/Worker evaluation, use `task_closed` as the resume
+  signal only after every current Task Center child sharing the same
+  `parent_session_id` is `Closed`. Build the follow-up from original user
+  objective history, decomposed task goal/deliverables/acceptance, and accepted
+  `TaskReviewSubmitted` truth; persist it in the original parent reason session
+  and never expose raw Worker transcripts.
+- Parent evaluation idempotency must consult terminal reason persistence
+  carrying a deterministic evaluation marker, not only the Master event cursor
+  or loop-state cache. Successful, waiting, and blocked evaluation turns are
+  durable decisions because they may already have created next-round task
+  truth; failed/interrupted/cancelled turns remain retryable.
+- Any background owner that writes reason turns outside the foreground UI
+  dispatcher must have a query-time projection refresh. `QuerySessionTurns`
+  must restore the requested session from reason persistence before returning
+  transcript truth, and internal parent-evaluation prompts must project no
+  synthetic user message while the Master decision/final answer remains visible.
+- An all-children-closed parent event is an evaluation trigger, not a completion
+  criterion. Parent evaluation must receive original user objective history,
+  child task goal/deliverables/acceptance, and accepted review truth. It must be
+  allowed to create correction, improvement, or newly discovered child tasks.
+  Reject any design or online verifier that proves only result aggregation; the
+  verifier must force at least one next-round task before final completion.
+- When global `~/.freehand` EventInbox/TaskBoard contains unrelated historical truth, run Master/Worker lifecycle fixtures with an isolated temporary `HOME/.freehand`; do not delete, skip, or rewrite global truth to obtain a pass. Switch both the fixture Master and Worker provider configurations through the config owner before submitting work, and stop only the explicit fixture/server/worker PIDs started by that verifier.
+- Before an isolated online verifier launches a workspace binary such as
+  `target/debug/freehand-daemon`, rebuild that exact binary after source changes;
+  a green unit test does not refresh a separately launched executable. Fixture
+  decisions must match accepted `review_summary`/TaskHistory truth, not expected
+  tokens embedded in task goals, acceptance text, or tool-call arguments.
 - For WebUI multi-round rendering, never collapse `runtime-turn-N` / `runtime-turn-N-rM` into one all-in summary card. Render chronological per-round lifecycle cards, hide duplicate/internal continuation prompts after the first round, mark superseded rounds as continued, and keep the final summary at the bottom terminal row.
 - For WebUI submit/history regressions, composer clearing is not proof of success. Verify the submitted text is immediately visible in the conversation stream, historical cards remain present, the latest card is appended in session order, a live turn with no public rows renders an explicit observable waiting row instead of a blank transcript, and at least two consecutive submits remain visible after later ADP refresh/timer updates.
 - For same-session continuation regressions, UI transcript continuity is not enough. Add a provider-request black-box test proving the follow-up request contains prior user/assistant history from effective persisted turns, then run a real WebUI same-session follow-up prompt on S profile and verify the second answer can use first-turn-only context plus ADP reports both turn ids.
