@@ -35,9 +35,11 @@
 - gate runner verifies source-only search policy so implementation searches use source code, tests, maintained scripts, and canonical docs rather than generated/runtime output; the wrapper rejects unsafe `rg` options such as `--no-ignore` / `-u` and keeps hard generated-output exclusions after caller args
 - release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
 - WebUI online verification wrapper checks fixed S-profile `127.0.0.1:4042` daemon health and invokes the real browser WebUI + ADP proof for alpha promotion; release-profile `127.0.0.1:4041` proof is a separate explicit target
+- fixed-session ADP observability verifier submits with the correct internally tagged ADP envelope and queries selected session plus TaskBoard/AgentBoard owner truth so receipt waits cannot masquerade as lifecycle proof
 - global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
 - symlink install script builds debug host binaries, exposes `freehand-cliS`, `freehand-serverS`, and `freehand-daemonS` as symlinks, and installs a copied `freehand-daemon-launchdS` wrapper for development without replacing global release commands
 - launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths
+- launchd install/restart runs `scripts/freehand-file-permission-preflight.sh` before bootstrapping the user service; on macOS it checks runtime/workdir plus standard protected user folders and opens Full Disk Access settings on denial instead of letting Worker execution discover permission failure later
 - launchd install script supports a coexisting symlink profile through `installS` / `restartS`, using `com.freehand.daemonS`, `~/.freehand/daemonS.env`, `127.0.0.1:4042`, and `daemonS.*.log`; `restartS` refreshes the debug daemon binary copy, rewrites the plist, reloads only the service-scoped launchd label, sources the env file at daemon start, and health-checks the env-backed bind so Tailscale defaults cannot move the S profile off loopback
 - launchd install script supports release and S Worker services through
   `installWorker` / `restartWorker` and `installWorkerS` / `restartWorkerS`;
@@ -61,6 +63,7 @@
 - gate returns success when `.ignore`, `scripts/source-search.sh`, debug docs, and local skill keep generated/runtime output excluded from implementation search, including wrapper-level rejection of unsafe `rg` ignore bypass options
 - release artifacts include `freehand-cli`, `freehand-server`, `freehand-daemon`, and the Android release APK under `dist/`
 - S-profile WebUI online verification writes screenshots and `summary.json` under `artifacts/webui-online/<run-id>/`, proving composer clear, visible submitted input, multi-round failed-tool continuation, no stale historical animation, refresh persistence, and ADP session truth alignment
+- fixed-session ADP observability verifier returns one JSON summary containing pending selected-session turn truth, final selected-session turn truth, command receipt or timeout, and current Worker/blocked-task owner truth
 - global install exposes `freehand-cli`, `freehand-server`, and `freehand-daemon` on the chosen install prefix
 - symlink install exposes `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` on the chosen prefix, pointing host commands at repo debug binaries while keeping the launchd wrapper executable as a prefix-local file
 - launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
@@ -89,6 +92,7 @@
 - missing release prerequisites such as Java or Cargo surface as script failure before artifacts are claimed
 - missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surface as online verification failure before alpha success is claimed
 - launchd bootstrap, kickstart, or env-backed health endpoint failure surfaces as script failure before background service success is claimed
+- macOS protected-folder permission denial surfaces as launchd install/restart preflight failure before the service is claimed healthy; `FREEHAND_FILE_PERMISSION_PREFLIGHT=warn` is an explicit operator override, not the default
 - mismatched launchd daemon binary prefix surfaces as install script failure before service success is claimed
 - symlink install failure surfaces before launchd symlink service success is claimed
 - request-node structs that introduce metadata/debug/cache/control payload fields or types surface as gate failure
@@ -127,8 +131,10 @@
 | 19 | `verify_resource_map` | `xtask/src/main.rs` | validate global resource ownership, resource relation rules, operation bindings, source-edge registry, and resource-operation test coverage | `docs/resource-maps/core.json` plus feature map, function maps, mainline call maps, and test designs | pass/fail | `run_gates_check` | resource-map verifier | bound |
 | 20 | `run_release` | `scripts/release.sh` | run release regressions and build/stage host + Android artifacts | repo root state | `dist/` artifacts | operator / GitHub release workflow | `make ci`, Cargo, Gradle | bound |
 | 21 | `run_verify_webui_online` | `scripts/verify-webui-online.sh` | run fixed-port S-profile real browser WebUI + ADP alpha proof, including temporary verifier credential env injection and config/env restoration | running S-profile daemon on `127.0.0.1:4042` | screenshots, summary JSON, ADP session alignment, restored S-profile config/env | operator / `make verify-webui-online` | curl, `scripts/webui_verify_online.mjs`, Chrome CDP, WebUI, `freehand-cliS adp-session-query` | bound |
+| 21a | `run` | `scripts/verify-adp-fixed-session-observability-online.py` | submit one fixed-session ADP command and query selected session plus task/agent owner truth while the turn is pending and after receipt/timeout | S-profile ADP URL + fixed session id | JSON proof with pending/final turns and Worker/blocked-task truth | operator / online debug workflow | ADP WebSocket | bound |
 | 22 | `run_install_global` | `scripts/install-global.sh` | run release script and install host binaries to a global prefix | release artifacts | installed commands | operator | `scripts/release.sh`, install tool | bound |
 | 23 | `run_install_launchd` | `scripts/install-launchd.sh` | install global binaries or refresh S debug binaries and bootstrap/restart the macOS user LaunchAgent | repo root + runtime env | running launchd service | operator | `scripts/install-global.sh`, launchctl | bound |
+| 23a | `run_file_permission_preflight` | `scripts/install-launchd.sh` | invoke first-launch macOS file permission preflight before launchd bootstrap/restart | runtime home + launchd workdir | ok status file or explicit permission failure | `run_install_launchd` / `restart_launchd` call path | `scripts/freehand-file-permission-preflight.sh` | bound |
 | 24 | `run_uninstall_launchd` | `scripts/uninstall-launchd.sh` | stop and remove the macOS user LaunchAgent plist | launchd label | service removed | operator | launchctl | bound |
 | 25 | `run_install_symlink` | `scripts/install-symlink.sh` | build debug host binaries and expose S-suffixed symlinks for development | repo root state | installed symlink commands | operator | Cargo, symlink creation | bound |
 

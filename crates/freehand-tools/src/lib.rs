@@ -606,7 +606,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "timer",
             false,
             true,
-            "Schedule internal wakeups for the Master. This is independent from task truth: use it after dispatching work when the Master should wake later, read current framework truth, and continue. If the next useful wait exceeds 3 minutes, schedule a timer instead of dead-waiting in the current turn; after scheduling, continue any other ready Master-side work. Do not claim a timer was scheduled unless this timer tool returned `Timer scheduled` in the current turn. Supports relative countdowns, absolute Unix timestamps, local-time daily/weekly recurrence, and 5-field local-time cron expressions. Every schedule must include a concrete reason and the exact prompt to use when the timer fires.",
+            "Schedule internal wakeups for the Master. This is independent from task truth: use it after dispatching work when the Master should wake later, read current framework truth, and continue. If the next useful wait exceeds 3 minutes, schedule a timer instead of dead-waiting in the current turn; after scheduling, continue any other ready Master-side work. If only async Worker/timer lifecycle remains, end with completion claim `waiting`, not `complete`. Do not claim a timer was scheduled unless this timer tool returned `Timer scheduled` in the current turn. Supports relative countdowns, absolute Unix timestamps, local-time daily/weekly recurrence, and 5-field local-time cron expressions. Every schedule must include a concrete reason and the exact prompt to use when the timer fires.",
             json!({
                 "type": "object",
                 "properties": {
@@ -1737,7 +1737,7 @@ fn resolve_glob_pattern(root: &Path, pattern: &str) -> Result<PathBuf, ToolRegis
 fn canonicalize_absolute_glob_pattern(pattern: &Path) -> Option<PathBuf> {
     let pattern_text = pattern.to_string_lossy();
     let first_meta = pattern_text
-        .find(|ch| matches!(ch, '*' | '?' | '[' | '{'))
+        .find(['*', '?', '[', '{'])
         .unwrap_or(pattern_text.len());
     let prefix_end = pattern_text[..first_meta]
         .rfind(['/', '\\'])

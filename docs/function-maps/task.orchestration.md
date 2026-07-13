@@ -39,7 +39,9 @@
 - runtime routes `task` tool calls to `task.orchestration` instead of generic file/tool execution
 - `TaskRuntime::boot` loads task snapshots, self-agent snapshot, and persisted
   agent lifecycle snapshots into memory
-- `TaskRuntime::boot` loads task leases and interrupts running tasks whose lease is missing or expired
+- `TaskRuntime::boot` loads task leases, preserves a freshly resumed running
+  task during the bounded lease-acquisition window, and interrupts running
+  tasks whose lease is still missing after that window or is invalid/expired
 - `TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance
 - create action writes append-only ledger events and atomic snapshots
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
@@ -217,7 +219,7 @@
 | 09 | `TaskRuntime::append_task` / `pause_task` / `resume_task` | `crates/freehand-task/src/lib.rs` | mutate non-review lifecycle states through one transition validator | task mutation request | task snapshot + ledger event | runtime task bridge | task owner | bound |
 | 10 | `TaskRuntime::submit_review` / `approve_review` / `reject_review` / `close_task` | `crates/freehand-task/src/lib.rs` | enforce review-before-close lifecycle and persist each transition | review mutation request | task snapshot + ledger event | runtime task bridge | task owner | bound |
 | 11 | `TaskRuntime::heartbeat_task` | `crates/freehand-task/src/lib.rs` | refresh the lease for an assigned running task and persist a heartbeat event | task heartbeat request | running task snapshot + lease | runtime task bridge | task owner | bound |
-| 12 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots + lease snapshot | recovered runtime state | task boot | task owner | bound |
+| 12 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | preserve fresh lease-acquisition windows, then interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots + lease snapshot | recovered runtime state | task boot | task owner | bound |
 | 13 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting/created/interrupted task to an available agent | task assignment request | assigned task snapshot + agent queued state | runtime task bridge | task owner | bound |
 | 14 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | claim the highest-priority assigned task for an agent and enter lease-backed running state | agent task-claim request | claimed running task snapshot or no-task outcome | runtime task bridge | task owner | bound |
 | 15 | `TaskRuntime::record_execution` | `crates/freehand-task/src/lib.rs` | append semantic worker execution progress for a running task | worker execution record request | running task snapshot + progress event | runtime task bridge | task owner | bound |

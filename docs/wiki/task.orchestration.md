@@ -13,7 +13,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - runtime receives a provider tool call named `task`
 - runtime routes `task` tool calls to `execute_task_tool` instead of generic file/tool execution
 - `TaskRuntime::boot` loads task snapshots, task leases, self-agent snapshot, and persisted agent lifecycle snapshots into memory
-- `TaskRuntime::boot` interrupts running tasks whose lease is missing, mismatched, inactive, or expired
+- `TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired
 - `TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance
 - create action writes append-only ledger events and atomic snapshots
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
@@ -93,7 +93,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: rebuild memory state from persisted task, agent, and lifecycle snapshots
   - allowed callers: runtime task tool bridge, future daemon bootstrap
-  - related tests: create_task_writes_ledger_snapshot_and_recovers_on_boot, boot_interrupts_running_task_with_expired_lease, task_tool_create_persists_and_queries_task
+  - related tests: create_task_writes_ledger_snapshot_and_recovers_on_boot, boot_preserves_fresh_running_task_during_lease_acquisition_grace, boot_interrupts_running_task_with_missing_lease_after_acquisition_grace, boot_interrupts_running_task_with_expired_lease, task_tool_create_persists_and_queries_task
   - why shared: keeps startup recovery in task owner, not UI/runtime glue
 - `TaskRuntime::mutate_task`
   - owner: `crates/freehand-task/src/lib.rs`
@@ -189,7 +189,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 09 | `TaskRuntime::approve_review` | `crates/freehand-task/src/lib.rs` | approve submitted review before close | task mutation request | approved task snapshot and event | runtime task bridge | task owner |  |  |  | bound |
 | 10 | `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | close only approved or otherwise closeable tasks and release assignee state | task mutation request | closed task snapshot and event | runtime task bridge | task owner |  |  |  | bound |
 | 11 | `TaskRuntime::heartbeat_task` | `crates/freehand-task/src/lib.rs` | refresh the lease for an assigned running task | task heartbeat request | running task snapshot plus active lease | runtime task bridge | task owner |  |  |  | bound |
-| 12 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots plus lease snapshot | recovered runtime state | task boot | task owner |  |  |  | bound |
+| 12 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | preserve fresh lease-acquisition windows, then interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots plus lease snapshot | recovered runtime state | task boot | task owner |  |  |  | bound |
 | 13 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting, created, or interrupted tasks to an available agent | task assignment request | assigned task snapshot plus queued agent state | runtime task bridge | task owner |  |  |  | bound |
 | 17a | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | claim the highest-priority assigned task for an agent and enter lease-backed running state | agent task claim request | claimed running task snapshot or no-task outcome | runtime task bridge | task owner |  |  |  | bound |
 | 15 | `TaskRuntime::record_execution` | `crates/freehand-task/src/lib.rs` | append semantic worker execution progress for a running task | worker execution record request | running task snapshot plus progress event | runtime task bridge | task owner |  |  |  | bound |

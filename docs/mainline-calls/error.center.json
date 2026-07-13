@@ -20,7 +20,7 @@
   "response_mainline": [
     "schema mismatch failures classify as schema/validation/repair_schema until retry cap and must not be projected as provider failure; repair_schema here means model response polishing",
     "schema validation failures at retry cap classify to stop_turn",
-    "provider executor failures classify as provider/recoverable/retry_same_step before retry cap and provider/recoverable/fail_turn at retry cap",
+    "provider executor failures classify as provider/recoverable/retry_same_step before retry cap, provider/recoverable/failover_provider when a configured alternate route is accepted, and provider/recoverable/fail_turn only when no provider route remains",
     "tool execution failures classify as tool/validation/repair_schema",
     "metadata rows carry domain, class, code, source owner, source pipeline node, recovery action, retry index, retry cap, public visibility, owner target, repair fields, and raw hash",
     "runtime projects only watermarked error-center fields into `UiErrorCenterEventProjection`; raw error message text remains absent from ADP query output"
@@ -113,15 +113,15 @@
       "symbol_path": "record_provider_error_metadata",
       "file_path": "crates/freehand-runtime/src/lib.rs",
       "responsibility": "route provider executor retry/failure through error center before retry continuation or terminal failure materialization",
-      "input_semantic": "provider executor failure plus retry index/cap",
-      "output_semantic": "error-center row plus provider row with retry_same_step or fail_turn decision",
+      "input_semantic": "provider executor failure plus route-switch eligibility plus retry index/cap",
+      "output_semantic": "error-center row plus provider row or failover-provider row with retry_same_step, failover_provider, or fail_turn decision",
       "caller": "runtime live bridge",
       "callee": "error center metadata writer",
       "binding_status": "bound"
     },
     {
       "step": "06",
-      "symbol_path": "run_live_anthropic_reason_turn",
+      "symbol_path": "run_live_provider_reason_turn",
       "file_path": "crates/freehand-runtime/src/lib.rs",
       "responsibility": "routes schema rejections and failed tool results through error center before repair/re-entry",
       "input_semantic": "schema/tool failure",

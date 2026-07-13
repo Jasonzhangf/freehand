@@ -33,9 +33,9 @@
 11. Each Master lifecycle event attempt runs in a task-scoped internal
     lifecycle session with event-and-attempt-isolated turn and trace ids; the
     session name is reused per task to avoid user-facing session explosion.
-12. Before Task Center EventInbox processing, the Master lifecycle runner claims
-    due independent timer schedules from durable timer truth and starts an
-    internal Master wakeup turn with the persisted prompt.
+12. Task Center EventInbox processing has priority over due independent timer
+    schedules. The Master lifecycle runner claims due timer schedules only when
+    no current task event produced a lifecycle outcome.
 13. A successful target-task mutation is evaluated against an explicit
     event-specific decision boundary. Once reached, the framework closes the
     lifecycle turn immediately instead of asking the model to wait for future
@@ -95,6 +95,27 @@ Task Center truth before another execution starts.
 - Master guidance tells the model to schedule a timer instead of dead-waiting
   when the next useful wait exceeds 3 minutes, then continue other ready
   Master-side work.
+- Master completion guidance tells the model that Worker dispatch, heartbeat,
+  review pending, or timer scheduling are lifecycle progress, not final
+  user-task completion; when no immediate Master work remains but Task
+  Center/timer truth will continue, the turn must use `claim="waiting"`.
+- Runtime rejects a Master user-session `claim="complete"` while any child task
+  with the same `parent_session_id` remains open; the provider gets repair
+  feedback and may continue or return `claim="waiting"`, but the parent session
+  must not project `TerminalStatus::Success`.
+- A child `task_closed` event whose parent has all same-session children closed
+  triggers exactly one parent-session evaluation turn in the original persisted
+  parent session. The evaluation must compare the original user objective,
+  each decomposed child task's goal/deliverables/acceptance, and accepted Worker
+  review truth. It may create and assign correction, improvement, or newly
+  discovered child tasks; it may claim final completion only when the overall
+  user objective is verified complete.
+- A child `task_closed` event whose parent still has any open child task is a
+  no-op for parent evaluation.
+- Replayed `task_closed` events or daemon restart after evaluation do not
+  repeat the same parent decision or duplicate next-round tasks for the same
+  parent/closed-child set, including evaluation turns that ended waiting after
+  creating more work.
 - Master "timer scheduled" claims must be backed by a successful `timer`
   tool result and timer ledger truth; verbal completion text alone is not proof
   of a scheduled wakeup.
@@ -112,6 +133,9 @@ Task Center truth before another execution starts.
 - due recurring timer fires once, increments `fired_count`, and reschedules
   while below `max_runs`; daily, weekly, and cron recurrence uses local timezone
   semantics.
+- due timer failure cannot starve pending Task Center lifecycle events; a
+  review-ready task is still approved/closed before the failed timer wakeup is
+  retried.
 - interrupted tasks assigned to the configured Worker are requeued once and
   claimed with a new execution id.
 - rejected submissions are requeued to the same Worker and the next prompt
@@ -144,11 +168,17 @@ Task Center truth before another execution starts.
 - provider/executor failure during a timer wakeup records timer failure truth,
   releases the timer to active retryable state, and surfaces a retryable Master
   execution error instead of leaving the schedule stuck in `running`.
+- provider/executor failure during a timer wakeup must not prevent already
+  pending review-ready, blocked, or interrupted Task Center events from being
+  processed first.
 - missing/incomplete Master decisions leave the event cursor unchanged and are
   retried by the long-running runner with bounded exponential backoff.
 - approved review truth remains retryable until the Master closes it.
 - blocked truth remains retryable until the Master either reassigns it or
   persists a `blocked_decision` note through `task(op="append")`.
+- repeated blocked-decision provider failures eventually append an explicit
+  Master-owned `blocked_decision` and advance to other pending lifecycle events
+  without marking the blocked task successful.
 - interrupted truth remains retryable until it leaves `Interrupted`.
 
 ### Negative
@@ -189,11 +219,29 @@ Task Center truth before another execution starts.
 - blocked tasks are not silently retried by the Worker.
 - an interrupted/rejected retry never reuses the previous execution id.
 - Master review failure does not approve or close the task.
+- A Master turn that only creates/assigns a Worker task must not project
+  `TerminalStatus::Success` or a completed final answer for the user objective;
+  it must remain lifecycle-observable as pending/running until worker review,
+  Master acceptance, and final synthesis close the user-facing lifecycle.
+- A Master user-session completion with open child tasks is rejected before
+  terminal success, even if the model emits a syntactically valid
+  `claim="complete"` schema.
+- A closed child task with an open sibling must not trigger parent evaluation.
+- A replayed closed-child event for an already evaluated parent/child set must
+  not trigger another parent follow-up turn.
+- A parent evaluation must not treat accepted child results as sufficient merely
+  because they can be summarized. If the original goal remains incomplete, the
+  evaluation must create/assign next-round task truth or return an explicit
+  blocked decision; a user-visible final success is reserved for verified goal
+  completion.
 - review prose without task mutation leaves the event retryable and returns an
   explicit `MissingReviewDecision`.
 - approve without close leaves the review event retryable.
 - blocked prose without a persisted Task Center decision leaves the event
   retryable.
+- blocked-decision provider failure cannot starve later lifecycle events
+  forever; after the retry cap, the runner records the provider-unavailable
+  blocked decision as `TaskProgressed`.
 - interrupted prose without reassignment leaves the event retryable.
 - a successful mutation of another task does not satisfy the current event's
   decision boundary.
@@ -214,15 +262,29 @@ Task Center truth before another execution starts.
 - deterministic fake executor drives `run_once` through:
   - idle
   - successful completion
-- provider/network system failure and non-provider task execution failure
+- provider/network system failure and non-provider task execution failure,
+  including Anthropic and OpenAI-compatible request/stream/status provider
+  errors mapping to retryable `TaskInterrupted`
 - deterministic Master executor drives:
   - review approve and close
   - review rejection with persisted requirements
   - blocked decision persisted through `task(op="append")`
   - missing review decision and same-event retry
-  - due timer wakeup without task truth
-  - recurring timer reschedule up to `max_runs`
-  - timer wakeup failure release back to active retryable state
+  - all-children-closed parent evaluation in the original parent session
+  - parent evaluation request contains original user objective history plus
+    each child task's goal/deliverables/acceptance and accepted review result
+  - parent evaluation creates a same-session improvement task when the combined
+    child results do not satisfy the overall objective
+  - open-sibling closed event no-op
+  - parent evaluation idempotency across repeated runner ticks/restart,
+    including a persisted waiting evaluation that already created next work
+- runtime/query projection coverage proves `QuerySessionTurns` can see a
+  background-persisted parent evaluation turn by restoring
+  `ReasonPersistence` owner truth into UI projection.
+- due timer wakeup without task truth
+- recurring timer reschedule up to `max_runs`
+- timer wakeup failure release back to active retryable state
+- task-event priority over due timer failure
 - live provider fixture drives:
   - an invalid historical-Worker assignment followed by a corrected configured
     Worker assignment; the second provider request must contain the paired
@@ -262,6 +324,9 @@ Task Center truth before another execution starts.
   - `TaskHeartbeat`
 - `TaskReviewSubmitted`, `TaskInterrupted`, or `TaskBlocked`
 - verify the same task/execution/agent ids after Worker restart
+- three-worker online proof must require the original parent session final
+  summary after all child tasks close, with every expected worker_result token
+  present in that same session transcript
 - only claim production closure when the Worker produced a real deliverable or an explicit real-provider blocked result
 
 ## Runtime Evidence

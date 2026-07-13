@@ -214,7 +214,7 @@ fn production_worker_runner_provider_error_records_interrupted_and_requeues_same
     let runner = test_runner(
         runtime_home.clone(),
         Arc::new(StubExecutor::new(Err(
-            "anthropic_http_request_failed: error sending request for url".to_owned(),
+            "openai_http_request_failed: error sending request for url".to_owned(),
         ))),
     );
     let expected_task_id = seed_assigned_task(&runtime_home, Some(&workspace));
@@ -280,6 +280,36 @@ fn production_worker_runner_provider_error_records_interrupted_and_requeues_same
 
     fs::remove_dir_all(runtime_home).expect("cleanup runtime");
     fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn worker_retryable_provider_error_classifier_covers_supported_provider_families() {
+    for reason in [
+        "anthropic_http_request_failed: error sending request for url",
+        "anthropic_stream_read_failed: broken stream",
+        "anthropic_http_status_429: rate limited",
+        "anthropic_http_status_503: unavailable",
+        "openai_http_request_failed: error sending request for url",
+        "openai_stream_read_failed: broken stream",
+        "openai_http_status_429: rate limited",
+        "openai_http_status_503: unavailable",
+    ] {
+        assert!(
+            super::worker_execution_error_is_retryable_system_failure(reason),
+            "{reason}"
+        );
+    }
+
+    for reason in [
+        "worker produced invalid deliverable",
+        "openai_adapter_failed: invalid response shape",
+        "openai_callback_failed: callback failed",
+    ] {
+        assert!(
+            !super::worker_execution_error_is_retryable_system_failure(reason),
+            "{reason}"
+        );
+    }
 }
 
 #[test]
@@ -792,6 +822,7 @@ fn selected_worker() -> SelectedAgentConfig {
             auth_source: ProviderAuthSourceKind::Inline,
             api_key: "test-key".to_owned(),
         },
+        fallback_provider: None,
         restart_required_on_change: true,
     }
 }

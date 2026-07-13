@@ -112,6 +112,7 @@ impl ErrorCenterClass {
 pub enum ErrorCenterRecoveryAction {
     RepairSchema,
     RetrySameStep,
+    FailoverProvider,
     WaitUntil,
     StopTurn,
     FailTurn,
@@ -125,6 +126,7 @@ impl ErrorCenterRecoveryAction {
         match self {
             Self::RepairSchema => "repair_schema",
             Self::RetrySameStep => "retry_same_step",
+            Self::FailoverProvider => "failover_provider",
             Self::WaitUntil => "wait_until",
             Self::StopTurn => "stop_turn",
             Self::FailTurn => "fail_turn",
@@ -195,6 +197,18 @@ pub fn classify_error_center_failure(observed: &ErrorCenterObservedFailure) -> E
             retry_index: observed.retry_index,
             retry_cap: observed.retry_cap,
             repair_fields: schema_repair_fields(&observed.message),
+            owner_target: "provider.reason-live-bridge".to_owned(),
+        };
+    }
+    if source == "provider.reason-live-bridge" && node == "RuntimeLive05ProviderFailover" {
+        return ErrorCenterDecision {
+            domain: ErrorCenterDomain::Provider,
+            class: ErrorCenterClass::Recoverable,
+            recovery_action: ErrorCenterRecoveryAction::FailoverProvider,
+            public_visibility: ErrorCenterPublicVisibility::StatusLine,
+            retry_index: observed.retry_index,
+            retry_cap: observed.retry_cap,
+            repair_fields: Vec::new(),
             owner_target: "provider.reason-live-bridge".to_owned(),
         };
     }
@@ -753,6 +767,25 @@ mod tests {
         assert_eq!(
             provider_capped.recovery_action,
             ErrorCenterRecoveryAction::FailTurn
+        );
+
+        let provider_failover = classify_error_center_failure(&ErrorCenterObservedFailure {
+            source_owner: "provider.reason-live-bridge".to_owned(),
+            source_pipeline_node: "RuntimeLive05ProviderFailover".to_owned(),
+            code: "openai_http_status_402".to_owned(),
+            message: "http 402".to_owned(),
+            retry_index: 1,
+            retry_cap: 10,
+        });
+        assert_eq!(provider_failover.domain, ErrorCenterDomain::Provider);
+        assert_eq!(provider_failover.class, ErrorCenterClass::Recoverable);
+        assert_eq!(
+            provider_failover.recovery_action,
+            ErrorCenterRecoveryAction::FailoverProvider
+        );
+        assert_eq!(
+            provider_failover.public_visibility,
+            ErrorCenterPublicVisibility::StatusLine
         );
 
         let tool = classify_error_center_failure(&ErrorCenterObservedFailure {

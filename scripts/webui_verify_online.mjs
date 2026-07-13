@@ -12,15 +12,15 @@ const profileName = process.env.FREEHAND_WEBUI_PROFILE || portLabelFromBaseUrl(b
 const successPrompt =
   'Online success sample: answer with one short sentence and a valid Freehand completion schema. Do not call tools.';
 const failurePrompt =
-  'Online failure sample: call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.';
+  'Online failure sample: call the task tool exactly once with {"op":"query","task_id":"definitely-missing-freehand-task"}, then use the failed tool result to continue and report success through the required Freehand completion schema.';
 const configUpdateEnvName = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_ENV || 'FREEHAND_WEBUI_VERIFY_CREDENTIAL';
 const configUpdateEnvValue = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_VALUE || 'webui-verify-provider-key';
-const configUpdateProviderId = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_PROVIDER || 'minimax';
+const configUpdateProviderId = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_PROVIDER || null;
 const configUpdateBaseUrl =
-  process.env.FREEHAND_WEBUI_CONFIG_UPDATE_BASE_URL || 'https://api.minimaxi.com/anthropic';
-const configUpdateModel = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_MODEL || 'MiniMax-M3';
-const configUpdateType = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_TYPE || 'anthropic';
-const configUpdateProtocol = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_PROTOCOL || 'messages';
+  process.env.FREEHAND_WEBUI_CONFIG_UPDATE_BASE_URL || 'https://api.anyint.ai/openai/v1';
+const configUpdateModel = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_MODEL || null;
+const configUpdateType = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_TYPE || null;
+const configUpdateProtocol = process.env.FREEHAND_WEBUI_CONFIG_UPDATE_PROTOCOL || null;
 const runtimeHome = process.env.FREEHAND_RUNTIME_HOME || path.join(process.env.HOME, '.freehand');
 const sEnvPath = process.env.FREEHAND_WEBUI_DAEMONS_ENV || path.join(runtimeHome, 'daemonS.env');
 const configPath = process.env.FREEHAND_WEBUI_CONFIG_PATH || path.join(runtimeHome, 'config.toml');
@@ -148,11 +148,16 @@ try {
     const commandStatus = document.getElementById('command-status')?.textContent?.toLowerCase() || '';
     const selectedTerminalStatus =
       document.querySelector('[data-webui-shell="true"]')?.dataset.selectedTerminalStatus?.toLowerCase() || '';
+    const selectedTurn = document.querySelector('[data-webui-shell="true"]')?.dataset.selectedTurn || '';
+    const currentTurnVisible =
+      selectedTurn !== '-' &&
+      text.includes('definitely-missing-freehand-task') &&
+      (turnStatus.includes('dispatching') || commandStatus.includes('dispatching'));
     const terminal =
       ['success', 'blocked', 'failed', 'cancelled', 'interrupted'].includes(selectedTerminalStatus) ||
       /(completed|blocked|failed|cancelled|interrupted)/.test(turnStatus) ||
       commandStatus.includes('turn completed');
-    return live.length >= 1 || (terminal && text.includes('definitely-missing-freehand-file.txt'));
+    return live.length >= 1 || currentTurnVisible || (terminal && text.includes('definitely-missing-freehand-task'));
   }, 20_000, 'second turn progress or terminal visible');
   const running2 = await captureState(cdp, '06-second-running');
 
@@ -168,7 +173,7 @@ try {
     cdp,
     (firstMarker) => {
       const text = document.getElementById('message-list')?.innerText || '';
-      return text.includes(firstMarker) && text.includes('definitely-missing-freehand-file.txt');
+      return text.includes(firstMarker) && text.includes('definitely-missing-freehand-task');
     },
     20_000,
     'refreshed transcript visible',
@@ -209,10 +214,18 @@ try {
         /(completed|blocked|failed|cancelled|interrupted)/.test(
           running2.state.turnStatus.toLowerCase(),
         ) ||
-        running2.state.commandStatus.toLowerCase().includes('turn completed'),
+        running2.state.commandStatus.toLowerCase().includes('turn completed') ||
+        (
+          running2.state.selectedTurn !== '-' &&
+          running2.state.messageText.includes('definitely-missing-freehand-task') &&
+          (
+            running2.state.turnStatus.toLowerCase().includes('dispatching') ||
+            running2.state.commandStatus.toLowerCase().includes('dispatching')
+          )
+        ),
       staleHistoricalLiveAfterSecondSubmit: running2.state.nonLastLiveCount,
       refreshPreservedFirstPrompt: refreshed.state.messageText.includes(prompt1),
-      refreshPreservedFailurePrompt: refreshed.state.messageText.includes('definitely-missing-freehand-file.txt'),
+      refreshPreservedFailurePrompt: refreshed.state.messageText.includes('definitely-missing-freehand-task'),
       terminal2NoLive: terminal2.state.liveCount === 0,
       viewportShapesCovered: viewportSnapshots.every((entry) => entry.state.layoutShape === entry.expectedShape),
       desktopSettingsOpensProviderConfig:
@@ -237,9 +250,9 @@ try {
         settingsProof.invalidUpdate.state.settingsProviderSaveStatus.toLowerCase().includes('base_url'),
       settingsValidUpdateRestartRequired:
         settingsProof.validUpdate.state.settingsProviderSaveStatus.toLowerCase().includes('restart required') &&
-        settingsProof.validUpdate.state.settingsProvider === configUpdateProviderId &&
-        settingsProof.validUpdate.state.settingsModel === configUpdateModel &&
-        settingsProof.validUpdate.state.settingsProviderHost === 'api.minimaxi.com' &&
+        settingsProof.validUpdate.state.settingsProvider === settingsProof.expectedValid.providerId &&
+        settingsProof.validUpdate.state.settingsModel === settingsProof.expectedValid.model &&
+        settingsProof.validUpdate.state.settingsProviderHost === settingsProof.expectedValid.host &&
         !settingsProof.validUpdate.state.commandStatus.includes('provider_config_saved_restart_required') &&
         !settingsProof.validUpdate.state.commandStatus.includes('config.core'),
       settingsUpdateNoSecretLeak:
@@ -249,7 +262,7 @@ try {
       settingsCloseKeepsConversation:
         !settingsProof.afterClose.state.settingsShellVisible &&
         settingsProof.afterClose.state.messageText.includes(prompt1) &&
-        settingsProof.afterClose.state.messageText.includes('definitely-missing-freehand-file.txt'),
+        settingsProof.afterClose.state.messageText.includes('definitely-missing-freehand-task'),
       scrollLockHasScrollableTranscript: scrollProof.before.state.scrollProofScrollable,
       scrollLockPreservesManualReadPosition:
         scrollProof.before.state.scrollProofScrollable &&
@@ -365,7 +378,7 @@ try {
         mobileAgentStatePreserved(mobileAgentDashboardProof.closed.state, mobileAgentDashboardProof.afterScrimClose.state),
       mobileAgentSheetMatchesService:
         mobileAgentDashboardProof.open.state.mobileAgentTaskStatus === mobileAgentDashboardProof.expected.taskBoardStatus &&
-        mobileAgentDashboardProof.open.state.mobileAgentAgentStatus === mobileAgentDashboardProof.expected.agentBoardStatus &&
+        mobileAgentDashboardProof.open.state.mobileAgentAgentStatus === mobileAgentDashboardProof.expected.agentBoardStatus.replace('current agent(s)', 'agent(s)') &&
         mobileAgentDashboardProof.open.state.mobileAgentHistoryStatus === mobileAgentDashboardProof.expected.taskHistoryStatus &&
         mobileAgentDashboardProof.open.state.mobileAgentControlStatus === mobileAgentDashboardProof.expected.workerControlStatus &&
         mobileAgentDashboardProof.open.state.mobileAgentTaskCardCount >= mobileAgentDashboardProof.expected.minimumTaskCards &&
@@ -742,7 +755,8 @@ async function capturePhase2Proof(cdp) {
     document.getElementById('refresh-session-button')?.click();
     return window.__freehandLayout?.applyLayoutShape?.();
   });
-  const truth = await queryPhase2Truth();
+  const selectedSessionId = await evalInPage(cdp, () => document.querySelector('.app-shell')?.dataset.selectedSession || null);
+  const truth = await queryPhase2Truth(selectedSessionId);
   await waitForFunction(
     cdp,
     (expected) =>
@@ -762,7 +776,8 @@ async function capturePhase2Proof(cdp) {
 }
 
 async function captureMobileAgentDashboardProof(cdp) {
-  const truth = await queryPhase2Truth();
+  const selectedSessionId = await evalInPage(cdp, () => document.querySelector('.app-shell')?.dataset.selectedSession || null);
+  const truth = await queryPhase2Truth(selectedSessionId);
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 390,
     height: 844,
@@ -945,15 +960,16 @@ function mobileAgentStatePreserved(before, after) {
     after.lifecycleClockCount >= before.lifecycleClockCount;
 }
 
-async function queryPhase2Truth() {
+async function queryPhase2Truth(selectedSessionId = null) {
   const taskBoardResult = await queryService({ QueryTaskBoard: { include_terminal: true } }, 'phase2-task-board');
   const agentBoardResult = await queryService('QueryAgentBoard', 'phase2-agent-board');
   const eventInboxResult = await queryService({ QueryEventInbox: { limit: 30 } }, 'phase2-event-inbox');
   const taskBoard = unwrapQueryResult(taskBoardResult, 'TaskBoard');
   const agentBoard = unwrapQueryResult(agentBoardResult, 'AgentBoard');
   const eventInbox = unwrapQueryResult(eventInboxResult, 'EventInbox');
-  const historyTarget = currentTaskHistoryTargetFromBoard(taskBoard);
-  const workerTarget = currentWorkerControlTargetFromBoard(taskBoard);
+  const scopedTasks = currentSessionTasksFromBoard(taskBoard, selectedSessionId);
+  const historyTarget = currentTaskHistoryTargetFromTasks(scopedTasks);
+  const workerTarget = currentWorkerControlTargetFromTasks(scopedTasks);
   let taskHistory = null;
   if (historyTarget?.task_id) {
     taskHistory = unwrapQueryResult(
@@ -975,24 +991,35 @@ async function queryPhase2Truth() {
   }
   return {
     truth: { taskBoard, agentBoard, eventInbox, taskHistory, workerControl },
-    expected: phase2ExpectedText(taskBoard, agentBoard, eventInbox, taskHistory, workerControl, workerTarget),
+    expected: phase2ExpectedText(taskBoard, agentBoard, eventInbox, taskHistory, workerControl, workerTarget, scopedTasks),
   };
 }
 
-function phase2ExpectedText(taskBoard, agentBoard, eventInbox, taskHistory, workerControl, workerTarget) {
-  const taskCount = (taskBoard.tasks || []).length;
-  const blockedCount = (taskBoard.blocked || []).length;
-  const reviewCount = (taskBoard.review_ready || []).length;
-  const staleCount = (taskBoard.stale || []).length;
-  const agents = agentBoard.agents || [];
-  const eventCount = (eventInbox.events || []).length;
+function phase2ExpectedText(taskBoard, agentBoard, eventInbox, taskHistory, workerControl, workerTarget, scopedTasks) {
+  const tasks = scopedTasks || phase2SortedTasks((taskBoard && taskBoard.tasks) || []);
+  const taskIds = new Set(tasks.map((task) => task.task_id).filter(Boolean));
+  const executionIds = new Set(tasks.map((task) => task.active_execution_id).filter(Boolean));
+  const taskCount = tasks.length;
+  const blockedCount = tasks.filter((task) => ['blocked', 'failed', 'cancelled'].includes(`${task.status || ''}`.toLowerCase())).length;
+  const reviewCount = tasks.filter((task) => ['review_ready', 'review_submitted'].includes(`${task.status || ''}`.toLowerCase())).length;
+  const staleTaskIds = new Set(((taskBoard && taskBoard.stale) || []).map((task) => task && task.task_id).filter(Boolean));
+  const staleCount = Array.from(taskIds).filter((taskId) => staleTaskIds.has(taskId)).length;
+  const agents = ((agentBoard && agentBoard.agents) || []).filter((agent) => {
+    if (!tasks.length) return false;
+    if (agent.current_task_id && taskIds.has(agent.current_task_id)) return true;
+    if (agent.current_execution_id && executionIds.has(agent.current_execution_id)) return true;
+    return tasks.some((task) =>
+      task.assignee_agent_id === agent.agent_id && !terminalTaskStatus(task.status)
+    );
+  });
+  const eventCount = ((eventInbox && eventInbox.events) || []).filter((event) => event && taskIds.has(event.task_id)).length;
   const historyEvents = (taskHistory && taskHistory.events) || [];
   const workerEvents = (workerControl && workerControl.events) || [];
   const workerTask = (workerControl && workerControl.task) || (workerTarget && workerTarget.task) || null;
   return {
-    taskBoardStatus: `${taskCount} task(s) · ${blockedCount} blocked · ${reviewCount} review · ${staleCount} stale`,
-    agentBoardStatus: `${agents.length} agent(s) · ${agents.filter((agent) => agent.alive).length} active`,
-    eventInboxStatus: `${eventCount} recent event(s)${eventInbox.next_cursor ? ' · updated' : ''}`,
+    taskBoardStatus: `${taskCount} current task(s) · ${blockedCount} blocked · ${reviewCount} review · ${staleCount} stale`,
+    agentBoardStatus: `${agents.length} current agent(s) · ${agents.filter((agent) => agent.alive).length} active`,
+    eventInboxStatus: `${eventCount} current event(s)${eventInbox.next_cursor ? ' · updated' : ''}`,
     taskHistoryStatus: taskHistory ? `${historyEvents.length} execution event(s)` : 'no task history',
     workerControlStatus: workerTarget || workerControl
       ? `${statusText(workerTask && workerTask.status)} · ${workerEvents.length} control event(s)`
@@ -1045,13 +1072,20 @@ function queryService(query, label) {
   });
 }
 
-function currentTaskHistoryTargetFromBoard(taskBoard) {
+function currentSessionTasksFromBoard(taskBoard, selectedSessionId) {
   const tasks = phase2SortedTasks((taskBoard && taskBoard.tasks) || []);
+  if (!selectedSessionId) {
+    return tasks;
+  }
+  return tasks.filter((task) => task && task.parent_session_id === selectedSessionId);
+}
+
+function currentTaskHistoryTargetFromTasks(tasks) {
   return tasks.find((candidate) => candidate.active_execution_id) || tasks[0] || null;
 }
 
-function currentWorkerControlTargetFromBoard(taskBoard) {
-  const task = phase2SortedTasks((taskBoard && taskBoard.tasks) || []).find((candidate) => candidate.active_execution_id);
+function currentWorkerControlTargetFromTasks(tasks) {
+  const task = tasks.find((candidate) => candidate.active_execution_id);
   if (!task) {
     return null;
   }
@@ -1213,22 +1247,30 @@ async function captureSettingsProof(cdp) {
     'desktop settings shell open',
   );
   const desktopOpen = await captureState(cdp, '09-settings-desktop-open');
+  const currentProvider = await evalInPage(cdp, () => ({
+    providerId: document.getElementById('settings-provider-id-input')?.value || '',
+    providerType: document.getElementById('settings-provider-type-input')?.value || '',
+    providerProtocol: document.getElementById('settings-provider-protocol-input')?.value || '',
+    baseUrl: document.getElementById('settings-provider-url-input')?.value || '',
+    model: document.getElementById('settings-provider-model-input')?.value || '',
+  }));
+  const validValues = {
+    providerId: configUpdateProviderId || currentProvider.providerId,
+    providerType: configUpdateType || currentProvider.providerType,
+    providerProtocol: configUpdateProtocol || currentProvider.providerProtocol,
+    baseUrl: configUpdateBaseUrl || currentProvider.baseUrl,
+    model: configUpdateModel || currentProvider.model,
+    envName: configUpdateEnvName,
+  };
   const invalidUpdate = await submitSettingsConfigUpdate(cdp, {
-    providerId: configUpdateProviderId,
-    providerType: configUpdateType,
-    providerProtocol: configUpdateProtocol,
+    providerId: validValues.providerId,
+    providerType: validValues.providerType,
+    providerProtocol: validValues.providerProtocol,
     baseUrl: 'not-a-url',
-    model: configUpdateModel,
+    model: validValues.model,
     envName: configUpdateEnvName,
   }, '09a-settings-invalid-update');
-  const validUpdate = await submitSettingsConfigUpdate(cdp, {
-    providerId: configUpdateProviderId,
-    providerType: configUpdateType,
-    providerProtocol: configUpdateProtocol,
-    baseUrl: configUpdateBaseUrl,
-    model: configUpdateModel,
-    envName: configUpdateEnvName,
-  }, '09b-settings-valid-update');
+  const validUpdate = await submitSettingsConfigUpdate(cdp, validValues, '09b-settings-valid-update');
   await evalInPage(cdp, () => {
     document.getElementById('settings-shell-toggle')?.click();
   });
@@ -1240,7 +1282,17 @@ async function captureSettingsProof(cdp) {
   );
   const afterClose = await captureState(cdp, '10-settings-desktop-closed');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  return { desktopOpen, invalidUpdate, validUpdate, afterClose };
+  return {
+    desktopOpen,
+    invalidUpdate,
+    validUpdate,
+    afterClose,
+    expectedValid: {
+      providerId: validValues.providerId,
+      model: validValues.model,
+      host: new URL(validValues.baseUrl).host,
+    },
+  };
 }
 
 async function submitSettingsConfigUpdate(cdp, values, label) {

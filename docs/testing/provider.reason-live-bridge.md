@@ -110,6 +110,10 @@
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
   - recoverable non-stream provider HTTP/executor failure retries ten attempts with exponential backoff starting at 1 second before explicit dispatch failure, materializes failed terminal/error truth with a concrete provider error code, and leaves no active turn hanging
   - recoverable non-stream provider HTTP/executor failure can succeed after earlier attempts; metadata records `retry_same_step` attempts without terminal `fail_turn`
+  - OpenAI Responses HTTP 402 on the primary route immediately activates the configured Anthropic fallback; fallback success persists the fallback model and explicit route-switch metadata while retaining the primary error code, and the error-center recovery action is `failover_provider` rather than the contradictory `fail_turn`
+  - retryable primary HTTP 500 exhausts ten attempts before activating the configured fallback
+  - primary success does not call fallback, and adapter/callback/local invalid-config errors do not activate fallback
+  - fallback retry exhaustion materializes exactly one failed closed turn with no active turn
   - tool execution result failure returns a paired failed tool result to the model, emits runtime-owned model-continuation waiting status, and can still end with a successful terminal schema
   - repaired failed-tool logical turn remains fully visible in persisted/UI truth while future prompt context admits only the final repaired round by default
   - long master-task prompt admission preserves semantic payload while still reporting planner token diagnostics
@@ -136,8 +140,10 @@
   - `~/.freehand/ledgers/metadata`
   - `~/.freehand/ledgers/providers/anthropic`
   - `~/.freehand/ledgers/reason`
+- known gaps:
+  - streaming provider failover is intentionally unsupported until partial semantic output/tool-call rollback or resume is a typed contract; current production Master/Worker/lifecycle requests use `stream=false`
 - sync status between design and implementation:
-  - anthropic-only live bridge owner is now `freehand-runtime`
+  - provider-selected live bridge owner is now `freehand-runtime`; provider-specific wire execution stays inside provider driver implementations backed by provider crates
   - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, persistence restore, runtime metadata producer wiring, and provider raw debug-ledger wiring
   - runtime white-box coverage now also proves runtime-owned debug snapshots for restore/request/tool/terminal lifecycle boundaries without prompt or tool-result leakage
   - runtime live bridge now injects tool owner schema fingerprint into reason planner diagnostics before provider request build
@@ -146,7 +152,9 @@
   - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
   - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
   - runtime white-box coverage now explicitly locks failed tool-result multi-round continuation, including incomplete `tool_use` as paired failed tool-result truth with zero schema retries, proving execution failures become paired `ToolResultStatus::Failed` re-entry truth and provider/system errors remain explicit bridge failures
-  - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes concrete provider error codes such as `anthropic_http_status_500`, retries recoverable non-stream failures up to ten attempts, closes the active turn as failed only after exhaustion, and restores with no active turn
+  - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes concrete provider error codes such as `anthropic_http_status_500` or `openai_http_status_500`, retries recoverable non-stream failures up to ten attempts, closes the active turn as failed only after exhaustion, and restores with no active turn
+  - runtime white-box coverage locks configured primary/fallback routing: retryable primary provider exhaustion switches once to the configured fallback using the same provider-neutral round input, fallback success owns the persisted model/provider metadata, fallback exhaustion materializes one failed turn, and non-retryable adapter/callback/content failures do not switch providers
+  - runtime white-box coverage locks OpenAI-compatible `responses` and `chat_completions` descriptor mapping through the same provider-neutral live bridge abstraction
   - runtime white-box coverage now explicitly locks context economy for repaired logical turns: superseded failed repair attempts do not leak into rebuilt future prompt context
   - runtime white-box coverage now locks long operator task admission through the live bridge: `original-task` budget scales with actual prompt content and the provider request preserves the prompt tail sentinel
   - runtime white-box coverage now locks `original-task` as a `TaskContract` segment and proves second-round requests still carry control status and runtime tool guidance

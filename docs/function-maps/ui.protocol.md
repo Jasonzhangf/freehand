@@ -123,7 +123,7 @@
 - error-center subscription initial snapshots use the same `UiErrorCenterEventListProjection` as query results
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards; tool status/outcome is conveyed by the status field while the public body stays semantic and target-focused instead of echoing success/failure result text
 - public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/parameters/result without parsing raw tool terms
-- public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
+- public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed; `TerminalStatus::ToolPending` projects as title `Lifecycle` and status `running`, not `Final`/`completed`
 - `bridge.html` in the Android APK renders the same public conversation projection as WebUI, so the live shell and browser shell share one projection truth
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
 - `ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state

@@ -10,7 +10,7 @@
     "runtime receives a provider tool call named `task`",
     "runtime routes `task` tool calls to `execute_task_tool` instead of generic file/tool execution",
     "`TaskRuntime::boot` loads task snapshots, task leases, self-agent snapshot, and persisted agent lifecycle snapshots into memory",
-    "`TaskRuntime::boot` interrupts running tasks whose lease is missing, mismatched, inactive, or expired",
+"`TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired",
     "`TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance",
     "create action writes append-only ledger events and atomic snapshots",
     "dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`",
@@ -93,6 +93,8 @@
       ],
       "related_tests": [
         "create_task_writes_ledger_snapshot_and_recovers_on_boot",
+        "boot_preserves_fresh_running_task_during_lease_acquisition_grace",
+        "boot_interrupts_running_task_with_missing_lease_after_acquisition_grace",
         "boot_interrupts_running_task_with_expired_lease",
         "task_tool_create_persists_and_queries_task"
       ],
@@ -410,7 +412,7 @@
       "step": "12",
       "symbol_path": "reconcile_running_leases",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "interrupt running tasks with missing, mismatched, inactive, or expired leases during boot",
+      "responsibility": "preserve fresh lease-acquisition windows, then interrupt running tasks with missing, mismatched, inactive, or expired leases during boot",
       "input_semantic": "persisted task snapshots plus lease snapshot",
       "output_semantic": "recovered runtime state",
       "caller": "task boot",

@@ -148,7 +148,7 @@ const samplePrompts = {
   success:
     "Answer with one short sentence and a valid Freehand completion schema. Do not call tools.",
   failure:
-    "Call the read_file tool exactly once with path definitely-missing-freehand-file.txt, then use the failed tool result to continue and report success through the required Freehand completion schema.",
+    'Call the task tool exactly once with {"op":"query","task_id":"definitely-missing-freehand-task"}, then use the failed tool result to continue and report success through the required Freehand completion schema.',
 };
 
 const selectedSessionStorageKey = "freehand-webui-selected-session";
@@ -1174,9 +1174,13 @@ function pendingChatCards(renderPending) {
   const renderTurn = {
     turnId: "pending-submit",
     lifecycle: {
-      className: renderPending.isLive ? "running" : "pending",
-      label: elapsed ? `dispatching... ${elapsed}` : "dispatching",
-      isLive: renderPending.isLive,
+      className: renderPending.error ? "failed" : renderPending.isLive ? "running" : "pending",
+      label: renderPending.error
+        ? "dispatch status unknown"
+        : elapsed
+          ? `dispatching... ${elapsed}`
+          : "dispatching",
+      isLive: renderPending.isLive && !renderPending.error,
     },
   };
   return [userChatBubble(renderTurn, userRow), assistantChatBubble(renderTurn, assistantRows)];
@@ -2448,7 +2452,12 @@ function conversationTurnsForRender() {
 }
 
 function setSelectedSessionId(sessionId) {
-  state.selectedSessionId = sessionId || null;
+  const nextSessionId = sessionId || null;
+  if (state.selectedSessionId !== nextSessionId) {
+    state.taskHistory = null;
+    state.workerControl = null;
+  }
+  state.selectedSessionId = nextSessionId;
   if (state.selectedSessionId) {
     window.localStorage.setItem(selectedSessionStorageKey, state.selectedSessionId);
   } else {
@@ -3038,6 +3047,9 @@ function applyAdpSubscriptionEvent(event) {
 }
 
 function liveTurnStatus() {
+  if (state.pendingSubmitError) {
+    return "dispatch status unknown · refresh needed";
+  }
   if (state.submitInFlight && !state.turn) {
     const elapsed = elapsedSince(state.submitStartedAt);
     return elapsed ? `dispatching... ${elapsed}` : "dispatching...";
@@ -3282,6 +3294,75 @@ function workerChildSessionForSessionId(sessionId) {
     }
   }
   return null;
+}
+
+function currentTaskParentSessionId() {
+  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
+  if (selectedWorkerSession) {
+    return selectedWorkerSession.parent_session_id || null;
+  }
+  return state.selectedSessionId || null;
+}
+
+function currentSessionTasks() {
+  const tasks = phase2SortedTasks((state.taskBoard && state.taskBoard.tasks) || []);
+  const parentSessionId = currentTaskParentSessionId();
+  if (!parentSessionId) {
+    return tasks;
+  }
+  return tasks.filter((task) => task && task.parent_session_id === parentSessionId);
+}
+
+function currentSessionTaskCounts(tasks = currentSessionTasks()) {
+  const taskIds = new Set(tasks.map((task) => task.task_id).filter(Boolean));
+  const staleTaskIds = new Set(
+    ((state.taskBoard && state.taskBoard.stale) || [])
+      .map((task) => task && task.task_id)
+      .filter(Boolean)
+  );
+  return {
+    taskCount: tasks.length,
+    blockedCount: tasks.filter((task) =>
+      ["blocked", "failed", "cancelled"].includes(`${task.status || ""}`.toLowerCase())
+    ).length,
+    reviewCount: tasks.filter((task) =>
+      ["review_ready", "review_submitted"].includes(`${task.status || ""}`.toLowerCase())
+    ).length,
+    staleCount: Array.from(taskIds).filter((taskId) => staleTaskIds.has(taskId)).length,
+  };
+}
+
+function currentSessionTaskStatusLabel(tasks = currentSessionTasks()) {
+  const counts = currentSessionTaskCounts(tasks);
+  return `${counts.taskCount} current task(s) · ${counts.blockedCount} blocked · ${counts.reviewCount} review · ${counts.staleCount} stale`;
+}
+
+function currentSessionAgents() {
+  const tasks = currentSessionTasks();
+  if (!tasks.length) {
+    return [];
+  }
+  const scopedTaskIds = new Set(tasks.map((task) => task.task_id).filter(Boolean));
+  const scopedExecutionIds = new Set(tasks.map((task) => task.active_execution_id).filter(Boolean));
+  return phase2SortedAgents((state.agentBoard && state.agentBoard.agents) || []).filter((agent) => {
+    if (agent.current_task_id && scopedTaskIds.has(agent.current_task_id)) {
+      return true;
+    }
+    if (agent.current_execution_id && scopedExecutionIds.has(agent.current_execution_id)) {
+      return true;
+    }
+    return !!taskForAgent(agent, tasks);
+  });
+}
+
+function currentSessionEvents() {
+  const taskIds = new Set(currentSessionTasks().map((task) => task.task_id).filter(Boolean));
+  if (!taskIds.size) {
+    return [];
+  }
+  return ((state.eventInbox && state.eventInbox.events) || []).filter((event) =>
+    event && taskIds.has(event.task_id)
+  );
 }
 
 function renderSessionItem(session) {
@@ -3539,15 +3620,8 @@ function buildMobileAgentDashboardModel() {
   const agentBoard = state.agentBoard;
   const taskHistory = state.taskHistory;
   const workerControl = state.workerControl;
-  const allTasks = phase2SortedTasks((taskBoard && taskBoard.tasks) || []);
+  const tasks = currentSessionTasks();
   const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
-  const parentSessionId = selectedWorkerSession
-    ? selectedWorkerSession.parent_session_id
-    : state.selectedSessionId;
-  const parentTasks = parentSessionId
-    ? allTasks.filter((task) => task.parent_session_id === parentSessionId)
-    : [];
-  const tasks = parentTasks.length > 0 ? parentTasks : allTasks;
   const taskStatuses = tasks.map((task) => `${task.status || ""}`.toLowerCase());
   const allClosed = tasks.length > 0 && taskStatuses.every((status) => status === "closed");
   const openTasks = tasks.filter((task) => `${task.status || ""}`.toLowerCase() !== "closed");
@@ -3569,7 +3643,7 @@ function buildMobileAgentDashboardModel() {
   );
   const latestSelectedTurn = selectedTurns[selectedTurns.length - 1] || activeTurnForSelectedSession();
   const terminalStatus = `${latestSelectedTurn?.terminal_status || ""}`.toLowerCase();
-  const finalComplete = parentTasks.length > 0 && allClosed && terminalStatus === "success";
+  const finalComplete = tasks.length > 0 && allClosed && terminalStatus === "success";
   const objectiveTurn = selectedWorkerSession
     ? null
     : selectedTurns.find((turn) => {
@@ -3618,11 +3692,7 @@ function buildMobileAgentDashboardModel() {
     }
   }
 
-  const taskCount = (taskBoard && taskBoard.tasks || []).length;
-  const blockedCount = (taskBoard && taskBoard.blocked || []).length;
-  const reviewCount = (taskBoard && taskBoard.review_ready || []).length;
-  const staleCount = (taskBoard && taskBoard.stale || []).length;
-  const agents = phase2SortedAgents((agentBoard && agentBoard.agents) || []);
+  const agents = currentSessionAgents();
   const workerTarget = currentWorkerControlTarget();
   const workerEvents = (workerControl && workerControl.events) || [];
   const workerTask = (workerControl && workerControl.task) || (workerTarget && workerTarget.task) || null;
@@ -3635,7 +3705,7 @@ function buildMobileAgentDashboardModel() {
     roundLabel: "Current round unavailable",
     terminalStatus,
     taskBoardStatus: taskBoard
-      ? `${taskCount} task(s) · ${blockedCount} blocked · ${reviewCount} review · ${staleCount} stale`
+      ? currentSessionTaskStatusLabel(tasks)
       : state.phase2StatusError
         ? `status unavailable: ${state.phase2StatusError}`
         : "waiting",
@@ -3861,15 +3931,11 @@ function renderTaskBoardProjection() {
     taskBoardList.textContent = "-";
     return;
   }
-  const taskCount = (board.tasks || []).length;
-  const blockedCount = (board.blocked || []).length;
-  const reviewCount = (board.review_ready || []).length;
-  const staleCount = (board.stale || []).length;
-  taskBoardStatus.textContent = `${taskCount} task(s) · ${blockedCount} blocked · ${reviewCount} review · ${staleCount} stale`;
+  const tasks = currentSessionTasks();
+  taskBoardStatus.textContent = currentSessionTaskStatusLabel(tasks);
   taskBoardList.replaceChildren();
-  const tasks = phase2SortedTasks(board.tasks || []);
   if (tasks.length === 0) {
-    taskBoardList.textContent = "no tasks yet";
+    taskBoardList.textContent = state.selectedSessionId ? "no tasks for selected session" : "no tasks yet";
     return;
   }
   tasks.slice(0, 8).forEach((task) => taskBoardList.appendChild(taskBoardItem(task)));
@@ -3912,12 +3978,12 @@ function renderAgentBoardProjection() {
     agentBoardList.textContent = "-";
     return;
   }
-  const agents = phase2SortedAgents(board.agents || []);
+  const agents = currentSessionAgents();
   const activeCount = agents.filter((agent) => agent.alive).length;
-  agentBoardStatus.textContent = `${agents.length} agent(s) · ${activeCount} active`;
+  agentBoardStatus.textContent = `${agents.length} current agent(s) · ${activeCount} active`;
   agentBoardList.replaceChildren();
   if (agents.length === 0) {
-    agentBoardList.textContent = "no workers yet";
+    agentBoardList.textContent = state.selectedSessionId ? "no workers for selected session" : "no workers yet";
     return;
   }
   agents.slice(0, 8).forEach((agent, index) => agentBoardList.appendChild(agentBoardItem(agent, index)));
@@ -3965,11 +4031,11 @@ function renderEventInboxProjection() {
     eventInboxList.textContent = "-";
     return;
   }
-  const events = inbox.events || [];
-  eventInboxStatus.textContent = `${events.length} recent event(s)${inbox.next_cursor ? " · updated" : ""}`;
+  const events = currentSessionEvents();
+  eventInboxStatus.textContent = `${events.length} current event(s)${inbox.next_cursor ? " · updated" : ""}`;
   eventInboxList.replaceChildren();
   if (events.length === 0) {
-    eventInboxList.textContent = "no pending task events";
+    eventInboxList.textContent = state.selectedSessionId ? "no events for selected session" : "no pending task events";
     return;
   }
   events.slice(-10).reverse().forEach((event) => eventInboxList.appendChild(eventInboxItem(event)));
@@ -4164,12 +4230,14 @@ function agentIsActive(agent) {
   return !!agent.alive && !["idle", "available", ""].includes(`${agent.state || ""}`.toLowerCase());
 }
 
-function taskForAgent(agent) {
+function taskForAgent(agent, taskCandidates = null) {
   const agentId = normalizeAgentId(agent && agent.agent_id);
   if (!agentId || !state.taskBoard) {
     return null;
   }
-  const tasks = phase2SortedTasks(state.taskBoard.tasks || []);
+  const tasks = taskCandidates
+    ? phase2SortedTasks(taskCandidates)
+    : phase2SortedTasks(state.taskBoard.tasks || []);
   return tasks.find((task) => {
     const taskAgent = normalizeAgentId(task.assignee_agent_id);
     if (agent.current_task_id && task.task_id === agent.current_task_id) {
@@ -4218,7 +4286,7 @@ function openWorkerTaskSession(task) {
 }
 
 function currentWorkerControlTarget() {
-  const tasks = phase2SortedTasks((state.taskBoard && state.taskBoard.tasks) || []);
+  const tasks = currentSessionTasks();
   const task = tasks.find((candidate) => candidate.active_execution_id) || null;
   if (!task) {
     return null;
@@ -4232,7 +4300,7 @@ function currentWorkerControlTarget() {
 }
 
 function currentTaskHistoryTarget() {
-  const tasks = phase2SortedTasks((state.taskBoard && state.taskBoard.tasks) || []);
+  const tasks = currentSessionTasks();
   const active = tasks.find((candidate) => candidate.active_execution_id);
   return active || tasks[0] || null;
 }
@@ -4584,6 +4652,9 @@ async function submitProviderConfigUpdate(event) {
 }
 
 function renderTurnMeta() {
+  if (state.pendingSubmitError) {
+    setText("turn-status", "dispatch status unknown · refresh needed");
+  }
   const turn = activeTurnForSelectedSession();
   if (!turn) {
     setText("session-title", state.selectedSessionId || "waiting for service state");
@@ -4591,7 +4662,9 @@ function renderTurnMeta() {
     setShellDataset("selectedSession", state.selectedSessionId || "");
     setShellDataset("selectedTurn", "");
     setShellDataset("selectedCwd", state.selectedCwd || "");
-    setText("turn-status", liveTurnStatus() || "waiting");
+    if (!state.pendingSubmitError) {
+      setText("turn-status", liveTurnStatus() || "waiting");
+    }
     return;
   }
 
@@ -4610,7 +4683,9 @@ function renderTurnMeta() {
         : state.submitInFlight
           ? liveTurnStatus()
           : "waiting";
-  setText("turn-status", turnStatus);
+  if (!state.pendingSubmitError) {
+    setText("turn-status", turnStatus);
+  }
 }
 
 setInterval(() => {
@@ -4861,7 +4936,26 @@ async function rewindCheckpoint(checkpointId) {
 
 async function runSlashCommand(rawText) {
   const command = rawText.trim();
-  if (command.startsWith("/")) {
+  const firstLine = command.split(/\s+/, 1)[0] || "";
+  const knownSlashCommands = new Set([
+    "/help",
+    "/new",
+    "/task",
+    "/settings",
+    "/cwd",
+    "/sessions",
+    "/reload",
+    "/success",
+    "/failure",
+    "/cancel",
+    "/clear",
+    "/attachments",
+    "/model",
+  ]);
+  if (command.startsWith("/") && !knownSlashCommands.has(firstLine)) {
+    return false;
+  }
+  if (knownSlashCommands.has(firstLine)) {
     composerInput.value = "";
     state.pendingUserInput = null;
     state.pendingSubmitId = null;
@@ -4871,7 +4965,7 @@ async function runSlashCommand(rawText) {
     state.lifecycleClocks.clear();
     state.submitStartedAt = null;
   }
-  switch (command) {
+  switch (firstLine) {
     case "/help":
       setCommandStatus(shortcutHelp, { stickyMs: 10000 });
       return true;
@@ -4937,10 +5031,6 @@ async function runSlashCommand(rawText) {
       setCommandStatus("model selection is controlled by runtime config", { stickyMs: 6000 });
       return true;
     default:
-      if (command.startsWith("/")) {
-        setCommandStatus(`unknown slash command: ${command}. ${shortcutHelp}`, { stickyMs: 8000 });
-        return true;
-      }
       return false;
   }
 }
@@ -5039,6 +5129,7 @@ composerForm.addEventListener("submit", async (event) => {
     composerInput.value = "";
     state.forceScrollToBottom = true;
     renderMessages();
+    renderTurnMeta();
     setCommandStatus(`dispatch status unknown; refresh before duplicate send. Use ↑ to recall input. Draft attachments retained: ${error.message}`);
   }
 });

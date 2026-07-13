@@ -48,6 +48,7 @@
 - transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history and error-center metadata before using protocol-state snapshots
 - front-end Phase 2D lifecycle observer queries TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl through the existing ADP/runtime query path; the browser only caches transient render data and must not persist task/control truth
 - front-end mobile Agent Dashboard builds one presentation model from the existing Phase 2D owner projections plus selected-session turn truth; it displays Master evaluation, Worker review/rework/next-action/blocker/final-complete cues without treating closed Worker tasks as final goal completion
+- front-end lifecycle dashboards scope TaskBoard counts, Worker cards, AgentBoard rows, EventInbox rows, Worker control targets, and task-history targets to the currently selected persisted parent session; when that session has no child tasks, the projection is empty and must not fall back to global historical TaskBoard/EventInbox/AgentBoard truth
 - front-end AgentBoard renders active Workers before idle/historical agents with distinct active styling; clicking an active Worker switches to the TaskBoard-parented temporary worker session and refreshes TaskHistory/WorkerControl for that task
 - transport-facing ADP subscribe route accepts protocol-owned task list and error-center subscriptions and obtains initial projections from the injected runtime query port
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
@@ -79,6 +80,7 @@
 - WebUI provider/model save renders field-level validation errors, disables duplicate save while in flight, and shows restart-required after a successful owner-backed save
 - WebUI Phase 2D lifecycle observer renders compact TaskBoard, AgentBoard, EventInbox, task history, and WorkerControl cards from owner query results; worker-control buttons submit `WorkerControl` commands and then re-query owner truth before updating the drawer or mobile Agent sheet
 - WebUI mobile Agent Dashboard renders a portrait-only compact strip and bottom sheet from the same owner-backed lifecycle model; sheet open/close is UI-only and preserves selected session, transcript, composer draft, pending submit, scroll anchor, and lifecycle timers
+- WebUI mobile Agent Dashboard and desktop lifecycle observer show only lifecycle rows tied to tasks whose `parent_session_id` matches the selected parent session; deleting or switching sessions cannot expose unrelated blocked/review/stale task counts, worker rows, event rows, or history/control details through a global fallback
 - WebUI AgentBoard renders active Workers first, highlights them separately from idle/historical agents, and routes clicks through TaskBoard `task_id`/`parent_session_id` truth instead of guessing top-level sessions
 - WebUI attachment tray renders session-scoped draft metadata and file-handle availability; restored metadata stays visible but is not treated as rehydrated binary payload
 - WebUI sends attachment placeholders as current-send text only, clears the composer immediately after submit, and keeps submitted text recoverable through local Up/Down input history instead of refilling the composer after dispatch failure
@@ -247,6 +249,7 @@
 - WebUI Final rows now extract the complete terminal `Summary` block and use a dedicated source-format-preserving summary renderer, while phone focused composer keeps attachment/CWD/model/status detail collapsed out of the main input surface
 - WebUI missing-debug race is locked by pending-state rendering plus late-debug ADP subscription coverage; ADP failure frames render as visible failure cards/status instead of stale pending
 - WebUI user-facing labels, status rows, failure cards, and diagnostic prompts must not expose `ADP`; ADP remains an internal protocol/debug/automation term only
+- WebUI hidden diagnostic failure prompts must follow the runtime Master framework-only tool boundary: samples may exercise `task`/`timer` failures, but must not ask Master to call workspace tools such as `read_file`
 - app dependency boundary is intended to remain protocol-only and must not import reason/provider/node/config semantics
 - app query transport now accepts an injected `UiRuntimeQueryPort`; the app still does not import runtime/task/error-center semantics
 - app subscription transport now uses the injected `UiRuntimeQueryPort` for task list and error-center initial snapshots while keeping later updates on protocol subscription events

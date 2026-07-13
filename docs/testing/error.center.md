@@ -23,7 +23,7 @@
 
 - schema mismatch classifies as `schema` / `validation` / `repair_schema` before retry cap and must not be reported as provider failure or `fail_turn`; the recovery action means model response polishing, not system schema repair
 - schema rejection at retry cap classifies as `stop_turn`
-- provider executor failure classifies as `provider` / `recoverable` / `retry_same_step` before retry cap and `fail_turn` at retry cap
+- provider executor failure classifies as `provider` / `recoverable` / `retry_same_step` before retry cap, `failover_provider` when the runtime has accepted an eligible configured alternate route, and `fail_turn` only when no provider route remains
 - tool failure classifies as `tool` / `validation` / `repair_schema`
 - unknown source classifies as runtime/fatal/escalate_to_user
 - runtime error-center query projection filters rows by session, trace, turn, and domain
@@ -34,7 +34,7 @@
 - runtime writes `error.center` metadata for completion schema rejection
 - runtime schema/no-schema mismatch metadata remains schema-domain polishing truth, not provider-domain failure truth
 - runtime writes `error.center` metadata for failed tool results before model re-entry
-- runtime writes `error.center` metadata for provider executor retry attempts and final retry-exhausted failure before terminal failure materialization
+- runtime writes `error.center` metadata for provider executor retry attempts, accepted provider failover, and final retry-exhausted failure before route switch or terminal failure materialization
 - runtime metadata ledger failure blocks the error-center decision path with explicit `MetadataFailed`
 - error metadata carries raw hash, not raw provider/tool/user/assistant text
 - daemon ADP query returns runtime-backed `ErrorCenterEvents` projection from metadata truth

@@ -451,6 +451,17 @@ fn worker_execution_error_is_retryable_system_failure(reason: &str) -> bool {
         || reason.contains("anthropic_http_status_503")
         || reason.contains("anthropic_http_status_504")
         || reason.contains("anthropic_http_status_5")
+        || reason.contains("openai_http_request_failed")
+        || reason.contains("openai_stream_read_failed")
+        || reason.contains("openai_http_status_408")
+        || reason.contains("openai_http_status_409")
+        || reason.contains("openai_http_status_425")
+        || reason.contains("openai_http_status_429")
+        || reason.contains("openai_http_status_500")
+        || reason.contains("openai_http_status_502")
+        || reason.contains("openai_http_status_503")
+        || reason.contains("openai_http_status_504")
+        || reason.contains("openai_http_status_5")
 }
 
 fn worker_live_request(

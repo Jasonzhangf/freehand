@@ -5561,3 +5561,157 @@ Current real root cause split:
   - model `gpt-5.5`
   - auth source `env`
   - verifier credential env marker absent
+# 2026-07-13 WebUI lifecycle current-session scope fix
+
+- trigger:
+  - Android/WebUI phone surface showed `Blocked · 144 task(s) · 31 blocked`
+    after user cleared sessions.
+  - Root cause was presentation-layer fallback: selected session with no child
+    tasks fell back from parent-scoped TaskBoard to global TaskBoard history.
+- implementation:
+  - Added current-session lifecycle selectors in `apps/freehand-server/assets/webui.js`.
+  - TaskBoard counts/cards, AgentBoard rows, EventInbox rows, TaskHistory target,
+    WorkerControl target, and mobile Agent Dashboard now scope to selected
+    parent session via TaskBoard `parent_session_id` / task ids.
+  - Switching selected sessions clears cached task history and worker control.
+  - Updated app.webui-smoke function map, test design, and asset smoke locks.
+- evidence:
+  - Local: `node --check apps/freehand-server/assets/webui.js`.
+  - Local: `cargo test -p freehand-server webui_smoke_renders_shell_and_asset_routes -- --nocapture`.
+  - Local: `cargo run -p xtask -- mainlines check`.
+  - Local: `cargo run -p xtask -- gates check`.
+  - Local: `git diff --check`.
+  - S daemon rebuilt/restarted via `scripts/install-symlink.sh` and `scripts/install-launchd.sh restartS`; health returned `ok`.
+  - Online browser artifact `artifacts/webui-online/20260713-verify-4042-1783939658253` shows selected session `webui-session-20260713104810-b82fe0ad` with `0 current task(s)`, `0 current agent(s)`, `0 current event(s)`, zero cards, and empty selected-session lifecycle panel even though global Task Center still has 144 historical tasks.
+- remaining:
+  - Full `scripts/verify-webui-online.sh` still failed later on `timeout waiting for phase2 projection dashboard`; the artifact before failure proves this specific current-session lifecycle scope fix, but the full WebUI online gate is not green.
+  - Android true-device final screenshot is blocked by device keyguard/dozing; ADB cannot dismiss the security lock without manual unlock.
+
+# 2026-07-13 WebUI selected-session scope verifier follow-up
+
+- trigger:
+  - `scripts/verify-webui-online.sh` still failed after current-session scope fix.
+- root causes found:
+  - verifier second-turn diagnostic prompt still asked Master to call `read_file`, but current Master live tool surface is framework-only `task`/`timer`.
+  - verifier progress wait treated a visible selected pending turn with `dispatching` status as no progress when no `[data-live=true]` card existed yet.
+  - `scripts/install-launchd.sh restartS` used a fixed 30s health wait; launchd restart could become healthy shortly after the script timed out.
+  - current S-profile provider `cc` / `api.anyint.ai` / `gpt-5.5` returned `openai_http_status_402` insufficient credits, blocking full live provider terminal proof.
+- implementation:
+  - replaced WebUI hidden/online failure sample with Master-safe `task` query against `definitely-missing-freehand-task`.
+  - expanded verifier progress detection to accept selected visible prompt + dispatching state.
+  - made launchd health wait configurable and defaulted to 60s.
+  - removed leaked dummy `FREEHAND_WEBUI_VERIFY_CREDENTIAL` from `~/.freehand/daemonS.env` and restarted S.
+- evidence:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `node --check scripts/webui_verify_online.mjs`
+  - `cargo test -p freehand-server webui_smoke_renders_shell_and_asset_routes -- --nocapture`
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+  - `scripts/install-launchd.sh restartS` returned 0 and `curl http://127.0.0.1:4042/health` returned `ok`.
+  - latest online artifact before provider terminal wait failure: `artifacts/webui-online/20260713-verify-4042-1783943684651/03-first-materialized.json` shows selected session `webui-session-20260713115517-dbb8eb42` with `0 current task(s)`, `0 current agent(s)`, `0 current event(s)`.
+- remaining:
+  - full `scripts/verify-webui-online.sh` is still not green because the live provider returned 402 insufficient credits before first terminal; this is not a UI lifecycle-scope failure.
+  - no historical Task Center files were deleted; clearing sessions is separate from deleting global task ledgers.
+
+# 2026-07-13 WebUI online gate rerun with minimax
+
+- action:
+  - Temporarily switched S-profile agents.master/agents.worker provider from `cc` to `minimax` only for the online verifier run.
+  - Ran `scripts/verify-webui-online.sh` against `http://127.0.0.1:4042/`.
+  - Restored S-profile back to `cc` after the run and restarted S.
+- evidence:
+  - verifier exited 0.
+  - summary artifact: `artifacts/webui-online/20260713-verify-4042-1783944723612/summary.json`.
+  - all summary checks were true; failed check set was `{}`.
+  - selected session: `webui-session-20260713121233-ebc85775`.
+  - desktop lifecycle proof: `0 current task(s) · 0 blocked · 0 review · 0 stale`; `0 current agent(s) · 0 active`; `0 current event(s) · updated`.
+  - mobile Agent Dashboard proof: `0 current task(s) · 0 blocked · 0 review · 0 stale`; `0 agent(s) · 0 active`.
+  - after restore, `~/.freehand/config.toml` has agents.master/agents.worker provider `cc`, `api.anyint.ai`, `gpt-5.5`, OpenAI Responses; health `http://127.0.0.1:4042/health` returned `ok`.
+
+# 2026-07-13 WebUI path-leading input observability fix
+
+- trigger:
+  - User submitted a normal task beginning with `/Volumes/extension/code/freehand ...` from WebUI.
+  - UI showed `unknown slash command: /Volumes/...`; the request never rendered as submitted work or progress.
+- root cause:
+  - `runSlashCommand` treated any input starting with `/` as a slash command.
+  - Absolute macOS paths are valid user task text and must not be intercepted unless the first token exactly matches a known command.
+  - After ADP submit timeout, command-status showed unknown dispatch, but top turn-status could remain `dispatching...` because the catch path did not force `renderTurnMeta`.
+- implementation:
+  - `apps/freehand-server/assets/webui.js` now only intercepts exact known slash commands.
+  - Unknown slash-leading text falls through to normal submit so the submitted user text is rendered immediately.
+  - Pending submit timeout/error sets both command-status and turn-status to `dispatch status unknown · refresh needed`, keeps the user input visible, and suppresses continued live lifecycle styling for that pending card.
+- evidence:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - S-profile rebuilt/restarted with `scripts/install-launchd.sh restartS`; health returned `ok`.
+  - Online headless Chrome proof: `artifacts/webui-online/slash-path-observable-1783947943516/state.json` shows pending `promptVisible=true`, `unknownSlashVisible=false`, and after timeout `commandStatus=dispatch status unknown · refresh needed`, `turnStatus=dispatch status unknown · refresh needed`.
+  - Screenshots: `artifacts/webui-online/slash-path-observable-1783947943516/01-pending-visible.png` and `02-timeout-visible.png`.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-server webui_smoke_renders_shell_and_asset_routes -- --nocapture` passed.
+  - `cargo fmt --check` and `git diff --check` passed.
+- remaining:
+  - Provider main/backup route work is still incomplete; current live requests may still time out/keep runtime work pending until provider failover is fully closed.
+
+# 2026-07-13 Provider primary/backup and WebUI observability closeout
+
+- configuration truth:
+  - `AgentConfig` and selected config now support `fallback_provider`.
+  - S profile uses `provider = "cc"` and `fallback_provider = "minimax"` for both Master and Worker.
+  - Primary and fallback must exist, be enabled, differ, and resolve protocol/model/base URL/auth independently.
+- runtime behavior:
+  - Non-stream HTTP status/network/stream-read failures are failover eligible.
+  - Retryable primary failures exhaust the existing primary retry policy before one fallback switch; eligible non-retryable HTTP failures such as 402 switch immediately.
+  - Adapter, invalid-config, and callback failures do not switch.
+  - Fallback reconstructs the provider descriptor/driver/request while preserving tools, tool choice, and tool exchanges.
+  - Successful fallback persists fallback model and metadata:
+    `provider.route=fallback`, `provider.failover_from`, `provider.failover_to`,
+    and `provider.failover_error_code`.
+  - Error Center uses recoverable `failover_provider`; it does not write
+    `fail_turn` for the primary error when fallback succeeds.
+  - Fallback exhaustion materializes one failed turn.
+- WebUI:
+  - Full online verifier passed:
+    `artifacts/webui-online/20260713-verify-4042-1783952632179/summary.json`.
+  - Session: `webui-session-20260713142425-a0eb7daf`.
+  - All submit/progress/refresh/terminal, Settings, secret-leakage,
+    selected-session lifecycle, mobile drawer/sheet, tablet, and desktop checks
+    were true.
+  - Settings valid-save now edits the current primary provider. It does not
+    change primary to the configured fallback, because config truth correctly
+    rejects identical primary/fallback routes.
+- controlled online failover proof:
+  - Production S daemon and ADP were used.
+  - Provider id `cc` was temporarily routed to a local fixture returning exactly
+    one OpenAI Responses 402; fallback remained the real `minimax` endpoint.
+  - Session: `cli-adp-sample-success-1783953723678094000`.
+  - Turn: `runtime-turn-347`.
+  - Persisted result: `model=MiniMax-M3`, `terminal=Success`.
+  - Metadata: `error.code=openai_http_status_402`,
+    `error.recovery_action=failover_provider`, `provider.route=fallback`,
+    `provider.failover_from=cc`, `provider.failover_to=minimax`.
+  - ADP error query returned one provider/recoverable/failover_provider event.
+  - This is controlled primary-fixture 402 to real minimax fallback, not a real
+    `api.anyint.ai` 402.
+  - Fixture was stopped through its explicit process session. Config was
+    restored.
+- verification:
+  - `cargo test -p freehand-config`: 17 passed.
+  - `cargo test -p freehand-control`: 8 passed.
+  - Runtime focused positive/negative tests passed for primary success, 402
+    failover success, retry-exhaustion failover success, ineligible adapter
+    failure, and fallback exhaustion.
+  - Targeted clippy, `cargo fmt --check`, JS syntax, freehand-server asset smoke,
+    mainlines generate/check, gates check, and `git diff --check` passed.
+  - Full `freehand-runtime`: 139 passed / 12 failed. Failures are the adjacent
+    live-tool/checkpoint/autonomy/task-list batch; the package is not green.
+- restored state:
+  - S profile: `cc`, OpenAI Responses, `api.anyint.ai`, `gpt-5.5`, env auth.
+  - Master and Worker retain `fallback_provider = "minimax"`.
+  - MasterS and WorkerS restarted; `127.0.0.1:4042/health` returned `ok`.
+  - Fixture env marker scan returned zero matches.
+- remaining:
+  - Stream failover is not implemented. Partial output/tool-call side effects,
+    rollback, and resume need a typed contract before enabling it.
+  - No commit. Existing unrelated dirty/untracked files, including `output/`,
+    remain untouched.

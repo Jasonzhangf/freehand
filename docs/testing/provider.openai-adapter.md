@@ -6,10 +6,12 @@
   - semantic request renders typed input segments into `responses` or `chat completions`
   - single-shot and stream outputs normalize into shared semantic events
   - partial tool-call chunks accumulate until arguments become complete
+  - live HTTP/SSE executor renders the selected OpenAI-compatible protocol, captures raw response/error/stream bodies, and returns only provider-neutral semantic outputs to runtime
 - white-box plan:
-  - request renderer, response parser, stream parser, partial tool accumulator
+  - request renderer, response parser, stream parser, partial tool accumulator, executor raw capture, executor HTTP status classification surface
 - module black-box plan:
   - adapter emits provider-neutral text/tool/usage/terminal/error outputs for both OpenAI protocols
+  - executor drives OpenAI-compatible responses and chat-completions requests through local mock HTTP/SSE endpoints without runtime owning wire paths
 - project black-box impact:
   - reason layer can consume OpenAI semantic outputs without protocol leakage
 - fixtures / replay inputs / runtime evidence paths:
@@ -17,9 +19,9 @@
   - `~/.freehand/ledgers/providers/openai`
   - `~/.freehand/replays/providers/openai`
 - known gaps:
-  - live HTTP execution is intentionally out of scope
+  - real upstream OpenAI-compatible online behavior is verified through `provider.reason-live-bridge`; provider crate tests use local mock HTTP/SSE surfaces
 - sync status between design and implementation:
-  - `OpenAiAdapter` baseline implemented
+  - `OpenAiAdapter` and `OpenAiExecutor` baseline implemented
   - request rendering covers `responses` and `chat completions` from typed input segments
   - single-shot and stream parsing cover text, tool calls, usage, terminal, and error paths
 - mainline/wiki sync:

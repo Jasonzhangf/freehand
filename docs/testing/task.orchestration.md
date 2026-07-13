@@ -8,7 +8,11 @@
   - task owner writes ledger and snapshot
   - task runtime memory state is rebuilt on boot
   - running state is lease-backed and heartbeat-refreshable
-  - boot recovery interrupts running tasks whose lease is missing or expired
+  - boot recovery preserves a freshly resumed running task during the bounded
+    lease-acquisition window so a concurrent runtime cannot interrupt the task
+    between `TaskResumed` persistence and lease persistence
+  - boot recovery interrupts running tasks whose lease is still missing after
+    the acquisition window or whose lease is expired
   - agent registry persists and recovers worker snapshots
   - blocked task truth releases the Worker resource back to `Available`;
     `AgentStatus::Paused` is reserved for an explicitly paused task
@@ -57,6 +61,12 @@
 - Phase 2A close rejects blocked and rejected tasks before approved review
 - resume creates a task lease and records a heartbeat event
 - heartbeat refreshes an active running lease
+- boot preserves a freshly resumed running task whose lease write is still
+  inside the acquisition grace:
+  `boot_preserves_fresh_running_task_during_lease_acquisition_grace`
+- boot interrupts a running task whose lease is still missing after the
+  acquisition grace:
+  `boot_interrupts_running_task_with_missing_lease_after_acquisition_grace`
 - boot changes running tasks with expired leases to `Interrupted`
 - heartbeat for a non-running task is rejected and writes no lease
 - create_agent persists, recovers, and closes an idle agent
@@ -166,6 +176,8 @@
 
 ```bash
 cargo test -p freehand-task
+cargo test -p freehand-task boot_preserves_fresh_running_task_during_lease_acquisition_grace -- --nocapture
+cargo test -p freehand-task boot_interrupts_running_task_with_missing_lease_after_acquisition_grace -- --nocapture
 cargo test -p freehand-tools
 cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --nocapture
 cargo test -p freehand-runtime task_tool_review_lifecycle_rejects_early_close_and_closes_after_approval -- --nocapture

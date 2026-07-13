@@ -11,10 +11,13 @@ fixture_key_name="FREEHAND_MASTER_AUTONOMY_FIXTURE_KEY"
 fixture_key_value="test-master-autonomy-key"
 config_path="$runtime_home/config.toml"
 env_path="$runtime_home/daemonS.env"
+worker_plist="$HOME/Library/LaunchAgents/com.freehand.workerS.plist"
 backup_dir="$runtime_home/tmp/master-autonomy-online-$(date +%Y%m%dT%H%M%S)-$$"
 mock_log="$backup_dir/mock-provider.log"
 mock_pid=""
 fixture_target_cwd="$backup_dir/worker-target"
+worker_was_loaded="0"
+leave_services_stopped="${FREEHAND_MASTER_AUTONOMY_LEAVE_SERVICES_STOPPED:-0}"
 
 cd "$repo_root"
 
@@ -39,10 +42,39 @@ restore_runtime_config() {
   if [[ -f "$backup_dir/daemonS.env" ]]; then
     cp "$backup_dir/daemonS.env" "$env_path" || restore_status=$?
   fi
+  if [[ "$leave_services_stopped" == "1" ]]; then
+    launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.freehand.daemonS.plist" >/dev/null 2>&1 || true
+    launchctl bootout "gui/$(id -u)" "$worker_plist" >/dev/null 2>&1 || true
+    return "$restore_status"
+  fi
   if [[ -f "$config_path" && -f "$env_path" ]]; then
     scripts/install-launchd.sh restartS >/dev/null || restore_status=$?
   fi
+  if [[ "$worker_was_loaded" == "1" ]]; then
+    scripts/install-launchd.sh restartWorkerS >/dev/null || restore_status=$?
+  fi
   return "$restore_status"
+}
+
+wait_for_health() {
+  local label="$1"
+  local deadline=$((SECONDS + 90))
+  until curl -4fsS "$health_url" >/dev/null 2>&1; do
+    if [[ $SECONDS -ge $deadline ]]; then
+      echo "master autonomy daemon did not become healthy after $label at $health_url" >&2
+      launchctl print "gui/$(id -u)/com.freehand.daemonS" 2>&1 | sed -n '1,140p' >&2 || true
+      tail -n 80 "$runtime_home/logs/daemonS.stderr.log" >&2 || true
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+stop_worker_service_if_loaded() {
+  if launchctl print "gui/$(id -u)/com.freehand.workerS" >/dev/null 2>&1; then
+    worker_was_loaded="1"
+    launchctl bootout "gui/$(id -u)" "$worker_plist" >/dev/null 2>&1 || true
+  fi
 }
 
 extract_field() {
@@ -74,6 +106,7 @@ run_master_worker_autonomy_online() {
   cp "$config_path" "$backup_dir/config.toml"
   cp "$env_path" "$backup_dir/daemonS.env"
   export FREEHAND_MASTER_AUTONOMY_TARGET_CWD="$fixture_target_cwd"
+  stop_worker_service_if_loaded
 
   node - "$port" >"$mock_log" 2>&1 <<'NODE' &
 const http = require("http");
@@ -254,7 +287,7 @@ NODE
 
   printf '\n%s="%s"\n' "$fixture_key_name" "$fixture_key_value" >>"$env_path"
   scripts/install-launchd.sh restartS >/dev/null
-  curl -4fsS "$health_url" >/dev/null
+  wait_for_health "fixture env restart"
 
   "$cli_path" adp-config-update \
     --url "$adp_url" \
@@ -266,7 +299,7 @@ NODE
     --model MiniMax-M3 \
     --api-key-env "$fixture_key_name" >/dev/null
   scripts/install-launchd.sh restartS >/dev/null
-  curl -4fsS "$health_url" >/dev/null
+  wait_for_health "fixture config restart"
   "$cli_path" adp-smoke --url "$adp_url" >/dev/null
 
   sample_output="$("$cli_path" master-worker-autonomy-sample --url "$adp_url" --scenario all)"
@@ -297,7 +330,7 @@ NODE
   fi
 
   scripts/install-launchd.sh restartS >/dev/null
-  curl -4fsS "$health_url" >/dev/null
+  wait_for_health "post-sample restart"
 
   verify_lines=()
   for scenario in success execution-error reject-retry; do

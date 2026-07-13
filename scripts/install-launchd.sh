@@ -335,7 +335,7 @@ wait_for_service() {
 
   local health_url="http://$bind_addr/health"
   local attempt=1
-  local max_attempts=30
+  local max_attempts="${FREEHAND_LAUNCHD_HEALTH_WAIT_SECONDS:-60}"
 
   while [[ $attempt -le $max_attempts ]]; do
     if curl -4fsS "$health_url" >/dev/null 2>&1; then
@@ -351,7 +351,7 @@ wait_for_service() {
 
 wait_for_worker_service() {
   local attempt=1
-  local max_attempts=30
+  local max_attempts="${FREEHAND_LAUNCHD_HEALTH_WAIT_SECONDS:-60}"
 
   while [[ $attempt -le $max_attempts ]]; do
     service_pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }')"
@@ -370,49 +370,63 @@ wait_for_worker_service() {
   exit 1
 }
 
+run_file_permission_preflight() {
+  FREEHAND_PERMISSION_PREFLIGHT_WORKDIR="$workdir" \
+    FREEHAND_RUNTIME_HOME="$runtime_home" \
+    scripts/freehand-file-permission-preflight.sh
+}
+
 case "$command" in
   install)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-global.sh
+    run_file_permission_preflight
     write_launchd_env
     write_launchd_plist
     run_install_launchd
     ;;
   installS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
+    run_file_permission_preflight
     write_launchd_env
     write_launchd_plist
     run_install_launchd
     ;;
   restart)
+    run_file_permission_preflight
     write_launchd_env
     write_launchd_plist
     restart_launchd
     ;;
   restartS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
+    run_file_permission_preflight
     write_launchd_env
     write_launchd_plist
     restart_launchd
     ;;
   installWorker)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-global.sh
+    run_file_permission_preflight
     write_launchd_env
     write_launchd_plist
     run_install_launchd
     ;;
   installWorkerS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
+    run_file_permission_preflight
     write_launchd_env
     write_launchd_plist
     run_install_launchd
     ;;
   restartWorker)
+    run_file_permission_preflight
     write_launchd_env
     write_launchd_plist
     restart_launchd
     ;;
   restartWorkerS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
+    run_file_permission_preflight
     write_launchd_env
     write_launchd_plist
     restart_launchd

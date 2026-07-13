@@ -18,6 +18,7 @@ pub use tool_display::*;
 pub enum CompletionClaim {
     Complete,
     Continue,
+    Waiting,
     Blocked,
 }
 
@@ -26,6 +27,7 @@ impl CompletionClaim {
         match input {
             "complete" => Some(Self::Complete),
             "continue" => Some(Self::Continue),
+            "waiting" => Some(Self::Waiting),
             "blocked" => Some(Self::Blocked),
             _ => None,
         }
@@ -46,6 +48,10 @@ pub struct CompletionSubmission {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompletionDecision {
     Completed {
+        status: TerminalStatus,
+        terminal_text: String,
+    },
+    Waiting {
         status: TerminalStatus,
         terminal_text: String,
     },
@@ -96,12 +102,12 @@ pub fn completion_schema_guidance() -> CompletionSchemaGuidance {
             "When you need to finish or continue this Freehand turn, include exactly one tagged JSON block:\n",
             "<freehand_completion>\n",
             "{\n",
-            "  \"claim\": \"complete\" | \"continue\" | \"blocked\",\n",
+            "  \"claim\": \"complete\" | \"continue\" | \"waiting\" | \"blocked\",\n",
             "  \"completion_reason\": \"required when claim=complete\",\n",
             "  \"evidence\": \"required when claim=complete\",\n",
             "  \"summary\": \"required when claim=complete\",\n",
             "  \"learned\": \"required when claim=complete\",\n",
-            "  \"next_step\": \"required when claim=continue\",\n",
+            "  \"next_step\": \"required when claim=continue or claim=waiting\",\n",
             "  \"blocked_reason\": \"required when claim=blocked\"\n",
             "}\n",
             "</freehand_completion>\n",
@@ -109,7 +115,10 @@ pub fn completion_schema_guidance() -> CompletionSchemaGuidance {
             "Use plain string values for required text fields; do not emit arrays or objects for those fields.\n",
             "Claim semantics: `continue` means Freehand should immediately run another model round in this same turn. ",
             "Do not use `continue` to wait for a Worker, timer, user, or external future event. ",
-            "After dispatching work and scheduling any needed timer, finish the current turn with `claim=\"complete\"` and explain the pending async follow-up in `completion_reason`, `summary`, `evidence`, and `learned`."
+            "`complete` means the user's requested outcome is actually finished with evidence. ",
+            "Dispatching a Worker task, scheduling a timer, or waiting for external lifecycle truth is not user-task completion. ",
+            "After dispatching work or scheduling a needed timer, finish the current turn with `claim=\"waiting\"` and put the exact lifecycle follow-up in `next_step`. ",
+            "Use `waiting` only when Freehand/Task Center/timer truth will continue the lifecycle without another user message."
         )
         .to_owned(),
     }
@@ -157,7 +166,8 @@ pub fn parse_completion_submission_block(
             None => {
                 issues.push(CompletionSchemaIssue {
                     field: "claim".to_owned(),
-                    message: "must be one of `complete`, `continue`, or `blocked`".to_owned(),
+                    message: "must be one of `complete`, `continue`, `waiting`, or `blocked`"
+                        .to_owned(),
                 });
                 None
             }
@@ -283,7 +293,7 @@ fn completion_submission_issues(submission: &CompletionSubmission) -> Vec<Comple
             collect_required_text_issue(&mut issues, submission.learned.as_deref(), "learned");
             issues
         }
-        CompletionClaim::Continue => {
+        CompletionClaim::Continue | CompletionClaim::Waiting => {
             let mut issues = Vec::new();
             collect_required_text_issue(&mut issues, submission.next_step.as_deref(), "next_step");
             if issues.is_empty() {
@@ -291,7 +301,10 @@ fn completion_submission_issues(submission: &CompletionSubmission) -> Vec<Comple
             } else {
                 vec![CompletionSchemaIssue {
                     field: "next_step".to_owned(),
-                    message: "is required when `claim` is `continue`".to_owned(),
+                    message: format!(
+                        "is required when `claim` is `{}`",
+                        claim_label(submission.claim)
+                    ),
                 }]
             }
         }
@@ -311,6 +324,15 @@ fn completion_submission_issues(submission: &CompletionSubmission) -> Vec<Comple
                 }]
             }
         }
+    }
+}
+
+fn claim_label(claim: CompletionClaim) -> &'static str {
+    match claim {
+        CompletionClaim::Complete => "complete",
+        CompletionClaim::Continue => "continue",
+        CompletionClaim::Waiting => "waiting",
+        CompletionClaim::Blocked => "blocked",
     }
 }
 
@@ -417,6 +439,14 @@ pub fn validate_completion_submission(
             let next_step = required_text(submission.next_step.as_deref(), "next_step")
                 .map_err(|_| CompletionValidationError::MissingNextStep)?;
             Ok(CompletionDecision::ContinueWithNextStep { next_step })
+        }
+        CompletionClaim::Waiting => {
+            let next_step = required_text(submission.next_step.as_deref(), "next_step")
+                .map_err(|_| CompletionValidationError::MissingNextStep)?;
+            Ok(CompletionDecision::Waiting {
+                status: TerminalStatus::ToolPending,
+                terminal_text: format!("Waiting for lifecycle: {next_step}"),
+            })
         }
         CompletionClaim::Blocked => {
             let blocked_reason =
@@ -895,6 +925,44 @@ mod tests {
         })
         .expect_err("should fail");
         assert_eq!(err, CompletionValidationError::MissingField("evidence"));
+    }
+
+    #[test]
+    fn accepts_waiting_submission_as_tool_pending_not_success() {
+        let decision = validate_completion_submission(&CompletionSubmission {
+            claim: CompletionClaim::Waiting,
+            completion_reason: None,
+            evidence: None,
+            summary: None,
+            learned: None,
+            next_step: Some(
+                "Worker task is assigned; timer will re-check TaskBoard before final answer"
+                    .to_owned(),
+            ),
+            blocked_reason: None,
+        })
+        .expect("valid waiting claim");
+
+        match decision {
+            CompletionDecision::Waiting {
+                status,
+                terminal_text,
+            } => {
+                assert_eq!(status, TerminalStatus::ToolPending);
+                assert!(terminal_text.contains("Waiting for lifecycle"));
+                assert!(terminal_text.contains("Worker task is assigned"));
+            }
+            other => panic!("unexpected decision: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn completion_guidance_forbids_dispatch_as_user_completion() {
+        let guidance = completion_schema_guidance().prompt;
+        assert!(guidance.contains("\"waiting\""));
+        assert!(guidance.contains("Dispatching a Worker task"));
+        assert!(guidance.contains("is not user-task completion"));
+        assert!(guidance.contains("claim=\"waiting\""));
     }
 
     #[test]
@@ -1581,7 +1649,7 @@ mod tests {
                 "invalid claim",
                 "<freehand_completion>\n{\"claim\":\"done\"}\n</freehand_completion>",
                 "claim",
-                "must be one of `complete`, `continue`, or `blocked`",
+                "must be one of `complete`, `continue`, `waiting`, or `blocked`",
             ),
             (
                 "missing complete field",
@@ -1606,6 +1674,12 @@ mod tests {
                 "<freehand_completion>\n{\"claim\":\"blocked\"}\n</freehand_completion>",
                 "blocked_reason",
                 "is required when `claim` is `blocked`",
+            ),
+            (
+                "waiting missing next_step",
+                "<freehand_completion>\n{\"claim\":\"waiting\"}\n</freehand_completion>",
+                "next_step",
+                "is required when `claim` is `waiting`",
             ),
         ];
 

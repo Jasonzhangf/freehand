@@ -1,12 +1,18 @@
 //! OpenAI-compatible provider adapter for Freehand.
 
 use std::collections::BTreeMap;
+use std::io::{self, BufRead, BufReader};
 
-use freehand_blocks::{parse_tool_arguments_json, render_context_segments_as_text};
-use freehand_contracts::{ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId};
+use freehand_blocks::{
+    parse_tool_arguments_json, render_context_segments_as_text, render_tool_arguments_json,
+};
+use freehand_contracts::{
+    ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId, ToolResultStatus,
+};
 use freehand_provider_core::{
     ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderProtocol,
-    ProviderSemanticOutput, ProviderSemanticRequest, map_adapter_events,
+    ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange,
+    map_adapter_events,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -15,6 +21,12 @@ use thiserror::Error;
 pub struct OpenAiRenderedRequest {
     pub path: &'static str,
     pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenAiExecutorConfig {
+    pub base_url: String,
+    pub api_key: String,
 }
 
 #[derive(Debug, Default)]
@@ -44,6 +56,196 @@ pub enum OpenAiAdapterError {
     InvalidToolArguments(String),
 }
 
+#[derive(Debug, Error)]
+pub enum OpenAiExecutorError {
+    #[error("openai executor base_url and api_key must be non-empty")]
+    InvalidConfig,
+    #[error(transparent)]
+    Adapter(#[from] OpenAiAdapterError),
+    #[error("openai http request failed: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("openai http status `{status}` returned body `{body}`")]
+    HttpStatus { status: u16, body: String },
+    #[error("openai stream read failed: {0}")]
+    StreamRead(#[from] io::Error),
+    #[error("openai stream callback failed: {0}")]
+    Callback(String),
+}
+
+pub struct OpenAiExecutor {
+    config: OpenAiExecutorConfig,
+    client: reqwest::blocking::Client,
+    adapter: OpenAiAdapter,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenAiRawCapture {
+    ResponseBody {
+        body: String,
+    },
+    HttpErrorBody {
+        status: u16,
+        body: String,
+    },
+    StreamEventBody {
+        event_index: usize,
+        event_body: String,
+    },
+}
+
+impl OpenAiExecutor {
+    pub fn new(config: OpenAiExecutorConfig) -> Result<Self, OpenAiExecutorError> {
+        if config.base_url.trim().is_empty() || config.api_key.trim().is_empty() {
+            return Err(OpenAiExecutorError::InvalidConfig);
+        }
+        Ok(Self {
+            config,
+            client: reqwest::blocking::Client::new(),
+            adapter: OpenAiAdapter::new(),
+        })
+    }
+
+    pub fn execute_once(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+    ) -> Result<Vec<ProviderSemanticOutput>, OpenAiExecutorError> {
+        self.execute_once_with_raw(ctx, request, |_| Ok(()))
+    }
+
+    pub fn execute_once_with_raw<F>(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        mut on_raw: F,
+    ) -> Result<Vec<ProviderSemanticOutput>, OpenAiExecutorError>
+    where
+        F: FnMut(&OpenAiRawCapture) -> Result<(), OpenAiExecutorError>,
+    {
+        let rendered = self.adapter.render_request(request, false)?;
+        let response = match self.send_rendered_request(&rendered) {
+            Ok(response) => response,
+            Err(OpenAiExecutorError::HttpStatus { status, body }) => {
+                on_raw(&OpenAiRawCapture::HttpErrorBody {
+                    status,
+                    body: body.clone(),
+                })?;
+                return Err(OpenAiExecutorError::HttpStatus { status, body });
+            }
+            Err(other) => return Err(other),
+        };
+        let body = response.text()?;
+        on_raw(&OpenAiRawCapture::ResponseBody { body: body.clone() })?;
+        Ok(self
+            .adapter
+            .parse_response(ctx, request.descriptor.protocol, &body)?)
+    }
+
+    pub fn execute_stream(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+    ) -> Result<Vec<ProviderSemanticOutput>, OpenAiExecutorError> {
+        self.execute_stream_with(ctx, request, |_| Ok(()))
+    }
+
+    pub fn execute_stream_with<F>(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        mut on_outputs: F,
+    ) -> Result<Vec<ProviderSemanticOutput>, OpenAiExecutorError>
+    where
+        F: FnMut(&[ProviderSemanticOutput]) -> Result<(), OpenAiExecutorError>,
+    {
+        self.execute_stream_with_raw(ctx, request, |_| Ok(()), |batch| on_outputs(batch))
+    }
+
+    pub fn execute_stream_with_raw<FR, FO>(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        mut on_raw: FR,
+        mut on_outputs: FO,
+    ) -> Result<Vec<ProviderSemanticOutput>, OpenAiExecutorError>
+    where
+        FR: FnMut(&OpenAiRawCapture) -> Result<(), OpenAiExecutorError>,
+        FO: FnMut(&[ProviderSemanticOutput]) -> Result<(), OpenAiExecutorError>,
+    {
+        let rendered = self.adapter.render_request(request, true)?;
+        let response = match self.send_rendered_request(&rendered) {
+            Ok(response) => response,
+            Err(OpenAiExecutorError::HttpStatus { status, body }) => {
+                on_raw(&OpenAiRawCapture::HttpErrorBody {
+                    status,
+                    body: body.clone(),
+                })?;
+                return Err(OpenAiExecutorError::HttpStatus { status, body });
+            }
+            Err(other) => return Err(other),
+        };
+        let mut reader = BufReader::new(response);
+        let mut outputs = Vec::new();
+        let mut collector = SseEventCollector::default();
+        let mut line = String::new();
+        let mut event_index = 0usize;
+        loop {
+            line.clear();
+            if reader.read_line(&mut line)? == 0 {
+                break;
+            }
+            let Some(event_body) = collector.push_line(&line) else {
+                continue;
+            };
+            event_index = event_index.saturating_add(1);
+            on_raw(&OpenAiRawCapture::StreamEventBody {
+                event_index,
+                event_body: event_body.clone(),
+            })?;
+            let batch =
+                self.adapter
+                    .parse_stream_event(ctx, request.descriptor.protocol, &event_body)?;
+            on_outputs(&batch)?;
+            outputs.extend(batch);
+        }
+        if let Some(event_body) = collector.finish() {
+            event_index = event_index.saturating_add(1);
+            on_raw(&OpenAiRawCapture::StreamEventBody {
+                event_index,
+                event_body: event_body.clone(),
+            })?;
+            let batch =
+                self.adapter
+                    .parse_stream_event(ctx, request.descriptor.protocol, &event_body)?;
+            on_outputs(&batch)?;
+            outputs.extend(batch);
+        }
+        Ok(outputs)
+    }
+
+    fn send_rendered_request(
+        &self,
+        rendered: &OpenAiRenderedRequest,
+    ) -> Result<reqwest::blocking::Response, OpenAiExecutorError> {
+        let response = self
+            .client
+            .post(join_base_url_path(&self.config.base_url, rendered.path))
+            .bearer_auth(&self.config.api_key)
+            .header("content-type", "application/json")
+            .body(rendered.body.clone())
+            .send()?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text()?;
+            return Err(OpenAiExecutorError::HttpStatus {
+                status: status.as_u16(),
+                body,
+            });
+        }
+        Ok(response)
+    }
+}
+
 impl OpenAiAdapter {
     pub fn new() -> Self {
         Self::default()
@@ -58,26 +260,65 @@ impl OpenAiAdapter {
         match request.descriptor.protocol {
             ProviderProtocol::OpenAiResponses => Ok(OpenAiRenderedRequest {
                 path: "/responses",
-                body: json!({
+                body: {
+                    let mut body = json!({
                     "model": request.descriptor.model,
-                    "input": rendered_input,
+                    "input": render_responses_input(&rendered_input, &request.tool_exchanges)?,
                     "stream": stream,
-                })
-                .to_string(),
+                    });
+                    if !request.tools.is_empty() {
+                        body["tools"] = Value::Array(
+                            request
+                                .tools
+                                .iter()
+                                .map(|tool| {
+                                    json!({
+                                        "type": "function",
+                                        "name": tool.name,
+                                        "description": tool.description,
+                                        "parameters": tool.input_schema,
+                                    })
+                                })
+                                .collect(),
+                        );
+                    }
+                    if let Some(choice) = &request.tool_choice {
+                        body["tool_choice"] = openai_tool_choice(choice);
+                    }
+                    body.to_string()
+                },
             }),
             ProviderProtocol::OpenAiChatCompletions => Ok(OpenAiRenderedRequest {
                 path: "/chat/completions",
-                body: json!({
+                body: {
+                    let mut body = json!({
                     "model": request.descriptor.model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": rendered_input,
-                        }
-                    ],
+                    "messages": render_chat_messages(&rendered_input, &request.tool_exchanges)?,
                     "stream": stream,
-                })
-                .to_string(),
+                    });
+                    if !request.tools.is_empty() {
+                        body["tools"] = Value::Array(
+                            request
+                                .tools
+                                .iter()
+                                .map(|tool| {
+                                    json!({
+                                        "type": "function",
+                                        "function": {
+                                            "name": tool.name,
+                                            "description": tool.description,
+                                            "parameters": tool.input_schema,
+                                        },
+                                    })
+                                })
+                                .collect(),
+                        );
+                    }
+                    if let Some(choice) = &request.tool_choice {
+                        body["tool_choice"] = openai_tool_choice(choice);
+                    }
+                    body.to_string()
+                },
             }),
             other => Err(OpenAiAdapterError::UnsupportedProtocol(other)),
         }
@@ -415,6 +656,95 @@ fn terminal_reason_from_responses(value: &Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn render_responses_input(
+    rendered_input: &str,
+    tool_exchanges: &[ProviderToolExchange],
+) -> Result<Value, OpenAiAdapterError> {
+    let mut items = vec![json!({
+        "type": "message",
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": rendered_input,
+            }
+        ],
+    })];
+    for exchange in tool_exchanges {
+        let arguments = render_tool_arguments_json(&exchange.tool_call.tool_call.arguments)
+            .map_err(|err| OpenAiAdapterError::InvalidToolArguments(err.to_string()))?;
+        items.push(json!({
+            "type": "function_call",
+            "call_id": exchange.tool_call.tool_call.tool_call_id.as_str(),
+            "name": exchange.tool_call.tool_call.tool_name,
+            "arguments": arguments,
+        }));
+        items.push(json!({
+            "type": "function_call_output",
+            "call_id": exchange.tool_result.tool_result.tool_call_id.as_str(),
+            "output": exchange.tool_result.tool_result.output,
+        }));
+    }
+    Ok(Value::Array(items))
+}
+
+fn render_chat_messages(
+    rendered_input: &str,
+    tool_exchanges: &[ProviderToolExchange],
+) -> Result<Value, OpenAiAdapterError> {
+    let mut messages = vec![json!({
+        "role": "user",
+        "content": rendered_input,
+    })];
+    if !tool_exchanges.is_empty() {
+        messages.push(json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": tool_exchanges
+                .iter()
+                .map(|exchange| {
+                    let arguments =
+                        render_tool_arguments_json(&exchange.tool_call.tool_call.arguments)
+                            .map_err(|err| {
+                                OpenAiAdapterError::InvalidToolArguments(err.to_string())
+                            })?;
+                    Ok(json!({
+                        "id": exchange.tool_call.tool_call.tool_call_id.as_str(),
+                        "type": "function",
+                        "function": {
+                            "name": exchange.tool_call.tool_call.tool_name,
+                            "arguments": arguments,
+                        },
+                    }))
+                })
+                .collect::<Result<Vec<_>, OpenAiAdapterError>>()?,
+        }));
+        for exchange in tool_exchanges {
+            let content = if exchange.tool_result.tool_result.status == ToolResultStatus::Failed {
+                format!("ERROR: {}", exchange.tool_result.tool_result.output)
+            } else {
+                exchange.tool_result.tool_result.output.clone()
+            };
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": exchange.tool_result.tool_result.tool_call_id.as_str(),
+                "content": content,
+            }));
+        }
+    }
+    Ok(Value::Array(messages))
+}
+
+fn openai_tool_choice(choice: &ProviderToolChoice) -> Value {
+    match choice {
+        ProviderToolChoice::Auto => json!("auto"),
+        ProviderToolChoice::Required { name } => json!({
+            "type": "function",
+            "function": {"name": name},
+        }),
+    }
+}
+
 fn terminal_event_from_reason(reason: &str) -> ProviderAdapterEvent {
     let status = match reason {
         "tool_calls" | "tool_use" => TerminalStatus::ToolPending,
@@ -504,6 +834,40 @@ fn error_hint_from_value(value: &Value) -> ProviderErrorHint {
     }
 }
 
+fn join_base_url_path(base_url: &str, path: &str) -> String {
+    format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
+}
+
+#[derive(Debug, Default)]
+struct SseEventCollector {
+    data_lines: Vec<String>,
+}
+
+impl SseEventCollector {
+    fn push_line(&mut self, raw_line: &str) -> Option<String> {
+        let line = raw_line.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            return self.finish();
+        }
+        if let Some(data) = line.strip_prefix("data:") {
+            self.data_lines
+                .push(data.strip_prefix(' ').unwrap_or(data).to_owned());
+        }
+        None
+    }
+
+    fn finish(&mut self) -> Option<String> {
+        if self.data_lines.is_empty() {
+            return None;
+        }
+        Some(std::mem::take(&mut self.data_lines).join("\n"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,6 +929,55 @@ mod tests {
         .expect("request")
     }
 
+    fn tool_request(protocol: ProviderProtocol) -> ProviderSemanticRequest {
+        let mut request = semantic_request(protocol);
+        request
+            .tools
+            .push(freehand_provider_core::ProviderToolDefinition {
+                name: "read_file".to_owned(),
+                description: "Read one UTF-8 file inside the locked workspace.".to_owned(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"}
+                    },
+                    "required": ["path"]
+                }),
+            });
+        request.tool_choice = Some(ProviderToolChoice::Auto);
+        request.tool_exchanges.push(ProviderToolExchange {
+            tool_call: freehand_contracts::ReasonReq04ToolCall {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("provider.openai-adapter"),
+                agent_id: AgentId::new("agent-1"),
+                tool_call: ToolCallContract {
+                    tool_call_id: ToolCallId::new("call-1"),
+                    tool_name: "read_file".to_owned(),
+                    arguments: vec![freehand_contracts::ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!("README.md"),
+                    }],
+                    arguments_complete: true,
+                },
+            },
+            tool_result: freehand_contracts::ReasonReq05ToolResultReentry {
+                session_id: SessionId::new("session-1"),
+                turn_id: TurnId::new("turn-1"),
+                trace_id: TraceId::new("trace-1"),
+                feature_id: FeatureId::new("provider.openai-adapter"),
+                agent_id: AgentId::new("agent-1"),
+                tool_result: freehand_contracts::ToolResultContract {
+                    tool_call_id: ToolCallId::new("call-1"),
+                    status: ToolResultStatus::Success,
+                    output: "file contents".to_owned(),
+                },
+            },
+        });
+        request
+    }
+
     #[test]
     fn renders_responses_request() {
         let adapter = OpenAiAdapter::new();
@@ -573,10 +986,39 @@ mod tests {
             .expect("render");
         assert_eq!(rendered.path, "/responses");
         let body: Value = serde_json::from_str(&rendered.body).expect("json");
-        let input = body.get("input").and_then(Value::as_str).expect("input");
-        assert!(input.contains("kind=\"user_turn_input\""));
-        assert!(input.contains("\nhello\n"));
+        let input = body.get("input").and_then(Value::as_array).expect("input");
+        let text = input[0]["content"][0]["text"].as_str().expect("input text");
+        assert!(text.contains("kind=\"user_turn_input\""));
+        assert!(text.contains("\nhello\n"));
         assert_eq!(body.get("stream").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn renders_responses_tools_and_tool_result_reentry() {
+        let adapter = OpenAiAdapter::new();
+        let rendered = adapter
+            .render_request(&tool_request(ProviderProtocol::OpenAiResponses), true)
+            .expect("render");
+        let body: Value = serde_json::from_str(&rendered.body).expect("json");
+        assert_eq!(body["tools"][0]["type"], json!("function"));
+        assert_eq!(body["tools"][0]["name"], json!("read_file"));
+        assert_eq!(body["tools"][0]["parameters"]["required"][0], json!("path"));
+        assert_eq!(body["tool_choice"], json!("auto"));
+        let input = body["input"].as_array().expect("input");
+        assert!(
+            input
+                .iter()
+                .any(|item| item["type"] == json!("function_call")
+                    && item["name"] == json!("read_file")
+                    && item["arguments"] == json!(r#"{"path":"README.md"}"#))
+        );
+        assert!(
+            input
+                .iter()
+                .any(|item| item["type"] == json!("function_call_output")
+                    && item["call_id"] == json!("call-1")
+                    && item["output"] == json!("file contents"))
+        );
     }
 
     #[test]
@@ -605,6 +1047,36 @@ mod tests {
                 .and_then(|message| message.get("content"))
                 .and_then(Value::as_str)
                 .is_some_and(|content| content.contains("kind=\"user_turn_input\""))
+        );
+    }
+
+    #[test]
+    fn renders_chat_completions_tools_and_tool_result_reentry() {
+        let adapter = OpenAiAdapter::new();
+        let rendered = adapter
+            .render_request(
+                &tool_request(ProviderProtocol::OpenAiChatCompletions),
+                false,
+            )
+            .expect("render");
+        let body: Value = serde_json::from_str(&rendered.body).expect("json");
+        assert_eq!(body["tools"][0]["type"], json!("function"));
+        assert_eq!(body["tools"][0]["function"]["name"], json!("read_file"));
+        let messages = body["messages"].as_array().expect("messages");
+        assert!(
+            messages
+                .iter()
+                .any(|message| message["role"] == json!("assistant")
+                    && message["tool_calls"][0]["function"]["name"] == json!("read_file")
+                    && message["tool_calls"][0]["function"]["arguments"]
+                        == json!(r#"{"path":"README.md"}"#))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message["role"] == json!("tool")
+                    && message["tool_call_id"] == json!("call-1")
+                    && message["content"] == json!("file contents"))
         );
     }
 

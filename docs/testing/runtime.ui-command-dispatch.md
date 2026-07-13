@@ -28,6 +28,7 @@
   - successful task tool mutations publish a runtime-owned task list projection into shared UI protocol state so ADP task subscribers receive owner-backed lifecycle changes
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
   - session rollback dispatch routes `RollbackLatestSessionTurn` to reason persistence, reloads effective turn snapshots, and replaces the shared UI session transcript projection
+  - runtime-backed `QuerySessionTurns` reloads effective turn snapshots from reason persistence and replaces the shared UI session transcript projection so background-written turns are visible without daemon restart
   - live bootstrap restores persisted turn projection and next runtime turn ordinal from all persisted sessions when recovery truth exists
   - live bootstrap restores multi-round turn snapshots as separate derived UI session transcript cards after daemon restart
   - reason-backed submit/cancel update derived UI state
@@ -42,6 +43,7 @@
 - live provider submit maps provider-request-built debug events into derived UI state so model-response waiting is visible before provider response arrives
 - live provider submit maps completion-schema rejection broadcasts into derived UI state so clients can query `SchemaRetry` plus either missing tag guidance or concrete invalid-schema fields before the model repair completes
 - live provider submit maps bridge-materialized tool execution failure into derived UI state before returning dispatch failure, so query/SSE do not stay waiting
+- live provider/protocol failure before reason persistence starts still creates a failed selected-session turn, persists it, and returns explicit dispatch failure without falling back to non-live submit
   - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately
   - live provider submit keeps the selected session id attached to the derived UI truth when one is supplied
   - live provider submit keeps the selected cwd attached to derived UI truth and tool execution workspace when one is supplied
@@ -59,6 +61,7 @@
   - selected-session cwd inheritance coverage
   - session metadata dispatch coverage for create, rename, archive, restore, and delete-as-archive
   - session rollback dispatch coverage for append-only marker write plus effective transcript refresh
+  - runtime query-session-turns coverage for persistence-backed transcript refresh, including parent-aggregation internal prompt hiding and assistant summary visibility
   - session metadata negative coverage for unknown session id and empty title rejection before runtime dispatch
   - live tool execution with requested session cwd coverage
   - persisted latest-turn restore coverage
@@ -97,6 +100,8 @@
   - live bootstrap projection keeps earlier-round tool activity on its original round after restart
   - live reason final projection negative coverage proves intermediate continuation text is not exposed in the final public conversation
   - live reason dispatch failure projection coverage proves bridge-materialized failed turns update `UiProtocolState` before the dispatch error is returned
+  - early live provider/protocol failure projection coverage proves the selected session keeps the original user prompt and a persisted failed terminal turn even when the provider bridge exits before recovery truth exists
+  - runtime query-session-turns projection coverage proves `runtime_query_session_turns_restores_background_parent_evaluation` restores a background parent evaluation turn from reason persistence, hides the `<freehand_parent_evaluation>` synthetic user text, and keeps the Master evaluation decision/final assistant answer visible
   - node direct-message dispatch coverage
   - unsupported/missing-target dispatch failure coverage
 - module black-box plan:

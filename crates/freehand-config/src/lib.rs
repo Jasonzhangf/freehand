@@ -85,6 +85,7 @@ pub struct AgentConfig {
     pub allowed_pair_ip: Option<IpAddr>,
     pub pair_token_env: String,
     pub provider_id: String,
+    pub fallback_provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,21 +182,29 @@ impl LoadedConfig {
             });
         }
 
-        let provider = self.providers.get(&agent.provider_id).ok_or_else(|| {
-            ConfigError::AgentProviderNotFound {
-                agent_name: agent.name.clone(),
-                provider_id: agent.provider_id.clone(),
+        let provider = select_provider_for_agent(
+            &self.providers,
+            &agent.name,
+            &agent.provider_id,
+            ProviderRouteRole::Primary,
+        )?;
+        let fallback_provider = match agent.fallback_provider_id.as_deref() {
+            Some(fallback_provider_id) => {
+                if fallback_provider_id == agent.provider_id {
+                    return Err(ConfigError::FallbackProviderMatchesPrimary {
+                        agent_name: agent.name.clone(),
+                        provider_id: agent.provider_id.clone(),
+                    });
+                }
+                Some(select_provider_for_agent(
+                    &self.providers,
+                    &agent.name,
+                    fallback_provider_id,
+                    ProviderRouteRole::Fallback,
+                )?)
             }
-        })?;
-        if !provider.enabled {
-            return Err(ConfigError::ProviderDisabled {
-                provider_id: provider.id.clone(),
-                agent_name: agent.name.clone(),
-            });
-        }
-
-        let auth_source = provider.auth.source_kind();
-        let api_key = resolve_provider_api_key(provider)?;
+            None => None,
+        };
         let paired = self.agents.get(&agent.paired_agent_name).ok_or_else(|| {
             ConfigError::PairedAgentNotFound {
                 agent_name: agent.name.clone(),
@@ -215,16 +224,8 @@ impl LoadedConfig {
             allowed_pair_ip: agent.allowed_pair_ip,
             pair_token_env: agent.pair_token_env.clone(),
             pair_token,
-            provider: SelectedProviderConfig {
-                id: provider.id.clone(),
-                provider_type: provider.provider_type,
-                protocol: provider.protocol,
-                base_url: provider.base_url.clone(),
-                default_model: provider.default_model.clone(),
-                auth_type: provider.auth_type,
-                auth_source,
-                api_key,
-            },
+            provider,
+            fallback_provider,
             restart_required_on_change: true,
         })
     }
@@ -253,7 +254,14 @@ pub struct SelectedAgentConfig {
     pub pair_token_env: String,
     pub pair_token: String,
     pub provider: SelectedProviderConfig,
+    pub fallback_provider: Option<SelectedProviderConfig>,
     pub restart_required_on_change: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderRouteRole {
+    Primary,
+    Fallback,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -365,10 +373,27 @@ pub enum ConfigError {
         agent_name: String,
         provider_id: String,
     },
+    #[error("agent `{agent_name}` references missing fallback provider `{provider_id}`")]
+    AgentFallbackProviderNotFound {
+        agent_name: String,
+        provider_id: String,
+    },
     #[error("agent `{agent_name}` selected disabled provider `{provider_id}`")]
     ProviderDisabled {
         provider_id: String,
         agent_name: String,
+    },
+    #[error("agent `{agent_name}` selected disabled fallback provider `{provider_id}`")]
+    FallbackProviderDisabled {
+        provider_id: String,
+        agent_name: String,
+    },
+    #[error(
+        "agent `{agent_name}` fallback provider `{provider_id}` must differ from the primary provider"
+    )]
+    FallbackProviderMatchesPrimary {
+        agent_name: String,
+        provider_id: String,
     },
     #[error("{owner} environment variable `{env_var}` is not set")]
     MissingEnvVar {
@@ -431,6 +456,8 @@ struct RawAgentConfig {
     allowed_pair_ip: Option<IpAddr>,
     pair_token: String,
     provider: String,
+    #[serde(default)]
+    fallback_provider: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -609,6 +636,7 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
             allowed_pair_ip: raw_agent.allowed_pair_ip,
             pair_token_env: raw_agent.pair_token,
             provider_id: raw_agent.provider,
+            fallback_provider_id: raw_agent.fallback_provider,
         };
         agents.insert(raw_agent.name, agent);
     }
@@ -892,6 +920,46 @@ fn resolve_provider_api_key(provider: &ProviderConfig) -> Result<String, ConfigE
             Ok(api_key)
         }
     }
+}
+
+fn select_provider_for_agent(
+    providers: &BTreeMap<String, ProviderConfig>,
+    agent_name: &str,
+    provider_id: &str,
+    role: ProviderRouteRole,
+) -> Result<SelectedProviderConfig, ConfigError> {
+    let provider = providers.get(provider_id).ok_or_else(|| match role {
+        ProviderRouteRole::Primary => ConfigError::AgentProviderNotFound {
+            agent_name: agent_name.to_owned(),
+            provider_id: provider_id.to_owned(),
+        },
+        ProviderRouteRole::Fallback => ConfigError::AgentFallbackProviderNotFound {
+            agent_name: agent_name.to_owned(),
+            provider_id: provider_id.to_owned(),
+        },
+    })?;
+    if !provider.enabled {
+        return Err(match role {
+            ProviderRouteRole::Primary => ConfigError::ProviderDisabled {
+                provider_id: provider.id.clone(),
+                agent_name: agent_name.to_owned(),
+            },
+            ProviderRouteRole::Fallback => ConfigError::FallbackProviderDisabled {
+                provider_id: provider.id.clone(),
+                agent_name: agent_name.to_owned(),
+            },
+        });
+    }
+    Ok(SelectedProviderConfig {
+        id: provider.id.clone(),
+        provider_type: provider.provider_type,
+        protocol: provider.protocol,
+        base_url: provider.base_url.clone(),
+        default_model: provider.default_model.clone(),
+        auth_type: provider.auth_type,
+        auth_source: provider.auth.source_kind(),
+        api_key: resolve_provider_api_key(provider)?,
+    })
 }
 
 #[cfg(test)]
@@ -1268,6 +1336,18 @@ default_model = "MiniMax-M2.7"
 type = "apikey"
 api_key = "sk-inline"
 
+[providers.backup]
+id = "backup"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "https://backup.example.com"
+default_model = "backup-model"
+
+[providers.backup.auth]
+type = "apikey"
+api_key = "sk-backup"
+
 [agents.master]
 name = "master"
 mode = "master"
@@ -1275,6 +1355,7 @@ node_id = "master-node"
 paired_agent = "worker"
 pair_token = "{token_name}"
 provider = "mini27"
+fallback_provider = "backup"
 
 [agents.worker]
 name = "worker"
@@ -1310,11 +1391,99 @@ provider = "mini27"
             ProviderAuthSourceKind::Inline
         );
         assert_eq!(selected.provider.api_key, "sk-inline");
+        let fallback = selected
+            .fallback_provider
+            .as_ref()
+            .expect("fallback provider");
+        assert_eq!(fallback.id, "backup");
+        assert_eq!(fallback.provider_type, ProviderType::Anthropic);
+        assert_eq!(fallback.protocol, ProviderProtocol::Messages);
+        assert_eq!(fallback.default_model, "backup-model");
+        assert_eq!(fallback.api_key, "sk-backup");
         assert!(selected.restart_required_on_change);
 
         // SAFETY: undo the test environment mutation before exit.
         unsafe { env::remove_var(&token_name) };
         fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn rejects_invalid_fallback_provider_bindings() {
+        for (fallback_line, expected) in [
+            (
+                r#"fallback_provider = "missing""#,
+                "references missing fallback provider",
+            ),
+            (
+                r#"fallback_provider = "primary""#,
+                "must differ from the primary provider",
+            ),
+            (
+                r#"fallback_provider = "disabled""#,
+                "selected disabled fallback provider",
+            ),
+        ] {
+            let pair_token_env = unique_env_name("FALLBACK_PAIR_TOKEN");
+            let path = write_temp_config(&format!(
+                r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://primary.example.com"
+default_model = "primary-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key = "sk-primary"
+
+[providers.disabled]
+id = "disabled"
+enabled = false
+type = "anthropic"
+protocol = "messages"
+base_url = "https://disabled.example.com"
+default_model = "disabled-model"
+
+[providers.disabled.auth]
+type = "apikey"
+api_key = "sk-disabled"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
+pair_token = "{pair_token_env}"
+provider = "primary"
+{fallback_line}
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agent = "master"
+pair_token = "WORKER_TOKEN"
+provider = "primary"
+"#,
+            ));
+            // SAFETY: test process controls this unique environment variable.
+            unsafe { env::set_var(&pair_token_env, "token-value") };
+
+            let config = load_config_from_path(&path).expect("load config");
+            let err = config
+                .select_agent("master")
+                .expect_err("fallback must fail");
+            assert!(
+                err.to_string().contains(expected),
+                "expected `{expected}`, got `{err}`"
+            );
+
+            // SAFETY: undo the test environment mutation before exit.
+            unsafe { env::remove_var(&pair_token_env) };
+            fs::remove_file(path).expect("cleanup");
+        }
     }
 
     #[test]

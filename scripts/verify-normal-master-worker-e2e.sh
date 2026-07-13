@@ -32,12 +32,42 @@ task_history() {
   "$cli_path" adp-task-query --url "$adp_url" --history "$1"
 }
 
+observe_agent_board() {
+  python3 - "$adp_url" <<'PY' 2>/dev/null || true
+import asyncio, json, sys, websockets
+
+async def main():
+    async with websockets.connect(sys.argv[1]) as ws:
+        await ws.send(json.dumps({
+            "kind": "query",
+            "request_id": "agent",
+            "query": {"QueryAgentBoard": {}},
+        }))
+        while True:
+            msg = json.loads(await ws.recv())
+            if msg.get("request_id") == "agent":
+                agents = msg.get("result", {}).get("AgentBoard", {}).get("agents", [])
+                rows = []
+                for agent in agents:
+                    if agent.get("agent_id") in ("master", "worker") or agent.get("state") == "running":
+                        rows.append(
+                            f"{agent.get('agent_id')}:{agent.get('state')}:"
+                            f"{agent.get('current_task_id')}:{agent.get('current_execution_id')}"
+                        )
+                print("agent_board_observed " + ",".join(rows))
+                return
+
+asyncio.run(main())
+PY
+}
+
 wait_history_contains() {
   local task_id="$1"
   local timeout_seconds="$2"
   shift 2
   local deadline=$((SECONDS + timeout_seconds))
   local output=""
+  local last_observed=0
   while [[ $SECONDS -le $deadline ]]; do
     output="$(task_history "$task_id" 2>/dev/null || true)"
     local ok=1
@@ -50,6 +80,12 @@ wait_history_contains() {
     if [[ "$ok" == "1" ]]; then
       echo "$output"
       return 0
+    fi
+    if (( SECONDS - last_observed >= 15 )); then
+      echo "normal_master_worker_observe task=$task_id waiting_for=$*"
+      echo "$output"
+      observe_agent_board
+      last_observed=$SECONDS
     fi
     sleep 1
   done
@@ -65,17 +101,36 @@ stop_service_if_loaded() {
 
 restart_master() {
   scripts/install-launchd.sh restartS >/dev/null
-  curl -4fsS "$health_url" >/dev/null
+  wait_for_health "restart_master"
 }
 
 restart_worker() {
   scripts/install-launchd.sh restartWorkerS >/dev/null
 }
 
+wait_for_health() {
+  local label="$1"
+  local deadline=$((SECONDS + 90))
+  until curl -4fsS "$health_url" >/dev/null 2>&1; do
+    if [[ $SECONDS -ge $deadline ]]; then
+      echo "daemon did not become healthy after $label at $health_url" >&2
+      launchctl print "gui/$(id -u)/com.freehand.daemonS" 2>&1 | sed -n '1,160p' >&2 || true
+      tail -n 120 "$runtime_home/logs/daemonS.stderr.log" >&2 || true
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 seed_with_token() {
   local token="$1"
   shift
-  env FREEHAND_PAIR_TOKEN_SHARED="$token" PATH="$PATH" HOME="$HOME" "$cli_path" "$@"
+  (
+    set -a
+    . "$daemon_env"
+    set +a
+    env FREEHAND_PAIR_TOKEN_SHARED="$token" PATH="$PATH" HOME="$HOME" "$cli_path" "$@"
+  )
 }
 
 run_rejected_retry_branch() {
@@ -183,7 +238,7 @@ run_normal_master_worker_e2e() {
   restart_worker
   "$cli_path" adp-smoke --url "$adp_url" >/dev/null
 
-  autonomy_output="$(scripts/verify-master-worker-autonomy-online.sh)"
+  autonomy_output="$(FREEHAND_MASTER_AUTONOMY_LEAVE_SERVICES_STOPPED=1 scripts/verify-master-worker-autonomy-online.sh)"
   if ! grep -q "master_worker_autonomy_online_ok" <<<"$autonomy_output"; then
     echo "$autonomy_output" >&2
     echo "normal master-worker SubmitUserInput autonomy gate failed" >&2
@@ -197,7 +252,7 @@ run_normal_master_worker_e2e() {
 
   restart_master
   restart_worker
-  curl -4fsS "$health_url" >/dev/null
+  wait_for_health "final restart"
   echo "normal_master_worker_e2e_ok url=$adp_url"
 }
 

@@ -139,6 +139,42 @@ NODE
 
   error_output="$("$cli_path" adp-error-query --url "$adp_url" --session "$session_id" --domain provider)"
   session_output="$("$cli_path" adp-session-query --url "$adp_url" --session "$session_id")"
+  session_status="$(python3 - "$adp_url" "$session_id" <<'PY'
+import asyncio
+import json
+import sys
+
+import websockets
+
+
+async def main():
+    url = sys.argv[1]
+    session_id = sys.argv[2]
+    async with websockets.connect(url) as ws:
+        await ws.send(json.dumps({
+            "kind": "query",
+            "request_id": "provider-retry-session-truth",
+            "query": {"QuerySessionTurns": {"session_id": session_id}},
+        }))
+        while True:
+            msg = json.loads(await ws.recv())
+            if msg.get("request_id") != "provider-retry-session-truth":
+                continue
+            turns = (
+                msg.get("result", {})
+                .get("SessionTurns", {})
+                .get("turns", [])
+            )
+            if not turns:
+                print("missing")
+                return
+            print(turns[-1].get("terminal_status") or "non_terminal")
+            return
+
+
+asyncio.run(main())
+PY
+)"
   mock_count="$(grep -c '"url":"/v1/messages"' "$mock_log" || true)"
 
   if [[ "$mock_count" != "10" ]]; then
@@ -166,13 +202,18 @@ NODE
     echo "error-center query missing provider HTTP status code" >&2
     exit 1
   fi
-  if ! grep -q "$session_id:1:failed" <<<"$session_output"; then
+  if ! grep -q "selected_session=$session_id turns=1" <<<"$session_output"; then
     echo "$session_output" >&2
-    echo "session truth did not report failed provider retry turn" >&2
+    echo "session truth did not report one provider retry turn" >&2
+    exit 1
+  fi
+  if [[ "$session_status" != "Failed" ]]; then
+    echo "$session_output" >&2
+    echo "expected provider retry session terminal_status=Failed, got $session_status" >&2
     exit 1
   fi
 
-  echo "provider_retry_online_ok session=$session_id mock_attempts=$mock_count"
+  echo "provider_retry_online_ok session=$session_id mock_attempts=$mock_count session_status=$session_status"
   echo "$sample_output"
   echo "$error_output"
 }

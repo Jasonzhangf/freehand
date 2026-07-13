@@ -8,7 +8,8 @@
   - validate reciprocal peer-topology fields
   - resolve `[providers.<id>]`
   - select one agent per process
-  - select one enabled provider per agent
+  - select one enabled primary provider per agent
+  - optionally select one distinct enabled fallback provider per agent
   - resolve provider auth source without leaking secret projection
   - preserve safe auth source kind on selected provider config for downstream UI-safe status projection
   - validate and persist owner-backed provider/model update requests through the canonical config path
@@ -16,12 +17,14 @@
 - white-box plan:
   - parse and validate agent/provider schema, reciprocal peer-topology invariants, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
   - assert inline and env auth providers project `ProviderAuthSourceKind` while resolved API keys remain runtime-only
+  - assert `fallback_provider` resolves a second provider with its own type, protocol, model, endpoint, and auth source
+  - reject fallback references that are missing, disabled, or equal to the primary provider
   - assert provider/model update accepts valid env-var auth, writes only `api_key_env`, returns a restart-required selected-agent projection, and does not write resolved API-key values
   - assert invalid provider update input fails before overwrite so the original config bytes remain unchanged
   - positive peer-topology coverage locks selected-agent projection of local node id, paired agent name, paired mode, paired node id, paired allowed IP, and paired pair-token env
   - negative peer-topology coverage locks self-pairing, missing paired agent, same-mode paired agents, and non-reciprocal paired agents
 - module black-box plan:
-  - load config file and select named agent with full provider runtime selection plus paired-topology projection through public config boundary
+  - load config file and select named agent with full primary/fallback provider runtime selection plus paired-topology projection through public config boundary
 - project black-box impact:
   - CLI startup path consumes one named agent configuration and projects selected provider metadata without exposing API key
   - runtime/UI config status queries can consume `auth_source` without reading raw provider auth fields or resolved API keys
@@ -31,7 +34,7 @@
   - config fixtures under crate test fixtures
   - runtime evidence under `~/.freehand/state/config`
 - known gaps:
-  - provider runtime execution support is still outside `config.core`; current project black-box scope stops at safe projection of selection truth
+  - provider failover execution remains owned by `provider.reason-live-bridge`; `config.core` owns only validated route selection truth
 - sync status between design and implementation:
   - white-box, module black-box, and project black-box baseline cover multi-provider registry, reciprocal peer topology, and selected-provider projection
   - selected-provider auth source is regression-locked for inline and env configurations

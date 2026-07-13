@@ -33,7 +33,8 @@ use freehand_blocks::{
 };
 use freehand_config::{
     AgentMode, ProviderConfigUpdate, ProviderProtocol as ConfigProviderProtocol, ProviderType,
-    SelectedAgentConfig, default_config_path, load_default_config, update_provider_config_in_path,
+    SelectedAgentConfig, SelectedProviderConfig, default_config_path, load_default_config,
+    update_provider_config_in_path,
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
@@ -68,8 +69,12 @@ use freehand_provider_anthropic::{
     AnthropicRawCapture, DEFAULT_ANTHROPIC_MAX_TOKENS,
 };
 use freehand_provider_core::{
-    ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderProtocol,
-    ProviderSemanticOutput, ProviderToolDefinition, ProviderToolExchange, build_semantic_request,
+    ProviderCapabilities, ProviderDescriptor, ProviderEventContext, ProviderFamily,
+    ProviderProtocol, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolDefinition,
+    ProviderToolExchange, build_semantic_request,
+};
+use freehand_provider_openai::{
+    OpenAiExecutor, OpenAiExecutorConfig, OpenAiExecutorError, OpenAiRawCapture,
 };
 use freehand_reason::{
     PersistedSessionMetadataEntry, ProviderRawLedgerWrite, ProviderRawScenePosition,
@@ -176,8 +181,8 @@ pub enum RuntimeLiveBridgeError {
     ProviderRequestBuildFailed(String),
     #[error("provider output apply failed: {0}")]
     ProviderOutputApplyFailed(String),
-    #[error("anthropic live executor failed: {0}")]
-    AnthropicExecutorFailed(String),
+    #[error("provider live executor failed: {0}")]
+    ProviderExecutorFailed(String),
     #[error("reason persistence failed: {0}")]
     ReasonPersistenceFailed(String),
     #[error("metadata failed: {0}")]
@@ -250,6 +255,7 @@ struct ProviderExecutorErrorInfo {
     code: String,
     message: String,
     retryable: bool,
+    failover_eligible: bool,
 }
 
 impl ProviderExecutorErrorInfo {
@@ -274,6 +280,27 @@ struct ProviderErrorMetadataSpec<'a> {
     error_code: &'a str,
     retry_index: u32,
     retry_cap: u32,
+    pipeline_node: &'a str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProviderRouteKind {
+    Primary,
+    Fallback,
+}
+
+impl ProviderRouteKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Fallback => "fallback",
+        }
+    }
+}
+
+struct ProviderRoute<'a> {
+    kind: ProviderRouteKind,
+    provider: &'a SelectedProviderConfig,
 }
 
 impl ProviderExecutorRetryPlan {
@@ -1677,8 +1704,10 @@ where
         return Err(RuntimeLiveBridgeError::WorkerWorkspaceRequired);
     }
     match (selected.provider.provider_type, selected.provider.protocol) {
-        (ProviderType::Anthropic, ConfigProviderProtocol::Messages) => {
-            run_live_anthropic_reason_turn(
+        (ProviderType::Anthropic, ConfigProviderProtocol::Messages)
+        | (ProviderType::OpenAi, ConfigProviderProtocol::Responses)
+        | (ProviderType::OpenAi, ConfigProviderProtocol::ChatCompletions) => {
+            run_live_provider_reason_turn(
                 selected,
                 request,
                 role,
@@ -1695,7 +1724,7 @@ where
     }
 }
 
-fn run_live_anthropic_reason_turn<FB, FD, FT>(
+fn run_live_provider_reason_turn<FB, FD, FT>(
     selected: &SelectedAgentConfig,
     request: LiveReasonTurnRequest,
     role: LiveReasonExecutionRole,
@@ -1709,6 +1738,14 @@ where
     FD: FnMut(&DebugEvent),
     FT: FnMut(&UiTaskListProjection),
 {
+    let mut active_route = ProviderRoute {
+        kind: ProviderRouteKind::Primary,
+        provider: &selected.provider,
+    };
+    let mut provider_label = live_provider_label(active_route.provider);
+    let mut active_provider_descriptor = provider_descriptor(active_route.provider)?;
+    let mut executor = build_live_provider_driver(active_route.provider)?;
+    let mut fallback_activated = false;
     let agent_id = AgentId::new(selected.name.clone());
     let persistence = ReasonPersistence::new(request.runtime_home.clone(), agent_id.clone());
     let (mut history, restore_status, restored_closed_turns) =
@@ -1766,7 +1803,7 @@ where
             kind: MetadataKind::RuntimeState,
             pipeline_node: "RuntimeLive01RestoreResolved",
             metadata_suffix: "restore_resolved".to_owned(),
-            symbol_path: "run_live_anthropic_reason_turn",
+            symbol_path: "run_live_provider_reason_turn",
             entries: vec![
                 MetadataEntry {
                     key: "runtime.restore_status".to_owned(),
@@ -1785,11 +1822,19 @@ where
                 },
                 MetadataEntry {
                     key: "provider.family".to_owned(),
-                    value: json!("anthropic"),
+                    value: json!(provider_label.family),
                 },
                 MetadataEntry {
                     key: "provider.protocol".to_owned(),
-                    value: json!("messages"),
+                    value: json!(provider_label.protocol),
+                },
+                MetadataEntry {
+                    key: "provider.route".to_owned(),
+                    value: json!(active_route.kind.as_str()),
+                },
+                MetadataEntry {
+                    key: "provider.id".to_owned(),
+                    value: json!(active_route.provider.id.as_str()),
                 },
             ],
         },
@@ -1802,7 +1847,7 @@ where
             turn_id: &first_round_turn_id,
             trace_id: &first_round_trace_id,
             pipeline_node: "RuntimeLive01RestoreResolved",
-            function: "run_live_anthropic_reason_turn",
+            function: "run_live_provider_reason_turn",
             status_text: "runtime restore resolved",
             detail_lines: vec![
                 format!(
@@ -1814,7 +1859,9 @@ where
                 ),
                 format!("restored_closed_turns={restored_closed_turns}"),
                 format!("stream={}", request.stream),
-                "provider=anthropic/messages".to_owned(),
+                format!("provider={}", provider_label.display),
+                format!("provider_route={}", active_route.kind.as_str()),
+                format!("provider_id={}", active_route.provider.id),
             ],
         },
     );
@@ -1823,15 +1870,6 @@ where
         Arc::clone(&metadata_center),
     );
     let receiver = engine.subscribe(64);
-    let mut executor = AnthropicExecutor::new(AnthropicExecutorConfig {
-        base_url: selected.provider.base_url.clone(),
-        api_key: selected.provider.api_key.clone(),
-        anthropic_version: "2023-06-01".to_owned(),
-        adapter: AnthropicAdapterConfig {
-            max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
-        },
-    })
-    .map_err(map_anthropic_executor_error)?;
 
     let mut broadcasts = Vec::new();
     let mut schema_rejections = Vec::new();
@@ -1874,7 +1912,7 @@ where
                     user_text: next_prompt.clone(),
                     planned_context_segments: carryover_segments.clone(),
                     tool_schema_fingerprint: Some(tool_schema_fingerprint.clone()),
-                    model: selected.provider.default_model.clone(),
+                    model: active_route.provider.default_model.clone(),
                 },
             )
             .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
@@ -1888,7 +1926,7 @@ where
         drain_debug_events(&debug_receiver, &mut on_debug);
 
         let mut semantic_request = build_semantic_request(
-            provider_descriptor(selected),
+            active_provider_descriptor.clone(),
             turn.provider_payload.clone(),
             debug_hub.is_enabled(),
         )
@@ -1905,7 +1943,7 @@ where
                 trace_id: &turn.request.trace_id,
                 pipeline_node: "ControlHook02BeforeModelRequest",
                 metadata_suffix: "before_model_request".to_owned(),
-                symbol_path: "run_live_anthropic_reason_turn",
+                symbol_path: "run_live_provider_reason_turn",
                 entries: vec![
                     MetadataEntry {
                         key: "control.hook".to_owned(),
@@ -1932,7 +1970,7 @@ where
                 kind: MetadataKind::Provider,
                 pipeline_node: "RuntimeLive02ProviderRequestBuilt",
                 metadata_suffix: "provider_request_built".to_owned(),
-                symbol_path: "run_live_anthropic_reason_turn",
+                symbol_path: "run_live_provider_reason_turn",
                 entries: vec![
                     MetadataEntry {
                         key: "bridge.round_ordinal".to_owned(),
@@ -1944,15 +1982,23 @@ where
                     },
                     MetadataEntry {
                         key: "provider.family".to_owned(),
-                        value: json!("anthropic"),
+                        value: json!(provider_label.family),
                     },
                     MetadataEntry {
                         key: "provider.protocol".to_owned(),
-                        value: json!("messages"),
+                        value: json!(provider_label.protocol),
+                    },
+                    MetadataEntry {
+                        key: "provider.route".to_owned(),
+                        value: json!(active_route.kind.as_str()),
+                    },
+                    MetadataEntry {
+                        key: "provider.id".to_owned(),
+                        value: json!(active_route.provider.id.as_str()),
                     },
                     MetadataEntry {
                         key: "reason.model".to_owned(),
-                        value: json!(selected.provider.default_model.as_str()),
+                        value: json!(active_route.provider.default_model.as_str()),
                     },
                     MetadataEntry {
                         key: "tool.definition_count".to_owned(),
@@ -1973,13 +2019,15 @@ where
                 turn_id: &turn.request.turn_id,
                 trace_id: &turn.request.trace_id,
                 pipeline_node: "RuntimeLive02ProviderRequestBuilt",
-                function: "run_live_anthropic_reason_turn",
+                function: "run_live_provider_reason_turn",
                 status_text: "provider request built",
                 detail_lines: vec![
                     format!("round={round}"),
                     format!("stream={}", request.stream),
-                    "provider=anthropic/messages".to_owned(),
-                    format!("model={}", selected.provider.default_model),
+                    format!("provider={}", provider_label.display),
+                    format!("provider_route={}", active_route.kind.as_str()),
+                    format!("provider_id={}", active_route.provider.id),
+                    format!("model={}", active_route.provider.default_model),
                     format!("tool_definition_count={}", semantic_request.tools.len()),
                     format!(
                         "tool_exchange_count={}",
@@ -1997,7 +2045,7 @@ where
             let stream_result = executor.execute_stream_with_raw(
                 &provider_ctx(&turn),
                 &semantic_request,
-                |raw| {
+                &mut |raw| {
                     if semantic_request.raw_retention
                         == freehand_provider_core::RawRetentionPolicy::DoNotRetain
                     {
@@ -2012,19 +2060,17 @@ where
                         raw,
                     ) {
                         *stream_persistence_error.borrow_mut() = Some(err);
-                        return Err(AnthropicExecutorError::Callback(
-                            "live bridge failed while persisting raw provider stream".to_owned(),
-                        ));
+                        return Err(
+                            "live bridge failed while persisting raw provider stream".to_owned()
+                        );
                     }
                     Ok(())
                 },
-                |batch| {
+                &mut |batch| {
                     if live_is_cancelled(&request) {
                         *stream_persistence_error.borrow_mut() =
                             Some(RuntimeLiveBridgeError::Cancelled);
-                        return Err(AnthropicExecutorError::Callback(
-                            "live bridge cancelled while reading stream".to_owned(),
-                        ));
+                        return Err("live bridge cancelled while reading stream".to_owned());
                     }
                     let mut apply_ctx = LiveApplyContext {
                         engine: &engine,
@@ -2043,9 +2089,7 @@ where
                         schema_rejections.len() as u32,
                     ) {
                         *stream_persistence_error.borrow_mut() = Some(err);
-                        return Err(AnthropicExecutorError::Callback(
-                            "live bridge failed while persisting stream output".to_owned(),
-                        ));
+                        return Err("live bridge failed while persisting stream output".to_owned());
                     }
                     Ok(())
                 },
@@ -2054,9 +2098,9 @@ where
                 return Err(err);
             }
             if let Err(err) = stream_result {
-                let info = classify_anthropic_executor_error(&err);
+                let info = err.info().clone();
                 let mapped =
-                    RuntimeLiveBridgeError::AnthropicExecutorFailed(info.terminal_message());
+                    RuntimeLiveBridgeError::ProviderExecutorFailed(info.terminal_message());
                 record_provider_error_metadata(ProviderErrorMetadataSpec {
                     center: &metadata_center,
                     agent_id: &agent_id,
@@ -2066,6 +2110,7 @@ where
                     error_code: &info.code,
                     retry_index: 1,
                     retry_cap: 1,
+                    pipeline_node: "RuntimeLive05ProviderError",
                 })?;
                 emit_provider_retry_debug(
                     &debug_hub,
@@ -2101,7 +2146,7 @@ where
                 let execute_result = executor.execute_once_with_raw(
                     &provider_ctx(&turn),
                     &semantic_request,
-                    |raw| {
+                    &mut |raw| {
                         if semantic_request.raw_retention
                             == freehand_provider_core::RawRetentionPolicy::DoNotRetain
                         {
@@ -2116,10 +2161,10 @@ where
                             raw,
                         ) {
                             *single_raw_error.borrow_mut() = Some(err);
-                            return Err(AnthropicExecutorError::Callback(
+                            return Err(
                                 "live bridge failed while persisting raw provider response"
                                     .to_owned(),
-                            ));
+                            );
                         }
                         Ok(())
                     },
@@ -2130,10 +2175,20 @@ where
                 match execute_result {
                     Ok(outputs) => break outputs,
                     Err(err) => {
-                        let info = classify_anthropic_executor_error(&err);
-                        let mapped = RuntimeLiveBridgeError::AnthropicExecutorFailed(
-                            info.terminal_message(),
-                        );
+                        let info = err.info().clone();
+                        let mapped =
+                            RuntimeLiveBridgeError::ProviderExecutorFailed(info.terminal_message());
+                        let primary_exhausted = !info.retryable || retry_index >= retry_plan.cap;
+                        let should_failover = active_route.kind == ProviderRouteKind::Primary
+                            && info.failover_eligible
+                            && primary_exhausted
+                            && !fallback_activated
+                            && selected.fallback_provider.is_some();
+                        let error_pipeline_node = if should_failover {
+                            "RuntimeLive05ProviderFailover"
+                        } else {
+                            "RuntimeLive05ProviderError"
+                        };
                         record_provider_error_metadata(ProviderErrorMetadataSpec {
                             center: &metadata_center,
                             agent_id: &agent_id,
@@ -2143,6 +2198,7 @@ where
                             error_code: &info.code,
                             retry_index,
                             retry_cap: retry_plan.cap,
+                            pipeline_node: error_pipeline_node,
                         })?;
                         emit_provider_retry_debug(
                             &debug_hub,
@@ -2153,7 +2209,102 @@ where
                             retry_index,
                             retry_plan.cap,
                         );
-                        if !info.retryable || retry_index >= retry_plan.cap {
+                        if should_failover
+                            && let Some(fallback_provider) = selected.fallback_provider.as_ref()
+                        {
+                            let from_provider_id = active_route.provider.id.clone();
+                            active_route = ProviderRoute {
+                                kind: ProviderRouteKind::Fallback,
+                                provider: fallback_provider,
+                            };
+                            fallback_activated = true;
+                            provider_label = live_provider_label(active_route.provider);
+                            active_provider_descriptor =
+                                provider_descriptor(active_route.provider)?;
+                            executor = build_live_provider_driver(active_route.provider)?;
+                            turn.provider_payload.model =
+                                active_route.provider.default_model.clone();
+                            let prior_tools = semantic_request.tools.clone();
+                            let prior_tool_choice = semantic_request.tool_choice.clone();
+                            let prior_tool_exchanges = semantic_request.tool_exchanges.clone();
+                            semantic_request = build_semantic_request(
+                                active_provider_descriptor.clone(),
+                                turn.provider_payload.clone(),
+                                debug_hub.is_enabled(),
+                            )
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ProviderRequestBuildFailed(err.to_string())
+                            })?;
+                            semantic_request.tools = prior_tools;
+                            semantic_request.tool_choice = prior_tool_choice;
+                            semantic_request.tool_exchanges = prior_tool_exchanges;
+                            write_live_bridge_metadata(
+                                &metadata_center,
+                                &agent_id,
+                                &request.session_id,
+                                RuntimeMetadataWriteSpec {
+                                    turn_id: Some(&turn.request.turn_id),
+                                    trace_id: &turn.request.trace_id,
+                                    kind: MetadataKind::Routing,
+                                    pipeline_node: "RuntimeLive05ProviderFailover",
+                                    metadata_suffix: format!("provider_failover:{retry_index}"),
+                                    symbol_path: "run_live_provider_reason_turn",
+                                    entries: vec![
+                                        MetadataEntry {
+                                            key: "provider.route".to_owned(),
+                                            value: json!(active_route.kind.as_str()),
+                                        },
+                                        MetadataEntry {
+                                            key: "provider.failover_from".to_owned(),
+                                            value: json!(from_provider_id),
+                                        },
+                                        MetadataEntry {
+                                            key: "provider.failover_to".to_owned(),
+                                            value: json!(active_route.provider.id.as_str()),
+                                        },
+                                        MetadataEntry {
+                                            key: "provider.failover_error_code".to_owned(),
+                                            value: json!(info.code.as_str()),
+                                        },
+                                        MetadataEntry {
+                                            key: "provider.family".to_owned(),
+                                            value: json!(provider_label.family),
+                                        },
+                                        MetadataEntry {
+                                            key: "provider.protocol".to_owned(),
+                                            value: json!(provider_label.protocol),
+                                        },
+                                        MetadataEntry {
+                                            key: "reason.model".to_owned(),
+                                            value: json!(
+                                                active_route.provider.default_model.as_str()
+                                            ),
+                                        },
+                                    ],
+                                },
+                            )?;
+                            emit_live_bridge_debug(
+                                &debug_hub,
+                                &agent_id,
+                                &request.session_id,
+                                RuntimeDebugEmitSpec {
+                                    turn_id: &turn.request.turn_id,
+                                    trace_id: &turn.request.trace_id,
+                                    pipeline_node: "RuntimeLive05ProviderFailover",
+                                    function: "run_live_provider_reason_turn",
+                                    status_text: "provider route switched to fallback",
+                                    detail_lines: vec![
+                                        format!("from_provider={from_provider_id}"),
+                                        format!("to_provider={}", active_route.provider.id),
+                                        format!("error_code={}", info.code),
+                                        format!("model={}", active_route.provider.default_model),
+                                    ],
+                                },
+                            );
+                            retry_index = 0;
+                            continue;
+                        }
+                        if primary_exhausted {
                             let mut failure_ctx = ProviderExecutorFailureContext {
                                 engine: &engine,
                                 persistence: &persistence,
@@ -2229,7 +2380,7 @@ where
                                 "tool_result_failed:{}",
                                 tool_call.tool_call.tool_call_id.as_str()
                             ),
-                            symbol_path: "run_live_anthropic_reason_turn",
+                            symbol_path: "run_live_provider_reason_turn",
                             observed: ErrorCenterObservedFailure {
                                 source_owner: "tool.registry".to_owned(),
                                 source_pipeline_node: "RuntimeLive03ToolExecuted".to_owned(),
@@ -2253,7 +2404,7 @@ where
                             "after_local_tool_result:{}",
                             tool_call.tool_call.tool_call_id.as_str()
                         ),
-                        symbol_path: "run_live_anthropic_reason_turn",
+                        symbol_path: "run_live_provider_reason_turn",
                         entries: vec![
                             MetadataEntry {
                                 key: "control.hook".to_owned(),
@@ -2287,7 +2438,7 @@ where
                             "tool_executed:{}",
                             tool_call.tool_call.tool_call_id.as_str()
                         ),
-                        symbol_path: "run_live_anthropic_reason_turn",
+                        symbol_path: "run_live_provider_reason_turn",
                         entries: vec![
                             MetadataEntry {
                                 key: "bridge.round_ordinal".to_owned(),
@@ -2316,7 +2467,7 @@ where
                         turn_id: &turn.request.turn_id,
                         trace_id: &turn.request.trace_id,
                         pipeline_node: "RuntimeLive03ToolExecuted",
-                        function: "run_live_anthropic_reason_turn",
+                        function: "run_live_provider_reason_turn",
                         status_text: "registry tool executed",
                         detail_lines: vec![
                             format!("round={round}"),
@@ -2462,11 +2613,13 @@ where
                 &request.prompt,
                 &collect_turn_text(&turn),
                 None,
-                role,
-                configured_worker,
-                &request.runtime_home,
-                request.cwd.as_deref(),
-                &agent_id,
+                LiveRoundContext {
+                    role,
+                    configured_worker,
+                    runtime_home: &request.runtime_home,
+                    cwd: request.cwd.as_deref(),
+                    agent_id: &agent_id,
+                },
             )?;
             turns.push(turn);
             continue;
@@ -2532,7 +2685,7 @@ where
                             "control_status_schema_rejected:{}",
                             consecutive_schema_rejections
                         ),
-                        symbol_path: "run_live_anthropic_reason_turn",
+                        symbol_path: "run_live_provider_reason_turn",
                         observed: ErrorCenterObservedFailure {
                             source_owner: "control.center".to_owned(),
                             source_pipeline_node: "ControlHook03AfterModelResponse".to_owned(),
@@ -2600,11 +2753,13 @@ where
                     &request.prompt,
                     &public_provider_text,
                     Some(feedback.as_str()),
-                    role,
-                    configured_worker,
-                    &request.runtime_home,
-                    request.cwd.as_deref(),
-                    &agent_id,
+                    LiveRoundContext {
+                        role,
+                        configured_worker,
+                        runtime_home: &request.runtime_home,
+                        cwd: request.cwd.as_deref(),
+                        agent_id: &agent_id,
+                    },
                 )?;
                 turns.push(turn);
                 continue;
@@ -2648,7 +2803,7 @@ where
                             trace_id: &turn.request.trace_id,
                             pipeline_node: "ControlHook04BeforeClientReturn",
                             metadata_suffix: "before_client_return:status_stop".to_owned(),
-                            symbol_path: "run_live_anthropic_reason_turn",
+                            symbol_path: "run_live_provider_reason_turn",
                             entries: vec![
                                 MetadataEntry {
                                     key: "control.hook".to_owned(),
@@ -2675,7 +2830,7 @@ where
                             kind: MetadataKind::RuntimeState,
                             pipeline_node: "RuntimeLive04TurnClosed",
                             metadata_suffix: "turn_closed".to_owned(),
-                            symbol_path: "run_live_anthropic_reason_turn",
+                            symbol_path: "run_live_provider_reason_turn",
                             entries: vec![
                                 MetadataEntry {
                                     key: "bridge.rounds".to_owned(),
@@ -2704,7 +2859,7 @@ where
                             turn_id: &turn.request.turn_id,
                             trace_id: &turn.request.trace_id,
                             pipeline_node: "ControlHook04BeforeClientReturn",
-                            function: "run_live_anthropic_reason_turn",
+                            function: "run_live_provider_reason_turn",
                             status_text: "control status accepted stop",
                             detail_lines: vec![
                                 format!("decision={}", control_decision_label(&decision)),
@@ -2744,7 +2899,7 @@ where
                             trace_id: &turn.request.trace_id,
                             pipeline_node: "ControlHook04BeforeClientReturn",
                             metadata_suffix: "before_client_return:status_blocked".to_owned(),
-                            symbol_path: "run_live_anthropic_reason_turn",
+                            symbol_path: "run_live_provider_reason_turn",
                             entries: vec![
                                 MetadataEntry {
                                     key: "control.hook".to_owned(),
@@ -2813,11 +2968,13 @@ where
                         &request.prompt,
                         &public_provider_text,
                         None,
-                        role,
-                        configured_worker,
-                        &request.runtime_home,
-                        request.cwd.as_deref(),
-                        &agent_id,
+                        LiveRoundContext {
+                            role,
+                            configured_worker,
+                            runtime_home: &request.runtime_home,
+                            cwd: request.cwd.as_deref(),
+                            agent_id: &agent_id,
+                        },
                     )?;
                     turns.push(turn);
                     continue;
@@ -2825,11 +2982,29 @@ where
             }
         }
         let visible_text = public_provider_text;
-        match parse_completion_submission_block(&provider_text) {
+        let completion_submission = match parse_completion_submission_block(&provider_text) {
+            Ok(submission) => {
+                match master_parent_session_completion_rejection(
+                    &request.runtime_home,
+                    &agent_id,
+                    &request.session_id,
+                    role,
+                    task_decision_boundary.as_ref(),
+                    &submission,
+                )? {
+                    Some(rejection) => Err(rejection),
+                    None => Ok(submission),
+                }
+            }
+            Err(rejection) => Err(rejection),
+        };
+        match completion_submission {
             Ok(submission) => match validate_completion_submission(&submission)
                 .expect("completion submission already validated")
             {
-                CompletionDecision::Completed { .. } | CompletionDecision::Blocked { .. } => {
+                CompletionDecision::Completed { .. }
+                | CompletionDecision::Waiting { .. }
+                | CompletionDecision::Blocked { .. } => {
                     ensure_live_not_cancelled(&request)?;
                     let _ = engine
                         .submit_completion(&mut turn, &submission)
@@ -2847,7 +3022,7 @@ where
                             kind: MetadataKind::RuntimeState,
                             pipeline_node: "RuntimeLive04TurnClosed",
                             metadata_suffix: "turn_closed".to_owned(),
-                            symbol_path: "run_live_anthropic_reason_turn",
+                            symbol_path: "run_live_provider_reason_turn",
                             entries: vec![
                                 MetadataEntry {
                                     key: "bridge.rounds".to_owned(),
@@ -2882,7 +3057,7 @@ where
                             turn_id: &turn.request.turn_id,
                             trace_id: &turn.request.trace_id,
                             pipeline_node: "RuntimeLive04TurnClosed",
-                            function: "run_live_anthropic_reason_turn",
+                            function: "run_live_provider_reason_turn",
                             status_text: "turn closed",
                             detail_lines: terminal_debug_details(
                                 round,
@@ -2949,11 +3124,13 @@ where
                         &request.prompt,
                         &visible_text,
                         None,
-                        role,
-                        configured_worker,
-                        &request.runtime_home,
-                        request.cwd.as_deref(),
-                        &agent_id,
+                        LiveRoundContext {
+                            role,
+                            configured_worker,
+                            runtime_home: &request.runtime_home,
+                            cwd: request.cwd.as_deref(),
+                            agent_id: &agent_id,
+                        },
                     )?;
                     turns.push(turn);
                 }
@@ -2975,7 +3152,7 @@ where
                             "schema_rejected:{}",
                             consecutive_schema_rejections
                         ),
-                        symbol_path: "run_live_anthropic_reason_turn",
+                        symbol_path: "run_live_provider_reason_turn",
                         observed: ErrorCenterObservedFailure {
                             source_owner: "reason.turn".to_owned(),
                             source_pipeline_node: "ReasonResp04CompletionSchemaRejected".to_owned(),
@@ -3017,7 +3194,7 @@ where
                             kind: MetadataKind::RuntimeState,
                             pipeline_node: "RuntimeLive04TurnClosed",
                             metadata_suffix: "turn_closed".to_owned(),
-                            symbol_path: "run_live_anthropic_reason_turn",
+                            symbol_path: "run_live_provider_reason_turn",
                             entries: vec![
                                 MetadataEntry {
                                     key: "bridge.rounds".to_owned(),
@@ -3052,7 +3229,7 @@ where
                             turn_id: &turn.request.turn_id,
                             trace_id: &turn.request.trace_id,
                             pipeline_node: "RuntimeLive04TurnClosed",
-                            function: "run_live_anthropic_reason_turn",
+                            function: "run_live_provider_reason_turn",
                             status_text: "turn closed",
                             detail_lines: terminal_debug_details(
                                 round,
@@ -3103,11 +3280,13 @@ where
                     &request.prompt,
                     &visible_text,
                     Some(feedback.as_str()),
-                    role,
-                    configured_worker,
-                    &request.runtime_home,
-                    request.cwd.as_deref(),
-                    &agent_id,
+                    LiveRoundContext {
+                        role,
+                        configured_worker,
+                        runtime_home: &request.runtime_home,
+                        cwd: request.cwd.as_deref(),
+                        agent_id: &agent_id,
+                    },
                 )?;
                 turns.push(turn);
             }
@@ -3549,6 +3728,46 @@ impl RuntimeCommandDispatcher {
     ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
         let state = self.state.lock().expect("lock runtime dispatcher state");
         match command {
+            UiCommand::QuerySessionTurns { session_id } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let persistence = ReasonPersistence::new(
+                    live.runtime_home.clone(),
+                    state.config.reason_agent_id.clone(),
+                );
+                let mut turns = match persistence.restore_turn_snapshots_for_ui(session_id) {
+                    Ok(turns) => turns,
+                    Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => return Ok(None),
+                    Err(error) => {
+                        return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+                            "failed to restore session turns from reason persistence: {error}"
+                        )));
+                    }
+                };
+                turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
+                let projections = turns
+                    .iter()
+                    .map(|turn| {
+                        let cwd = state
+                            .session_cwds
+                            .get(session_id)
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .or_else(|| turn.cwd.clone());
+                        project_runtime_turn(
+                            &state.config.reason_agent_id,
+                            &state.config.master_node_id,
+                            turn,
+                            cwd,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let mut ui = self.ui_state.lock().expect("lock ui state");
+                ui.replace_session_turn_projections(session_id, projections);
+                ui.query(command)
+                    .map(Some)
+                    .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))
+            }
             UiCommand::QueryConfigStatus => {
                 if let Some(status) = state.pending_config_status.clone() {
                     return Ok(Some(UiQueryResult::ConfigStatus(status)));
@@ -3823,11 +4042,12 @@ impl RuntimeCommandDispatcher {
         text: String,
         requested_session_id: Option<SessionId>,
         requested_cwd: Option<String>,
-    ) -> Option<PreparedLiveSubmit> {
-        let live = state.config.live.clone()?;
+    ) -> Result<Option<PreparedLiveSubmit>, UiCommandDispatchPortError> {
+        let Some(live) = state.config.live.clone() else {
+            return Ok(None);
+        };
         let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
-        let cwd = resolve_session_cwd(state, &session_id, requested_cwd, Some(&live.runtime_home))
-            .ok()?;
+        let cwd = resolve_session_cwd(state, &session_id, requested_cwd, Some(&live.runtime_home))?;
         state.next_turn_ordinal += 1;
         let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
         let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
@@ -3840,7 +4060,7 @@ impl RuntimeCommandDispatcher {
             user_text: text.clone(),
             cancel_token: Arc::clone(&cancel_token),
         });
-        Some(PreparedLiveSubmit {
+        Ok(Some(PreparedLiveSubmit {
             live,
             reason_agent_id: state.config.reason_agent_id.clone(),
             master_node_id: state.config.master_node_id.clone(),
@@ -3850,7 +4070,7 @@ impl RuntimeCommandDispatcher {
             trace_id,
             prompt: text,
             cancel_token,
-        })
+        }))
     }
 
     fn publish_prepared_live_submit(&self, prepared: &PreparedLiveSubmit) {
@@ -3960,44 +4180,11 @@ impl RuntimeCommandDispatcher {
                 Ok(outcome)
             }
             Err(err) => {
-                let persistence = ReasonPersistence::new(
-                    state
-                        .config
-                        .live
-                        .as_ref()
-                        .expect("live submit requires live config")
-                        .runtime_home
-                        .clone(),
-                    state.config.reason_agent_id.clone(),
-                );
-                let restored =
-                    persistence
-                        .restore(&prepared.session_id)
-                        .map_err(|restore_err| {
-                            UiCommandDispatchPortError::DispatchFailed(format!(
-                                "failed to project live error turn from persistence: {restore_err}"
-                            ))
-                        })?;
-                let mut restored_turns = persistence
-                    .restore_turn_snapshots_for_ui(&prepared.session_id)
-                    .map_err(|restore_err| {
-                        UiCommandDispatchPortError::DispatchFailed(format!(
-                            "failed to restore effective session turns for live error projection: {restore_err}"
-                        ))
-                    })?;
-                if let Some(active_turn) = restored.active_turn {
-                    restored_turns.push(active_turn.turn);
-                }
-                state
-                    .turns
-                    .retain(|turn| turn.request.session_id != prepared.session_id);
-                state.turns.extend(restored_turns);
-                state
-                    .turns
-                    .sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
-                state.session_cwds = session_cwds_from_turns(&state.turns);
-                let current_turn =
-                    current_runtime_turn_for_projection(&state.turns, &prepared.turn_id)?;
+                let current_turn = restore_or_materialize_failed_live_submit(
+                    &mut state,
+                    prepared,
+                    &err.to_string(),
+                )?;
                 let projection = project_runtime_turn_history(
                     &state.config.reason_agent_id,
                     &state.config.master_node_id,
@@ -4452,7 +4639,7 @@ fn record_control_status_metadata(
             trace_id: &turn.request.trace_id,
             pipeline_node: "ControlHook03AfterModelResponse",
             metadata_suffix: "after_model_response:status_accepted".to_owned(),
-            symbol_path: "run_live_anthropic_reason_turn",
+            symbol_path: "run_live_provider_reason_turn",
             entries: vec![
                 MetadataEntry {
                     key: "control.hook".to_owned(),
@@ -4502,7 +4689,7 @@ fn record_control_status_rejection_metadata(
             trace_id: &turn.request.trace_id,
             pipeline_node: "ControlHook03AfterModelResponse",
             metadata_suffix: "after_model_response:status_rejected".to_owned(),
-            symbol_path: "run_live_anthropic_reason_turn",
+            symbol_path: "run_live_provider_reason_turn",
             entries: vec![
                 MetadataEntry {
                     key: "control.hook".to_owned(),
@@ -4648,7 +4835,7 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
                     session_id.clone(),
                     cwd.clone(),
                 )
-            };
+            }?;
             if let Some(prepared) = prepared {
                 return self.dispatch_prepared_live_submit(envelope, prepared);
             }
@@ -6121,31 +6308,45 @@ fn record_live_provider_raw(
     turn_id: &TurnId,
     trace_id: &TraceId,
     provider_family: ProviderFamily,
-    raw: &AnthropicRawCapture,
+    raw: LiveProviderRawCapture<'_>,
 ) -> Result<(), RuntimeLiveBridgeError> {
-    let (raw_kind, function, raw_exchange_id, body, headers) = match raw {
-        AnthropicRawCapture::ResponseBody { body } => (
+    let (raw_kind, crate_name, function, raw_exchange_id, body, headers) = match raw {
+        LiveProviderRawCapture::Response {
+            body,
+            crate_name,
+            function,
+        } => (
             "response_body",
-            "AnthropicExecutor::execute_once_with_raw",
+            crate_name,
+            function,
             Some("response-body".to_owned()),
-            body.clone(),
+            body.to_owned(),
             BTreeMap::new(),
         ),
-        AnthropicRawCapture::HttpErrorBody { status, body } => (
+        LiveProviderRawCapture::HttpError {
+            status,
+            body,
+            crate_name,
+            function,
+        } => (
             "http_error_body",
-            "AnthropicExecutor::send_rendered_request",
+            crate_name,
+            function,
             Some(format!("http-status:{status}")),
-            body.clone(),
+            body.to_owned(),
             BTreeMap::from([("http-status".to_owned(), status.to_string())]),
         ),
-        AnthropicRawCapture::StreamEventBody {
+        LiveProviderRawCapture::StreamEvent {
             event_index,
             event_body,
+            crate_name,
+            function,
         } => (
             "stream_event_body",
-            "AnthropicExecutor::execute_stream_with_raw",
+            crate_name,
+            function,
             Some(format!("stream-event:{event_index}")),
-            event_body.clone(),
+            event_body.to_owned(),
             BTreeMap::from([("stream-event-index".to_owned(), event_index.to_string())]),
         ),
     };
@@ -6157,7 +6358,7 @@ fn record_live_provider_raw(
             trace_id: trace_id.clone(),
             raw_kind: raw_kind.to_owned(),
             scene: ProviderRawScenePosition {
-                crate_name: "freehand-provider-anthropic".to_owned(),
+                crate_name: crate_name.to_owned(),
                 file: "src/lib.rs".to_owned(),
                 function: function.to_owned(),
                 line: None,
@@ -6183,11 +6384,6 @@ fn terminal_debug_details(
     ]
 }
 
-fn map_anthropic_executor_error(err: AnthropicExecutorError) -> RuntimeLiveBridgeError {
-    let info = classify_anthropic_executor_error(&err);
-    RuntimeLiveBridgeError::AnthropicExecutorFailed(info.terminal_message())
-}
-
 fn classify_anthropic_executor_error(err: &AnthropicExecutorError) -> ProviderExecutorErrorInfo {
     match err {
         AnthropicExecutorError::HttpStatus { status, body } => ProviderExecutorErrorInfo {
@@ -6198,31 +6394,82 @@ fn classify_anthropic_executor_error(err: &AnthropicExecutorError) -> ProviderEx
                 || *status == 425
                 || *status == 429
                 || *status >= 500,
+            failover_eligible: true,
         },
         AnthropicExecutorError::Http(err) => ProviderExecutorErrorInfo {
             code: "anthropic_http_request_failed".to_owned(),
             message: err.to_string(),
             retryable: err.is_connect() || err.is_timeout() || err.is_request(),
+            failover_eligible: true,
         },
         AnthropicExecutorError::StreamRead(err) => ProviderExecutorErrorInfo {
             code: "anthropic_stream_read_failed".to_owned(),
             message: err.to_string(),
             retryable: true,
+            failover_eligible: true,
         },
         AnthropicExecutorError::Adapter(err) => ProviderExecutorErrorInfo {
             code: "anthropic_adapter_failed".to_owned(),
             message: err.to_string(),
             retryable: false,
+            failover_eligible: false,
         },
         AnthropicExecutorError::InvalidConfig => ProviderExecutorErrorInfo {
             code: "anthropic_invalid_config".to_owned(),
             message: err.to_string(),
             retryable: false,
+            failover_eligible: false,
         },
         AnthropicExecutorError::Callback(message) => ProviderExecutorErrorInfo {
             code: "anthropic_callback_failed".to_owned(),
             message: message.clone(),
             retryable: false,
+            failover_eligible: false,
+        },
+    }
+}
+
+fn classify_openai_executor_error(err: &OpenAiExecutorError) -> ProviderExecutorErrorInfo {
+    match err {
+        OpenAiExecutorError::HttpStatus { status, body } => ProviderExecutorErrorInfo {
+            code: format!("openai_http_status_{status}"),
+            message: body.clone(),
+            retryable: *status == 408
+                || *status == 409
+                || *status == 425
+                || *status == 429
+                || *status >= 500,
+            failover_eligible: true,
+        },
+        OpenAiExecutorError::Http(err) => ProviderExecutorErrorInfo {
+            code: "openai_http_request_failed".to_owned(),
+            message: err.to_string(),
+            retryable: err.is_connect() || err.is_timeout() || err.is_request(),
+            failover_eligible: true,
+        },
+        OpenAiExecutorError::StreamRead(err) => ProviderExecutorErrorInfo {
+            code: "openai_stream_read_failed".to_owned(),
+            message: err.to_string(),
+            retryable: true,
+            failover_eligible: true,
+        },
+        OpenAiExecutorError::Adapter(err) => ProviderExecutorErrorInfo {
+            code: "openai_adapter_failed".to_owned(),
+            message: err.to_string(),
+            retryable: false,
+            failover_eligible: false,
+        },
+        OpenAiExecutorError::InvalidConfig => ProviderExecutorErrorInfo {
+            code: "openai_invalid_config".to_owned(),
+            message: err.to_string(),
+            retryable: false,
+            failover_eligible: false,
+        },
+        OpenAiExecutorError::Callback(message) => ProviderExecutorErrorInfo {
+            code: "openai_callback_failed".to_owned(),
+            message: message.clone(),
+            retryable: false,
+            failover_eligible: false,
         },
     }
 }
@@ -6260,12 +6507,12 @@ fn record_provider_error_metadata(
         RuntimeErrorCenterWriteSpec {
             turn_id: Some(&spec.turn.request.turn_id),
             trace_id: &spec.turn.request.trace_id,
-            pipeline_node: "RuntimeLive05ProviderError",
+            pipeline_node: spec.pipeline_node,
             metadata_suffix: format!("provider_error:{}", spec.retry_index),
-            symbol_path: "run_live_anthropic_reason_turn",
+            symbol_path: "run_live_provider_reason_turn",
             observed: ErrorCenterObservedFailure {
                 source_owner: "provider.reason-live-bridge".to_owned(),
-                source_pipeline_node: "RuntimeLive05ProviderError".to_owned(),
+                source_pipeline_node: spec.pipeline_node.to_owned(),
                 code: spec.error_code.to_owned(),
                 message: spec.error.to_string(),
                 retry_index: spec.retry_index,
@@ -6281,9 +6528,9 @@ fn record_provider_error_metadata(
             turn_id: Some(&spec.turn.request.turn_id),
             trace_id: &spec.turn.request.trace_id,
             kind: MetadataKind::Provider,
-            pipeline_node: "RuntimeLive05ProviderError",
+            pipeline_node: spec.pipeline_node,
             metadata_suffix: format!("provider_error:{}", spec.retry_index),
-            symbol_path: "run_live_anthropic_reason_turn",
+            symbol_path: "run_live_provider_reason_turn",
             entries: vec![
                 MetadataEntry {
                     key: "error.kind".to_owned(),
@@ -6377,7 +6624,7 @@ fn emit_provider_retry_debug(
             turn_id: &turn.request.turn_id,
             trace_id: &turn.request.trace_id,
             pipeline_node: "RuntimeLive05ProviderError",
-            function: "run_live_anthropic_reason_turn",
+            function: "run_live_provider_reason_turn",
             status_text: "provider error retry scheduled",
             detail_lines: vec![
                 format!("error_code={}", error.code),
@@ -6405,17 +6652,291 @@ fn ensure_live_not_cancelled(
     Ok(())
 }
 
-fn provider_descriptor(selected: &SelectedAgentConfig) -> ProviderDescriptor {
-    ProviderDescriptor {
-        provider_name: selected.provider.id.clone(),
-        family: ProviderFamily::Anthropic,
-        protocol: ProviderProtocol::AnthropicMessages,
-        model: selected.provider.default_model.clone(),
+fn provider_descriptor(
+    provider: &SelectedProviderConfig,
+) -> Result<ProviderDescriptor, RuntimeLiveBridgeError> {
+    let (family, protocol) = match (provider.provider_type, provider.protocol) {
+        (ProviderType::Anthropic, ConfigProviderProtocol::Messages) => (
+            ProviderFamily::Anthropic,
+            ProviderProtocol::AnthropicMessages,
+        ),
+        (ProviderType::OpenAi, ConfigProviderProtocol::Responses) => (
+            ProviderFamily::OpenAiCompatible,
+            ProviderProtocol::OpenAiResponses,
+        ),
+        (ProviderType::OpenAi, ConfigProviderProtocol::ChatCompletions) => (
+            ProviderFamily::OpenAiCompatible,
+            ProviderProtocol::OpenAiChatCompletions,
+        ),
+        _ => {
+            return Err(RuntimeLiveBridgeError::UnsupportedLiveProvider {
+                provider: provider.provider_type.as_str().to_owned(),
+                protocol: provider.protocol.as_str().to_owned(),
+            });
+        }
+    };
+    Ok(ProviderDescriptor {
+        provider_name: provider.id.clone(),
+        family,
+        protocol,
+        model: provider.default_model.clone(),
         capabilities: ProviderCapabilities {
             web_search: false,
             multimodal: false,
             vision: false,
             reasoning: true,
+        },
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LiveProviderLabel {
+    family: &'static str,
+    protocol: &'static str,
+    display: &'static str,
+}
+
+fn live_provider_label(provider: &SelectedProviderConfig) -> LiveProviderLabel {
+    match (provider.provider_type, provider.protocol) {
+        (ProviderType::Anthropic, ConfigProviderProtocol::Messages) => LiveProviderLabel {
+            family: "anthropic",
+            protocol: "messages",
+            display: "anthropic/messages",
+        },
+        (ProviderType::OpenAi, ConfigProviderProtocol::Responses) => LiveProviderLabel {
+            family: "openai",
+            protocol: "responses",
+            display: "openai/responses",
+        },
+        (ProviderType::OpenAi, ConfigProviderProtocol::ChatCompletions) => LiveProviderLabel {
+            family: "openai",
+            protocol: "chat_completions",
+            display: "openai/chat_completions",
+        },
+        _ => LiveProviderLabel {
+            family: "unsupported",
+            protocol: "unsupported",
+            display: "unsupported/unsupported",
+        },
+    }
+}
+
+enum LiveProviderRawCapture<'a> {
+    Response {
+        crate_name: &'static str,
+        function: &'static str,
+        body: &'a str,
+    },
+    HttpError {
+        crate_name: &'static str,
+        function: &'static str,
+        status: u16,
+        body: &'a str,
+    },
+    StreamEvent {
+        crate_name: &'static str,
+        function: &'static str,
+        event_index: usize,
+        event_body: &'a str,
+    },
+}
+
+#[derive(Debug)]
+struct LiveProviderDriverError {
+    info: ProviderExecutorErrorInfo,
+}
+
+impl LiveProviderDriverError {
+    fn info(&self) -> &ProviderExecutorErrorInfo {
+        &self.info
+    }
+}
+
+trait LiveProviderDriver {
+    fn execute_once_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError>;
+
+    fn execute_stream_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
+        on_outputs: &mut dyn FnMut(&[ProviderSemanticOutput]) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError>;
+}
+
+struct AnthropicLiveProviderDriver {
+    executor: AnthropicExecutor,
+}
+
+struct OpenAiLiveProviderDriver {
+    executor: OpenAiExecutor,
+}
+
+impl LiveProviderDriver for AnthropicLiveProviderDriver {
+    fn execute_once_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError> {
+        self.executor
+            .execute_once_with_raw(ctx, request, |raw| {
+                on_raw(live_raw_from_anthropic(raw)).map_err(AnthropicExecutorError::Callback)
+            })
+            .map_err(|err| LiveProviderDriverError {
+                info: classify_anthropic_executor_error(&err),
+            })
+    }
+
+    fn execute_stream_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
+        on_outputs: &mut dyn FnMut(&[ProviderSemanticOutput]) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError> {
+        self.executor
+            .execute_stream_with_raw(
+                ctx,
+                request,
+                |raw| {
+                    on_raw(live_raw_from_anthropic(raw)).map_err(AnthropicExecutorError::Callback)
+                },
+                |batch| on_outputs(batch).map_err(AnthropicExecutorError::Callback),
+            )
+            .map_err(|err| LiveProviderDriverError {
+                info: classify_anthropic_executor_error(&err),
+            })
+    }
+}
+
+impl LiveProviderDriver for OpenAiLiveProviderDriver {
+    fn execute_once_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError> {
+        self.executor
+            .execute_once_with_raw(ctx, request, |raw| {
+                on_raw(live_raw_from_openai(raw)).map_err(OpenAiExecutorError::Callback)
+            })
+            .map_err(|err| LiveProviderDriverError {
+                info: classify_openai_executor_error(&err),
+            })
+    }
+
+    fn execute_stream_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
+        on_outputs: &mut dyn FnMut(&[ProviderSemanticOutput]) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError> {
+        self.executor
+            .execute_stream_with_raw(
+                ctx,
+                request,
+                |raw| on_raw(live_raw_from_openai(raw)).map_err(OpenAiExecutorError::Callback),
+                |batch| on_outputs(batch).map_err(OpenAiExecutorError::Callback),
+            )
+            .map_err(|err| LiveProviderDriverError {
+                info: classify_openai_executor_error(&err),
+            })
+    }
+}
+
+fn build_live_provider_driver(
+    provider: &SelectedProviderConfig,
+) -> Result<Box<dyn LiveProviderDriver>, RuntimeLiveBridgeError> {
+    match (provider.provider_type, provider.protocol) {
+        (ProviderType::Anthropic, ConfigProviderProtocol::Messages) => {
+            let executor = AnthropicExecutor::new(AnthropicExecutorConfig {
+                base_url: provider.base_url.clone(),
+                api_key: provider.api_key.clone(),
+                anthropic_version: "2023-06-01".to_owned(),
+                adapter: AnthropicAdapterConfig {
+                    max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+                },
+            })
+            .map_err(|err| {
+                RuntimeLiveBridgeError::ProviderExecutorFailed(
+                    classify_anthropic_executor_error(&err).terminal_message(),
+                )
+            })?;
+            Ok(Box::new(AnthropicLiveProviderDriver { executor }))
+        }
+        (ProviderType::OpenAi, ConfigProviderProtocol::Responses)
+        | (ProviderType::OpenAi, ConfigProviderProtocol::ChatCompletions) => {
+            let executor = OpenAiExecutor::new(OpenAiExecutorConfig {
+                base_url: provider.base_url.clone(),
+                api_key: provider.api_key.clone(),
+            })
+            .map_err(|err| {
+                RuntimeLiveBridgeError::ProviderExecutorFailed(
+                    classify_openai_executor_error(&err).terminal_message(),
+                )
+            })?;
+            Ok(Box::new(OpenAiLiveProviderDriver { executor }))
+        }
+        _ => Err(RuntimeLiveBridgeError::UnsupportedLiveProvider {
+            provider: provider.provider_type.as_str().to_owned(),
+            protocol: provider.protocol.as_str().to_owned(),
+        }),
+    }
+}
+
+fn live_raw_from_anthropic(raw: &AnthropicRawCapture) -> LiveProviderRawCapture<'_> {
+    match raw {
+        AnthropicRawCapture::ResponseBody { body } => LiveProviderRawCapture::Response {
+            crate_name: "freehand-provider-anthropic",
+            function: "AnthropicExecutor::execute_once_with_raw",
+            body,
+        },
+        AnthropicRawCapture::HttpErrorBody { status, body } => LiveProviderRawCapture::HttpError {
+            crate_name: "freehand-provider-anthropic",
+            function: "AnthropicExecutor::send_rendered_request",
+            status: *status,
+            body,
+        },
+        AnthropicRawCapture::StreamEventBody {
+            event_index,
+            event_body,
+        } => LiveProviderRawCapture::StreamEvent {
+            crate_name: "freehand-provider-anthropic",
+            function: "AnthropicExecutor::execute_stream_with_raw",
+            event_index: *event_index,
+            event_body,
+        },
+    }
+}
+
+fn live_raw_from_openai(raw: &OpenAiRawCapture) -> LiveProviderRawCapture<'_> {
+    match raw {
+        OpenAiRawCapture::ResponseBody { body } => LiveProviderRawCapture::Response {
+            crate_name: "freehand-provider-openai",
+            function: "OpenAiExecutor::execute_once_with_raw",
+            body,
+        },
+        OpenAiRawCapture::HttpErrorBody { status, body } => LiveProviderRawCapture::HttpError {
+            crate_name: "freehand-provider-openai",
+            function: "OpenAiExecutor::send_rendered_request",
+            status: *status,
+            body,
+        },
+        OpenAiRawCapture::StreamEventBody {
+            event_index,
+            event_body,
+        } => LiveProviderRawCapture::StreamEvent {
+            crate_name: "freehand-provider-openai",
+            function: "OpenAiExecutor::execute_stream_with_raw",
+            event_index: *event_index,
+            event_body,
         },
     }
 }
@@ -6721,7 +7242,8 @@ fn master_task_orchestration_guidance(configured_worker: &str) -> String {
             "- Task tool workflow: create_agent only when needed; create a task with goal, deliverables, acceptance, target_cwd, and priority; assign it; query task/history while the Worker runner claims, heartbeats, and records execution; approve/reject; close only after accepted review.\n",
             "- Task create dispatch: every task tool call must include top-level op. For production worker work, call task with {\"op\":\"create\", ..., \"target_cwd\":\"/absolute/existing/repo\", \"dispatch\":{\"mode\":\"none\"}} and then task with {\"op\":\"assign\", \"task_id\":\"...\", \"agent_id\":\"configured Worker\"}. Never omit dispatch and never use auto or self dispatch, because persisted historical agents are not production targets.\n",
             "- Ownership boundary: as Master, do not call claim_next, heartbeat, or record_execution on behalf of a Worker. Those mutations are owned by the Worker runner. Use them only in explicit framework/debug tests, never as normal production orchestration.\n",
-            "- Timer workflow: when all immediate Master-side actions are dispatched or waiting on worker progress, call timer(op=\"schedule\") with reason, prompt, and either delay_seconds, run_at_unix_seconds, or a repeat rule. If the next useful wait exceeds 3 minutes, schedule a timer instead of dead-waiting in the current turn. A timer is not scheduled until the timer tool returns `Timer scheduled`; do not claim or imply that a timer was scheduled in completion text unless this turn has a successful timer tool result. After scheduling the timer, continue any other ready Master-side work instead of blocking on the waited item. If no other work is ready, complete the current turn with the timer result as evidence. The timer prompt must tell the future Master turn what current truth to inspect, what waited condition to revisit, and what decision to make. Timer truth is independent internal scheduler truth, not task truth. Daily, weekly, and cron repeat rules use the local timezone. Cron is 5 fields: minute hour day-of-month month weekday.\n",
+            "- Timer workflow: when all immediate Master-side actions are dispatched or waiting on worker progress, call timer(op=\"schedule\") with reason, prompt, and either delay_seconds, run_at_unix_seconds, or a repeat rule. If the next useful wait exceeds 3 minutes, schedule a timer instead of dead-waiting in the current turn. A timer is not scheduled until the timer tool returns `Timer scheduled`; do not claim or imply that a timer was scheduled in completion text unless this turn has a successful timer tool result. After scheduling the timer, continue any other ready Master-side work instead of blocking on the waited item. If no other work is ready and the user's requested final outcome is not yet delivered, finish the current turn with `claim=\"waiting\"` and name the Task Center/timer follow-up in `next_step`; do not use `claim=\"complete\"` for mere dispatch. The timer prompt must tell the future Master turn what current truth to inspect, what waited condition to revisit, and what decision to make. Timer truth is independent internal scheduler truth, not task truth. Daily, weekly, and cron repeat rules use the local timezone. Cron is 5 fields: minute hour day-of-month month weekday.\n",
+            "- Completion boundary: `claim=\"complete\"` is allowed only after the user-visible objective is actually satisfied with evidence. A created/assigned Worker task, heartbeat, timer, or pending review is lifecycle progress, not user-task completion.\n",
         ),
         concat!(
             "Master task orchestration examples:\n",
@@ -6789,23 +7311,28 @@ fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
         .max(512)
 }
 
+#[derive(Clone, Copy)]
+struct LiveRoundContext<'a> {
+    role: LiveReasonExecutionRole,
+    configured_worker: Option<&'a str>,
+    runtime_home: &'a Path,
+    cwd: Option<&'a Path>,
+    agent_id: &'a AgentId,
+}
+
 fn next_round_segments(
     original_prompt: &str,
     visible_text: &str,
     rejection_feedback: Option<&str>,
-    role: LiveReasonExecutionRole,
-    configured_worker: Option<&str>,
-    runtime_home: &Path,
-    cwd: Option<&Path>,
-    agent_id: &AgentId,
+    context: LiveRoundContext<'_>,
 ) -> Result<Vec<ContextSegment>, RuntimeLiveBridgeError> {
     let mut segments = base_live_context_segments(
         original_prompt,
-        role,
-        configured_worker,
-        runtime_home,
-        cwd,
-        agent_id,
+        context.role,
+        context.configured_worker,
+        context.runtime_home,
+        context.cwd,
+        context.agent_id,
     )?;
     if !visible_text.trim().is_empty() {
         let content = format!("Previous round visible output:\n{visible_text}");
@@ -7904,6 +8431,52 @@ fn task_decision_round_budget_reason(
     })
 }
 
+fn master_parent_session_completion_rejection(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    role: LiveReasonExecutionRole,
+    task_decision_boundary: Option<&LiveReasonTaskDecisionBoundary>,
+    submission: &CompletionSubmission,
+) -> Result<Option<CompletionSchemaRejection>, RuntimeLiveBridgeError> {
+    if role != LiveReasonExecutionRole::Master
+        || task_decision_boundary.is_some()
+        || submission.claim != CompletionClaim::Complete
+    {
+        return Ok(None);
+    }
+
+    let runtime = TaskRuntime::boot(runtime_home, agent_id.clone())
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+    let board = runtime
+        .query_task_board(TaskBoardQuery {
+            status: None,
+            assignee: None,
+            include_terminal: true,
+        })
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
+    let open_children = board
+        .tasks
+        .iter()
+        .filter(|task| task.parent.session_id.as_ref() == Some(session_id))
+        .filter(|task| task.status != TaskStatus::Closed)
+        .map(|task| format!("{}:{:?}", task.task_id.as_str(), task.status))
+        .collect::<Vec<_>>();
+    if open_children.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(CompletionSchemaRejection {
+        issues: vec![CompletionSchemaIssue {
+            field: "claim".to_owned(),
+            message: format!(
+                "cannot be `complete` while child Worker tasks for this Master session are still open: {}. Inspect Task Center truth, wait with `claim=\"waiting\"`, or continue only if you can approve/close all required child work in this turn.",
+                open_children.join(", ")
+            ),
+        }],
+    }))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn finalize_framework_live_turn<FB, FD>(
     engine: &ReasonTurnEngine,
@@ -8205,7 +8778,7 @@ fn project_runtime_turn_history(
             session_id: turn.request.session_id.clone(),
             turn_id: turn.request.turn_id.clone(),
             cwd: cwd.or_else(|| turn.cwd.clone()),
-            user_text: Some(ui_user_text_for_turn(turn)),
+            user_text: ui_user_text_projection_for_turn(turn),
             semantic_events: turn.semantic_events.clone(),
             tool_calls: turn.tool_calls.clone(),
             tool_results: turn.tool_results.clone(),
@@ -8235,6 +8808,92 @@ fn current_runtime_turn_for_projection(
             ))
         })?;
     Ok(current_turn)
+}
+
+fn restore_or_materialize_failed_live_submit(
+    state: &mut RuntimeCommandDispatcherState,
+    prepared: &PreparedLiveSubmit,
+    failure_message: &str,
+) -> Result<TurnRecord, UiCommandDispatchPortError> {
+    let persistence = ReasonPersistence::new(
+        prepared.live.runtime_home.clone(),
+        state.config.reason_agent_id.clone(),
+    );
+    match restore_live_submit_turns_for_projection(&persistence, &prepared.session_id) {
+        Ok(restored_turns) => {
+            state
+                .turns
+                .retain(|turn| turn.request.session_id != prepared.session_id);
+            state.turns.extend(restored_turns);
+        }
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => {
+            let failed_turn = materialize_dispatch_failed_turn(
+                &persistence,
+                prepared,
+                state.config.model.clone(),
+                failure_message,
+            )?;
+            state.turns.push(failed_turn);
+        }
+        Err(err) => {
+            return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+                "failed to project live error turn from persistence: {err}"
+            )));
+        }
+    }
+    state
+        .turns
+        .sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
+    state.session_cwds = session_cwds_from_turns(&state.turns);
+    current_runtime_turn_for_projection(&state.turns, &prepared.turn_id)
+}
+
+fn restore_live_submit_turns_for_projection(
+    persistence: &ReasonPersistence,
+    session_id: &SessionId,
+) -> Result<Vec<TurnRecord>, ReasonPersistenceError> {
+    let restored = persistence.restore(session_id)?;
+    let mut restored_turns = persistence.restore_turn_snapshots_for_ui(session_id)?;
+    if let Some(active_turn) = restored.active_turn {
+        restored_turns.push(active_turn.turn);
+    }
+    Ok(restored_turns)
+}
+
+fn materialize_dispatch_failed_turn(
+    persistence: &ReasonPersistence,
+    prepared: &PreparedLiveSubmit,
+    model: String,
+    failure_message: &str,
+) -> Result<TurnRecord, UiCommandDispatchPortError> {
+    let mut history = SessionHistory::new(prepared.session_id.clone(), Vec::new())
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+    let engine = ReasonTurnEngine::new();
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: prepared.session_id.clone(),
+                turn_id: prepared.turn_id.clone(),
+                trace_id: prepared.trace_id.clone(),
+                feature_id: FeatureId::new("runtime.ui-command-dispatch"),
+                agent_id: prepared.reason_agent_id.clone(),
+                user_text: prepared.prompt.clone(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model,
+            },
+        )
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+    turn.cwd = Some(prepared.cwd.to_string_lossy().into_owned());
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+    engine.fail_turn(&mut turn, failure_message.to_owned());
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+    Ok(turn)
 }
 
 fn project_runtime_turn(
@@ -8291,6 +8950,14 @@ fn ui_user_text_for_turn(turn: &TurnRecord) -> String {
                 .map(str::to_owned)
         })
         .unwrap_or_else(|| turn.request.user_text.clone())
+}
+
+fn ui_user_text_projection_for_turn(turn: &TurnRecord) -> Option<String> {
+    if turn.request.user_text.contains("<freehand_parent_") {
+        None
+    } else {
+        Some(ui_user_text_for_turn(turn))
+    }
 }
 
 fn rebuild_session_history_from_effective_turns(
@@ -8941,25 +9608,20 @@ mod tests {
             .expect("session list query");
         match session_list {
             UiQueryResult::SessionList(list) => {
-                let ids = list
-                    .sessions
-                    .iter()
-                    .map(|session| session.session_id.as_str())
-                    .collect::<Vec<_>>();
-                assert!(ids.contains(&"runtime-session-agent-live"));
-                assert!(ids.contains(&"runtime-session-other"));
+                assert!(
+                    list.sessions.is_empty(),
+                    "turn-only persisted sessions stay out of the metadata-owned session list"
+                );
             }
             other => panic!("unexpected session list query: {other:?}"),
         }
 
         let transcript = runtime
-            .ui_state()
-            .lock()
-            .expect("lock ui")
-            .query(&UiCommand::QuerySessionTurns {
+            .query_runtime(&UiCommand::QuerySessionTurns {
                 session_id: SessionId::new("runtime-session-other"),
             })
-            .expect("session turns query");
+            .expect("runtime session turns query")
+            .expect("runtime query result");
         match transcript {
             UiQueryResult::SessionTurns(transcript) => {
                 assert_eq!(transcript.turns.len(), 1);
@@ -9090,6 +9752,83 @@ mod tests {
             !rendered.contains("failed attempt details that should stay out of future prompt"),
             "superseded failed repair attempt leaked into future context: {rendered}"
         );
+    }
+
+    #[test]
+    fn runtime_query_session_turns_restores_background_parent_evaluation() {
+        let runtime_home = temp_runtime_home();
+        let selected = live_selected_agent(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        );
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &selected,
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+        let session_id = SessionId::new("parent-session-background-evaluation");
+        let mut history =
+            SessionHistory::new(session_id.clone(), Vec::new()).expect("session history");
+        let engine = ReasonTurnEngine::new();
+        let mut turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: session_id.clone(),
+                    turn_id: TurnId::new("runtime-turn-1"),
+                    trace_id: TraceId::new("master-parent-evaluate-trace-event-1-attempt-0"),
+                    feature_id: FeatureId::new("runtime.master-worker-loop"),
+                    agent_id: AgentId::new("master"),
+                    user_text:
+                        "<freehand_parent_evaluation id=\"background-test\">\ninternal prompt"
+                            .to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "master-model".to_owned(),
+                },
+            )
+            .expect("start evaluation turn");
+        let persistence =
+            ReasonPersistence::new(runtime_home.clone(), AgentId::new(selected.name.clone()));
+        persistence
+            .record_turn_started(&history, &turn, 0)
+            .expect("persist evaluation start");
+        turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: FeatureId::new("runtime.master-worker-loop"),
+            agent_id: AgentId::new("master"),
+            status: TerminalStatus::Success,
+            summary: "overall goal evaluated; next task or final answer decided".to_owned(),
+        });
+        persistence
+            .record_turn_closed(&history, &turn, 0)
+            .expect("persist evaluation close");
+
+        match runtime
+            .query_runtime(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("runtime query")
+            .expect("runtime-owned session query")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.session_id, session_id);
+                assert_eq!(transcript.turns.len(), 1);
+                assert_eq!(transcript.turns[0].user_text, None);
+                assert!(
+                    transcript.turns[0]
+                        .terminal_text
+                        .as_deref()
+                        .is_some_and(|text| text.contains("overall goal evaluated"))
+                );
+            }
+            other => panic!("unexpected session query result: {other:?}"),
+        }
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
     }
 
     fn closed_turn_for_context(
@@ -9625,6 +10364,79 @@ provider = "old"
     }
 
     #[test]
+    fn live_dispatch_materializes_failed_turn_when_provider_fails_before_persistence() {
+        let runtime_home = temp_runtime_home();
+        let failed_session = SessionId::new("runtime-session-early-provider-failure");
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &live_selected_agent_with_protocol(
+                "http://127.0.0.1:1".to_owned(),
+                freehand_config::ProviderType::Anthropic,
+                ConfigProviderProtocol::Responses,
+            ),
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "prompt must remain visible after early provider failure".to_owned(),
+                    session_id: Some(failed_session.clone()),
+                    cwd: None,
+                })
+                .expect("submit envelope"),
+            )
+            .expect_err("unsupported provider/protocol must fail");
+        assert!(
+            err.to_string().contains("not supported"),
+            "unexpected dispatch error: {err}"
+        );
+
+        match runtime
+            .ui_state()
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: failed_session.clone(),
+            })
+            .expect("query failed transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                let turn = &transcript.turns[0];
+                assert_eq!(
+                    turn.user_text.as_deref(),
+                    Some("prompt must remain visible after early provider failure")
+                );
+                assert_eq!(turn.terminal_status, Some(TerminalStatus::Failed));
+                assert!(
+                    turn.terminal_text
+                        .as_deref()
+                        .is_some_and(|text| text.contains("not supported")),
+                    "failed turn should expose the provider failure: {turn:?}"
+                );
+            }
+            other => panic!("unexpected failed transcript query: {other:?}"),
+        }
+
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&failed_session)
+            .expect("failed turn should be persisted");
+        assert!(restored.active_turn.is_none());
+        assert_eq!(restored.closed_turns.len(), 1);
+        assert_eq!(
+            restored.closed_turns[0]
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Failed)
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
     fn runtime_dispatches_session_rollback_into_effective_ui_projection() {
         let runtime_home = temp_runtime_home();
         let session_id = SessionId::new("session-rollback-runtime");
@@ -10021,6 +10833,85 @@ provider = "old"
     }
 
     #[test]
+    fn live_master_rejects_complete_while_parent_child_task_open() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let task_runtime =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+        let child = task_runtime
+            .create_task(TaskCreateRequest {
+                task_id: Some(TaskId::new("open-child-task")),
+                title: "Open child task".to_owned(),
+                content: "child work is still running".to_owned(),
+                goal: "prove parent completion is gated".to_owned(),
+                deliverables: vec!["child result".to_owned()],
+                acceptance: vec!["child task closed".to_owned()],
+                priority: 90,
+                target_cwd: Some(runtime_home.display().to_string()),
+                dispatch: TaskDispatchRequest::None,
+                parent: TaskParentRef {
+                    session_id: Some(SessionId::new("session-live")),
+                    turn_id: None,
+                    trace_id: None,
+                },
+                actor: lifecycle_test_actor(),
+                watermark: lifecycle_test_watermark("open-child"),
+            })
+            .expect("create open child")
+            .task;
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                complete_single_response("premature final answer"),
+                waiting_single_response("wait for open-child-task to close, then synthesize"),
+            ],
+        );
+        let mut request = live_request(false);
+        request.runtime_home = runtime_home.clone();
+        request.cwd = Some(runtime_home.clone());
+
+        let outcome = run_live_reason_turn_with_hooks(
+            &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+            request,
+            |_| {},
+            |_| {},
+            |_| {},
+        )
+        .expect("master completion gate should repair to waiting");
+        let requests = collect_provider_requests(&rx, 2);
+        handle.join().expect("join provider");
+
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::ToolPending)
+        );
+        assert_eq!(outcome.schema_rejections.len(), 1);
+        assert_eq!(outcome.schema_rejections[0].issues[0].field, "claim");
+        assert!(
+            outcome.schema_rejections[0].issues[0]
+                .message
+                .contains("open-child-task")
+        );
+        assert!(requests[1].contains("cannot be `complete` while child Worker tasks"));
+        assert_eq!(
+            task_runtime
+                .query_task(&child.task_id)
+                .expect("child unchanged")
+                .status,
+            TaskStatus::WaitingAgent
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
     fn live_submit_uses_requested_session_id_for_new_webui_session() {
         let runtime_home = temp_runtime_home();
         let (base_url, rx, handle) = spawn_sequence_server(
@@ -10129,6 +11020,301 @@ provider = "old"
             .collect::<Vec<_>>();
         assert!(retry_actions.contains(&"retry_same_step".to_owned()));
         assert!(!retry_actions.contains(&"fail_turn".to_owned()));
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_failover_from_openai_http_402_to_anthropic_success() {
+        let runtime_home = temp_runtime_home();
+        let (primary_url, primary_rx, primary_handle) = spawn_status_sequence_server(vec![(
+            402,
+            "application/json",
+            r#"{"error":{"message":"insufficient credits"}}"#.to_owned(),
+        )]);
+        let (fallback_url, fallback_rx, fallback_handle) = spawn_sequence_server(
+            "application/json",
+            vec![complete_single_response("fallback completed")],
+        );
+        let selected = live_selected_agent_with_fallback(primary_url, fallback_url);
+
+        let outcome = run_live_reason_turn_with_hooks(
+            &selected,
+            LiveReasonTurnRequest {
+                runtime_home: runtime_home.clone(),
+                ..live_request(false)
+            },
+            |_| {},
+            |_| {},
+            |_| {},
+        )
+        .expect("402 should fail over to the configured fallback");
+
+        let primary_request = primary_rx.recv().expect("primary request");
+        let fallback_request = fallback_rx.recv().expect("fallback request");
+        primary_handle.join().expect("join primary");
+        fallback_handle.join().expect("join fallback");
+        assert!(primary_request.starts_with("POST /responses "));
+        assert!(fallback_request.contains("\"model\":\"MiniMax-M3\""));
+        assert_eq!(outcome.turn.provider_payload.model, "MiniMax-M3");
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|terminal| terminal.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+        assert!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .expect("terminal")
+                .summary
+                .contains("fallback completed")
+        );
+
+        let metadata =
+            metadata_ledger_records(&runtime_home, "agent-live", &SessionId::new("session-live"));
+        assert!(metadata.iter().any(|record| {
+            record.write_node.pipeline_node == "RuntimeLive05ProviderFailover"
+                && metadata_entry_string(record, "error.code").as_deref()
+                    == Some("openai_http_status_402")
+                && metadata_entry_string(record, "error.recovery_action").as_deref()
+                    == Some("failover_provider")
+        }));
+        assert!(metadata.iter().any(|record| {
+            record.write_node.pipeline_node == "RuntimeLive05ProviderFailover"
+                && metadata_entry_string(record, "provider.route").as_deref() == Some("fallback")
+                && metadata_entry_string(record, "provider.failover_from").as_deref() == Some("cc")
+                && metadata_entry_string(record, "provider.failover_to").as_deref()
+                    == Some("minimax")
+                && metadata_entry_string(record, "provider.failover_error_code").as_deref()
+                    == Some("openai_http_status_402")
+                && metadata_entry_string(record, "reason.model").as_deref() == Some("MiniMax-M3")
+        }));
+        assert!(!metadata.iter().any(|record| {
+            metadata_entry_string(record, "error.code").as_deref() == Some("openai_http_status_402")
+                && metadata_entry_string(record, "error.recovery_action").as_deref()
+                    == Some("fail_turn")
+        }));
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_failover_after_primary_retry_exhaustion() {
+        let runtime_home = temp_runtime_home();
+        let primary_responses = (0..PROVIDER_EXECUTOR_RETRY_CAP)
+            .map(|attempt| {
+                (
+                    500,
+                    "application/json",
+                    format!(r#"{{"error":{{"message":"primary failure {attempt}"}}}}"#),
+                )
+            })
+            .collect();
+        let (primary_url, primary_rx, primary_handle) =
+            spawn_status_sequence_server(primary_responses);
+        let (fallback_url, fallback_rx, fallback_handle) = spawn_sequence_server(
+            "application/json",
+            vec![complete_single_response("fallback after retries")],
+        );
+        let selected = live_selected_agent_with_fallback(primary_url, fallback_url);
+
+        let outcome = run_live_reason_turn_with_hooks(
+            &selected,
+            LiveReasonTurnRequest {
+                runtime_home: runtime_home.clone(),
+                ..live_request(false)
+            },
+            |_| {},
+            |_| {},
+            |_| {},
+        )
+        .expect("retry exhaustion should fail over");
+
+        assert_eq!(
+            primary_rx
+                .iter()
+                .take(PROVIDER_EXECUTOR_RETRY_CAP as usize)
+                .count(),
+            PROVIDER_EXECUTOR_RETRY_CAP as usize
+        );
+        assert_eq!(fallback_rx.iter().take(1).count(), 1);
+        primary_handle.join().expect("join primary");
+        fallback_handle.join().expect("join fallback");
+        assert_eq!(outcome.turn.provider_payload.model, "MiniMax-M3");
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|terminal| terminal.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+
+        let metadata =
+            metadata_ledger_records(&runtime_home, "agent-live", &SessionId::new("session-live"));
+        assert!(metadata.iter().any(|record| {
+            record.write_node.pipeline_node == "RuntimeLive05ProviderFailover"
+                && metadata_entry_string(record, "provider.failover_error_code").as_deref()
+                    == Some("openai_http_status_500")
+        }));
+        assert!(metadata.iter().any(|record| {
+            record.write_node.pipeline_node == "RuntimeLive05ProviderFailover"
+                && metadata_entry_string(record, "error.code").as_deref()
+                    == Some("openai_http_status_500")
+                && metadata_entry_string(record, "error.recovery_action").as_deref()
+                    == Some("failover_provider")
+        }));
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_primary_success_does_not_activate_fallback() {
+        let runtime_home = temp_runtime_home();
+        let (primary_url, primary_rx, primary_handle) = spawn_sequence_server(
+            "application/json",
+            vec![openai_responses_complete_response("primary completed")],
+        );
+        let selected =
+            live_selected_agent_with_fallback(primary_url, "http://127.0.0.1:1".to_owned());
+
+        let outcome = run_live_reason_turn_with_hooks(
+            &selected,
+            LiveReasonTurnRequest {
+                runtime_home: runtime_home.clone(),
+                ..live_request(false)
+            },
+            |_| {},
+            |_| {},
+            |_| {},
+        )
+        .expect("primary success should not call fallback");
+
+        assert_eq!(primary_rx.iter().take(1).count(), 1);
+        primary_handle.join().expect("join primary");
+        assert_eq!(outcome.turn.provider_payload.model, "gpt-5.5");
+        let metadata =
+            metadata_ledger_records(&runtime_home, "agent-live", &SessionId::new("session-live"));
+        assert!(
+            !metadata
+                .iter()
+                .any(|record| record.write_node.pipeline_node == "RuntimeLive05ProviderFailover")
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_adapter_failure_does_not_activate_fallback() {
+        let runtime_home = temp_runtime_home();
+        let (primary_url, primary_rx, primary_handle) =
+            spawn_sequence_server("application/json", vec!["{not-json}".to_owned()]);
+        let selected =
+            live_selected_agent_with_fallback(primary_url, "http://127.0.0.1:1".to_owned());
+
+        let err = run_live_reason_turn_with_hooks(
+            &selected,
+            LiveReasonTurnRequest {
+                runtime_home: runtime_home.clone(),
+                ..live_request(false)
+            },
+            |_| {},
+            |_| {},
+            |_| {},
+        )
+        .expect_err("adapter failure must not activate fallback");
+
+        assert_eq!(primary_rx.iter().take(1).count(), 1);
+        primary_handle.join().expect("join primary");
+        assert!(err.to_string().contains("openai_adapter_failed"));
+        let metadata =
+            metadata_ledger_records(&runtime_home, "agent-live", &SessionId::new("session-live"));
+        assert!(
+            !metadata
+                .iter()
+                .any(|record| record.write_node.pipeline_node == "RuntimeLive05ProviderFailover")
+        );
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&SessionId::new("session-live"))
+            .expect("restore failed turn");
+        assert!(restored.active_turn.is_none());
+        assert_eq!(restored.closed_turns.len(), 1);
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_fallback_exhaustion_materializes_one_failed_turn() {
+        let runtime_home = temp_runtime_home();
+        let (primary_url, primary_rx, primary_handle) = spawn_status_sequence_server(vec![(
+            402,
+            "application/json",
+            r#"{"error":{"message":"insufficient credits"}}"#.to_owned(),
+        )]);
+        let fallback_responses = (0..PROVIDER_EXECUTOR_RETRY_CAP)
+            .map(|attempt| {
+                (
+                    500,
+                    "application/json",
+                    format!(
+                        r#"{{"type":"error","error":{{"message":"fallback failure {attempt}"}}}}"#
+                    ),
+                )
+            })
+            .collect();
+        let (fallback_url, fallback_rx, fallback_handle) =
+            spawn_status_sequence_server(fallback_responses);
+        let selected = live_selected_agent_with_fallback(primary_url, fallback_url);
+
+        let err = run_live_reason_turn_with_hooks(
+            &selected,
+            LiveReasonTurnRequest {
+                runtime_home: runtime_home.clone(),
+                ..live_request(false)
+            },
+            |_| {},
+            |_| {},
+            |_| {},
+        )
+        .expect_err("fallback exhaustion must fail the turn once");
+
+        assert_eq!(primary_rx.iter().take(1).count(), 1);
+        assert_eq!(
+            fallback_rx
+                .iter()
+                .take(PROVIDER_EXECUTOR_RETRY_CAP as usize)
+                .count(),
+            PROVIDER_EXECUTOR_RETRY_CAP as usize
+        );
+        primary_handle.join().expect("join primary");
+        fallback_handle.join().expect("join fallback");
+        assert!(err.to_string().contains("anthropic_http_status_500"));
+        let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))
+            .restore(&SessionId::new("session-live"))
+            .expect("restore failed turn");
+        assert!(restored.active_turn.is_none());
+        assert_eq!(restored.closed_turns.len(), 1);
+        let failed_turn = restored.closed_turns.last().expect("failed turn");
+        assert_eq!(failed_turn.provider_payload.model, "MiniMax-M3");
+        assert_eq!(
+            failed_turn
+                .terminal_event
+                .as_ref()
+                .map(|terminal| terminal.status.clone()),
+            Some(TerminalStatus::Failed)
+        );
+        assert_eq!(
+            failed_turn
+                .error_events
+                .last()
+                .map(|event| event.error.code.as_str()),
+            Some("anthropic_http_status_500")
+        );
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
@@ -10355,6 +11541,7 @@ provider = "old"
                 auth_source: freehand_config::ProviderAuthSourceKind::Inline,
                 api_key: "secret".to_owned(),
             },
+            fallback_provider: None,
             restart_required_on_change: true,
         }
     }
@@ -10389,8 +11576,43 @@ provider = "old"
                 auth_source: freehand_config::ProviderAuthSourceKind::Env,
                 api_key: "test-api-key".to_owned(),
             },
+            fallback_provider: None,
             restart_required_on_change: true,
         }
+    }
+
+    fn live_selected_agent_with_protocol(
+        base_url: String,
+        provider_type: freehand_config::ProviderType,
+        protocol: ConfigProviderProtocol,
+    ) -> SelectedAgentConfig {
+        let mut selected = live_selected_agent(base_url, provider_type);
+        selected.provider.protocol = protocol;
+        selected
+    }
+
+    fn live_selected_agent_with_fallback(
+        primary_base_url: String,
+        fallback_base_url: String,
+    ) -> SelectedAgentConfig {
+        let mut selected = live_selected_agent_with_protocol(
+            primary_base_url,
+            freehand_config::ProviderType::OpenAi,
+            ConfigProviderProtocol::Responses,
+        );
+        selected.provider.id = "cc".to_owned();
+        selected.provider.default_model = "gpt-5.5".to_owned();
+        selected.fallback_provider = Some(freehand_config::SelectedProviderConfig {
+            id: "minimax".to_owned(),
+            provider_type: freehand_config::ProviderType::Anthropic,
+            protocol: ConfigProviderProtocol::Messages,
+            base_url: fallback_base_url,
+            default_model: "MiniMax-M3".to_owned(),
+            auth_type: freehand_config::ProviderAuthType::ApiKey,
+            auth_source: freehand_config::ProviderAuthSourceKind::Env,
+            api_key: "fallback-test-api-key".to_owned(),
+        });
+        selected
     }
 
     fn live_selected_worker_agent(
@@ -10808,6 +12030,34 @@ provider = "old"
         )
     }
 
+    fn openai_responses_complete_response(visible_text: &str) -> String {
+        let tagged = tagged_completion_json(&format!(
+            r#"{{"claim":"complete","completion_reason":"done","evidence":"provider returned {visible_text}","summary":"{visible_text}","learned":"keep tagged completion strict"}}"#
+        ));
+        json!({
+            "id": "resp-test",
+            "object": "response",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg-test",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{
+                    "type": "output_text",
+                    "text": format!("{visible_text}\n{tagged}"),
+                    "annotations": []
+                }]
+            }],
+            "usage": {
+                "input_tokens": 14,
+                "output_tokens": 82,
+                "total_tokens": 96
+            }
+        })
+        .to_string()
+    }
+
     fn status_stop_single_response(visible_text: &str) -> String {
         let status = r#"<<<freehand_status>>>
 {"schema_version":1,"status":{"simple_question":true}}
@@ -10829,6 +12079,16 @@ provider = "old"
         ));
         format!(
             r#"{{"content":[{{"type":"text","text":"working\n{tagged}"}}],"usage":{{"input_tokens":14,"output_tokens":40}},"stop_reason":"end_turn"}}"#,
+            tagged = tagged.replace('\n', "\\n").replace('"', "\\\""),
+        )
+    }
+
+    fn waiting_single_response(next_step: &str) -> String {
+        let tagged = tagged_completion_json(&format!(
+            r#"{{"claim":"waiting","next_step":"{next_step}"}}"#
+        ));
+        format!(
+            r#"{{"content":[{{"type":"text","text":"waiting\n{tagged}"}}],"usage":{{"input_tokens":14,"output_tokens":40}},"stop_reason":"end_turn"}}"#,
             tagged = tagged.replace('\n', "\\n").replace('"', "\\\""),
         )
     }
@@ -14285,11 +15545,34 @@ data: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[test]
+    fn live_bridge_maps_openai_protocols_to_provider_descriptor() {
+        let responses_agent = live_selected_agent_with_protocol(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::OpenAi,
+            ConfigProviderProtocol::Responses,
+        );
+        let responses =
+            provider_descriptor(&responses_agent.provider).expect("responses descriptor");
+        assert_eq!(responses.family, ProviderFamily::OpenAiCompatible);
+        assert_eq!(responses.protocol, ProviderProtocol::OpenAiResponses);
+
+        let chat_agent = live_selected_agent_with_protocol(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::OpenAi,
+            ConfigProviderProtocol::ChatCompletions,
+        );
+        let chat = provider_descriptor(&chat_agent.provider).expect("chat completions descriptor");
+        assert_eq!(chat.family, ProviderFamily::OpenAiCompatible);
+        assert_eq!(chat.protocol, ProviderProtocol::OpenAiChatCompletions);
+    }
+
+    #[test]
     fn live_bridge_rejects_unsupported_provider_selection() {
         let err = run_live_reason_turn(
-            &live_selected_agent(
+            &live_selected_agent_with_protocol(
                 "http://127.0.0.1:1".to_owned(),
-                freehand_config::ProviderType::OpenAi,
+                freehand_config::ProviderType::Anthropic,
+                ConfigProviderProtocol::Responses,
             ),
             live_request(false),
         )
@@ -14298,7 +15581,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         assert!(matches!(
             err,
             RuntimeLiveBridgeError::UnsupportedLiveProvider { provider, protocol }
-                if provider == "openai" && protocol == "chat_completions"
+                if provider == "anthropic" && protocol == "responses"
         ));
     }
 
@@ -14308,7 +15591,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Return HTTP 500 so the executor returns HttpStatus, which maps to
-        // RuntimeLiveBridgeError::AnthropicExecutorFailed and triggers
+        // RuntimeLiveBridgeError::ProviderExecutorFailed and triggers
         // RuntimeLive05ProviderError metadata + debug emission.
         let (base_url, _rx, handle) = spawn_status_sequence_server(
             (0..PROVIDER_EXECUTOR_RETRY_CAP)
@@ -14336,7 +15619,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
         assert!(matches!(
             err,
-            RuntimeLiveBridgeError::AnthropicExecutorFailed(ref msg)
+            RuntimeLiveBridgeError::ProviderExecutorFailed(ref msg)
                 if msg.contains("500")
         ));
 
@@ -14401,7 +15684,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 && event
                     .error
                     .message
-                    .contains("anthropic live executor failed")
+                    .contains("provider live executor failed")
         }));
 
         let _ = handle.join();

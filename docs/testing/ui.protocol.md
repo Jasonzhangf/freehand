@@ -59,6 +59,7 @@
   - session list and transcript queries project the cwd bound to the selected session
   - session list queries project protocol-owned session title and archived state from owner-supplied session metadata
   - cancelled terminal status remains visible to public conversation status mapping and is not projected as completed
+  - `ToolPending` terminal status remains visible to public conversation as `Lifecycle` / `running` and is not projected as `Final` / completed
   - public tool summaries carry `tool_call_id` so same-tool waiting/completed updates remain one UI activity
 - white-box plan:
   - command/projection mapping, status query, terminal projection, slave subscription semantics
@@ -118,7 +119,7 @@
   - tool activity projection smoke covers waiting-before-result, completed-after-result, failed-result detail rendering, and failed-terminal-without-result without rendering verbose tool terms into the public summary
 - public tool summary smoke covers `display.kind`, semantic action title, parameter summary, target summary, result summary, and no UI-local category guessing
   - duplicate tool-call projection smoke covers one public card per `tool_call_id`
-  - cancelled/failed terminal status projection smoke
+  - cancelled/failed/ToolPending terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
   - ADP command/query/subscribe frame roundtrip smoke
   - ADP task list/history query smoke proves the protocol frame can carry task read models supplied by runtime

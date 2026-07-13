@@ -385,6 +385,10 @@ impl ReasonTurnEngine {
                 status,
                 terminal_text,
             })
+            | Ok(CompletionDecision::Waiting {
+                status,
+                terminal_text,
+            })
             | Ok(CompletionDecision::Blocked {
                 status,
                 terminal_text,

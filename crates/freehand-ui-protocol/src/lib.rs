@@ -2101,9 +2101,14 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
                 Some(TerminalStatus::ToolPending) => "running",
                 Some(TerminalStatus::Success) | None => "completed",
             };
+            let title = if projection.terminal_status == Some(TerminalStatus::ToolPending) {
+                "Lifecycle"
+            } else {
+                "Final"
+            };
             items.push(UiConversationItem {
                 kind: UiConversationItemKind::Terminal,
-                title: "Final".to_owned(),
+                title: title.to_owned(),
                 body: public_text,
                 status: status.to_owned(),
                 tool_call_id: None,
@@ -4038,6 +4043,23 @@ mod tests {
 
         assert_eq!(terminal.status, "cancelled");
         assert_eq!(terminal.body, "cancelled by ui command");
+    }
+
+    #[test]
+    fn tool_pending_terminal_projects_as_lifecycle_running_not_final_completed() {
+        let mut projection = sample_turn_projection(false);
+        projection.terminal_status = Some(TerminalStatus::ToolPending);
+        projection.terminal_text = Some("Waiting for lifecycle: worker task assigned".to_owned());
+
+        let items = public_conversation_items(&projection);
+        let terminal = items
+            .iter()
+            .find(|item| item.kind == UiConversationItemKind::Terminal)
+            .expect("terminal item");
+
+        assert_eq!(terminal.title, "Lifecycle");
+        assert_eq!(terminal.status, "running");
+        assert_eq!(terminal.body, "Waiting for lifecycle: worker task assigned");
     }
 
     #[test]

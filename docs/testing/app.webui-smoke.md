@@ -18,6 +18,7 @@
   - WebUI Phase 2D status drawer can query and render TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl owner projections without browser-persisted task/control truth
   - WebUI mobile Agent Dashboard derives one presentation model from those existing owner-backed projections, renders a compact portrait status strip, and renders detailed Master evaluation / Worker review truth in a portrait bottom sheet
   - WebUI mobile Agent Dashboard treats all child tasks closed as an evaluation trigger only; it must not project final goal completion without selected parent-session Master final-complete truth
+  - WebUI lifecycle projections scope task counts, task cards, Worker cards, AgentBoard rows, EventInbox rows, task-history targets, and Worker-control targets to the selected parent session; an empty selected session must render zero current lifecycle rows instead of falling back to global TaskBoard history
   - opening or closing the mobile Agent sheet is presentation-only and preserves selected session, transcript, composer draft, pending submit, scroll anchor, and lifecycle clocks
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
@@ -51,6 +52,7 @@
   - WebUI ADP request timeout visible-failure smoke
 - WebUI ADP failure card ordering smoke: failure card must not render ahead of the current conversation items
 - WebUI asset and online smoke must prove user-visible status text, failure cards, and verifier-submitted diagnostic prompts do not expose `ADP`; protocol naming is allowed only in internal code, docs, CLI, and test harness output
+  - WebUI hidden failure diagnostic prompts must stay within the Master framework-only tool surface: use `task`/`timer` samples, not workspace tools such as `read_file`
   - WebUI hidden success/failure diagnostic prompt asset smoke and no persistent sample-button smoke
   - WebUI keyboard shortcut smoke for submit, cancel, refresh, focus composer, and sample loading
   - WebUI slash command smoke for `/help`, `/sessions`, `/reload`, `/success`, `/failure`, `/cancel`, and `/clear`
@@ -74,6 +76,7 @@
   - WebUI Phase 2D dashboard asset smoke for TaskBoard, AgentBoard, EventInbox, TaskHistory, WorkerControl query/render functions, worker-control command routing, and absence of browser localStorage task/control truth
   - WebUI mobile Agent Dashboard asset smoke for `buildMobileAgentDashboardModel`, `renderMobileAgentSummaryStrip`, `renderMobileAgentSheet`, and `setMobileAgentSheetOpen`; shell/CSS smoke locks the portrait-only summary strip, bottom-sheet dialog, shared scrim, grayscale base, minimal blue active/evaluating cue, and minimal green accepted cue
   - WebUI mobile Agent Dashboard negative asset smoke rejects browser-local Agent/task truth, raw internal ids in normal labels, aggregation wording, and closed-task-to-goal-complete inference
+  - WebUI selected-session lifecycle asset smoke requires the `parent_session_id` filter for TaskBoard-derived rows, AgentBoard rows, EventInbox rows, history targets, and control targets, and rejects the former `parentTasks.length > 0 ? parentTasks : allTasks` global fallback
   - WebUI query projection smoke
   - WebUI debug query projection smoke
   - WebUI latest-turn SSE initial snapshot plus later update smoke
@@ -111,6 +114,7 @@
 - WebUI online Phase 2D coverage must query the same service endpoint for TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl, then assert lifecycle observer status text/card counts match service truth, active Workers render before idle/historical agents with distinct styling, active Worker clicks select the TaskBoard-parented temporary worker session and refresh history/control, and the visible drawer text does not expose raw `ADP`, `runtime-turn-*`, task id, or execution id plumbing
 - WebUI mobile Agent Dashboard positive coverage must prove active/review/rework/blocked/accepted cues are direct projections of owner-backed task, agent, event, history, and selected-session turn truth
 - WebUI mobile Agent Dashboard negative coverage must prove closed Worker tasks alone cannot produce `Goal complete`, unavailable projections remain explicitly unavailable, and toggling the sheet does not reset or recreate any semantic state
+- WebUI online selected-session lifecycle coverage must prove that a newly selected session with no child tasks shows `0 current task(s)`, `0 current agent(s)`, and `0 current event(s)` even when the daemon TaskBoard still contains unrelated historical blocked tasks/events
 - WebUI JS asset smoke locks that submitted input remains observable after composer clear: pending submit cards render after existing history, pending input is cleared only after the same user text is materialized in visible turn rows, a live protocol turn with no public rows renders an explicit observable waiting row, and a latest terminal/interrupted turn still renders when selected-session transcript state is empty instead of producing a blank transcript
 - WebUI JS asset smoke locks that submit command timeout/transport failure is ambiguous: the pending user card, selected/draft session, and draft attachments remain visible, the status says dispatch is unknown, and the UI tells the operator to refresh before duplicate send instead of clearing into an empty session
 - WebUI JS asset smoke locks that an empty selected session remains visually clean: empty `SessionTurns` binds the selected session, clears the previous active turn/debug state, suppresses the generic waiting-data card, and ignores latest-active turns from other sessions
@@ -152,7 +156,7 @@
 - WebUI mobile session drawer right-swipe gesture and persisted-session -> indented worker-child hierarchy are landed and covered by asset smoke plus `scripts/webui_verify_online.mjs`
   - WebUI session rail now supports `/new` as the New dialog for global conversation or cwd-bound task creation, compact session summaries, and selected-session draft creation without inventing a separate navigation path
   - WebUI settings shell is landed as a provider/model config drawer, not a config/status drawer; it consumes owner-backed `QueryConfigStatus`, provider/model edits route through `UpdateProviderConfig`, and unsupported agent/session/workspace/skills/files/tasks/diagnostics controls remain absent until owner-backed write contracts exist
-  - WebUI online verifier owns its Settings valid-save fixture: it backs up S-profile config/env, injects a verifier-only credential env before the browser run, and restores config/env afterward so Settings proof does not depend on stale local launchd environment
+- WebUI online verifier owns its Settings valid-save fixture: it backs up S-profile config/env, injects a verifier-only credential env before the browser run, edits the currently selected primary provider instead of switching the agent to a configured fallback provider, and restores config/env afterward so Settings proof does not depend on stale local launchd environment or violate the primary/fallback-distinct config contract
   - WebUI online verifier now captures Phase 2D drawer proof by querying service truth through the same endpoint and comparing TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl status text plus visible card counts
   - WebUI New dialog task path selection and composer cwd input are landed; new conversation creates protocol-owned session metadata through ADP `CreateSession` without cwd, while new task requires an explicit selected or typed cwd and creates a cwd-bound session through ADP `CreateSession`
   - WebUI root shell intentionally does not expose persistent success/failure buttons, while WebUI JS still carries paired diagnostic prompts for slash commands and shortcuts

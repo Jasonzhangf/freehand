@@ -63,8 +63,10 @@
   - `bash -n scripts/release.sh`
   - `bash -n scripts/source-search.sh`
   - `bash -n scripts/verify-webui-online.sh`
+  - `python3 -m py_compile scripts/verify-adp-fixed-session-observability-online.py`
   - `bash -n scripts/install-global.sh`
   - `bash -n scripts/install-symlink.sh`
+  - `bash -n scripts/freehand-file-permission-preflight.sh`
   - `bash -n scripts/freehand-daemon-launchd.sh`
   - `bash -n scripts/install-launchd.sh`
   - `bash -n scripts/uninstall-launchd.sh`
@@ -80,10 +82,12 @@
   - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
   - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`
   - `scripts/install-launchd.sh restartS` refreshes S debug binaries, rewrites the env-sourcing plist, reloads only `com.freehand.daemonS`, reads the existing env bind for health checks, and restarts only that label
+  - `scripts/freehand-file-permission-preflight.sh` records macOS runtime/workdir/protected-folder permission preflight status under `~/.freehand/state/file-permission-preflight.json`; denial opens Full Disk Access settings and fails install/restart unless explicitly run with `FREEHAND_FILE_PERMISSION_PREFLIGHT=warn`
   - `scripts/install-launchd.sh installWorkerS` starts
     `com.freehand.workerS` from the same debug binary and pair token without a
     WebUI bind; `restartWorkerS` preserves the same service contract
   - `make verify-webui-online` runs the fixed S-profile `127.0.0.1:4042` real-browser WebUI + ADP proof after symlink install/restartS, injects the verifier-only provider credential env required for Settings valid-save proof, restores S-profile config/env afterward, and saves screenshots plus `summary.json` under `artifacts/webui-online/`; `make verify-webui-release-online` is the explicit release-profile `127.0.0.1:4041` proof
+  - `scripts/verify-adp-fixed-session-observability-online.py --url ws://127.0.0.1:4042/adp --session <fixed-id>` proves fixed-session submit observability with pending/final selected-session turns plus TaskBoard/AgentBoard owner truth, without creating random sessions
   - machine-readable mainline truth remains the only source for generated wiki artifacts
   - loop governance starts as report-only project control, not unattended automation
 - fixtures / replay inputs / runtime evidence paths:

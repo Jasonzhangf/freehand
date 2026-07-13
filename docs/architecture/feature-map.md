@@ -889,14 +889,16 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `provider.reason-live-bridge`
 
 - owner: `crates/freehand-runtime`
-- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-config/**`, `crates/freehand-provider-core/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-reason/**`, `crates/freehand-blocks/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
-- forbidden_paths: `crates/freehand-reason/**` semantic-owner changes unrelated to provider-neutral consumption, `crates/freehand-provider-openai/**`, `apps/freehand-daemon/**`
+- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-config/**`, `crates/freehand-provider-core/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-provider-openai/**`, `crates/freehand-reason/**`, `crates/freehand-blocks/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
+- forbidden_paths: `crates/freehand-reason/**` semantic-owner changes unrelated to provider-neutral consumption, `apps/freehand-daemon/**`
 - required_checks:
   - `cargo test -p freehand-runtime`
 - required_white_box_tests:
   - live bridge request build tests
+  - live bridge provider-neutral driver selection tests
   - live bridge anthropic single-shot mock tests
   - live bridge anthropic SSE mock tests
+  - live bridge OpenAI-compatible protocol descriptor tests
   - live bridge broadcast capture tests
   - live bridge incremental stream broadcast tests
   - live bridge invalid-schema retry tests
@@ -907,11 +909,11 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - persistence restore/write tests on runtime-owned live bridge
   - tool-result re-entry into second provider request tests
 - required_module_black_box_tests:
-  - config-selected anthropic provider can drive one runtime-owned live turn with persistence and UI projection updates
+  - config-selected provider can drive one runtime-owned live turn with persistence and UI projection updates
   - config-selected restart can restore prior closed turns and continue ordinal allocation without turn-id reuse
 - required_project_black_box_tests:
-  - CLI live-turn smoke against local anthropic-compatible mock server
-  - daemon submit-user-input HTTP smoke against local anthropic-compatible mock server
+  - CLI live-turn smoke against local provider-compatible mock server
+  - daemon submit-user-input HTTP smoke against local provider-compatible mock server
 - test_design_doc: `docs/testing/provider.reason-live-bridge.md`
 - function_map_doc: `docs/function-maps/provider.reason-live-bridge.md`
 - mainline_call_doc: `docs/mainline-calls/provider.reason-live-bridge.json`
@@ -921,8 +923,10 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - local mock transcript fixtures
 - runtime_paths:
   - `~/.freehand/ledgers/providers/anthropic`
+  - `~/.freehand/ledgers/providers/openai`
   - `~/.freehand/ledgers/reason`
   - `~/.freehand/replays/providers/anthropic`
+  - `~/.freehand/replays/providers/openai`
 - update_triggers:
   - config-to-provider bridge rules change
   - anthropic executor boundary changes

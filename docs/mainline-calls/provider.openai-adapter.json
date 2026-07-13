@@ -9,11 +9,13 @@
   "request_mainline": [
     "provider-neutral semantic request enters OpenAI adapter",
     "adapter renders either `responses` or `chat completions` request body based on selected protocol",
-    "adapter consumes typed `input_segments` and renders them to OpenAI wire text without owning segment admission truth"
+    "adapter consumes typed `input_segments` and renders them to OpenAI wire text without owning segment admission truth",
+    "adapter renders provider-neutral tool definitions and tool-result re-entry into the selected OpenAI wire shape so runtime never hardcodes protocol-specific tool wire"
   ],
   "response_mainline": [
     "OpenAI single-shot body or stream chunk becomes provider-neutral semantic output",
-    "partial tool calls stay adapter-local until enough JSON exists to emit structured arguments"
+    "partial tool calls stay adapter-local until enough JSON exists to emit structured arguments",
+    "OpenAI executor owns HTTP endpoint selection, bearer auth, status/body capture, SSE reading, and callback mapping before returning provider-neutral semantic outputs"
   ],
   "error_mainline": [
     "unsupported protocol, invalid JSON body, and invalid tool-argument payload are explicit adapter errors",
@@ -40,7 +42,7 @@
       "step": "01",
       "symbol_path": "OpenAiAdapter::render_request",
       "file_path": "crates/freehand-provider-openai/src/lib.rs",
-      "responsibility": "render semantic request to OpenAI wire request",
+      "responsibility": "render semantic request, tool definitions, and tool-result re-entry to OpenAI wire request",
       "input_semantic": "provider semantic request",
       "output_semantic": "OpenAI path plus JSON body",
       "caller": "runtime/provider caller",
@@ -68,10 +70,32 @@
       "caller": "runtime/provider caller",
       "callee": "adapter stream parser",
       "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "OpenAiExecutor::execute_once_with_raw",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "render and execute one non-stream OpenAI-compatible request without leaking wire DTOs to runtime",
+      "input_semantic": "provider semantic request plus auth/base URL plus raw callback",
+      "output_semantic": "provider semantic outputs plus callback-visible raw body/error body",
+      "caller": "runtime provider driver",
+      "callee": "OpenAI executor",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "OpenAiExecutor::execute_stream_with_raw",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "render and execute one streaming OpenAI-compatible request, collecting SSE events through adapter-owned parsing",
+      "input_semantic": "provider semantic request plus auth/base URL plus raw callback plus semantic callback",
+      "output_semantic": "incremental raw event bodies plus incremental semantic output batches plus accumulated outputs",
+      "caller": "runtime provider driver",
+      "callee": "OpenAI executor",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
-    "renderer and parser bindings now match `OpenAiAdapter`",
+    "renderer/parser bindings match `OpenAiAdapter`, and live HTTP/SSE executor bindings match `OpenAiExecutor`",
     "generated wiki must be regenerated from `docs/mainline-calls/provider.openai-adapter.json` when this function-map truth changes"
   ]
 }

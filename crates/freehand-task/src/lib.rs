@@ -2133,6 +2133,7 @@ impl TaskRuntime {
 }
 
 const DEFAULT_TASK_LEASE_TTL_SECONDS: u64 = 300;
+const RUNNING_LEASE_ACQUISITION_GRACE_SECONDS: u64 = 5;
 
 #[derive(Debug, Clone)]
 struct TaskStore {
@@ -2617,9 +2618,16 @@ fn reconcile_running_leases(
             }
             continue;
         }
-        let lease_valid = state
-            .leases
-            .get(&task_id)
+        let lease = state.leases.get(&task_id);
+        if lease.is_none()
+            && now
+                <= task
+                    .updated_at
+                    .saturating_add(RUNNING_LEASE_ACQUISITION_GRACE_SECONDS)
+        {
+            continue;
+        }
+        let lease_valid = lease
             .map(|lease| {
                 lease.status == "active"
                     && lease.task_id == task_id
@@ -4199,6 +4207,90 @@ mod tests {
             read_json(&runtime_home.join("state/task-runtime/master/leases.json")).expect("leases");
         assert!(leases.is_empty());
         assert_eq!(actor.source, "control.center");
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn boot_preserves_fresh_running_task_during_lease_acquisition_grace() {
+        let runtime_home = temp_runtime_home("task-fresh-missing-lease-grace");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+        let task_id = outcome.task.task_id.clone();
+        runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("resume");
+        write_json_atomic(
+            &runtime_home.join("state/task-runtime/master/leases.json"),
+            &Vec::<TaskLease>::new(),
+        )
+        .expect("simulate lease acquisition window");
+        let before = runtime.query_task(&task_id).expect("query before boot");
+
+        let concurrent = TaskRuntime::boot(&runtime_home, agent_id).expect("concurrent boot");
+        let after = concurrent.query_task(&task_id).expect("query after boot");
+
+        assert_eq!(after.status, TaskStatus::Running);
+        assert_eq!(after.last_event_seq, before.last_event_seq);
+        assert_eq!(after.last_event_id, before.last_event_id);
+        assert!(
+            !concurrent
+                .task_history(&task_id)
+                .expect("history")
+                .iter()
+                .any(|event| event.event_type == "TaskInterrupted")
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn boot_interrupts_running_task_with_missing_lease_after_acquisition_grace() {
+        let runtime_home = temp_runtime_home("task-stale-missing-lease");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let outcome = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create");
+        let task_id = outcome.task.task_id.clone();
+        runtime
+            .resume_task(TaskMutationRequest {
+                task_id: task_id.clone(),
+                actor: sample_actor(agent_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("resume");
+        write_json_atomic(
+            &runtime_home.join("state/task-runtime/master/leases.json"),
+            &Vec::<TaskLease>::new(),
+        )
+        .expect("remove lease");
+        let snapshot_path = runtime_home
+            .join("state/tasks/master")
+            .join(format!("{}.json", task_id.as_str()));
+        let mut stale: TaskSnapshot = read_json(&snapshot_path).expect("read task snapshot");
+        stale.updated_at =
+            now_unix_seconds().saturating_sub(RUNNING_LEASE_ACQUISITION_GRACE_SECONDS + 1);
+        write_json_atomic(&snapshot_path, &stale).expect("age task snapshot");
+
+        let recovered = TaskRuntime::boot(&runtime_home, agent_id).expect("recover");
+        let task = recovered.query_task(&task_id).expect("query");
+
+        assert_eq!(task.status, TaskStatus::Interrupted);
+        assert_eq!(task.last_event_seq, stale.last_event_seq + 1);
+        assert_eq!(
+            recovered
+                .task_history(&task_id)
+                .expect("history")
+                .last()
+                .map(|event| event.event_type.as_str()),
+            Some("TaskInterrupted")
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 

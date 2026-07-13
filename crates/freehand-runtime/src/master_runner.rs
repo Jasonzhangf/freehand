@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -6,9 +7,11 @@ use std::thread;
 use std::time::Duration;
 
 use freehand_config::{AgentMode, SelectedAgentConfig};
-use freehand_contracts::{AgentId, SessionId, TraceId, TurnId};
+use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
+use freehand_reason::{ReasonPersistence, ReasonPersistenceError};
 use freehand_task::{
-    TaskEventInboxEntry, TaskEventInboxQuery, TaskId, TaskRuntime, TaskSnapshot, TaskStatus,
+    TaskActor, TaskAppendRequest, TaskBoardQuery, TaskEventInboxEntry, TaskEventInboxQuery, TaskId,
+    TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -17,7 +20,8 @@ use super::{
     DueTimerSchedule, LiveReasonTaskDecisionBoundary, LiveReasonTaskDecisionMode,
     LiveReasonTurnRequest, RuntimeAgentBootstrapError, claim_due_timer_schedule,
     complete_due_timer_schedule, fail_due_timer_schedule, load_default_runtime_agent,
-    now_unix_seconds, run_live_reason_turn, run_master_lifecycle_reason_turn, sanitize_identifier,
+    now_unix_seconds, run_live_reason_turn, run_master_lifecycle_reason_turn,
+    runtime_turn_position, sanitize_identifier, ui_user_text_for_turn,
 };
 
 #[cfg(test)]
@@ -27,6 +31,7 @@ const DEFAULT_POLL_INTERVAL_MILLIS: u64 = 1_000;
 const MASTER_RETRY_INITIAL_BACKOFF_MILLIS: u64 = 1_000;
 const MASTER_RETRY_MAX_BACKOFF_MILLIS: u64 = 30_000;
 const MASTER_LIFECYCLE_DECISION_MAX_ROUNDS: usize = 8;
+const MASTER_BLOCKED_DECISION_AUTO_APPEND_ATTEMPTS: u32 = 16;
 const CANCEL_POLL_MILLIS: u64 = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +49,11 @@ pub enum ProductionMasterTickOutcome {
     },
     TimerFired {
         timer_id: String,
+        summary: String,
+    },
+    ParentEvaluated {
+        parent_session_id: SessionId,
+        evaluated_child_task_ids: Vec<TaskId>,
         summary: String,
     },
 }
@@ -121,6 +131,12 @@ trait MasterTurnExecutor: Send + Sync {
         selected: &SelectedAgentConfig,
         request: LiveReasonTurnRequest,
     ) -> Result<String, String>;
+
+    fn execute_parent_evaluation(
+        &self,
+        selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+    ) -> Result<String, String>;
 }
 
 struct LiveMasterTurnExecutor;
@@ -155,6 +171,20 @@ impl MasterTurnExecutor for LiveMasterTurnExecutor {
             .ok_or_else(|| "timer wakeup turn closed without terminal event".to_owned())?;
         Ok(terminal.summary.clone())
     }
+
+    fn execute_parent_evaluation(
+        &self,
+        selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+    ) -> Result<String, String> {
+        let outcome = run_live_reason_turn(selected, request).map_err(|error| error.to_string())?;
+        let terminal = outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .ok_or_else(|| "parent evaluation turn closed without terminal event".to_owned())?;
+        Ok(terminal.summary.clone())
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -167,6 +197,8 @@ struct MasterLoopState {
     retry_event_id: Option<String>,
     #[serde(default)]
     retry_attempt: u32,
+    #[serde(default)]
+    completed_parent_evaluations: BTreeSet<String>,
 }
 
 pub struct ProductionMasterRunner {
@@ -215,9 +247,6 @@ impl ProductionMasterRunner {
     }
 
     pub fn run_once(&self) -> Result<ProductionMasterTickOutcome, ProductionMasterRunnerError> {
-        if let Some(outcome) = self.handle_due_timer()? {
-            return Ok(outcome);
-        }
         let task_runtime = self.open_task_center()?;
         let mut state = self.load_state()?;
         if !state.initialized {
@@ -232,6 +261,7 @@ impl ProductionMasterRunner {
             self.write_state(&state)?;
             return Ok(ProductionMasterTickOutcome::Idle);
         }
+
         let inbox = task_runtime
             .query_event_inbox(TaskEventInboxQuery {
                 after_cursor: state.cursor.clone(),
@@ -239,6 +269,9 @@ impl ProductionMasterRunner {
             })
             .map_err(task_center_error)?;
         if inbox.events.is_empty() {
+            if let Some(outcome) = self.handle_due_timer()? {
+                return Ok(outcome);
+            }
             return Ok(ProductionMasterTickOutcome::Idle);
         }
 
@@ -249,7 +282,7 @@ impl ProductionMasterRunner {
             } else {
                 0
             };
-            match self.handle_event(&task_runtime, &event, attempt) {
+            match self.handle_event(&task_runtime, &event, attempt, &mut state) {
                 Ok(Some(outcome)) => latest_outcome = outcome,
                 Ok(None) => {}
                 Err(error) => {
@@ -265,6 +298,12 @@ impl ProductionMasterRunner {
             state.retry_attempt = 0;
             state.cursor = Some(event.cursor);
             self.write_state(&state)?;
+        }
+        if latest_outcome != ProductionMasterTickOutcome::Idle {
+            return Ok(latest_outcome);
+        }
+        if let Some(outcome) = self.handle_due_timer()? {
+            return Ok(outcome);
         }
         Ok(latest_outcome)
     }
@@ -350,10 +389,14 @@ impl ProductionMasterRunner {
         task_runtime: &TaskRuntime,
         event: &TaskEventInboxEntry,
         attempt: u32,
+        state: &mut MasterLoopState,
     ) -> Result<Option<ProductionMasterTickOutcome>, ProductionMasterRunnerError> {
         let task = task_runtime
             .query_task(&event.task_id)
             .map_err(task_center_error)?;
+        if event.kind == "task_closed" {
+            return self.handle_parent_task_closed(task_runtime, &task, attempt, state);
+        }
         let actionable = match event.kind.as_str() {
             "review_ready" => matches!(
                 task.status,
@@ -368,6 +411,26 @@ impl ProductionMasterRunner {
         }
 
         let from = task.status.clone();
+        if event.kind == "execution_blocked"
+            && from == TaskStatus::Blocked
+            && attempt >= MASTER_BLOCKED_DECISION_AUTO_APPEND_ATTEMPTS
+        {
+            let note = format!(
+                "blocked_decision: Master lifecycle provider remained unavailable after {attempt} attempts; leaving task blocked and continuing other pending lifecycle events"
+            );
+            task_runtime
+                .append_task(TaskAppendRequest {
+                    task_id: task.task_id.clone(),
+                    note: note.clone(),
+                    actor: master_loop_actor(&self.master_agent_id),
+                    watermark: master_loop_watermark("blocked_auto_append"),
+                })
+                .map_err(task_center_error)?;
+            return Ok(Some(ProductionMasterTickOutcome::BlockedObserved {
+                task_id: task.task_id,
+                summary: note,
+            }));
+        }
         let history_len_before = task_runtime
             .task_history(&task.task_id)
             .map_err(task_center_error)?
@@ -437,6 +500,92 @@ impl ProductionMasterRunner {
             task_id: task.task_id,
             from,
             to: current.status,
+            summary,
+        }))
+    }
+
+    fn handle_parent_task_closed(
+        &self,
+        task_runtime: &TaskRuntime,
+        closed_task: &TaskSnapshot,
+        attempt: u32,
+        state: &mut MasterLoopState,
+    ) -> Result<Option<ProductionMasterTickOutcome>, ProductionMasterRunnerError> {
+        if closed_task.status != TaskStatus::Closed {
+            return Ok(None);
+        }
+        let Some(parent_session_id) = closed_task.parent.session_id.clone() else {
+            return Ok(None);
+        };
+        let board = task_runtime
+            .query_task_board(TaskBoardQuery {
+                status: None,
+                assignee: None,
+                include_terminal: true,
+            })
+            .map_err(task_center_error)?;
+        let mut children = board
+            .tasks
+            .into_iter()
+            .filter(|task| task.parent.session_id.as_ref() == Some(&parent_session_id))
+            .collect::<Vec<_>>();
+        if children.is_empty()
+            || children
+                .iter()
+                .any(|task| task.status != TaskStatus::Closed)
+        {
+            return Ok(None);
+        }
+        children.sort_by(|left, right| left.task_id.cmp(&right.task_id));
+        let evaluation_key = parent_evaluation_key(&parent_session_id, &children);
+        if state.completed_parent_evaluations.contains(&evaluation_key) {
+            return Ok(None);
+        }
+        let evaluation_marker = parent_evaluation_marker(&evaluation_key);
+        if let Some(summary) = persisted_parent_evaluation_summary(
+            &self.runtime_home,
+            &self.master_agent_id,
+            &parent_session_id,
+            &evaluation_marker,
+        )? {
+            state.completed_parent_evaluations.insert(evaluation_key);
+            return Ok(Some(ProductionMasterTickOutcome::ParentEvaluated {
+                parent_session_id,
+                evaluated_child_task_ids: children.into_iter().map(|task| task.task_id).collect(),
+                summary,
+            }));
+        }
+        let user_objectives = parent_user_objectives(
+            &self.runtime_home,
+            &self.master_agent_id,
+            &parent_session_id,
+        )?;
+        let completed_subtasks = children
+            .iter()
+            .map(|task| parent_completed_subtask_truth(task_runtime, task))
+            .collect::<Result<Vec<_>, _>>()?;
+        let evaluation_turn_id = next_parent_evaluation_turn_id(
+            &self.runtime_home,
+            &self.master_agent_id,
+            &parent_session_id,
+        )?;
+        let request = parent_evaluation_live_request(
+            &self.runtime_home,
+            &parent_session_id,
+            &evaluation_turn_id,
+            &evaluation_marker,
+            attempt,
+            &user_objectives,
+            &completed_subtasks,
+        )?;
+        let summary = self
+            .executor
+            .execute_parent_evaluation(&self.selected, request)
+            .map_err(ProductionMasterRunnerError::Execution)?;
+        state.completed_parent_evaluations.insert(evaluation_key);
+        Ok(Some(ProductionMasterTickOutcome::ParentEvaluated {
+            parent_session_id,
+            evaluated_child_task_ids: children.into_iter().map(|task| task.task_id).collect(),
             summary,
         }))
     }
@@ -526,6 +675,215 @@ Trigger event:\n{event_json}"
     })
 }
 
+#[derive(Debug, Serialize)]
+struct ParentCompletedSubtaskTruth {
+    task_id: TaskId,
+    title: String,
+    content: String,
+    goal: String,
+    required_deliverables: Vec<String>,
+    acceptance: Vec<String>,
+    review_summary: String,
+    review_deliverables: Vec<String>,
+    review_evidence: Vec<String>,
+}
+
+fn parent_completed_subtask_truth(
+    task_runtime: &TaskRuntime,
+    task: &TaskSnapshot,
+) -> Result<ParentCompletedSubtaskTruth, ProductionMasterRunnerError> {
+    let history = task_runtime
+        .task_history(&task.task_id)
+        .map_err(task_center_error)?;
+    let review = history
+        .iter()
+        .rev()
+        .find(|event| event.event_type == "TaskReviewSubmitted")
+        .ok_or_else(|| {
+            ProductionMasterRunnerError::State(format!(
+                "closed child task `{}` has no TaskReviewSubmitted truth",
+                task.task_id.as_str()
+            ))
+        })?;
+    let summary = review
+        .payload
+        .get("summary")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            ProductionMasterRunnerError::State(format!(
+                "closed child task `{}` review summary is missing",
+                task.task_id.as_str()
+            ))
+        })?
+        .to_owned();
+    Ok(ParentCompletedSubtaskTruth {
+        task_id: task.task_id.clone(),
+        title: task.title.clone(),
+        content: task.content.clone(),
+        goal: task.goal.clone(),
+        required_deliverables: task.deliverables.clone(),
+        acceptance: task.acceptance.clone(),
+        review_summary: summary,
+        review_deliverables: review_payload_strings(&review.payload, "deliverables"),
+        review_evidence: review_payload_strings(&review.payload, "evidence"),
+    })
+}
+
+fn review_payload_strings(payload: &serde_json::Value, field: &str) -> Vec<String> {
+    payload
+        .get(field)
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn parent_evaluation_key(parent_session_id: &SessionId, children: &[TaskSnapshot]) -> String {
+    format!(
+        "{}|{}",
+        parent_session_id.as_str(),
+        children
+            .iter()
+            .map(|task| format!("{}:{}", task.task_id.as_str(), task.last_event_seq))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn parent_evaluation_marker(evaluation_key: &str) -> String {
+    format!("{:016x}", stable_parent_evaluation_hash(evaluation_key))
+}
+
+fn stable_parent_evaluation_hash(value: &str) -> u64 {
+    value
+        .as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        })
+}
+
+fn persisted_parent_evaluation_summary(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    parent_session_id: &SessionId,
+    evaluation_marker: &str,
+) -> Result<Option<String>, ProductionMasterRunnerError> {
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+    let turns = match persistence.restore_turn_snapshots_for_ui(parent_session_id) {
+        Ok(turns) => turns,
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => return Ok(None),
+        Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
+    };
+    Ok(turns.into_iter().find_map(|turn| {
+        let terminal = turn.terminal_event?;
+        (turn.request.user_text.contains(&format!(
+            "<freehand_parent_evaluation id=\"{evaluation_marker}\">"
+        )) && matches!(
+            terminal.status,
+            TerminalStatus::Success | TerminalStatus::ToolPending | TerminalStatus::Blocked
+        ))
+        .then_some(terminal.summary)
+    }))
+}
+
+fn next_parent_evaluation_turn_id(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    parent_session_id: &SessionId,
+) -> Result<TurnId, ProductionMasterRunnerError> {
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+    let turns = match persistence.restore_turn_snapshots_for_ui(parent_session_id) {
+        Ok(turns) => turns,
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => Vec::new(),
+        Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
+    };
+    let next = turns
+        .iter()
+        .map(|turn| runtime_turn_position(&turn.request.turn_id).0)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    Ok(TurnId::new(format!("runtime-turn-{next}")))
+}
+
+fn parent_evaluation_live_request(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    turn_id: &TurnId,
+    evaluation_marker: &str,
+    attempt: u32,
+    user_objectives: &[String],
+    completed_subtasks: &[ParentCompletedSubtaskTruth],
+) -> Result<LiveReasonTurnRequest, ProductionMasterRunnerError> {
+    let objectives_json = serde_json::to_string_pretty(user_objectives)
+        .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
+    let subtasks_json = serde_json::to_string_pretty(completed_subtasks)
+        .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
+    Ok(LiveReasonTurnRequest {
+        runtime_home: runtime_home.to_path_buf(),
+        session_id: parent_session_id.clone(),
+        turn_id: turn_id.clone(),
+        trace_id: TraceId::new(format!(
+            "master-parent-evaluate-trace-{evaluation_marker}-attempt-{attempt}"
+        )),
+        prompt: format!(
+            "<freehand_parent_evaluation id=\"{evaluation_marker}\">\n\
+You are the production Master resuming the original user session after the current set of required child Worker tasks closed.\n\
+This is an overall-goal evaluation turn, not a result aggregation turn.\n\
+Compare the original user objective history with every decomposed child task's content, goal, required deliverables, acceptance criteria, and accepted Worker review truth.\n\
+Do not expose raw Worker transcripts or internal lifecycle session text.\n\
+\n\
+Decision contract:\n\
+- If accepted child work is insufficient, inconsistent, or needs improvement, use the task tool to create and assign concrete correction/improvement child tasks in this same parent session.\n\
+- If the completed subgoals reveal additional work needed for the overall objective, create and assign the next required child tasks.\n\
+- If an external dependency prevents progress, return an explicit blocked decision naming the required action.\n\
+- Use `claim=\"complete\"` and produce the final user-visible answer only when the overall user objective is actually verified complete.\n\
+- Do not merely summarize the Worker results and call that completion.\n\
+\n\
+Original user objective history:\n\
+{objectives_json}\n\
+\n\
+Completed subtask and accepted review truth:\n{subtasks_json}"
+        ),
+        cwd: Some(runtime_home.to_path_buf()),
+        stream: false,
+        cancel_token: None,
+    })
+}
+
+fn parent_user_objectives(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    parent_session_id: &SessionId,
+) -> Result<Vec<String>, ProductionMasterRunnerError> {
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+    let turns = match persistence.restore_turn_snapshots_for_ui(parent_session_id) {
+        Ok(turns) => turns,
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => Vec::new(),
+        Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
+    };
+    let mut seen = BTreeSet::new();
+    let objectives = turns
+        .into_iter()
+        .filter(|turn| runtime_turn_position(&turn.request.turn_id).1 == 1)
+        .map(|turn| ui_user_text_for_turn(&turn))
+        .filter(|text| !text.trim().is_empty())
+        .filter(|text| !text.contains("<freehand_parent_"))
+        .filter(|text| seen.insert(text.clone()))
+        .collect::<Vec<_>>();
+    if objectives.is_empty() {
+        return Err(ProductionMasterRunnerError::State(format!(
+            "parent session `{}` has no persisted user objective truth",
+            parent_session_id.as_str()
+        )));
+    }
+    Ok(objectives)
+}
+
 fn timer_live_request(
     runtime_home: &Path,
     due: &DueTimerSchedule,
@@ -577,6 +935,24 @@ fn master_decision_boundary(task: &TaskSnapshot) -> LiveReasonTaskDecisionBounda
 
 fn task_center_error(error: freehand_task::TaskError) -> ProductionMasterRunnerError {
     ProductionMasterRunnerError::TaskCenter(error.to_string())
+}
+
+fn master_loop_actor(agent_id: &AgentId) -> TaskActor {
+    TaskActor {
+        agent_id: agent_id.clone(),
+        source: "runtime.master-worker-loop".to_owned(),
+        session_id: None,
+        turn_id: None,
+        trace_id: None,
+    }
+}
+
+fn master_loop_watermark(hook: &str) -> TaskWatermark {
+    TaskWatermark {
+        metadata_id: None,
+        hook: Some(format!("runtime.master-worker-loop.{hook}")),
+        action_tool_call_id: None,
+    }
 }
 
 fn sleep_with_cancel(cancel: &AtomicBool, duration: Duration) {
