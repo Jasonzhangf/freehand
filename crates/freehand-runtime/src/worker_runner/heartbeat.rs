@@ -3,10 +3,14 @@ use std::thread;
 use std::time::Duration;
 
 use freehand_contracts::AgentId;
-use freehand_task::{TaskHeartbeatRequest, TaskId, TaskRuntime};
+use freehand_task::{
+    AGENT_PROCESS_HEARTBEAT_TTL_SECONDS, AgentLifecycleEvent, TaskHeartbeatRequest, TaskId,
+    TaskRuntime,
+};
 
 use super::{
-    DEFAULT_LEASE_TTL_SECONDS, ProductionWorkerRunnerError, worker_actor, worker_watermark,
+    DEFAULT_LEASE_TTL_SECONDS, ProductionWorkerRunnerError, WorkerProcessIdentity,
+    now_unix_seconds, worker_actor, worker_watermark,
 };
 
 pub(super) struct WorkerHeartbeat {
@@ -21,11 +25,14 @@ impl WorkerHeartbeat {
         task_id: TaskId,
         worker_agent_id: AgentId,
         execution_id: String,
+        process_identity: WorkerProcessIdentity,
     ) -> Self {
         let (stop, receiver) = mpsc::channel();
         let error = Arc::new(Mutex::new(None));
         let thread_error = Arc::clone(&error);
-        let interval = Duration::from_secs((DEFAULT_LEASE_TTL_SECONDS / 3).max(1));
+        let interval = Duration::from_secs(
+            (DEFAULT_LEASE_TTL_SECONDS / 3).clamp(1, AGENT_PROCESS_HEARTBEAT_TTL_SECONDS / 2),
+        );
         let handle = thread::spawn(move || {
             while receiver.recv_timeout(interval).is_err() {
                 let result = task_runtime.heartbeat_task(TaskHeartbeatRequest {
@@ -34,6 +41,19 @@ impl WorkerHeartbeat {
                     actor: worker_actor(&worker_agent_id, None),
                     watermark: worker_watermark(&execution_id, "heartbeat"),
                 });
+                if let Err(error) = result {
+                    *thread_error.lock().expect("lock worker heartbeat error") =
+                        Some(error.to_string());
+                    break;
+                }
+                let result = task_runtime.apply_agent_lifecycle_event(
+                    AgentLifecycleEvent::ProcessHeartbeat {
+                        agent_id: worker_agent_id.clone(),
+                        process_id: process_identity.process_id,
+                        process_instance_id: process_identity.process_instance_id.clone(),
+                        observed_at: now_unix_seconds(),
+                    },
+                );
                 if let Err(error) = result {
                     *thread_error.lock().expect("lock worker heartbeat error") =
                         Some(error.to_string());

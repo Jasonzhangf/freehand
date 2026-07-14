@@ -2,7 +2,16 @@
 
 - feature_id: `agent.lifecycle`
 - owner: `crates/freehand-task` initially
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `agent.heartbeat`
 - lifecycle path under test:
+  - Worker process start enters the lifecycle owner as a typed
+    `ProcessStarted` event with PID, process-instance identity, and start time
+  - every Worker poll tick, including idle ticks, enters the same owner as a
+    typed `ProcessHeartbeat` event
+  - AgentBoard and AgentLifecycle queries derive `alive` only from the
+    process-heartbeat timestamp and the owner TTL
   - typed runtime/provider/tool/error/task event enters lifecycle reducer
   - reducer updates one agent's lifecycle snapshot
   - AgentBoard projection exposes lifecycle truth
@@ -13,8 +22,24 @@
   - Phase 2A worker execution and review events project lifecycle state from
     typed Task Center truth, not from raw model text
 
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `agent.heartbeat` | bound | `cargo test -p freehand-task agent_process -- --nocapture` covers start, same-instance heartbeat, new-instance restart count, stale/missing heartbeat, task-activity separation, and malformed instance rejection | `cargo test -p freehand-runtime production_worker_runner -- --nocapture` proves constructor start plus idle and active tick heartbeat through the Worker runner | `scripts/verify-master-three-worker-e2e-online.sh` proves three fresh Worker identities, one explicit PID stop, TTL-offline projection, same-agent restart, and restart-count increment in an isolated runtime home |
+
 ## White-Box Coverage
 
+- `ProcessStarted` persists PID, unique process instance, start timestamp,
+  heartbeat timestamp, `alive=true`, and initial `restart_count=0`
+- same-instance heartbeat refreshes process health without incrementing
+  `restart_count`
+- a different process instance for the same agent increments `restart_count`
+- fresh heartbeat projects `alive=true`; stale or missing process heartbeat
+  projects `alive=false` without deleting task/execution/activity history
+- task/model/tool activity never refreshes `process_heartbeat_at`
+- empty process instance identity and PID zero are rejected without lifecycle
+  mutation
 - `model_thinking` state from typed provider/model request event
 - `tool_running` state from typed tool execution event
 - `recovering` state from failed-tool/schema-polishing/provider-retry typed facts
@@ -31,6 +56,11 @@
 
 ## Module Black-Box Coverage
 
+- production Worker constructor emits one typed process-start event
+- idle and active `ProductionWorkerRunner::run_once` ticks refresh the same
+  process heartbeat
+- UI protocol projection exposes PID, process instance, start/heartbeat
+  timestamps, and restart count from owner truth
 - runtime can query AgentBoard truth without UI-local state
 - runtime can query one AgentLifecycleSnapshot by agent id
 - CLI/ADP headless sample can query lifecycle truth for a known agent id
@@ -40,8 +70,10 @@
 
 ## Project Black-Box Impact
 
-- Master will later consume AgentBoard summaries instead of raw logs.
-- UI/Android will later render lifecycle projections instead of inferring state.
+- Master consumes AgentBoard process health instead of inferring Worker
+  availability from task activity or launchd state.
+- UI/Android render process health and restart identity from owner projection
+  instead of inferring state.
 - Worker Control may read lifecycle truth for status answers, but it must not mutate task truth.
 
 ## Required Checks
@@ -50,6 +82,7 @@
 cargo test -p freehand-task
 cargo test -p freehand-runtime
 cargo test -p freehand-ui-protocol
+cargo test -p freehand-daemon worker_mode -- --nocapture
 cargo test -p freehand-cli
 cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
@@ -64,3 +97,5 @@ cargo run -p xtask -- gates check
 - Phase 2A restart same-id lifecycle proof is implemented by
   `master-worker-foundation-sample --verify ...`
 - no standalone model-facing `agent` tool is planned for Phase 1
+- launchd owns process supervision only; it does not own or synthesize
+  AgentBoard health truth

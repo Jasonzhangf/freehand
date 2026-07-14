@@ -129,6 +129,51 @@ fn production_worker_runner_idle_does_not_create_task_truth() {
             .expect("list tasks")
             .is_empty()
     );
+    let lifecycle = task_runtime
+        .query_agent_lifecycle(&AgentId::new("worker"))
+        .expect("worker lifecycle");
+    assert!(lifecycle.alive);
+    assert_eq!(lifecycle.process_id, Some(std::process::id()));
+    assert!(lifecycle.process_instance_id.is_some());
+    assert!(lifecycle.process_started_at.is_some());
+    assert!(lifecycle.process_heartbeat_at.is_some());
+    assert_eq!(lifecycle.restart_count, 0);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_worker_runner_restart_reuses_agent_id_and_increments_process_identity() {
+    let runtime_home = temp_path("process-restart");
+    let first = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubExecutor::new(Err("must not execute".to_owned()))),
+    );
+    first.run_once().expect("first idle tick");
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let first_lifecycle = task_runtime
+        .query_agent_lifecycle(&AgentId::new("worker"))
+        .expect("first lifecycle");
+
+    let restarted = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubExecutor::new(Err("must not execute".to_owned()))),
+    );
+    restarted.run_once().expect("restarted idle tick");
+    let restarted_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("restarted task runtime");
+    let restarted_lifecycle = restarted_runtime
+        .query_agent_lifecycle(&AgentId::new("worker"))
+        .expect("restarted lifecycle");
+
+    assert_eq!(restarted_lifecycle.agent_id, first_lifecycle.agent_id);
+    assert_ne!(
+        restarted_lifecycle.process_instance_id,
+        first_lifecycle.process_instance_id
+    );
+    assert_eq!(restarted_lifecycle.restart_count, 1);
+    assert!(restarted_lifecycle.alive);
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }

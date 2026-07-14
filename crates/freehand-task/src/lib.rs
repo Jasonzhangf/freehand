@@ -181,6 +181,16 @@ pub struct AgentLifecycleSnapshot {
     pub stats: AgentLifecycleStats,
     pub last_seen_at: u64,
     pub next_check_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_instance_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_started_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_heartbeat_at: Option<u64>,
+    #[serde(default)]
+    pub restart_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,6 +203,18 @@ pub struct AgentBoardProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentLifecycleEvent {
+    ProcessStarted {
+        agent_id: AgentId,
+        process_id: u32,
+        process_instance_id: String,
+        started_at: u64,
+    },
+    ProcessHeartbeat {
+        agent_id: AgentId,
+        process_id: u32,
+        process_instance_id: String,
+        observed_at: u64,
+    },
     ModelThinking {
         agent_id: AgentId,
         task_id: Option<TaskId>,
@@ -223,7 +245,9 @@ pub enum AgentLifecycleEvent {
 impl AgentLifecycleEvent {
     pub fn agent_id(&self) -> &AgentId {
         match self {
-            Self::ModelThinking { agent_id, .. }
+            Self::ProcessStarted { agent_id, .. }
+            | Self::ProcessHeartbeat { agent_id, .. }
+            | Self::ModelThinking { agent_id, .. }
             | Self::ToolRunning { agent_id, .. }
             | Self::Recovering { agent_id, .. }
             | Self::Blocked { agent_id, .. } => agent_id,
@@ -236,6 +260,7 @@ impl AgentLifecycleEvent {
             | Self::ToolRunning { task_id, .. }
             | Self::Recovering { task_id, .. }
             | Self::Blocked { task_id, .. } => task_id.as_ref(),
+            Self::ProcessStarted { .. } | Self::ProcessHeartbeat { .. } => None,
         }
     }
 
@@ -245,6 +270,7 @@ impl AgentLifecycleEvent {
             | Self::ToolRunning { turn_id, .. }
             | Self::Recovering { turn_id, .. }
             | Self::Blocked { turn_id, .. } => turn_id.as_ref(),
+            Self::ProcessStarted { .. } | Self::ProcessHeartbeat { .. } => None,
         }
     }
 }
@@ -1738,6 +1764,7 @@ impl TaskRuntime {
         &self,
         event: AgentLifecycleEvent,
     ) -> Result<AgentLifecycleSnapshot, TaskError> {
+        validate_agent_lifecycle_event(&event)?;
         let mut state = self
             .state
             .lock()
@@ -1753,6 +1780,20 @@ impl TaskRuntime {
             .get(&agent_id)
             .cloned()
             .unwrap_or_else(|| lifecycle_from_agent_snapshot(agent, now));
+        if snapshot.current_task_id.is_none() && agent.current_task_id.is_some() {
+            let assigned = lifecycle_from_agent_snapshot(agent, now);
+            snapshot.state = assigned.state;
+            snapshot.state_entered_at = assigned.state_entered_at;
+            snapshot.elapsed_ms = assigned.elapsed_ms;
+            snapshot.current_task_id = assigned.current_task_id;
+            snapshot.current_execution_id = assigned.current_execution_id;
+            snapshot.current_activity = assigned.current_activity;
+        }
+        if apply_process_lifecycle_event(&mut snapshot, &event)? {
+            self.store.write_agent_lifecycle_snapshot(&snapshot)?;
+            state.lifecycle.insert(agent_id, snapshot.clone());
+            return Ok(project_agent_lifecycle_health(snapshot, now));
+        }
         let previous = snapshot.current_activity.clone();
         let (next_state, activity, model, stats_update) = lifecycle_event_projection(&event, now);
         snapshot.state = next_state;
@@ -1779,16 +1820,19 @@ impl TaskRuntime {
         &self,
         agent_id: &AgentId,
     ) -> Result<AgentLifecycleSnapshot, TaskError> {
+        let now = now_unix_seconds();
         self.state
             .lock()
             .map_err(|err| TaskError::Persistence(err.to_string()))?
             .lifecycle
             .get(agent_id)
             .cloned()
+            .map(|snapshot| project_agent_lifecycle_health(snapshot, now))
             .ok_or_else(|| TaskError::AgentNotFound(agent_id.as_str().to_owned()))
     }
 
     pub fn query_agent_board(&self) -> Result<AgentBoardProjection, TaskError> {
+        let now = now_unix_seconds();
         let mut agents = self
             .state
             .lock()
@@ -1796,6 +1840,7 @@ impl TaskRuntime {
             .lifecycle
             .values()
             .cloned()
+            .map(|snapshot| project_agent_lifecycle_health(snapshot, now))
             .collect::<Vec<_>>();
         agents.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
         Ok(AgentBoardProjection {
@@ -2136,6 +2181,7 @@ impl TaskRuntime {
 
 const DEFAULT_TASK_LEASE_TTL_SECONDS: u64 = 300;
 const RUNNING_LEASE_ACQUISITION_GRACE_SECONDS: u64 = 5;
+pub const AGENT_PROCESS_HEARTBEAT_TTL_SECONDS: u64 = 5;
 static ATOMIC_WRITE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
@@ -3518,7 +3564,126 @@ fn lifecycle_from_agent_snapshot(agent: &AgentSnapshot, now: u64) -> AgentLifecy
         },
         last_seen_at: agent.last_seen_at,
         next_check_at: None,
+        process_id: None,
+        process_instance_id: None,
+        process_started_at: None,
+        process_heartbeat_at: None,
+        restart_count: 0,
     }
+}
+
+fn validate_agent_lifecycle_event(event: &AgentLifecycleEvent) -> Result<(), TaskError> {
+    match event {
+        AgentLifecycleEvent::ProcessStarted {
+            process_id,
+            process_instance_id,
+            started_at,
+            ..
+        } => {
+            require_process_id(*process_id)?;
+            require_text(process_instance_id, "process_instance_id")?;
+            require_timestamp(*started_at, "started_at")
+        }
+        AgentLifecycleEvent::ProcessHeartbeat {
+            process_id,
+            process_instance_id,
+            observed_at,
+            ..
+        } => {
+            require_process_id(*process_id)?;
+            require_text(process_instance_id, "process_instance_id")?;
+            require_timestamp(*observed_at, "observed_at")
+        }
+        AgentLifecycleEvent::ModelThinking { model, .. } => require_text(model, "model"),
+        AgentLifecycleEvent::ToolRunning { tool_name, .. } => require_text(tool_name, "tool_name"),
+        AgentLifecycleEvent::Recovering { summary, .. } => require_text(summary, "summary"),
+        AgentLifecycleEvent::Blocked { reason, .. } => require_text(reason, "reason"),
+    }
+}
+
+fn require_process_id(process_id: u32) -> Result<(), TaskError> {
+    if process_id == 0 {
+        Err(TaskError::MissingField("process_id"))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_timestamp(timestamp: u64, field: &'static str) -> Result<(), TaskError> {
+    if timestamp == 0 {
+        Err(TaskError::MissingField(field))
+    } else {
+        Ok(())
+    }
+}
+
+fn apply_process_lifecycle_event(
+    snapshot: &mut AgentLifecycleSnapshot,
+    event: &AgentLifecycleEvent,
+) -> Result<bool, TaskError> {
+    let (process_id, process_instance_id, observed_at, explicit_start) = match event {
+        AgentLifecycleEvent::ProcessStarted {
+            process_id,
+            process_instance_id,
+            started_at,
+            ..
+        } => (*process_id, process_instance_id, *started_at, true),
+        AgentLifecycleEvent::ProcessHeartbeat {
+            process_id,
+            process_instance_id,
+            observed_at,
+            ..
+        } => (*process_id, process_instance_id, *observed_at, false),
+        _ => return Ok(false),
+    };
+    let instance_changed = snapshot
+        .process_instance_id
+        .as_deref()
+        .map(|current| current != process_instance_id)
+        .unwrap_or(false);
+    if instance_changed {
+        snapshot.restart_count = snapshot.restart_count.saturating_add(1);
+    }
+    if explicit_start || instance_changed || snapshot.process_started_at.is_none() {
+        snapshot.process_started_at = Some(observed_at);
+    }
+    snapshot.schema_version = 2;
+    snapshot.alive = true;
+    snapshot.process_id = Some(process_id);
+    snapshot.process_instance_id = Some(process_instance_id.clone());
+    snapshot.process_heartbeat_at = Some(observed_at);
+    snapshot.next_check_at = Some(observed_at.saturating_add(AGENT_PROCESS_HEARTBEAT_TTL_SECONDS));
+    if matches!(snapshot.state, AgentLifecycleState::Offline) && snapshot.current_task_id.is_none()
+    {
+        snapshot.state = AgentLifecycleState::Idle;
+        snapshot.state_entered_at = observed_at;
+        snapshot.elapsed_ms = 0;
+    }
+    Ok(true)
+}
+
+fn project_agent_lifecycle_health(
+    mut snapshot: AgentLifecycleSnapshot,
+    now: u64,
+) -> AgentLifecycleSnapshot {
+    snapshot.elapsed_ms = now
+        .saturating_sub(snapshot.state_entered_at)
+        .saturating_mul(1000);
+    if let Some(activity) = snapshot.current_activity.as_mut() {
+        activity.elapsed_ms = now.saturating_sub(activity.started_at).saturating_mul(1000);
+    }
+    match snapshot.process_heartbeat_at {
+        Some(heartbeat_at) => {
+            let expires_at = heartbeat_at.saturating_add(AGENT_PROCESS_HEARTBEAT_TTL_SECONDS);
+            snapshot.alive = now <= expires_at;
+            snapshot.next_check_at = Some(expires_at);
+        }
+        None => {
+            snapshot.alive = false;
+            snapshot.next_check_at = None;
+        }
+    }
+    snapshot
 }
 
 type StatsUpdate = fn(&mut AgentLifecycleStats);
@@ -3533,6 +3698,10 @@ fn lifecycle_event_projection(
     StatsUpdate,
 ) {
     match event {
+        AgentLifecycleEvent::ProcessStarted { .. }
+        | AgentLifecycleEvent::ProcessHeartbeat { .. } => {
+            unreachable!("process lifecycle events are reduced before activity projection")
+        }
         AgentLifecycleEvent::ModelThinking { model, .. } => (
             AgentLifecycleState::ModelThinking,
             AgentLifecycleActivity {
@@ -6689,6 +6858,15 @@ mod tests {
         let runtime_home = temp_runtime_home("agent-lifecycle-reducer");
         let agent_id = AgentId::new("master");
         let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let now = now_unix_seconds();
+        runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ProcessStarted {
+                agent_id: agent_id.clone(),
+                process_id: 101,
+                process_instance_id: "master-process-1".to_owned(),
+                started_at: now,
+            })
+            .expect("process started");
         let created = runtime
             .create_task(sample_create_request(agent_id.clone()))
             .expect("create task")
@@ -6749,6 +6927,135 @@ mod tests {
         let board = runtime.query_agent_board().expect("agent board");
         assert_eq!(board.agents.len(), 1);
         assert_eq!(board.agents[0].state, AgentLifecycleState::Blocked);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn agent_process_lifecycle_projects_fresh_stale_and_restart_truth() {
+        let runtime_home = temp_runtime_home("agent-process-health");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let now = now_unix_seconds();
+
+        let started = runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ProcessStarted {
+                agent_id: agent_id.clone(),
+                process_id: 201,
+                process_instance_id: "master-process-1".to_owned(),
+                started_at: now,
+            })
+            .expect("process started");
+        assert!(started.alive);
+        assert_eq!(started.process_id, Some(201));
+        assert_eq!(
+            started.process_instance_id.as_deref(),
+            Some("master-process-1")
+        );
+        assert_eq!(started.process_started_at, Some(now));
+        assert_eq!(started.process_heartbeat_at, Some(now));
+        assert_eq!(started.restart_count, 0);
+
+        let heartbeat = runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ProcessHeartbeat {
+                agent_id: agent_id.clone(),
+                process_id: 201,
+                process_instance_id: "master-process-1".to_owned(),
+                observed_at: now,
+            })
+            .expect("same process heartbeat");
+        assert_eq!(heartbeat.restart_count, 0);
+
+        let restarted = runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ProcessStarted {
+                agent_id: agent_id.clone(),
+                process_id: 202,
+                process_instance_id: "master-process-2".to_owned(),
+                started_at: now,
+            })
+            .expect("restarted process");
+        assert!(restarted.alive);
+        assert_eq!(restarted.process_id, Some(202));
+        assert_eq!(restarted.restart_count, 1);
+
+        let board = runtime.query_agent_board().expect("fresh agent board");
+        assert!(board.agents[0].alive);
+        assert_eq!(board.agents[0].restart_count, 1);
+
+        let stale_home = temp_runtime_home("agent-process-stale");
+        let stale_runtime =
+            TaskRuntime::boot(&stale_home, agent_id.clone()).expect("stale runtime boot");
+        let stale_at = now.saturating_sub(AGENT_PROCESS_HEARTBEAT_TTL_SECONDS + 1);
+        stale_runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ProcessStarted {
+                agent_id: agent_id.clone(),
+                process_id: 301,
+                process_instance_id: "master-process-stale".to_owned(),
+                started_at: stale_at,
+            })
+            .expect("stale process start");
+        let stale = stale_runtime
+            .query_agent_lifecycle(&agent_id)
+            .expect("stale lifecycle");
+        assert!(!stale.alive);
+        assert_eq!(
+            stale.process_instance_id.as_deref(),
+            Some("master-process-stale")
+        );
+
+        let _ = fs::remove_dir_all(runtime_home);
+        let _ = fs::remove_dir_all(stale_home);
+    }
+
+    #[test]
+    fn agent_process_lifecycle_rejects_invalid_identity_and_task_activity_is_not_heartbeat() {
+        let runtime_home = temp_runtime_home("agent-process-negative");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let created = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create task")
+            .task;
+
+        runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ModelThinking {
+                agent_id: agent_id.clone(),
+                task_id: Some(created.task_id),
+                turn_id: Some(TurnId::new("turn-process-negative")),
+                model: "MiniMax-M3".to_owned(),
+            })
+            .expect("task activity");
+        let before = runtime
+            .query_agent_lifecycle(&agent_id)
+            .expect("lifecycle before invalid process event");
+        assert!(!before.alive);
+        assert_eq!(before.process_heartbeat_at, None);
+
+        let empty_instance = runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ProcessHeartbeat {
+                agent_id: agent_id.clone(),
+                process_id: 401,
+                process_instance_id: "  ".to_owned(),
+                observed_at: now_unix_seconds(),
+            })
+            .expect_err("empty instance must fail");
+        assert_eq!(
+            empty_instance,
+            TaskError::MissingField("process_instance_id")
+        );
+        let zero_pid = runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ProcessStarted {
+                agent_id: agent_id.clone(),
+                process_id: 0,
+                process_instance_id: "master-process-invalid".to_owned(),
+                started_at: now_unix_seconds(),
+            })
+            .expect_err("zero pid must fail");
+        assert_eq!(zero_pid, TaskError::MissingField("process_id"));
+
+        let after = runtime
+            .query_agent_lifecycle(&agent_id)
+            .expect("lifecycle after invalid process event");
+        assert_eq!(before, after);
         let _ = fs::remove_dir_all(runtime_home);
     }
 

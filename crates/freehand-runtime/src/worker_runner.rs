@@ -9,9 +9,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use freehand_config::{AgentMode, SelectedAgentConfig};
 use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_task::{
-    AgentCreateRequest, ExecutionFact, ExecutionFactKind, TaskActor, TaskAssignRequest,
-    TaskClaimOutcome, TaskClaimRequest, TaskError, TaskId, TaskListQuery, TaskRuntime,
-    TaskSnapshot, TaskStatus, TaskWatermark,
+    AgentCreateRequest, AgentLifecycleEvent, ExecutionFact, ExecutionFactKind, TaskActor,
+    TaskAssignRequest, TaskClaimOutcome, TaskClaimRequest, TaskError, TaskId, TaskListQuery,
+    TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark,
 };
 use thiserror::Error;
 
@@ -30,6 +30,7 @@ const DEFAULT_LEASE_TTL_SECONDS: u64 = 30;
 const DEFAULT_POLL_INTERVAL_MILLIS: u64 = 1_000;
 
 static EXECUTION_COUNTER: AtomicU64 = AtomicU64::new(0);
+static PROCESS_INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProductionWorkerTickOutcome {
@@ -84,6 +85,13 @@ struct WorkerTurnExecution {
     turn_id: TurnId,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct WorkerProcessIdentity {
+    process_id: u32,
+    process_instance_id: String,
+    started_at: u64,
+}
+
 trait WorkerTurnExecutor: Send + Sync {
     fn execute(
         &self,
@@ -120,6 +128,7 @@ pub struct ProductionWorkerRunner {
     runtime_home: PathBuf,
     task_owner_agent_id: AgentId,
     worker_agent_id: AgentId,
+    process_identity: WorkerProcessIdentity,
     executor: Arc<dyn WorkerTurnExecutor>,
 }
 
@@ -170,22 +179,26 @@ impl ProductionWorkerRunner {
             });
         }
         let master_peer_name = master_peer.name.clone();
+        let worker_agent_id = AgentId::new(selected.name.clone());
         fs::create_dir_all(&runtime_home)
             .map_err(|error| ProductionWorkerRunnerError::TaskCenter(error.to_string()))?;
         let runner = Self {
             task_owner_agent_id: AgentId::new(master_peer_name),
-            worker_agent_id: AgentId::new(selected.name.clone()),
+            process_identity: new_worker_process_identity(&worker_agent_id),
+            worker_agent_id,
             selected,
             runtime_home,
             executor,
         };
         runner.ensure_worker_registered()?;
+        runner.record_process_started()?;
         Ok(runner)
     }
 
     pub fn run_once(&self) -> Result<ProductionWorkerTickOutcome, ProductionWorkerRunnerError> {
         let task_runtime = Arc::new(self.open_task_center()?);
         self.ensure_worker_registered_in(&task_runtime)?;
+        self.record_process_heartbeat_in(&task_runtime)?;
         let execution_id = next_execution_id(&self.worker_agent_id);
         let mut retry_kind = None;
         let mut claim = self.claim_assigned_task(&task_runtime, &execution_id)?;
@@ -231,6 +244,7 @@ impl ProductionWorkerRunner {
             task.task_id.clone(),
             self.worker_agent_id.clone(),
             execution_id.clone(),
+            self.process_identity.clone(),
         );
         let request = worker_live_request(
             &self.runtime_home,
@@ -369,6 +383,34 @@ impl ProductionWorkerRunner {
     fn ensure_worker_registered(&self) -> Result<(), ProductionWorkerRunnerError> {
         let task_runtime = self.open_task_center()?;
         self.ensure_worker_registered_in(&task_runtime)
+    }
+
+    fn record_process_started(&self) -> Result<(), ProductionWorkerRunnerError> {
+        let task_runtime = self.open_task_center()?;
+        task_runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ProcessStarted {
+                agent_id: self.worker_agent_id.clone(),
+                process_id: self.process_identity.process_id,
+                process_instance_id: self.process_identity.process_instance_id.clone(),
+                started_at: self.process_identity.started_at,
+            })
+            .map_err(task_center_error)?;
+        Ok(())
+    }
+
+    fn record_process_heartbeat_in(
+        &self,
+        task_runtime: &TaskRuntime,
+    ) -> Result<(), ProductionWorkerRunnerError> {
+        task_runtime
+            .apply_agent_lifecycle_event(AgentLifecycleEvent::ProcessHeartbeat {
+                agent_id: self.worker_agent_id.clone(),
+                process_id: self.process_identity.process_id,
+                process_instance_id: self.process_identity.process_instance_id.clone(),
+                observed_at: now_unix_seconds(),
+            })
+            .map_err(task_center_error)?;
+        Ok(())
     }
 
     fn ensure_worker_registered_in(
@@ -724,9 +766,31 @@ fn task_center_error(error: TaskError) -> ProductionWorkerRunnerError {
     ProductionWorkerRunnerError::TaskCenter(error.to_string())
 }
 
+fn new_worker_process_identity(worker_agent_id: &AgentId) -> WorkerProcessIdentity {
+    let process_id = std::process::id();
+    let started_at = now_unix_seconds();
+    let counter = PROCESS_INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    WorkerProcessIdentity {
+        process_id,
+        process_instance_id: format!(
+            "{}-{process_id}-{}-{counter}",
+            worker_agent_id.as_str(),
+            now_unix_nanos()
+        ),
+        started_at,
+    }
+}
+
 fn now_unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_secs()
+}
+
+fn now_unix_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time")
+        .as_nanos()
 }

@@ -5847,3 +5847,48 @@ Current real root cause split:
     truth remain open.
   - real-provider crash/recovery/reassignment/takeover remains open.
   - cross-machine multi-peer node transport remains open.
+# 2026-07-14 Worker process health/restart owner truth closeout
+
+- target:
+  - close P3 queryable Worker health/restart truth under `agent.lifecycle`.
+  - keep launchd as supervisor only; no UI/daemon PID inference.
+- implementation:
+  - `AgentLifecycleEvent` now has typed `ProcessStarted` and
+    `ProcessHeartbeat`.
+  - `AgentLifecycleSnapshot` persists `process_id`, `process_instance_id`,
+    `process_started_at`, `process_heartbeat_at`, and `restart_count`.
+  - `TaskRuntime::query_agent_board` and `query_agent_lifecycle` project
+    `alive` from `process_heartbeat_at + 5s TTL`; missing/stale process
+    heartbeat does not fallback to task activity or AgentSnapshot status.
+  - `ProductionWorkerRunner` writes process start at construction and heartbeat
+    on every `run_once`; `WorkerHeartbeat::start` also refreshes process
+    heartbeat while provider execution is running.
+  - ADP/UI projection exposes process truth under `agent.process` to avoid
+    bloating `UiAdpResponse` enum variants.
+- online evidence:
+  - `scripts/verify-master-three-worker-e2e-online.sh` now also proves Worker
+    process health/restart in isolated HOME.
+  - latest pass session:
+    `online-master-three-worker-evaluation-1783993233`.
+  - evidence dir:
+    `/tmp/freehand-three-worker-home.AwGYEs/.freehand/tmp/three-worker-e2e-20260714T094033-93242`.
+  - gamma proof:
+    old PID `93601` fresh `alive=true`, stopped -> `alive=false` after TTL while
+    retaining `task-three-worker-1781783993233-gamma` and
+    `exec-worker-worker-gamma-1783993239925554000-3`, restarted as PID `96753`
+    with new process instance and `restart_count=1`.
+  - all verifier PIDs stopped after cleanup.
+- local evidence:
+  - `cargo test -p freehand-task -- --nocapture` -> 54 passed.
+  - `cargo test -p freehand-runtime production_worker_runner -- --nocapture`
+    -> 14 passed.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 56 passed.
+  - `cargo test -p freehand-daemon worker_mode -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-cli --no-run` passed.
+  - targeted clippy for task/runtime/ui-protocol/daemon passed.
+  - `cargo fmt --check`, mainlines generate/check, gates check,
+    `git diff --check`, and script syntax passed.
+- remaining:
+  - launchd-managed three-service KeepAlive/crash restart proof remains open.
+  - real-provider crash/recovery/reassignment/takeover remains open.
+  - cross-machine multi-peer transport remains open.

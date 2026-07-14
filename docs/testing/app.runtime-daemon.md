@@ -17,6 +17,8 @@
   - provider execution failures surface through protocol-mapped HTTP failure payloads
   - slave-mode agent selection starts one configured Worker's production runner
     without UI transport
+  - Slave runner construction persists typed process PID/instance health
+    through `agent.lifecycle`; daemon and launchd remain non-owner hosts
   - three configured Workers receive unique launchd labels, env files, and log
     files so their processes cannot overwrite one another's service truth
 - white-box plan:
@@ -38,6 +40,8 @@
   - daemon checkpoint rewind HTTP smoke
   - daemon missing-checkpoint rewind HTTP failure smoke
   - daemon slave-mode production Worker runner bootstrap smoke
+  - daemon Worker bootstrap queries the same agent id and verifies owner-backed
+    PID, process-instance identity, `alive=true`, and initial restart count
   - daemon Worker blocking-boundary positive and negative smoke
   - launchd shell fixture proves `worker-alpha`, `worker-beta`, and
     `worker-gamma` resolve to three unique labels/env/log paths through
@@ -76,6 +80,8 @@
   - daemon ADP error-center metadata query coverage is landed
   - config-selected bootstrap smoke is landed and uses configured peer topology
   - configured Slave bootstrap now constructs the production Worker runner
+  - configured Slave bootstrap test verifies process identity through
+    TaskRuntime/AgentLifecycle owner truth
   - agent-specific Worker launchd naming and its non-mutating executable fixture
     are landed; isolated three-process runtime proof is green, while live
     launchd-managed three-service proof remains required

@@ -1874,6 +1874,18 @@ mod tests {
         unsafe { env::set_var("FREEHAND_PAIR_TOKEN_SHARED", "pair-token-shared") };
 
         build_worker_runner_from_default_config("worker").expect("worker runner");
+        let task_runtime = TaskRuntime::boot(
+            home.join(".freehand"),
+            freehand_contracts::AgentId::new("master"),
+        )
+        .expect("task runtime");
+        let lifecycle = task_runtime
+            .query_agent_lifecycle(&freehand_contracts::AgentId::new("worker"))
+            .expect("worker lifecycle");
+        assert!(lifecycle.alive);
+        assert_eq!(lifecycle.process_id, Some(std::process::id()));
+        assert!(lifecycle.process_instance_id.is_some());
+        assert_eq!(lifecycle.restart_count, 0);
 
         restore_env(old_home, "FREEHAND_PAIR_TOKEN_SHARED", old_pair_token);
         fs::remove_dir_all(home).expect("cleanup");

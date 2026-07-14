@@ -6,12 +6,14 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operation coverage:
   - `timer.fire_master_wakeup`
+  - `agent.heartbeat`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `timer.fire_master_wakeup` | bound | `cargo test -p freehand-runtime timer -- --nocapture` covers durable timer due-claim, one-shot, recurring, local-time cron/daily/weekly, wakeup prompt, failure release, and Master runner tests | `cargo test -p freehand-runtime production_master -- --nocapture` covers production Master runner smokes where due timers create internal Master wakeup turns without task-state mutation | `scripts/verify-timer-tool-online.sh` covers S-profile timer online proof and restart-due proof showing persisted timer wakeup fires after due time and completes timer truth |
+| `agent.heartbeat` | bound | `cargo test -p freehand-task agent_process -- --nocapture` locks typed start/heartbeat validation, restart identity, TTL health, and no task-activity fallback | `cargo test -p freehand-runtime production_worker_runner -- --nocapture` proves constructor start, idle tick heartbeat, same-agent restart, and active-loop wiring | `scripts/verify-master-three-worker-e2e-online.sh` proves isolated three-process fresh/offline/restart AgentBoard truth |
 
 
 ## Lifecycle Under Test
@@ -23,30 +25,33 @@
 3. Agent-specific Worker LaunchAgents start at login, stay alive, and restart
    the same configured Worker process after an unexpected exit.
 4. Each runner opens its only configured Master's Task Center namespace.
-5. Each runner claims only the task assigned to its own Worker identity and
+5. Each runner writes one typed process-start event and refreshes the same
+   process instance on idle ticks and while executing work.
+6. Each runner claims only the task assigned to its own Worker identity and
    persists lease heartbeat.
-6. Runner expands a leading `~`, canonicalizes `task.target_cwd` through symlinks, and locks the Worker to that canonical workspace.
-7. Runner executes one provider/reason turn under Worker identity and Worker tool policy.
-8. Runner writes `review_ready` on successful completion, `interrupted` on
+7. Runner expands a leading `~`, canonicalizes `task.target_cwd` through symlinks, and locks the Worker to that canonical workspace.
+8. Runner executes one provider/reason turn under Worker identity and Worker tool policy.
+9. Runner writes `review_ready` on successful completion, `interrupted` on
    provider/network system failure after provider-owned retry exhaustion, or
    `blocked` on task-content, path-preflight, model-terminal, or other
    non-provider execution failure.
-9. Runner returns to polling without inventing task truth while idle.
-10. Restart reads the same task/execution/agent/history truth.
-11. Each Master lifecycle event attempt runs in a task-scoped internal
+10. Runner returns to polling without inventing task truth while idle.
+11. Restart reads the same task/execution/agent/history truth and increments
+    process restart count only for a new process-instance identity.
+12. Each Master lifecycle event attempt runs in a task-scoped internal
     lifecycle session with event-and-attempt-isolated turn and trace ids; the
     session name is reused per task to avoid user-facing session explosion.
-12. Task Center EventInbox processing has priority over due independent timer
+13. Task Center EventInbox processing has priority over due independent timer
     schedules. The Master lifecycle runner claims due timer schedules only when
     no current task event produced a lifecycle outcome.
-13. A successful target-task mutation is evaluated against an explicit
+14. A successful target-task mutation is evaluated against an explicit
     event-specific decision boundary. Once reached, the framework closes the
     lifecycle turn immediately instead of asking the model to wait for future
     Worker events inside the same turn.
-14. A lifecycle decision has a finite round budget. Exhaustion becomes an
+15. A lifecycle decision has a finite round budget. Exhaustion becomes an
     explicit blocked lifecycle turn and leaves the EventInbox cursor retryable;
     it must never remain as an unbounded active reason turn.
-15. Retryable Master decision failures keep the same durable event cursor,
+16. Retryable Master decision failures keep the same durable event cursor,
     back off, and retry without terminating the daemon. Task Center/state
     persistence failures remain fatal because owner truth is unavailable.
 
@@ -64,6 +69,7 @@ at a time. Multiple independent BigTasks remain outside this slice.
 | provider/network system failure after internal retries | `TaskInterrupted` with paired reason/evidence | same task is requeued to the configured Worker with a new execution |
 | task-content, path-preflight, or model-terminal failure | `TaskBlocked` with paired reason/evidence | Master explicitly retries/reassigns or leaves the task blocked |
 | Worker process crash | boot writes `TaskInterrupted` for missing/expired lease | task is requeued to the configured Worker with a new execution |
+| Worker process heartbeat stale/missing | AgentBoard retains task/execution history and projects `alive=false` after the owner TTL | launchd may supervise the process, while Master/UI rely only on AgentBoard owner truth |
 | daemon restart while idle | task/agent/cursor truth reloads unchanged | loops resume without duplicate task mutation |
 | daemon restart while review is pending | review truth reloads unchanged | Master review loop continues from durable task truth |
 | daemon stopped before review is pending | `TaskReviewSubmitted` is seeded through TaskRuntime owner API while Master daemon is offline | after restart, Master consumes persisted review truth and closes or rejects |

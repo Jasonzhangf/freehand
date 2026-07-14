@@ -373,6 +373,14 @@ Use this skill for any non-trivial work in this repo.
   TaskStore advisory lock across load, mutate, and atomic replace. Boot cleanup
   must remove only the invalid task ids from current locked truth; never replace
   the file from a stale pre-lock lease snapshot.
+- Worker process health/restart truth belongs to `agent.lifecycle`, not
+  launchd, daemon host glue, UI, or PID probing code. Worker construction must
+  write typed `ProcessStarted`; every idle/active poll tick and long-running
+  task heartbeat must write typed `ProcessHeartbeat`; AgentBoard/AgentLifecycle
+  query projection derives `alive` from the owner TTL while retaining task,
+  execution, and activity history. Online proof must stop one explicit Worker
+  PID, observe `alive=false` after TTL for the same agent/task/execution, then
+  restart the same agent with a new PID/process instance and `restart_count+1`.
 - When global `~/.freehand` EventInbox/TaskBoard contains unrelated historical truth, run Master/Worker lifecycle fixtures with an isolated temporary `HOME/.freehand`; do not delete, skip, or rewrite global truth to obtain a pass. Switch both the fixture Master and Worker provider configurations through the config owner before submitting work, and stop only the explicit fixture/server/worker PIDs started by that verifier.
 - Before an isolated online verifier launches a workspace binary such as
   `target/debug/freehand-daemon`, rebuild that exact binary after source changes;

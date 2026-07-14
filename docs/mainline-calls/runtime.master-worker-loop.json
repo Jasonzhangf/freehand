@@ -7,7 +7,8 @@
   "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
   "generated_wiki_doc": "docs/wiki/runtime.master-worker-loop.md",
   "resource_operations": [
-    "timer.fire_master_wakeup"
+    "timer.fire_master_wakeup",
+    "agent.heartbeat"
   ],
   "request_mainline": [
     "one daemon process selects one configured agent",
@@ -18,6 +19,7 @@
     "when a child task_closed event arrives, the runner checks all terminal-included child tasks with the same parent_session_id and starts an overall-goal evaluation turn in the original parent session only after every current child is Closed; the evaluation receives original user objective history, decomposed child task requirements, and accepted review truth",
     "Slave mode constructs a production Worker runner instead of a Master UI dispatcher",
     "each Worker opens its only configured Master's Task Center namespace and uses its own distinct configured agent id as execution identity",
+    "Worker construction records one typed process-start event; every idle or active poll tick and the active task-heartbeat loop refresh the same process instance through agent.lifecycle",
     "each Worker tick claims the highest-priority Assigned task for that Worker",
     "claim persists one execution id and lease heartbeat",
     "task target cwd expands a leading ~, canonicalizes through symlinks, and becomes the locked Worker execution root",
@@ -46,6 +48,7 @@
     "provider/network system failure after internal provider retries writes one interrupted execution fact for same-task retry; non-provider task execution failure writes one blocked execution fact",
     "Worker reason/session truth persists under Worker agent identity",
     "task/execution/lease/agent truth persists under the paired Master's Task Center namespace",
+    "AgentBoard and AgentLifecycle return Worker PID, process instance, heartbeat timestamp, restart count, and TTL-derived alive from the lifecycle owner",
     "periodic Worker ticks continue after idle, success, or blocked outcomes",
     "blocked Worker execution releases the configured Worker resource to Available while preserving TaskBlocked for Master decision",
     "Worker heartbeat and result reporting are rejected when paired Task Center truth has externally terminalized the task",
@@ -71,6 +74,7 @@
     "Master lifecycle cursor parse or write failure stops the loop explicitly",
     "missing or invalid target cwd records blocked truth before model execution, with classified wording for missing parent, likely output-directory misuse, permission denial, and generic canonicalization failure",
     "claim or heartbeat persistence failure stops before provider execution",
+    "process-start or process-heartbeat persistence failure stops before task claim or provider execution",
     "heartbeat or result reporting after external cancel returns explicit Task Center failure and does not append Worker lifecycle truth",
     "failure to persist a blocked execution fact remains an explicit runner error",
     "Worker cannot call recursive `task` through schema or execution policy",
@@ -157,11 +161,11 @@
       "step": "05",
       "symbol_path": "WorkerHeartbeat::start",
       "file_path": "crates/freehand-runtime/src/worker_runner/heartbeat.rs",
-      "responsibility": "renew the claimed task lease while provider execution remains active",
-      "input_semantic": "claimed task, execution, and Worker identity",
-      "output_semantic": "periodic TaskHeartbeat truth or explicit heartbeat error without overwriting external terminal truth",
+      "responsibility": "renew the claimed task lease and same process-instance heartbeat while provider execution remains active",
+      "input_semantic": "claimed task, execution, Worker, and process identity",
+      "output_semantic": "periodic TaskHeartbeat plus agent heartbeat truth or explicit heartbeat error without overwriting external terminal truth",
       "caller": "ProductionWorkerRunner::run_once",
-      "callee": "task owner",
+      "callee": "task owner and agent.lifecycle owner",
       "binding_status": "bound"
     },
     {
@@ -320,6 +324,17 @@
       "caller": "daemon CLI",
       "callee": "server host and ProductionMasterRunner::run_until",
       "binding_status": "bound"
+    },
+    {
+      "step": "19",
+      "symbol_path": "ProductionWorkerRunner::record_process_started / ProductionWorkerRunner::record_process_heartbeat_in",
+      "file_path": "crates/freehand-runtime/src/worker_runner.rs",
+      "responsibility": "emit one unique process instance at runner construction and refresh it on every poll tick",
+      "input_semantic": "configured Worker identity, PID, and process-instance id",
+      "output_semantic": "persisted agent.lifecycle process health",
+      "caller": "Worker construction and ProductionWorkerRunner::run_once",
+      "callee": "TaskRuntime::apply_agent_lifecycle_event",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -327,7 +342,7 @@
     "Master workspace boundary, external-cwd delegation, and path/symlink dispatch guidance are already bound",
     "independent timer schedule truth, Master due-timer wakeup routing, and failure release are code-bound",
     "production Master lifecycle runner, durable cursor, and supervised Master daemon startup are code-bound",
-    "production Worker runner, retryable interrupted/rejected requeue, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound",
+    "production Worker runner, retryable interrupted/rejected requeue, Worker-specific live tool policy, periodic task and process heartbeat, and Slave daemon startup are code-bound",
     "config-selected Master guidance, TaskSpaceSnapshot, and task mutation boundary consume the full ordered Worker peer set; singular configured-Worker fields are physically removed",
     "each Slave Worker runner consumes its one configured Master peer and keeps task claim/execution identity distinct per configured Worker process",
     "the controlled online verifier starts worker-alpha, worker-beta, and worker-gamma as three distinct daemon processes, proves one initial task per Worker without cross-claim, forces beta reject/rework plus a next-round integration task, and persists JSON proof before explicit PID cleanup",

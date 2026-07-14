@@ -168,6 +168,172 @@ verify_worker_processes() {
   done
 }
 
+query_worker_health() {
+  local phase="$1"
+  local alpha_pid="$2"
+  local beta_pid="$3"
+  local gamma_pid="$4"
+  local previous_gamma_instance="${5:-}"
+  local previous_gamma_task="${6:-}"
+  local previous_gamma_execution="${7:-}"
+  python3 - "$adp_url" "$phase" "$alpha_pid" "$beta_pid" "$gamma_pid" "$previous_gamma_instance" "$previous_gamma_task" "$previous_gamma_execution" <<'PY'
+import asyncio
+import json
+import sys
+import websockets
+
+(
+    url,
+    phase,
+    alpha_pid,
+    beta_pid,
+    gamma_pid,
+    previous_gamma_instance,
+    previous_gamma_task,
+    previous_gamma_execution,
+) = sys.argv[1:9]
+expected_pids = {
+    "worker-alpha": int(alpha_pid),
+    "worker-beta": int(beta_pid),
+    "worker-gamma": int(gamma_pid),
+}
+
+async def query_board():
+    async with websockets.connect(url) as ws:
+        await ws.send(json.dumps({
+            "kind": "query",
+            "request_id": f"worker-health-{phase}",
+            "query": {"QueryAgentBoard": {}},
+        }))
+        while True:
+            message = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
+            if message.get("request_id") == f"worker-health-{phase}":
+                return message
+
+def validate(message):
+    agents = (
+        message.get("result", {})
+        .get("AgentBoard", {})
+        .get("agents", [])
+    )
+    workers = {
+        agent.get("agent_id"): agent
+        for agent in agents
+        if agent.get("agent_id") in expected_pids
+    }
+    if set(workers) != set(expected_pids):
+        return None, f"missing configured Workers: {workers}"
+    processes = {}
+    for worker_id, expected_pid in expected_pids.items():
+        worker = workers[worker_id]
+        process = worker.get("process") or {}
+        processes[worker_id] = process
+        if process.get("process_id") != expected_pid:
+            return None, (
+                f"{worker_id} process_id={process.get('process_id')} "
+                f"expected={expected_pid}"
+            )
+        if not process.get("process_instance_id"):
+            return None, f"{worker_id} missing process_instance_id"
+        if not process.get("started_at") or not process.get("heartbeat_at"):
+            return None, f"{worker_id} missing process timestamps"
+    gamma = workers["worker-gamma"]
+    gamma_process = processes["worker-gamma"]
+    if phase == "fresh":
+        if not all(worker.get("alive") for worker in workers.values()):
+            return None, f"fresh Worker not alive: {workers}"
+        if any(process.get("restart_count") != 0 for process in processes.values()):
+            return None, f"fresh Worker restart_count mismatch: {workers}"
+        if not gamma.get("current_task_id") or not gamma.get("current_execution_id"):
+            return None, f"fresh gamma missing retained task/execution identity: {gamma}"
+    elif phase == "offline":
+        if not workers["worker-alpha"].get("alive") or not workers["worker-beta"].get("alive"):
+            return None, f"unaffected Worker became offline: {workers}"
+        if gamma.get("alive"):
+            return None, f"stopped gamma still alive before TTL projection: {gamma}"
+        if gamma_process.get("process_instance_id") != previous_gamma_instance:
+            return None, f"offline gamma instance changed: {gamma}"
+        if gamma_process.get("restart_count") != 0:
+            return None, f"offline gamma restart_count changed: {gamma}"
+        if gamma.get("current_task_id") != previous_gamma_task:
+            return None, f"offline gamma task identity changed: {gamma}"
+        if gamma.get("current_execution_id") != previous_gamma_execution:
+            return None, f"offline gamma execution identity changed: {gamma}"
+    elif phase == "restarted":
+        if not all(worker.get("alive") for worker in workers.values()):
+            return None, f"restarted Worker not alive: {workers}"
+        if gamma_process.get("process_instance_id") == previous_gamma_instance:
+            return None, f"restarted gamma reused process instance: {gamma}"
+        if gamma_process.get("restart_count") != 1:
+            return None, f"restarted gamma restart_count mismatch: {gamma}"
+        if gamma.get("current_task_id") != previous_gamma_task:
+            return None, f"restarted gamma task identity changed: {gamma}"
+        if gamma.get("current_execution_id") != previous_gamma_execution:
+            return None, f"restarted gamma execution identity changed: {gamma}"
+    else:
+        return None, f"unknown phase {phase}"
+    return workers, None
+
+async def main():
+    deadline = asyncio.get_event_loop().time() + 30
+    last_error = "no query"
+    while asyncio.get_event_loop().time() < deadline:
+        message = await query_board()
+        workers, error = validate(message)
+        if workers is not None:
+            print(json.dumps({
+                "phase": phase,
+                "workers": workers,
+            }, ensure_ascii=False, sort_keys=True))
+            return
+        last_error = error
+        await asyncio.sleep(1)
+    raise RuntimeError(f"worker health phase {phase} did not converge: {last_error}")
+
+asyncio.run(main())
+PY
+}
+
+verify_worker_health_restart() {
+  local initial_health old_gamma_pid gamma_instance gamma_task gamma_execution
+  local offline_health restarted_health
+  initial_health="$(query_worker_health fresh "$worker_alpha_pid" "$worker_beta_pid" "$worker_gamma_pid")"
+  gamma_instance="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["workers"]["worker-gamma"]["process"]["process_instance_id"])' "$initial_health")"
+  gamma_task="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["workers"]["worker-gamma"]["current_task_id"])' "$initial_health")"
+  gamma_execution="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["workers"]["worker-gamma"]["current_execution_id"])' "$initial_health")"
+
+  old_gamma_pid="$worker_gamma_pid"
+  kill "$old_gamma_pid"
+  wait "$old_gamma_pid" >/dev/null 2>&1 || true
+  worker_gamma_pid=""
+  offline_health="$(query_worker_health offline "$worker_alpha_pid" "$worker_beta_pid" "$old_gamma_pid" "$gamma_instance" "$gamma_task" "$gamma_execution")"
+
+  start_worker worker-gamma
+  worker_gamma_pid="$worker_start_pid"
+  if [[ "$worker_gamma_pid" == "$old_gamma_pid" ]]; then
+    echo "worker-gamma restart reused PID $old_gamma_pid" >&2
+    return 1
+  fi
+  verify_worker_processes
+  restarted_health="$(query_worker_health restarted "$worker_alpha_pid" "$worker_beta_pid" "$worker_gamma_pid" "$gamma_instance" "$gamma_task" "$gamma_execution")"
+
+  health_proof="$(python3 - "$initial_health" "$offline_health" "$restarted_health" "$old_gamma_pid" "$worker_gamma_pid" <<'PY'
+import json
+import sys
+
+initial, offline, restarted = (json.loads(value) for value in sys.argv[1:4])
+print(json.dumps({
+    "ok": True,
+    "initial": initial,
+    "offline_after_ttl": offline,
+    "restarted": restarted,
+    "old_gamma_pid": int(sys.argv[4]),
+    "new_gamma_pid": int(sys.argv[5]),
+}, ensure_ascii=False, sort_keys=True))
+PY
+)"
+}
+
 start_fixture() {
   node - "$port" >"$mock_log" 2>&1 <<'NODE' &
 const http = require("http");
@@ -862,7 +1028,7 @@ run_three_worker_e2e() {
 
   local stamp task_alpha task_beta task_gamma task_integration
   local worker_alpha worker_beta worker_gamma worker_integration
-  local prompt proof restart_proof
+  local prompt proof health_proof restart_proof
   stamp="178$(date +%s)"
   task_alpha="task-three-worker-$stamp-alpha"
   task_beta="task-three-worker-$stamp-beta"
@@ -895,13 +1061,18 @@ run_three_worker_e2e() {
     "$worker_integration" \
     "$prompt")"
   verify_worker_processes
+  health_proof=""
+  verify_worker_health_restart
+  verify_worker_processes
   stop_master
   start_master
   restart_proof="$(verify_restart_idempotency "$stamp")"
   printf '%s\n' "$proof" >"$backup_dir/three-worker-proof.json"
+  printf '%s\n' "$health_proof" >"$backup_dir/worker-health-proof.json"
   printf '%s\n' "$restart_proof" >"$backup_dir/restart-proof.json"
   echo "master_three_worker_e2e_ok url=$adp_url session=$session_id initial_tasks=$task_alpha:$worker_alpha,$task_beta:$worker_beta,$task_gamma:$worker_gamma next_task=$task_integration:$worker_integration worker_pids=$worker_alpha_pid,$worker_beta_pid,$worker_gamma_pid evidence_dir=$backup_dir"
   echo "$proof"
+  echo "$health_proof"
   echo "$restart_proof"
 }
 

@@ -12,9 +12,29 @@
   - `TaskRuntime::query_agent_lifecycle`
 - mainline call source: `docs/mainline-calls/agent.lifecycle.json`
 - generated wiki: `docs/wiki/agent.lifecycle.md`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `agent.heartbeat`
+
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `agent`
+- touched resources:
+  - `agent`
+- resource operations:
+  - `agent.heartbeat`
+- forbidden shortcuts:
+  - UI, daemon hosts, and launchd scripts must not infer AgentBoard process
+    health from PID inspection, task activity, or service status.
+  - Task lifecycle activity must not refresh process-heartbeat truth.
 
 ## Request Mainline
 
+- Worker process start and every poll tick emit typed process lifecycle events
+- lifecycle owner validates PID and process-instance identity before mutation
+- process heartbeat persists independently from task/model/tool activity
 - runtime/provider/tool/error/task owners emit typed lifecycle events
 - lifecycle reducer accepts only typed lifecycle events
 - lifecycle reducer updates per-agent lifecycle state
@@ -29,8 +49,10 @@
 
 ## Response Mainline
 
-- AgentLifecycleSnapshot returns one agent's intrinsic state
-- AgentBoardProjection returns agent availability, current activity, elapsed time, task/execution/turn binding, review/retry/closed task states, and model/tool/error counters
+- AgentLifecycleSnapshot returns one agent's intrinsic state plus process PID,
+  process-instance identity, start/heartbeat timestamps, and restart count
+- AgentBoardProjection derives `alive` from the owner heartbeat TTL while
+  retaining current task/execution/activity history
 - scheduler and master prompt context consume AgentBoard summaries, not raw logs
 - UI and Android render lifecycle projections and do not infer state from raw text
 
@@ -39,7 +61,11 @@
 - raw assistant prose is rejected as lifecycle input
 - unknown agent id returns explicit agent-not-found
 - malformed typed lifecycle event returns explicit validation error and does not mutate lifecycle truth
+- missing, empty, or zero-valued process identity fields return explicit
+  validation errors and do not mutate lifecycle truth
 - lifecycle query without initialized lifecycle truth returns explicit not-ready or empty-board truth, not fallback state
+- missing or stale process heartbeat projects `alive=false`; task activity and
+  persisted AgentSnapshot status are not health fallbacks
 - missing execution id on execution-bound lifecycle events is rejected by task owner before lifecycle projection is accepted
 - persisted lifecycle snapshot parse/write failures surface as task persistence
   errors; query must not rebuild a false idle lifecycle when persisted typed
@@ -51,7 +77,9 @@
   - owner: `crates/freehand-task/src/lib.rs` initially
   - purpose: reduce typed runtime/provider/tool/error/task events into per-agent lifecycle state
   - allowed callers: runtime live bridge, task runtime, tests
-  - related tests: `agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked`
+  - related tests:
+    `agent_process_lifecycle_projects_fresh_stale_and_restart_truth`,
+    `agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked`
   - why shared: keeps lifecycle semantics single-sourced instead of duplicated in UI/runtime/node code
 - `AgentBoardProjection`
   - owner: `crates/freehand-task/src/lib.rs` initially
@@ -78,6 +106,7 @@
 | 05 | `TaskRuntime::query_agent_board` | `crates/freehand-task/src/lib.rs` | query AgentBoard projection | optional filters | AgentBoard projection | runtime query dispatch | lifecycle owner | bound |
 | 06 | `TaskRuntime::apply_execution_fact` / `TaskRuntime::reject_review` / `TaskRuntime::approve_review` / `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | derive Phase 2A worker lifecycle state from typed task execution and review events | execution/review task events with execution id | AgentLifecycleSnapshot and AgentBoard truth | task.orchestration | agent.lifecycle reducer | bound |
 | 07 | `TaskStore::write_agent_lifecycle_snapshot` / `TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and reload latest lifecycle snapshot for restart same-id query | lifecycle snapshot | durable lifecycle projection | task event projection / boot | lifecycle owner storage | bound |
+| 08 | `TaskRuntime::apply_agent_lifecycle_event` | `crates/freehand-task/src/lib.rs` | validate and persist process start/heartbeat truth, derive restart count, and project TTL-backed alive state | typed Worker process lifecycle event | durable process identity and queryable health | production Worker runner | agent.lifecycle owner | bound |
 
 ## Sync Status Against Code
 
@@ -87,3 +116,5 @@
 - Agent Lifecycle must remain an intrinsic agent state/projection.
 - Phase 2A ADP/CLI same-id proof is implemented and live-validated on the
   S-profile with restart same-id verification.
+- Worker process health is owner-projected from typed heartbeat truth; launchd
+  remains a supervisor and is not an AgentBoard truth source.

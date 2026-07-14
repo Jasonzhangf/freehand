@@ -12,6 +12,7 @@
     "each configured Worker process has an agent-specific launchd label, env file, stdout log, and stderr log; a shared workerS service is not the Worker pool",
     "daemon bootstrap selects one agent from default config and creates one runtime dispatcher",
     "daemon bootstrap routes Master mode to the runtime-backed UI host and Slave mode to the production Worker runner",
+    "Slave runner construction records typed Worker process identity in agent.lifecycle; daemon and launchd do not infer AgentBoard health",
     "runtime bootstrap consumes configured local and paired node topology before daemon transport starts",
     "if persisted runtime turn truth exists, daemon bootstrap restores it through the injected runtime owner before serving query and SSE routes",
     "daemon injects the runtime dispatcher and its shared UI state into the protocol-only HTTP and SSE transport",
@@ -37,6 +38,7 @@
     "daemon remains a host process and does not own reason or node semantics itself",
     "daemon serves task list subscription events from runtime-published task projections after task tool mutations",
     "daemon serves error-center initial subscription snapshots from runtime metadata projection",
+    "ADP AgentBoard and AgentLifecycle queries expose owner-projected Worker process health and restart identity without app-owned PID logic",
     "daemon ADP session management can create, rename, archive, list archived sessions, restore, submit turns, rollback latest effective turn, and query the resulting effective transcript"
     ,"each Slave daemon runs one configured Worker's production claim/execute/report loop without binding WebUI or ADP transport"
   ],
@@ -274,9 +276,9 @@
       "step": "11",
       "symbol_path": "run_worker_mode",
       "file_path": "apps/freehand-daemon/src/main.rs",
-      "responsibility": "route configured Slave mode into the production Worker runner without UI transport",
+      "responsibility": "route configured Slave mode into the production Worker runner without UI transport or app-owned health inference",
       "input_semantic": "selected Slave bootstrap",
-      "output_semantic": "long-running Worker service",
+      "output_semantic": "long-running Worker service whose process truth is written by agent.lifecycle",
       "caller": "daemon CLI",
       "callee": "run_blocking_worker_service",
       "binding_status": "bound"
@@ -303,6 +305,7 @@
     "checkpoint query projection is covered through daemon HTTP after writable mutation and after rewind",
     "config-selected bootstrap is now bound in code and uses configured peer topology",
     "configured Slave startup binds runtime.master-worker-loop instead of failing the app host",
+    "configured Slave runner construction is black-box checked for persisted process PID, instance, alive, and restart truth under agent.lifecycle",
     "Worker launchd defaults bind identity as com.freehand.worker[ S].<agent>, worker[ S].<agent>.env, and matching agent-specific logs",
     "agent-specific launchd naming has a non-mutating executable fixture, and isolated runtime proof starts three distinct Slave daemon processes while launchd-managed three-service recovery remains open",
     "generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes"

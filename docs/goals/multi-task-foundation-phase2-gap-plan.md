@@ -271,22 +271,28 @@ scripts/verify-launchd-worker-naming.sh
 scripts/verify-master-three-worker-e2e-online.sh
 ```
 
-### P3: Managed Worker Lifecycle And Pool
+### P3: Managed Worker Lifecycle And Pool — Partially Closed
 
 Deliverables:
 
-- Worker processes auto-start from config and restart on failure
+- Worker processes auto-start from config and restart on failure through
+  launchd-managed services
 - Worker health/current task/last activity are queryable owner truth
+  - closed for isolated daemon processes through `agent.lifecycle`
+    `ProcessStarted`/`ProcessHeartbeat`, heartbeat TTL, PID/process-instance
+    projection, and restart-count truth
+  - still open for launchd-managed KeepAlive/crash proof
 - configured Worker pool allocation and release are deterministic
 - no orphan Worker process or leaked lease after task completion/failure
 
 Validation:
 
 ```bash
-scripts/install-launchd.sh restartS
-curl -4fsS http://127.0.0.1:4042/health
-freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp
-# managed Worker lifecycle verifier remains a P3 deliverable
+cargo test -p freehand-task agent_process -- --nocapture
+cargo test -p freehand-runtime production_worker_runner -- --nocapture
+cargo test -p freehand-daemon worker_mode -- --nocapture
+scripts/verify-master-three-worker-e2e-online.sh
+# launchd-managed Worker lifecycle verifier remains a P3 deliverable
 ```
 
 ### P4: Background Master Scheduling And Recovery — In Progress

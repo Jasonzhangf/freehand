@@ -507,6 +507,8 @@ pub struct UiAgentLifecycleProjection {
     pub agent_id: AgentId,
     pub role: String,
     pub alive: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<Box<UiAgentProcessProjection>>,
     pub state: String,
     pub current_task_id: Option<String>,
     pub current_execution_id: Option<String>,
@@ -523,6 +525,16 @@ pub struct UiAgentLifecycleProjection {
     pub current_model: Option<String>,
     pub last_seen_at: u64,
     pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAgentProcessProjection {
+    pub process_id: Option<u32>,
+    pub process_instance_id: Option<String>,
+    pub started_at: Option<u64>,
+    pub heartbeat_at: Option<u64>,
+    pub restart_count: u64,
+    pub next_check_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -101,19 +101,20 @@ use freehand_tools::{
 };
 use freehand_ui_protocol::{
     TurnProjectionInput, UiAgentBoardProjection, UiAgentLifecycleActivityProjection,
-    UiAgentLifecycleProjection, UiAgentSnapshotProjection, UiCheckpointSummary, UiClientKind,
-    UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort, UiCommandDispatchPortError,
-    UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting, UiConfigPeerProjection,
-    UiConfigStatusProjection, UiErrorCenterEventListProjection, UiErrorCenterEventProjection,
-    UiExecutionFactCommand, UiExecutionFactKind, UiMasterPollClassificationProjection,
-    UiMasterPollProjection, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
-    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
-    UiSessionMetadataProjection, UiTaskAgentCreateCommand, UiTaskAssignCommand,
-    UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
-    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
-    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
-    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTurnProjection,
-    UiWorkerControlCommand, UiWorkerControlEventProjection, UiWorkerControlProjection,
+    UiAgentLifecycleProjection, UiAgentProcessProjection, UiAgentSnapshotProjection,
+    UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort,
+    UiCommandDispatchPortError, UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting,
+    UiConfigPeerProjection, UiConfigStatusProjection, UiErrorCenterEventListProjection,
+    UiErrorCenterEventProjection, UiExecutionFactCommand, UiExecutionFactKind,
+    UiMasterPollClassificationProjection, UiMasterPollProjection, UiModelRequestKind,
+    UiModelRequestWaiting, UiProtocolState, UiProviderConfigUpdate, UiQueryResult,
+    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
+    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
+    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
+    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
+    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
+    UiTaskSnapshotProjection, UiTurnProjection, UiWorkerControlCommand,
+    UiWorkerControlEventProjection, UiWorkerControlProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
 };
@@ -5566,10 +5567,12 @@ fn project_agent_board_for_ui(
 }
 
 fn project_agent_lifecycle_for_ui(lifecycle: AgentLifecycleSnapshot) -> UiAgentLifecycleProjection {
+    let process = lifecycle_process_projection(&lifecycle);
     UiAgentLifecycleProjection {
         agent_id: lifecycle.agent_id,
         role: lifecycle.role,
         alive: lifecycle.alive,
+        process,
         state: agent_lifecycle_state_label(&lifecycle.state).to_owned(),
         current_task_id: lifecycle
             .current_task_id
@@ -5593,6 +5596,27 @@ fn project_agent_lifecycle_for_ui(lifecycle: AgentLifecycleSnapshot) -> UiAgentL
         last_seen_at: lifecycle.last_seen_at,
         elapsed_ms: lifecycle.elapsed_ms,
     }
+}
+
+fn lifecycle_process_projection(
+    lifecycle: &AgentLifecycleSnapshot,
+) -> Option<Box<UiAgentProcessProjection>> {
+    if lifecycle.process_id.is_none()
+        && lifecycle.process_instance_id.is_none()
+        && lifecycle.process_started_at.is_none()
+        && lifecycle.process_heartbeat_at.is_none()
+        && lifecycle.restart_count == 0
+    {
+        return None;
+    }
+    Some(Box::new(UiAgentProcessProjection {
+        process_id: lifecycle.process_id,
+        process_instance_id: lifecycle.process_instance_id.clone(),
+        started_at: lifecycle.process_started_at,
+        heartbeat_at: lifecycle.process_heartbeat_at,
+        restart_count: lifecycle.restart_count,
+        next_check_at: lifecycle.next_check_at,
+    }))
 }
 
 fn project_agent_lifecycle_activity_for_ui(
@@ -16910,6 +16934,15 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 },
             })
             .expect("create task");
+        let process_started_at = now_unix_seconds();
+        task_runtime
+            .apply_agent_lifecycle_event(freehand_task::AgentLifecycleEvent::ProcessStarted {
+                agent_id: AgentId::new("agent-live"),
+                process_id: 501,
+                process_instance_id: "agent-live-process-1".to_owned(),
+                started_at: process_started_at,
+            })
+            .expect("process lifecycle");
         let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
             &live_selected_agent(
                 "http://127.0.0.1:1".to_owned(),
@@ -16954,6 +16987,17 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 assert_eq!(board.agents.len(), 1);
                 assert_eq!(board.agents[0].agent_id.as_str(), "agent-live");
                 assert_eq!(board.agents[0].state, "assigned");
+                assert!(board.agents[0].alive);
+                let process = board.agents[0]
+                    .process
+                    .as_ref()
+                    .expect("process projection");
+                assert_eq!(process.process_id, Some(501));
+                assert_eq!(
+                    process.process_instance_id.as_deref(),
+                    Some("agent-live-process-1")
+                );
+                assert_eq!(process.restart_count, 0);
                 assert_eq!(
                     board.agents[0].current_task_id.as_deref(),
                     Some("runtime-phase1-board-task")
@@ -16972,6 +17016,11 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             UiQueryResult::AgentLifecycle(lifecycle) => {
                 assert_eq!(lifecycle.agent_id.as_str(), "agent-live");
                 assert_eq!(lifecycle.state, "assigned");
+                assert!(lifecycle.alive);
+                let process = lifecycle.process.as_ref().expect("process projection");
+                assert_eq!(process.started_at, Some(process_started_at));
+                assert_eq!(process.heartbeat_at, Some(process_started_at));
+                assert!(process.next_check_at.is_some());
                 assert_eq!(
                     lifecycle.current_task_id.as_deref(),
                     Some("runtime-phase1-board-task")

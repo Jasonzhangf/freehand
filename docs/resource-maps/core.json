@@ -230,6 +230,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "agent.heartbeat",
+      "owner_feature_id": "agent.lifecycle",
+      "source_resource": "agent",
+      "target_resource": "agent",
+      "effect": "record typed process start and heartbeat truth and derive query-time Worker health",
+      "mainline_call_doc": "docs/mainline-calls/agent.lifecycle.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "timer.fire_master_wakeup",
       "owner_feature_id": "runtime.master-worker-loop",
       "source_resource": "timer",
@@ -370,6 +379,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "agent.lifecycle#08",
+      "operation_id": "agent.heartbeat",
+      "source_resource": "agent",
+      "target_resource": "agent",
+      "mainline_call_doc": "docs/mainline-calls/agent.lifecycle.json",
+      "call_table_step": "08",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "symbol_path": "TaskRuntime::apply_agent_lifecycle_event",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "runtime.master-worker-loop#12",
       "operation_id": "timer.fire_master_wakeup",
       "source_resource": "timer",
@@ -506,6 +526,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Task owner truth may be projected into UI protocol without UI owning task state."
+    },
+    {
+      "rule_id": "agent-heartbeat-updates-agent-direct",
+      "source_resource": "agent",
+      "target_resource": "agent",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Agent lifecycle owner may update one agent's typed process identity and heartbeat projection without a second health resource."
     },
     {
       "rule_id": "timer-fires-master-wakeup-direct",

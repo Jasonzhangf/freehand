@@ -11,6 +11,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 ## Resource Operation Backlinks
 
 - timer.fire_master_wakeup
+- agent.heartbeat
 
 ## Request Mainline
 
@@ -22,6 +23,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 - when a child task_closed event arrives, the runner checks all terminal-included child tasks with the same parent_session_id and starts an overall-goal evaluation turn in the original parent session only after every current child is Closed; the evaluation receives original user objective history, decomposed child task requirements, and accepted review truth
 - Slave mode constructs a production Worker runner instead of a Master UI dispatcher
 - each Worker opens its only configured Master's Task Center namespace and uses its own distinct configured agent id as execution identity
+- Worker construction records one typed process-start event; every idle or active poll tick and the active task-heartbeat loop refresh the same process instance through agent.lifecycle
 - each Worker tick claims the highest-priority Assigned task for that Worker
 - claim persists one execution id and lease heartbeat
 - task target cwd expands a leading ~, canonicalizes through symlinks, and becomes the locked Worker execution root
@@ -51,6 +53,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 - provider/network system failure after internal provider retries writes one interrupted execution fact for same-task retry; non-provider task execution failure writes one blocked execution fact
 - Worker reason/session truth persists under Worker agent identity
 - task/execution/lease/agent truth persists under the paired Master's Task Center namespace
+- AgentBoard and AgentLifecycle return Worker PID, process instance, heartbeat timestamp, restart count, and TTL-derived alive from the lifecycle owner
 - periodic Worker ticks continue after idle, success, or blocked outcomes
 - blocked Worker execution releases the configured Worker resource to Available while preserving TaskBlocked for Master decision
 - Worker heartbeat and result reporting are rejected when paired Task Center truth has externally terminalized the task
@@ -77,6 +80,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 - Master lifecycle cursor parse or write failure stops the loop explicitly
 - missing or invalid target cwd records blocked truth before model execution, with classified wording for missing parent, likely output-directory misuse, permission denial, and generic canonicalization failure
 - claim or heartbeat persistence failure stops before provider execution
+- process-start or process-heartbeat persistence failure stops before task claim or provider execution
 - heartbeat or result reporting after external cancel returns explicit Task Center failure and does not append Worker lifecycle truth
 - failure to persist a blocked execution fact remains an explicit runner error
 - Worker cannot call recursive `task` through schema or execution policy
@@ -106,7 +110,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 | 02 | `ProductionWorkerRunner::run` | `crates/freehand-runtime/src/worker_runner.rs` | run periodic Worker ticks with explicit cadence | runner and interval | long-running Worker service | daemon Slave mode | ProductionWorkerRunner::run_once |  |  |  | bound |
 | 03 | `ProductionWorkerRunner::run_once` | `crates/freehand-runtime/src/worker_runner.rs` | claim one Assigned task, canonicalize target cwd with ~ expansion and symlink resolution, heartbeat, execute, and report | Task Center and Worker identity | idle, review-ready, or blocked outcome | Worker service loop and tests | task owner and live bridge |  |  |  | bound |
 | 04 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | choose and claim the highest-priority Assigned task for Worker | Worker id, execution id, and lease TTL | claimed task plus TaskResumed and heartbeat truth | ProductionWorkerRunner::run_once | task owner |  |  |  | bound |
-| 05 | `WorkerHeartbeat::start` | `crates/freehand-runtime/src/worker_runner/heartbeat.rs` | renew the claimed task lease while provider execution remains active | claimed task, execution, and Worker identity | periodic TaskHeartbeat truth or explicit heartbeat error without overwriting external terminal truth | ProductionWorkerRunner::run_once | task owner |  |  |  | bound |
+| 05 | `WorkerHeartbeat::start` | `crates/freehand-runtime/src/worker_runner/heartbeat.rs` | renew the claimed task lease and same process-instance heartbeat while provider execution remains active | claimed task, execution, Worker, and process identity | periodic TaskHeartbeat plus agent heartbeat truth or explicit heartbeat error without overwriting external terminal truth | ProductionWorkerRunner::run_once | task owner and agent.lifecycle owner |  |  |  | bound |
 | 06 | `run_worker_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one Worker task in canonical task cwd with Worker tool policy and path-preflight prompt contract | selected Worker config and live request | closed live reason outcome | ProductionWorkerRunner::run_once | provider/reason live bridge |  |  |  | bound |
 | 07 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | persist review-ready or blocked result for the same execution unless Task Center truth is externally terminal | typed execution fact | terminal task mutation | ProductionWorkerRunner::run_once | task owner |  |  |  | bound |
 | 08 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | select Slave host path without constructing Master UI dispatcher | daemon agent selection | Worker service process | daemon CLI | ProductionWorkerRunner::run |  |  |  | bound |
@@ -121,6 +125,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 | 16 | `configured_worker_task_boundary_failure` | `crates/freehand-runtime/src/lib.rs` | validate Master task create and assign routing against the configured Worker topology | task tool call and ordered configured Worker id set | explicit topology failure or allowed mutation path | execute_registry_tool_call_with_workspace | pure boundary validator |  |  |  | bound |
 | 17 | `execute_registry_tool_call_with_workspace` | `crates/freehand-runtime/src/lib.rs` | enforce configured Worker-set routing before task-tool mutation and route Master timer calls to independent timer truth | Master task or timer call and ordered configured Worker id set | paired failed result or owner-routed task/timer mutation | provider and reason live bridge | configured_worker_task_boundary_failure, task tool owner, and timer store owner |  |  |  | bound |
 | 18 | `run_master_mode` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP host and Master lifecycle runner under one daemon lifetime | Master bootstrap and bind | supervised Master daemon | daemon CLI | server host and ProductionMasterRunner::run_until |  |  |  | bound |
+| 19 | `ProductionWorkerRunner::record_process_started / ProductionWorkerRunner::record_process_heartbeat_in` | `crates/freehand-runtime/src/worker_runner.rs` | emit one unique process instance at runner construction and refresh it on every poll tick | configured Worker identity, PID, and process-instance id | persisted agent.lifecycle process health | Worker construction and ProductionWorkerRunner::run_once | TaskRuntime::apply_agent_lifecycle_event |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -128,7 +133,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 - Master workspace boundary, external-cwd delegation, and path/symlink dispatch guidance are already bound
 - independent timer schedule truth, Master due-timer wakeup routing, and failure release are code-bound
 - production Master lifecycle runner, durable cursor, and supervised Master daemon startup are code-bound
-- production Worker runner, retryable interrupted/rejected requeue, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound
+- production Worker runner, retryable interrupted/rejected requeue, Worker-specific live tool policy, periodic task and process heartbeat, and Slave daemon startup are code-bound
 - config-selected Master guidance, TaskSpaceSnapshot, and task mutation boundary consume the full ordered Worker peer set; singular configured-Worker fields are physically removed
 - each Slave Worker runner consumes its one configured Master peer and keeps task claim/execution identity distinct per configured Worker process
 - the controlled online verifier starts worker-alpha, worker-beta, and worker-gamma as three distinct daemon processes, proves one initial task per Worker without cross-claim, forces beta reject/rework plus a next-round integration task, and persists JSON proof before explicit PID cleanup
