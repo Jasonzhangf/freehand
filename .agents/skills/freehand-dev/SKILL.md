@@ -368,6 +368,11 @@ Use this skill for any non-trivial work in this repo.
 - Task Center atomic JSON temp paths must be process-unique. A timestamp rounded
   to seconds is invalid because concurrent Worker boot/index writes can race on
   the same temp file and terminate one Worker before it claims work.
+- Atomic rename alone does not make shared JSON read-modify-write safe.
+  `leases.json` mutations from independent Worker processes must hold the
+  TaskStore advisory lock across load, mutate, and atomic replace. Boot cleanup
+  must remove only the invalid task ids from current locked truth; never replace
+  the file from a stale pre-lock lease snapshot.
 - When global `~/.freehand` EventInbox/TaskBoard contains unrelated historical truth, run Master/Worker lifecycle fixtures with an isolated temporary `HOME/.freehand`; do not delete, skip, or rewrite global truth to obtain a pass. Switch both the fixture Master and Worker provider configurations through the config owner before submitting work, and stop only the explicit fixture/server/worker PIDs started by that verifier.
 - Before an isolated online verifier launches a workspace binary such as
   `target/debug/freehand-daemon`, rebuild that exact binary after source changes;

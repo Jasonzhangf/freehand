@@ -449,6 +449,7 @@ name = "freehand-task"
 version = "0.1.0"
 dependencies = [
  "freehand-contracts",
+ "fs2",
  "serde",
  "serde_json",
  "thiserror",

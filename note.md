@@ -5799,3 +5799,51 @@ Current real root cause split:
     node transport paths.
   - shared `leases.json` remains a potential multi-process read-modify-write
     lost-update risk even though the latest controlled proof passed.
+
+# 2026-07-14 Shared lease RMW concurrency closeout
+
+- trigger:
+  - The controlled three-Worker topology uses one Master Task Center namespace,
+    so independent Worker processes mutate the same
+    `state/task-runtime/<master>/leases.json`.
+  - Process-unique atomic temp names fixed rename collisions but did not make
+    the preceding load/mutate/write transaction atomic.
+- red evidence:
+  - New test `lease_state_rmw_preserves_parallel_distinct_writers` started 24
+    concurrent distinct lease writers against the old implementation.
+  - Old implementation retained only 1 of 24 leases.
+  - Failure log:
+    `~/Library/Application Support/rtk/tee/1783987933_cargo_test.log`.
+- unique owner fix:
+  - `TaskStore::with_lease_state_lock` owns one `leases.lock` advisory lock.
+  - Lease create/refresh/remove holds the lock across load, mutate, and atomic
+    rename.
+  - Boot reconciliation removes only invalid task ids from current locked lease
+    truth instead of writing its stale pre-lock full map.
+  - No new lease schema, per-task fallback store, or compatibility path was
+    introduced.
+- local evidence:
+  - `lease_state_rmw_preserves_parallel_distinct_writers` passed.
+  - `lease_state_rmw_removes_only_target_during_parallel_refresh` passed.
+  - `cargo test -p freehand-task -- --nocapture` passed 52 tests.
+  - `cargo clippy -p freehand-task --all-targets -- -D warnings` passed.
+  - `cargo fmt --check`, mainlines generate/check, gates check, and
+    `git diff --check` passed.
+- online evidence:
+  - `scripts/verify-master-three-worker-e2e-online.sh` passed with session
+    `online-master-three-worker-evaluation-1783988351`.
+  - Worker PIDs were `60857/60858/60859` for
+    `worker-alpha/worker-beta/worker-gamma`; no PID remained after cleanup.
+  - Alpha/beta/gamma stayed bound to their configured Worker identities.
+  - Beta used two distinct execution ids through reject/rework.
+  - First parent evaluation created integration work; second evaluation closed
+    the overall goal at `runtime-turn-3`.
+  - Restart proof kept `final_evaluation_count=1` and
+    `restart_idempotent=true`.
+  - Evidence dir:
+    `/tmp/freehand-three-worker-home.CrH6iE/.freehand/tmp/three-worker-e2e-20260714T081911-60827`.
+- remaining:
+  - launchd-managed three-service lifecycle and queryable Worker health/restart
+    truth remain open.
+  - real-provider crash/recovery/reassignment/takeover remains open.
+  - cross-machine multi-peer node transport remains open.

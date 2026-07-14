@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_contracts::{AgentId, SessionId, TraceId, TurnId};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -2397,21 +2398,54 @@ impl TaskStore {
             .collect())
     }
 
-    fn write_leases(&self, leases: &BTreeMap<TaskId, TaskLease>) -> Result<(), TaskError> {
+    fn write_leases_unlocked(&self, leases: &BTreeMap<TaskId, TaskLease>) -> Result<(), TaskError> {
         let values = leases.values().cloned().collect::<Vec<_>>();
         write_json_atomic(&self.lease_state_path(), &values)
     }
 
     fn write_lease(&self, lease: &TaskLease) -> Result<(), TaskError> {
-        let mut leases = self.load_leases()?;
-        leases.insert(lease.task_id.clone(), lease.clone());
-        self.write_leases(&leases)
+        self.with_lease_state_lock(|store| {
+            let mut leases = store.load_leases()?;
+            leases.insert(lease.task_id.clone(), lease.clone());
+            store.write_leases_unlocked(&leases)
+        })
     }
 
     fn remove_lease(&self, task_id: &TaskId) -> Result<(), TaskError> {
-        let mut leases = self.load_leases()?;
-        leases.remove(task_id);
-        self.write_leases(&leases)
+        self.remove_leases(std::slice::from_ref(task_id))
+    }
+
+    fn remove_leases(&self, task_ids: &[TaskId]) -> Result<(), TaskError> {
+        self.with_lease_state_lock(|store| {
+            let mut leases = store.load_leases()?;
+            for task_id in task_ids {
+                leases.remove(task_id);
+            }
+            store.write_leases_unlocked(&leases)
+        })
+    }
+
+    fn with_lease_state_lock<T>(
+        &self,
+        mutate: impl FnOnce(&Self) -> Result<T, TaskError>,
+    ) -> Result<T, TaskError> {
+        let lock_path = self.lease_state_lock_path();
+        ensure_parent_dir(&lock_path)?;
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(lock_path)
+            .map_err(io_err)?;
+        FileExt::lock_exclusive(&lock_file).map_err(io_err)?;
+        let result = mutate(self);
+        let unlock_result = FileExt::unlock(&lock_file).map_err(io_err);
+        match (result, unlock_result) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Err(err), _) => Err(err),
+            (Ok(_), Err(err)) => Err(err),
+        }
     }
 
     fn load_master_event_cursor(
@@ -2527,6 +2561,10 @@ impl TaskStore {
         self.task_runtime_state_dir().join("leases.json")
     }
 
+    fn lease_state_lock_path(&self) -> PathBuf {
+        self.task_runtime_state_dir().join("leases.lock")
+    }
+
     fn master_event_cursor_path(&self, master_agent_id: &AgentId) -> PathBuf {
         self.task_runtime_state_dir()
             .join("master-event-cursors")
@@ -2609,14 +2647,14 @@ fn reconcile_running_leases(
     now: u64,
 ) -> Result<(), TaskError> {
     let task_ids = state.tasks.keys().cloned().collect::<Vec<_>>();
-    let mut leases_changed = false;
+    let mut leases_to_remove = Vec::new();
     for task_id in task_ids {
         let Some(task) = state.tasks.get(&task_id).cloned() else {
             continue;
         };
         if !matches!(task.status, TaskStatus::Running) {
             if state.leases.remove(&task_id).is_some() {
-                leases_changed = true;
+                leases_to_remove.push(task_id);
             }
             continue;
         }
@@ -2676,11 +2714,11 @@ fn reconcile_running_leases(
         }
         state.tasks.insert(task_id.clone(), interrupted);
         if state.leases.remove(&task_id).is_some() {
-            leases_changed = true;
+            leases_to_remove.push(task_id);
         }
     }
-    if leases_changed {
-        store.write_leases(&state.leases)?;
+    if !leases_to_remove.is_empty() {
+        store.remove_leases(&leases_to_remove)?;
     }
     Ok(())
 }
@@ -3959,6 +3997,108 @@ mod tests {
             leftovers.is_empty(),
             "atomic write temp files leaked: {leftovers:?}"
         );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn lease_state_rmw_preserves_parallel_distinct_writers() {
+        let runtime_home = temp_runtime_home("task-parallel-lease-writers");
+        let store = TaskStore::new(&runtime_home, AgentId::new("master"));
+        let writer_count = 24;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(writer_count));
+        let mut handles = Vec::new();
+
+        for index in 0..writer_count {
+            let barrier = std::sync::Arc::clone(&barrier);
+            let store = store.clone();
+            handles.push(std::thread::spawn(move || {
+                let task_id = TaskId::new(format!("task-parallel-{index}"));
+                let lease = TaskLease {
+                    schema_version: 1,
+                    task_id: task_id.clone(),
+                    agent_id: AgentId::new(format!("worker-{index}")),
+                    lease_id: format!("lease-{index}"),
+                    status: "active".to_owned(),
+                    acquired_at: 1,
+                    heartbeat_at: 2,
+                    expires_at: 300,
+                };
+                barrier.wait();
+                store.write_lease(&lease)
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("join").expect("write lease");
+        }
+
+        let leases = store.load_leases().expect("load leases");
+        assert_eq!(leases.len(), writer_count);
+        for index in 0..writer_count {
+            assert!(leases.contains_key(&TaskId::new(format!("task-parallel-{index}"))));
+        }
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn lease_state_rmw_removes_only_target_during_parallel_refresh() {
+        let runtime_home = temp_runtime_home("task-parallel-lease-remove-refresh");
+        let store = TaskStore::new(&runtime_home, AgentId::new("master"));
+        let lease_count = 24;
+        for index in 0..lease_count {
+            store
+                .write_lease(&TaskLease {
+                    schema_version: 1,
+                    task_id: TaskId::new(format!("task-parallel-{index}")),
+                    agent_id: AgentId::new(format!("worker-{index}")),
+                    lease_id: format!("lease-{index}"),
+                    status: "active".to_owned(),
+                    acquired_at: 1,
+                    heartbeat_at: 2,
+                    expires_at: 300,
+                })
+                .expect("seed lease");
+        }
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(lease_count));
+        let mut handles = Vec::new();
+        for index in 0..lease_count {
+            let barrier = std::sync::Arc::clone(&barrier);
+            let store = store.clone();
+            handles.push(std::thread::spawn(move || {
+                let task_id = TaskId::new(format!("task-parallel-{index}"));
+                barrier.wait();
+                if index % 2 == 0 {
+                    store.remove_lease(&task_id)
+                } else {
+                    store.write_lease(&TaskLease {
+                        schema_version: 1,
+                        task_id,
+                        agent_id: AgentId::new(format!("worker-{index}")),
+                        lease_id: format!("lease-{index}"),
+                        status: "active".to_owned(),
+                        acquired_at: 1,
+                        heartbeat_at: 3,
+                        expires_at: 600,
+                    })
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("join").expect("mutate lease");
+        }
+
+        let leases = store.load_leases().expect("load leases");
+        assert_eq!(leases.len(), lease_count / 2);
+        for index in 0..lease_count {
+            let lease = leases.get(&TaskId::new(format!("task-parallel-{index}")));
+            if index % 2 == 0 {
+                assert!(lease.is_none(), "removed lease {index} was reintroduced");
+            } else {
+                assert_eq!(lease.map(|lease| lease.heartbeat_at), Some(3));
+            }
+        }
         let _ = fs::remove_dir_all(runtime_home);
     }
 

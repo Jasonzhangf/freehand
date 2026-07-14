@@ -46,6 +46,9 @@
 - create action writes append-only ledger events and atomic snapshots; the
   shared atomic JSON writer uses per-process unique temp paths so concurrent
   TaskRuntime boots or index writes do not steal each other's temp file
+- lease create/refresh/remove serializes the complete `leases.json`
+  read-modify-write transaction through one TaskStore lock; boot recovery
+  removes only invalid task ids instead of replacing concurrent lease truth
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
 - `assign_task` binds waiting/created/interrupted tasks to an available agent
 - `claim_next_task` lets an agent claim its highest-priority assigned task into `Running` with a lease and durable `execution_id`
@@ -123,6 +126,8 @@
 - unknown task id returns explicit task-not-found
 - unknown agent id returns explicit agent-not-found
 - persistence failures return explicit task persistence errors
+- lease lock/open/unlock failures return explicit task persistence errors and
+  do not pretend the lease mutation succeeded
 - invalid lifecycle transitions return explicit `InvalidTransition` errors and do not write ledger/snapshot truth
 - heartbeat for non-running or unassigned tasks returns explicit invalid transition and writes no lease
 - heartbeat or execution facts from a stale runtime after a terminal mutation
@@ -165,6 +170,15 @@
   - related tests: `atomic_json_write_survives_parallel_same_path_writers`
   - why shared: one atomic write owner prevents per-store ad hoc persistence
     and multi-process temp-file collisions
+- `TaskStore::with_lease_state_lock`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: serialize the complete shared lease load/mutate/atomic-write
+    transaction across independent Worker processes
+  - allowed callers: TaskStore lease create/refresh/remove helpers
+  - related tests: `lease_state_rmw_preserves_parallel_distinct_writers`,
+    `lease_state_rmw_removes_only_target_during_parallel_refresh`
+  - why shared: one lock owner prevents per-caller locking gaps and lost lease
+    updates
 - `TaskRuntime::query_task_board`
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: project owner-backed TaskBoard truth from task snapshots,
@@ -243,6 +257,7 @@
 | 23 | `TaskRuntime::query_event_inbox` | `crates/freehand-task/src/lib.rs` | project master-visible event inbox entries from ordered task ledger events after a globally unique cursor, with legacy three-part cursor prefix compatibility | task ledgers + optional cursor | EventInbox projection and next cursor | runtime query dispatch / CLI sample | task owner | bound |
 | 24 | `TaskRuntime::run_master_poll` | `crates/freehand-task/src/lib.rs` | load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and persist processed cursor without task business mutations | master poll request + persisted cursor | master poll outcome with classifications and next cursor | runtime ADP command dispatch / CLI sample | task owner | bound |
 | 25 | `write_json_atomic` | `crates/freehand-task/src/lib.rs` | atomically replace JSON persistence files with process/nanos/counter-qualified temp paths | serializable task owner truth | replaced JSON truth without cross-writer temp collisions | TaskStore persistence helpers | filesystem atomic rename | bound |
+| 26 | `TaskStore::with_lease_state_lock` | `crates/freehand-task/src/lib.rs` | serialize shared lease read-modify-write mutation across independent Worker processes | lease create/refresh/remove mutation | complete `leases.json` truth without lost updates or stale reintroduction | TaskStore lease helpers | filesystem advisory lock + atomic rename | bound |
 
 ## Sync Status Against Code
 

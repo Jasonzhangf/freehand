@@ -13,6 +13,7 @@
 "`TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired",
     "`TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance",
     "create action writes append-only ledger events and atomic snapshots; shared atomic JSON persistence uses per-process unique temp paths so concurrent TaskRuntime boots or index writes do not steal each other's temp file",
+    "lease create, refresh, and removal serialize the complete leases.json read-modify-write transaction through one TaskStore advisory lock; boot recovery removes only invalid task ids instead of replacing concurrent lease truth",
     "dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`",
     "`TaskRuntime::assign_task` binds waiting, created, or interrupted tasks to an available agent",
     "`TaskRuntime::claim_next_task` lets an agent claim its highest-priority assigned task into lease-backed Running state with a durable execution_id",
@@ -71,6 +72,7 @@
     "recording execution for a non-running task returns invalid-transition and writes no event",
     "history for unknown task returns explicit task-not-found",
     "persistence failures return explicit task persistence errors",
+    "lease lock, open, and unlock failures return explicit task persistence errors and do not pretend the lease mutation succeeded",
     "task failures become failed tool results and can be sent back to the model",
     "malformed ExecutionFact returns explicit validation error and writes no Task Center truth",
     "SchedulerTick persistence failure returns explicit task runtime error and does not pretend stale/timeout facts were admitted",
@@ -111,6 +113,19 @@
         "atomic_json_write_survives_parallel_same_path_writers"
       ],
       "why_shared": "one atomic write owner prevents per-store ad hoc persistence and multi-process temp-file collisions"
+    },
+    {
+      "symbol": "TaskStore::with_lease_state_lock",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "serialize the complete shared lease load, mutate, and atomic-write transaction across independent Worker processes",
+      "allowed_callers": [
+        "TaskStore lease create, refresh, and remove helpers"
+      ],
+      "related_tests": [
+        "lease_state_rmw_preserves_parallel_distinct_writers",
+        "lease_state_rmw_removes_only_target_during_parallel_refresh"
+      ],
+      "why_shared": "one lock owner prevents per-caller locking gaps and lost lease updates"
     },
     {
       "symbol": "TaskRuntime::mutate_task",
@@ -584,6 +599,17 @@
       "caller": "TaskStore persistence helpers",
       "callee": "filesystem atomic rename",
       "binding_status": "bound"
+    },
+    {
+      "step": "26",
+      "symbol_path": "TaskStore::with_lease_state_lock",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "serialize shared lease read-modify-write mutation across independent Worker processes",
+      "input_semantic": "lease create, refresh, or remove mutation",
+      "output_semantic": "complete leases.json truth without lost updates or stale reintroduction",
+      "caller": "TaskStore lease helpers",
+      "callee": "filesystem advisory lock plus atomic rename",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -591,6 +617,7 @@
     "current implementation supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `record_execution`, `history`, `list_tasks`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`",
     "review-before-close is locked by positive and negative tests",
     "lease-backed Running recovery is locked by positive and negative tests",
+    "shared leases.json read-modify-write is serialized across Worker processes and locked by parallel positive and negative tests",
     "agent registry lifecycle is locked by positive and negative tests",
     "worker progress event recording is locked by positive and negative tests",
     "Phase 1 TaskBoard owner-internal skeleton is implemented",

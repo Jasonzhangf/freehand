@@ -255,12 +255,17 @@ Landed:
 - Master restart proof preserves exactly one final parent evaluation
 - Task Center atomic JSON temp paths are process-unique, preventing concurrent
   Worker boot from stealing another process's index temp file
+- shared Task Center `leases.json` mutations hold one advisory lock across the
+  complete read-modify-write transaction, so concurrent Worker heartbeats do
+  not lose another task's lease or reintroduce a removed lease
 
 Validation:
 
 ```bash
 cargo test -p freehand-config -- --nocapture
 cargo test -p freehand-runtime master_assignment_gate -- --nocapture
+cargo test -p freehand-task lease_state_rmw_preserves_parallel_distinct_writers -- --nocapture
+cargo test -p freehand-task lease_state_rmw_removes_only_target_during_parallel_refresh -- --nocapture
 bash -n scripts/install-launchd.sh
 scripts/verify-launchd-worker-naming.sh
 scripts/verify-master-three-worker-e2e-online.sh

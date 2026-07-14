@@ -16,6 +16,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - `TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired
 - `TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance
 - create action writes append-only ledger events and atomic snapshots; shared atomic JSON persistence uses per-process unique temp paths so concurrent TaskRuntime boots or index writes do not steal each other's temp file
+- lease create, refresh, and removal serialize the complete leases.json read-modify-write transaction through one TaskStore advisory lock; boot recovery removes only invalid task ids instead of replacing concurrent lease truth
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
 - `TaskRuntime::assign_task` binds waiting, created, or interrupted tasks to an available agent
 - `TaskRuntime::claim_next_task` lets an agent claim its highest-priority assigned task into lease-backed Running state with a durable execution_id
@@ -76,6 +77,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - recording execution for a non-running task returns invalid-transition and writes no event
 - history for unknown task returns explicit task-not-found
 - persistence failures return explicit task persistence errors
+- lease lock, open, and unlock failures return explicit task persistence errors and do not pretend the lease mutation succeeded
 - task failures become failed tool results and can be sent back to the model
 - malformed ExecutionFact returns explicit validation error and writes no Task Center truth
 - SchedulerTick persistence failure returns explicit task runtime error and does not pretend stale/timeout facts were admitted
@@ -101,6 +103,12 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
   - allowed callers: TaskStore persistence helpers
   - related tests: atomic_json_write_survives_parallel_same_path_writers
   - why shared: one atomic write owner prevents per-store ad hoc persistence and multi-process temp-file collisions
+- `TaskStore::with_lease_state_lock`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: serialize the complete shared lease load, mutate, and atomic-write transaction across independent Worker processes
+  - allowed callers: TaskStore lease create, refresh, and remove helpers
+  - related tests: lease_state_rmw_preserves_parallel_distinct_writers, lease_state_rmw_removes_only_target_during_parallel_refresh
+  - why shared: one lock owner prevents per-caller locking gaps and lost lease updates
 - `TaskRuntime::mutate_task`
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: re-read persisted task truth, validate lifecycle transitions, write ledger and snapshot, and update memory state
@@ -210,6 +218,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 23 | `TaskRuntime::query_event_inbox` | `crates/freehand-task/src/lib.rs` | project master-visible event inbox entries from ordered task ledger events after a globally unique cursor, with legacy three-part cursor prefix compatibility; omitted limit drains all pending rows | task ledgers plus optional cursor | EventInbox projection and next cursor | runtime query dispatch / CLI sample | task owner |  |  |  | bound |
 | 24 | `TaskRuntime::run_master_poll` | `crates/freehand-task/src/lib.rs` | load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and persist processed cursor without task business mutations; replay_from_start plus omitted limit drains all pending rows | master poll request plus explicit replay cursor mode or persisted cursor | master poll outcome with classifications and next cursor | runtime ADP command dispatch / CLI sample | task owner |  |  |  | bound |
 | 25 | `write_json_atomic` | `crates/freehand-task/src/lib.rs` | atomically replace JSON persistence files with process/nanos/counter-qualified temp paths | serializable task owner truth | replaced JSON truth without cross-writer temp collisions | TaskStore persistence helpers | filesystem atomic rename |  |  |  | bound |
+| 26 | `TaskStore::with_lease_state_lock` | `crates/freehand-task/src/lib.rs` | serialize shared lease read-modify-write mutation across independent Worker processes | lease create, refresh, or remove mutation | complete leases.json truth without lost updates or stale reintroduction | TaskStore lease helpers | filesystem advisory lock plus atomic rename |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -217,6 +226,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - current implementation supports `append`, `pause`, `resume`, `heartbeat`, `assign`, `claim_next`, `record_execution`, `history`, `list_tasks`, `cancel`, `submit_review`, `approve`, `reject`, `close`, `create_agent`, and `close_agent`
 - review-before-close is locked by positive and negative tests
 - lease-backed Running recovery is locked by positive and negative tests
+- shared leases.json read-modify-write is serialized across Worker processes and locked by parallel positive and negative tests
 - agent registry lifecycle is locked by positive and negative tests
 - worker progress event recording is locked by positive and negative tests
 - Phase 1 TaskBoard owner-internal skeleton is implemented
