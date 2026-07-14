@@ -251,6 +251,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "09b",
+      "symbol_path": "enable_launchd_service",
+      "file_path": "scripts/install-launchd.sh",
+      "responsibility": "enable persistent production LaunchAgents unless an isolated verifier explicitly skips enable overrides",
+      "input_semantic": "install or restart launchd profile",
+      "output_semantic": "launchctl enable or no persistent override",
+      "caller": "launchd install and restart profiles",
+      "callee": "launchctl enable",
+      "binding_status": "bound"
+    },
+    {
       "step": "09",
       "symbol_path": "handle_adp_socket / RuntimeCommandDispatcher::query_runtime",
       "file_path": "apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs",
@@ -307,7 +318,7 @@
     "configured Slave startup binds runtime.master-worker-loop instead of failing the app host",
     "configured Slave runner construction is black-box checked for persisted process PID, instance, alive, and restart truth under agent.lifecycle",
     "Worker launchd defaults bind identity as com.freehand.worker[ S].<agent>, worker[ S].<agent>.env, and matching agent-specific logs",
-    "agent-specific launchd naming has a non-mutating executable fixture, and isolated runtime proof starts three distinct Slave daemon processes while launchd-managed three-service recovery remains open",
+    "agent-specific launchd naming has a non-mutating executable fixture, isolated runtime proof starts three distinct Slave daemon processes, and launchd-managed three-service recovery is proven through KeepAlive restart plus AgentBoard restart-count truth",
     "generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes"
   ]
 }

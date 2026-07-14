@@ -5892,3 +5892,50 @@ Current real root cause split:
   - launchd-managed three-service KeepAlive/crash restart proof remains open.
   - real-provider crash/recovery/reassignment/takeover remains open.
   - cross-machine multi-peer transport remains open.
+
+# 2026-07-14 launchd-managed three Worker lifecycle closeout
+
+- target:
+  - prove three configured Worker services are launchd-managed, not just
+    manually started daemon processes.
+  - keep process truth owned by `agent.lifecycle`; launchd remains only the
+    supervisor.
+- implementation:
+  - `scripts/verify-master-three-worker-e2e-online.sh` now supports
+    `FREEHAND_THREE_WORKER_WORKER_START_MODE=launchd`.
+  - launchd Worker mode installs three unique agent-specific labels under an
+    isolated HOME, starts Workers through `scripts/install-launchd.sh
+    restartWorkerS`, then kills only the explicit gamma PID and waits for
+    KeepAlive to provide a new PID.
+  - `scripts/install-launchd.sh` now has `enable_launchd_service` and
+    `FREEHAND_LAUNCHD_SKIP_ENABLE=1`; production defaults still call
+    `launchctl enable`, while temporary online verifiers skip persistent enable
+    overrides.
+  - `scripts/verify-launchd-three-worker-services-online.sh` wraps the
+    three-Worker verifier with launchd mode, unique label prefix, isolated
+    runtime, and fixed 4143 ADP/health port.
+- online evidence:
+  - first pass session:
+    `online-launchd-three-worker-evaluation-1783994180-13520`, evidence dir
+    `/tmp/freehand-three-worker-home.tKntzt/.freehand/tmp/three-worker-e2e-20260714T095620-13531`.
+  - second pass after skip-enable cleanup fix:
+    `online-launchd-three-worker-evaluation-1783994336-33327`, evidence dir
+    `/tmp/freehand-three-worker-home.rDDvDe/.freehand/tmp/three-worker-e2e-20260714T095856-33335`.
+  - gamma proof from the second pass:
+    launchd label
+    `com.freehand.verify.three-worker.skipenable.1783994336-33322.worker-gamma`,
+    old PID `35572`, new PID `36923`, same gamma task
+    `task-three-worker-1781783994336-gamma`, same execution
+    `exec-worker-worker-gamma-1783994347588322000-3`, new process instance, and
+    `restart_count=1`.
+  - the second pass also verified beta reject/rework, required integration
+    next-round work, final parent success only after integration, and
+    restart-idempotent final evaluation.
+  - cleanup check for the second pass prefix returned zero launchctl matches.
+- local evidence:
+  - `bash -n scripts/verify-master-three-worker-e2e-online.sh` passed.
+  - `bash -n scripts/verify-launchd-three-worker-services-online.sh` passed.
+  - `cargo build -p freehand-daemon` passed before online verification.
+- remaining:
+  - real-provider crash/recovery/reassignment/takeover remains open.
+  - cross-machine multi-peer transport remains open.

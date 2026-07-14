@@ -2,10 +2,12 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+host_home="${FREEHAND_THREE_WORKER_HOST_HOME:-$HOME}"
 isolated_home="${FREEHAND_THREE_WORKER_HOME:-"$(mktemp -d /tmp/freehand-three-worker-home.XXXXXX)"}"
 runtime_home="$isolated_home/.freehand"
-adp_url="${FREEHAND_THREE_WORKER_ADP_URL:-ws://127.0.0.1:4142/adp}"
-health_url="${FREEHAND_THREE_WORKER_HEALTH_URL:-http://127.0.0.1:4142/health}"
+master_bind="${FREEHAND_THREE_WORKER_MASTER_BIND:-127.0.0.1:4142}"
+adp_url="${FREEHAND_THREE_WORKER_ADP_URL:-ws://$master_bind/adp}"
+health_url="${FREEHAND_THREE_WORKER_HEALTH_URL:-http://$master_bind/health}"
 cli_path="${FREEHAND_THREE_WORKER_CLI:-$HOME/.local/bin/freehand-cliS}"
 daemon_path="${FREEHAND_THREE_WORKER_DAEMON:-$repo_root/target/debug/freehand-daemon}"
 port="${FREEHAND_THREE_WORKER_FIXTURE_PORT:-18084}"
@@ -16,6 +18,8 @@ config_path="$runtime_home/config.toml"
 backup_dir="$runtime_home/tmp/three-worker-e2e-$(date +%Y%m%dT%H%M%S)-$$"
 mock_log="$backup_dir/mock-provider.log"
 target_cwd="$backup_dir/worker-target"
+worker_start_mode="${FREEHAND_THREE_WORKER_WORKER_START_MODE:-process}"
+launchd_label_prefix="${FREEHAND_THREE_WORKER_LAUNCHD_LABEL_PREFIX:-com.freehand.three-worker.$$}"
 mock_pid=""
 master_pid=""
 worker_alpha_pid=""
@@ -47,6 +51,9 @@ wait_for_health() {
 
 restore_runtime_config() {
   local restore_status=0
+  if [[ "$worker_start_mode" == "launchd" ]]; then
+    uninstall_launchd_workers || restore_status=$?
+  fi
   for service_pid in "$worker_alpha_pid" "$worker_beta_pid" "$worker_gamma_pid" "$master_pid"; do
     if [[ -n "$service_pid" ]] && kill -0 "$service_pid" >/dev/null 2>&1; then
       kill "$service_pid" >/dev/null 2>&1 || restore_status=$?
@@ -74,7 +81,7 @@ default_model = "MiniMax-M3"
 
 [providers.minimax.auth]
 type = "apikey"
-api_key_env = "$fixture_key_name"
+api_key_env = "FREEHAND_PAIR_TOKEN_SHARED"
 
 [agents.master]
 name = "master"
@@ -115,7 +122,7 @@ start_master() {
     FREEHAND_PAIR_TOKEN_SHARED="$pair_token" \
     FREEHAND_CC_API_KEY="isolated-bootstrap-only" \
     "${fixture_key_name}=${fixture_key_value}" \
-    "$daemon_path" serve --agent master --bind 127.0.0.1:4142 \
+    "$daemon_path" serve --agent master --bind "$master_bind" \
     >"$runtime_home/logs/master.stdout.log" \
     2>"$runtime_home/logs/master.stderr.log" &
   master_pid="$!"
@@ -132,6 +139,10 @@ stop_master() {
 
 start_worker() {
   local agent_name="$1"
+  if [[ "$worker_start_mode" == "launchd" ]]; then
+    start_launchd_worker "$agent_name"
+    return 0
+  fi
   env HOME="$isolated_home" \
     FREEHAND_PAIR_TOKEN_SHARED="$pair_token" \
     FREEHAND_CC_API_KEY="isolated-bootstrap-only" \
@@ -140,6 +151,82 @@ start_worker() {
     >"$runtime_home/logs/${agent_name}.stdout.log" \
     2>"$runtime_home/logs/${agent_name}.stderr.log" &
   worker_start_pid="$!"
+}
+
+launchd_component_for_agent() {
+  printf '%s\n' "$1" | sed 's/[^A-Za-z0-9_.-]/-/g'
+}
+
+launchd_label_for_agent() {
+  local agent_name="$1"
+  printf '%s.%s\n' "$launchd_label_prefix" "$(launchd_component_for_agent "$agent_name")"
+}
+
+launchd_plist_for_agent() {
+  local agent_name="$1"
+  printf '%s/Library/LaunchAgents/%s.plist\n' "$isolated_home" "$(launchd_label_for_agent "$agent_name")"
+}
+
+launchd_pid_for_agent() {
+  local agent_name="$1"
+  local label
+  label="$(launchd_label_for_agent "$agent_name")"
+  launchctl print "gui/$(id -u)/$label" 2>/dev/null \
+    | awk '$1 == "pid" && $2 == "=" { print $3; exit }'
+}
+
+wait_for_launchd_worker_pid() {
+  local agent_name="$1"
+  local old_pid="${2:-}"
+  local deadline=$((SECONDS + 90))
+  local service_pid=""
+  while [[ $SECONDS -lt $deadline ]]; do
+    service_pid="$(launchd_pid_for_agent "$agent_name")"
+    if [[ -n "$service_pid" && "$service_pid" != "$old_pid" ]] && kill -0 "$service_pid" >/dev/null 2>&1; then
+      worker_start_pid="$service_pid"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "launchd Worker $agent_name did not expose a fresh running PID" >&2
+  launchctl print "gui/$(id -u)/$(launchd_label_for_agent "$agent_name")" 2>&1 | sed -n '1,160p' >&2 || true
+  tail -n 120 "$runtime_home/logs/workerS.$(launchd_component_for_agent "$agent_name").stderr.log" >&2 || true
+  return 1
+}
+
+start_launchd_worker() {
+  local agent_name="$1"
+  local label
+  label="$(launchd_label_for_agent "$agent_name")"
+  HOME="$isolated_home" \
+    CARGO_HOME="${CARGO_HOME:-$host_home/.cargo}" \
+    RUSTUP_HOME="${RUSTUP_HOME:-$host_home/.rustup}" \
+    FREEHAND_PREFIX="$isolated_home/.local" \
+    FREEHAND_RUNTIME_HOME="$runtime_home" \
+    FREEHAND_WORKER_AGENT="$agent_name" \
+    FREEHAND_WORKER_WORKDIR="$runtime_home" \
+    FREEHAND_LAUNCHD_LABEL="$label" \
+    FREEHAND_PAIR_TOKEN_SHARED="$pair_token" \
+    FREEHAND_LAUNCHD_SKIP_ENABLE=1 \
+    FREEHAND_LAUNCHD_HEALTH_WAIT_SECONDS=90 \
+    bash scripts/install-launchd.sh restartWorkerS >/dev/null
+  wait_for_launchd_worker_pid "$agent_name"
+}
+
+uninstall_launchd_worker() {
+  local agent_name="$1"
+  local label
+  label="$(launchd_label_for_agent "$agent_name")"
+  HOME="$isolated_home" \
+    FREEHAND_LAUNCHD_LABEL="$label" \
+    bash scripts/uninstall-launchd.sh uninstallWorkerS >/dev/null 2>&1 || true
+  rm -f "$(launchd_plist_for_agent "$agent_name")"
+}
+
+uninstall_launchd_workers() {
+  uninstall_launchd_worker worker-alpha
+  uninstall_launchd_worker worker-beta
+  uninstall_launchd_worker worker-gamma
 }
 
 start_workers() {
@@ -304,6 +391,33 @@ verify_worker_health_restart() {
 
   old_gamma_pid="$worker_gamma_pid"
   kill "$old_gamma_pid"
+  if [[ "$worker_start_mode" == "launchd" ]]; then
+    wait_for_launchd_worker_pid worker-gamma "$old_gamma_pid"
+    worker_gamma_pid="$worker_start_pid"
+    if [[ "$worker_gamma_pid" == "$old_gamma_pid" ]]; then
+      echo "launchd worker-gamma restart reused PID $old_gamma_pid" >&2
+      return 1
+    fi
+    verify_worker_processes
+    restarted_health="$(query_worker_health restarted "$worker_alpha_pid" "$worker_beta_pid" "$worker_gamma_pid" "$gamma_instance" "$gamma_task" "$gamma_execution")"
+    health_proof="$(python3 - "$initial_health" "$restarted_health" "$old_gamma_pid" "$worker_gamma_pid" "$(launchd_label_for_agent worker-gamma)" <<'PY'
+import json
+import sys
+
+initial, restarted = (json.loads(value) for value in sys.argv[1:3])
+print(json.dumps({
+    "ok": True,
+    "mode": "launchd_keepalive",
+    "initial": initial,
+    "restarted": restarted,
+    "old_gamma_pid": int(sys.argv[3]),
+    "new_gamma_pid": int(sys.argv[4]),
+    "gamma_launchd_label": sys.argv[5],
+}, ensure_ascii=False, sort_keys=True))
+PY
+)"
+    return 0
+  fi
   wait "$old_gamma_pid" >/dev/null 2>&1 || true
   worker_gamma_pid=""
   offline_health="$(query_worker_health offline "$worker_alpha_pid" "$worker_beta_pid" "$old_gamma_pid" "$gamma_instance" "$gamma_task" "$gamma_execution")"

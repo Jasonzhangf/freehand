@@ -317,7 +317,7 @@ EOF
 run_install_launchd() {
   launchctl bootout "gui/$(id -u)" "$plist_path" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$plist_path"
-  launchctl enable "gui/$(id -u)/$label"
+  enable_launchd_service
   wait_for_service
 
   echo "[freehand-launchd] installed:"
@@ -339,9 +339,16 @@ run_install_launchd() {
 restart_launchd() {
   launchctl bootout "gui/$(id -u)" "$plist_path" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$plist_path"
-  launchctl enable "gui/$(id -u)/$label"
+  enable_launchd_service
   wait_for_service
   echo "[freehand-launchd] restarted $label"
+}
+
+enable_launchd_service() {
+  if [[ "${FREEHAND_LAUNCHD_SKIP_ENABLE:-0}" == "1" ]]; then
+    return 0
+  fi
+  launchctl enable "gui/$(id -u)/$label"
 }
 
 wait_for_service() {

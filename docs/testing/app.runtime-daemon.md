@@ -46,6 +46,11 @@
   - launchd shell fixture proves `worker-alpha`, `worker-beta`, and
     `worker-gamma` resolve to three unique labels/env/log paths through
     `scripts/verify-launchd-worker-naming.sh`
+  - launchd online fixture proves three agent-specific Worker services start
+    under unique labels in isolated HOME, survive one gamma crash through
+    KeepAlive restart, and expose new PID/process instance plus
+    `restart_count=1` through AgentBoard owner truth via
+    `scripts/verify-launchd-three-worker-services-online.sh`
   - daemon corrupt-checkpoint-bootstrap startup rejection smoke
   - daemon ADP WebSocket command/query/subscribe smoke
   - daemon ADP session CRUD plus rollback command/query smoke
@@ -65,9 +70,9 @@
   - `~/.freehand/logs/daemon.stderr.log`
 - known gaps:
   - real node-pairing websocket transport is not wired yet; daemon ADP WebSocket is a UI/control/status transport over existing runtime-owned local node semantics, not the node pairing transport
-  - isolated controlled-provider three-process proof is green; production
-    closure still requires three agent-specific launchd services with managed
-    health/restart and real-provider recovery evidence
+  - isolated controlled-provider three-process proof and launchd-managed
+    three-service KeepAlive restart proof are green; production closure still
+    requires real-provider recovery evidence
 - sync status between design and implementation:
   - daemon bootstrap helper is landed
   - runtime-backed submit/query/restart-restore/continuous-SSE/provider-failure/direct-message/checkpoint-rewind HTTP smoke is landed
@@ -82,7 +87,7 @@
   - configured Slave bootstrap now constructs the production Worker runner
   - configured Slave bootstrap test verifies process identity through
     TaskRuntime/AgentLifecycle owner truth
-  - agent-specific Worker launchd naming and its non-mutating executable fixture
-    are landed; isolated three-process runtime proof is green, while live
-    launchd-managed three-service proof remains required
+  - agent-specific Worker launchd naming, its non-mutating executable fixture,
+    isolated three-process runtime proof, and live launchd-managed
+    three-service KeepAlive proof are landed
   - migrated mainline-call source and generated wiki are kept in sync with this test design

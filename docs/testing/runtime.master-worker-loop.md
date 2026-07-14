@@ -354,6 +354,11 @@ Task Center truth before another execution starts.
   Worker processes in an isolated runtime home, writes JSON evidence, forces
   beta reject/rework and an integration next round, rejects premature parent
   success, and checks final-evaluation restart idempotency
+- launchd-managed online proof is landed in
+  `scripts/verify-launchd-three-worker-services-online.sh`: it reuses the same
+  three-Worker parent-evaluation verifier with Worker start mode set to
+  launchd, then kills gamma and requires KeepAlive to restart the same agent
+  with a new PID/process instance and AgentBoard `restart_count=1`
 - only claim production closure when the Worker produced a real deliverable or an explicit real-provider blocked result
 
 ## Runtime Evidence
@@ -375,8 +380,7 @@ Task Center truth before another execution starts.
 - task approval/close by the Worker
 - UI projection changes
 - remote node transport; first production slice uses the shared local Task Center runtime home
-- launchd-managed crash/restart and real-provider recovery remain outside the
-  controlled fixture proof
+- real-provider recovery remains outside the controlled fixture proof
 
 ## Definition Of Done
 
@@ -391,6 +395,8 @@ Task Center truth before another execution starts.
 - `scripts/verify-launchd-worker-naming.sh`
 - `bash -n scripts/verify-master-three-worker-e2e-online.sh`
 - `scripts/verify-master-three-worker-e2e-online.sh`
+- `bash -n scripts/verify-launchd-three-worker-services-online.sh`
+- `scripts/verify-launchd-three-worker-services-online.sh`
 - `cargo run -p xtask -- mainlines generate`
 - `cargo run -p xtask -- mainlines check`
 - `cargo run -p xtask -- gates check`

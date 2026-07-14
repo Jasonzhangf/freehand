@@ -95,6 +95,16 @@
     `scripts/verify-launchd-worker-naming.sh`
   - why shared: one naming rule prevents different Worker processes from
     overwriting the same service/env/log truth
+- `enable_launchd_service`
+  - owner: `scripts/install-launchd.sh`
+  - purpose: enable persistent production LaunchAgents by default while letting
+    isolated online verifiers bootstrap/bootout unique labels without leaving
+    launchctl enable overrides
+  - allowed callers: launchd install/restart profiles
+  - related tests: shell syntax plus
+    `scripts/verify-launchd-three-worker-services-online.sh`
+  - why shared: keeps production launchd behavior and temporary verifier cleanup
+    behind one installer-owned switch
 
 ## Function Call Table
 
@@ -110,6 +120,7 @@
 | 07 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | `~/.freehand/daemon.env` | daemon process exec | macOS launchd | `FREEHAND_DAEMON_BIN serve` | bound |
 | 07a | `default_daemon_bind` / `detect_tailscale_ip` | `scripts/install-launchd.sh` | choose launchd default bind as the local Tailscale IPv4 on the fixed release/S port when Tailscale is available, otherwise fall back to loopback | install/restart profile | `<tailscale-ip>:4041` / `<tailscale-ip>:4042` or loopback fallback | launchd installer | `tailscale ip -4` | bound |
 | 07b | `sanitize_launchd_component` | `scripts/install-launchd.sh` | derive deterministic agent-specific Worker label/env/log components | configured Worker agent id | launchd-safe identity component | launchd installer | Worker service path builder | bound |
+| 07c | `enable_launchd_service` | `scripts/install-launchd.sh` | enable persistent production LaunchAgents unless an isolated verifier explicitly skips enable overrides | install/restart profile | launchctl enable or no persistent override | launchd installer | `launchctl enable` | bound |
 | 08 | `handle_adp_socket` / `RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs` / `crates/freehand-runtime/src/lib.rs` | serve daemon ADP error-center query and initial subscription snapshots from runtime metadata truth | ADP error-center query or subscribe frame | ADP error-center query result or initial subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime metadata projection owner | bound |
 | 09 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | route configured Slave mode into the production Worker runner without UI transport or app-owned health inference | selected Slave bootstrap | long-running Worker service whose process truth is written by agent.lifecycle | daemon CLI | `run_blocking_worker_service` | bound |
 | 10 | `run_blocking_worker_service` | `apps/freehand-daemon/src/main.rs` | isolate the synchronous Worker/provider loop from the daemon async runtime thread | Worker service closure | Worker service result or explicit join failure | `run_worker_mode` | `tokio::task::spawn_blocking` | bound |
@@ -130,4 +141,7 @@
 - Worker launchd defaults now bind identity as
   `com.freehand.worker[ S].<agent>`, `worker[ S].<agent>.env`, and matching
   agent-specific logs
+- launchd online verifier now starts three agent-specific Worker services,
+  kills gamma, waits for KeepAlive to produce a new PID, and verifies
+  AgentBoard owner truth reports the same task/execution plus `restart_count=1`
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes
