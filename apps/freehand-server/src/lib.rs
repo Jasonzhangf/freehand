@@ -76,7 +76,6 @@ pub fn build_webui_router(
 ) -> Router {
     Router::new()
         .route("/", get(handle_root))
-        .route("/mock/android", get(handle_android_mock))
         .route("/android/update.json", get(handle_android_update_manifest))
         .route(
             "/android/freehand-android.apk",
@@ -146,10 +145,6 @@ async fn handle_root(Query(params): Query<HashMap<String, String>>) -> Html<Stri
     Html(render_webui_smoke_for_client(
         params.get("client").map(String::as_str),
     ))
-}
-
-async fn handle_android_mock() -> Html<String> {
-    Html(include_str!("../assets/mocks/android/mobile-mock.html").to_owned())
 }
 
 async fn handle_android_update_manifest() -> Result<impl IntoResponse, StatusCode> {
@@ -1091,7 +1086,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn android_mock_route_returns_design_preview() {
+    async fn android_mock_route_is_removed() {
         let server = TestServer::spawn().await;
         let client = Client::builder().build().expect("client");
 
@@ -1099,14 +1094,8 @@ mod tests {
             .get(format!("{}/mock/android", server.base_url))
             .send()
             .await
-            .expect("mock page");
-        assert_eq!(page.status(), StatusCode::OK);
-        let body = page.text().await.expect("mock body");
-        assert!(body.contains("mock-mobile"));
-        assert!(body.contains("<style>"));
-        assert!(body.contains(".mock-mobile"));
-        assert!(!body.contains("/assets/mocks/android/mobile-mock.css"));
-        assert!(body.contains("快速控制"));
+            .expect("removed mock page response");
+        assert_eq!(page.status(), StatusCode::NOT_FOUND);
 
         let css = client
             .get(format!(
@@ -1115,11 +1104,8 @@ mod tests {
             ))
             .send()
             .await
-            .expect("mock css");
-        assert_eq!(css.status(), StatusCode::OK);
-        let css_body = css.text().await.expect("mock css body");
-        assert!(css_body.contains("mock-mobile"));
-        assert!(css_body.contains(".drawer.open"));
+            .expect("removed mock css response");
+        assert_eq!(css.status(), StatusCode::NOT_FOUND);
 
         server.stop().await;
     }

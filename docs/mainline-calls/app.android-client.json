@@ -7,43 +7,40 @@
   "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
   "generated_wiki_doc": "docs/wiki/app.android-client.md",
   "request_mainline": [
-    "user input enters via InputBarController -> CommandIngress::submit wraps SubmitUserInput UiCommand -> AdpEventStream::sendCommand sends a kind=command frame to /adp",
-    "cancel enters via MainActivity onKeyDown Escape -> CommandIngress::cancelLatest wraps CancelLatestActiveTurn -> AdpEventStream::sendCommand sends a kind=command frame to /adp",
-    "Android default status/control path opens daemon ADP WebSocket /adp and sends query/subscribe frames before rendering live state",
-    "HTTP query, SSE subscribe, and POST command ingress remain compatibility transport paths, not the default Android live shell path",
-    "Android client never mutates session/reason/debug/metadata/provider truth"
+    "MainActivity::onCreate loads app-owned daemon endpoint config",
+    "DaemonConnectionConfig accepts only active Tailscale profile identity plus host and port; removed transport, relay, and alternate endpoint fields are explicit errors",
+    "MainActivity::onCreate immediately loads the canonical daemon WebUI URL with client=android-webview",
+    "WebUI owns ADP query/subscribe/command, settings, lifecycle dashboard, transcript, composer, and error rendering",
+    "Android only exposes the system file-picker bridge for WebUI attachment controls"
   ],
   "response_mainline": [
-    "daemon ADP emits UiAdpResponse::SubscriptionEvent with UiSubscriptionEvent / UiProjection::Turn -> AdpEventStream receives Event -> TimelineProjector::applyAdp updates state + latestRawTurnProjection",
-    "daemon ADP command receipt -> AdpEventStream::commandReceiptResponse keeps raw routing/status in CommandResponse.code and maps CommandResponse.message to user-safe known-status text or explicit unsupported text without owner or payload ids",
-    "MainActivity::loadRemoteWebUi hides native chrome after ADP opens and loads the daemon-hosted WebUI root so Android shares WebUI visual/session/ADP rendering truth",
-    "MainActivity::pushSnapshotToWebView calls window.__freehand.applySnapshot(json) on bridge.html only before the remote WebUI is loaded",
-    "bridge.html JS renders public_conversation items as DOM turn cards only in fallback/config-error mode",
-    "WebView settings force mobile viewport rendering so the daemon-hosted WebUI applies phone/tall-phone/tablet portrait drawer layout instead of desktop columns on a phone"
+    "daemon root returns the canonical WebUI shell and mobile layout attributes",
+    "WebViewClient::onPageFinished logs canonical WebUI selector/layout evidence",
+    "Android file-picker result returns URI metadata to window.__freehandAndroidAttachmentSelected"
   ],
   "error_mainline": [
-    "ADP onError -> projector.setConnectionState('error') + statusBanner.showPersistent",
-    "ADP failure frame -> TimelineProjector::applyAdp marks visible error projection",
-    "AdpEventStream::sendCommand send failure -> CommandResponse(ok=false, code='adp_send_failed')",
-    "Android device validation script fails explicitly and records blocker evidence when ADB is offline, the device is locked, Freehand is not foreground, or fatal logcat entries are present"
+    "config parse/load failure is an explicit Android startup failure",
+    "unknown config fields, including removed ADP/SSE/command path or relay fields, are rejected rather than ignored or migrated",
+    "WebView network failure remains a WebView/network failure; Android does not render local fallback UI",
+    "missing FreehandWebUiLayout evidence is a device-validation failure"
   ],
   "call_table": [
     {
       "step": "01",
       "symbol_path": "com.freehand.android.ui.MainActivity::onCreate",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "app shell entrypoint: load file-backed config, configure WebView for mobile viewport rendering, create controllers, start ADP connection",
+      "responsibility": "load config, configure WebView, attach file picker bridge, and load canonical daemon WebUI",
       "input_semantic": "activity intent",
-      "output_semantic": "app process",
+      "output_semantic": "WebView loading http://<host>:<port>/?client=android-webview",
       "caller": "Android framework",
-      "callee": "ClientConfig::store, DaemonConnectionConfigStore::load, controller ctors",
+      "callee": "ClientConfig::store, DaemonConnectionConfigStore::load, DaemonConnectionConfig::activeHostConfig, WebView::loadUrl",
       "binding_status": "bound"
     },
     {
       "step": "02",
       "symbol_path": "com.freehand.android.data.ClientConfig::store",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/ClientConfig.kt",
-      "responsibility": "adapt Android Context to the app-owned daemon config file and bundled asset reader",
+      "responsibility": "adapt Android context to app-owned config and bundled first-run JSON",
       "input_semantic": "Android Context",
       "output_semantic": "DaemonConnectionConfigStore",
       "caller": "MainActivity::onCreate",
@@ -54,195 +51,96 @@
       "step": "03",
       "symbol_path": "com.freehand.android.data.DaemonConnectionConfigStore::load / com.freehand.android.data.DaemonConnectionConfig::parse / com.freehand.android.data.DaemonConnectionConfig::activeHostConfig",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt",
-      "responsibility": "read app-owned daemon JSON or bootstrap bundled config, validate required schema, active profile, Tailscale-only mode, endpoint paths, relay-disabled state, and migrate the known legacy bundled default port without touching user-edited configs",
-      "input_semantic": "config file plus bundled JSON reader",
-      "output_semantic": "validated DaemonConnectionConfig or explicit config error",
+      "responsibility": "read/bootstrap, strictly validate host/port-only profile schema, and select the active daemon endpoint",
+      "input_semantic": "app-owned or bundled daemon JSON",
+      "output_semantic": "HostConfig or explicit config error",
       "caller": "MainActivity::onCreate",
-      "callee": "Gson JsonParser, schema validator, file IO",
+      "callee": "Gson JSON parser and schema validator",
       "binding_status": "bound"
     },
     {
       "step": "04",
-      "symbol_path": "com.freehand.android.data.HostConfig::adpUrl / com.freehand.android.data.HostConfig::healthUrl",
+      "symbol_path": "com.freehand.android.data.HostConfig::baseUrl",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt",
-      "responsibility": "construct selected daemon endpoint URLs from the active profile",
-      "input_semantic": "profile host plus port plus paths",
-      "output_semantic": "ws://<host>:<port><adpPath> and health URL",
-      "caller": "Android app shell",
-      "callee": "active profile config",
+      "responsibility": "build daemon WebUI origin",
+      "input_semantic": "host and port",
+      "output_semantic": "http://<host>:<port>",
+      "caller": "MainActivity::onCreate",
+      "callee": "pure URL builder",
       "binding_status": "bound"
     },
     {
       "step": "05",
-      "symbol_path": "com.freehand.android.data.AdpEventStream::start",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt",
-      "responsibility": "open OkHttp WebSocket to /adp, subscribe latest turn, and query latest turn",
-      "input_semantic": "no",
-      "output_semantic": "ADP WebSocket session",
-      "caller": "MainActivity::connectToDaemon",
-      "callee": "OkHttp newWebSocket",
+      "symbol_path": "com.freehand.android.ui.MainActivity.AndroidWebChromeClient::onShowFileChooser",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "route WebUI input type=file to Android system picker",
+      "input_semantic": "WebUI file chooser request",
+      "output_semantic": "selected URI array or explicit picker failure",
+      "caller": "WebView",
+      "callee": "Android activity result API",
       "binding_status": "bound"
     },
     {
       "step": "06",
-      "symbol_path": "com.freehand.android.data.AdpEventStream::sendCommand",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt",
-      "responsibility": "wrap UiCommand JSON in an ADP command frame and send it over the active socket",
-      "input_semantic": "UiCommand JSON",
-      "output_semantic": "immediate send result plus later command receipt or failure callback",
-      "caller": "CommandIngress",
-      "callee": "ADP WebSocket",
-      "binding_status": "bound"
-    },
-    {
-      "step": "06a",
-      "symbol_path": "com.freehand.android.data.AdpEventStream::commandReceiptResponse",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt",
-      "responsibility": "map command receipts to CommandResponse with user-safe known-status text, explicit unsupported text for unknown receipts, and hidden owner/payload ids",
-      "input_semantic": "protocol command receipt JSON",
-      "output_semantic": "CommandResponse with internal status in code and safe known-status or unsupported text in message",
-      "caller": "AdpEventStream handleFrame",
-      "callee": "command receipt parser",
+      "symbol_path": "com.freehand.android.ui.MainActivity.AndroidFilePickerBridge::request",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "route WebUI attachment buttons to Android system picker",
+      "input_semantic": "attachment kind",
+      "output_semantic": "picker launch",
+      "caller": "daemon WebUI JavaScript",
+      "callee": "MainActivity::openAndroidAttachmentPicker",
       "binding_status": "bound"
     },
     {
       "step": "07",
-      "symbol_path": "com.freehand.android.data.CommandIngress::submit",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt",
-      "responsibility": "wrap user text in SubmitUserInput UiCommand and dispatch through injected ADP sender",
-      "input_semantic": "user text",
-      "output_semantic": "CommandResponse",
-      "caller": "InputBarController",
-      "callee": "AdpEventStream::sendCommand",
+      "symbol_path": "com.freehand.android.ui.MainActivity::injectAndroidAttachmentSelection",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "return selected Android URI metadata to the canonical WebUI attachment hook",
+      "input_semantic": "Android picker result intent",
+      "output_semantic": "window.__freehandAndroidAttachmentSelected(kind, files)",
+      "caller": "activity result callback",
+      "callee": "WebView JavaScript",
       "binding_status": "bound"
     },
     {
       "step": "08",
-      "symbol_path": "com.freehand.android.data.CommandIngress::cancelLatest",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/CommandIngress.kt",
-      "responsibility": "wrap CancelLatestActiveTurn UiCommand and dispatch through injected ADP sender",
-      "input_semantic": "no",
-      "output_semantic": "fire-and-forget",
-      "caller": "MainActivity::onKeyDown Escape",
-      "callee": "AdpEventStream::sendCommand",
+      "symbol_path": "com.freehand.android.ui.MainActivity::reportCanonicalWebUiLayout",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "log canonical WebUI selector/layout evidence",
+      "input_semantic": "loaded page DOM",
+      "output_semantic": "FreehandWebUiLayout logcat row",
+      "caller": "WebViewClient::onPageFinished",
+      "callee": "WebView JavaScript",
       "binding_status": "bound"
     },
     {
       "step": "09",
-      "symbol_path": "com.freehand.android.data.TimelineProjector::applyAdp",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt",
-      "responsibility": "apply ADP query, subscription, and failure frames to internal turn/slave/error state; update latestRawTurnProjection",
-      "input_semantic": "AdpEventStream.Event",
-      "output_semantic": "updated projector state",
-      "caller": "AdpEventStream onEvent callback",
-      "callee": "applyAdpQueryResult, applyAdpProjection, applyTurnProjection",
+      "symbol_path": "generate_launcher_icons",
+      "file_path": "apps/freehand-android/scripts/generate-launcher-icons.sh",
+      "responsibility": "derive launcher PNGs from assets/logo.png",
+      "input_semantic": "source logo",
+      "output_semantic": "density-specific launcher PNGs",
+      "caller": "Android asset maintainer",
+      "callee": "ImageMagick resize",
       "binding_status": "bound"
     },
     {
       "step": "10",
-      "symbol_path": "com.freehand.android.data.AdpEventStream::stop",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/AdpEventStream.kt",
-      "responsibility": "close active ADP WebSocket",
-      "input_semantic": "no",
-      "output_semantic": "no",
-      "caller": "MainActivity::onPause, connectToDaemon",
-      "callee": "OkHttp WebSocket::close",
+      "symbol_path": "verify_launcher_icons",
+      "file_path": "apps/freehand-android/scripts/verify-launcher-icons.sh",
+      "responsibility": "verify launcher dimensions and exact source-derived pixels",
+      "input_semantic": "source logo plus launcher PNGs",
+      "output_semantic": "success or explicit drift failure",
+      "caller": "Android asset maintainer",
+      "callee": "ImageMagick identify/compare",
       "binding_status": "bound"
     },
     {
       "step": "11",
-      "symbol_path": "com.freehand.android.data.TimelineProjector::snapshot",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt",
-      "responsibility": "emit full UI state map including latest_turn for native controllers",
-      "input_semantic": "no",
-      "output_semantic": "Map<String, Any?>",
-      "caller": "MainActivity::pushSnapshotToWebView",
-      "callee": "internal state",
-      "binding_status": "bound"
-    },
-    {
-      "step": "12",
-      "symbol_path": "com.freehand.android.data.TimelineProjector::latestTurnProjectionJson",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/TimelineProjector.kt",
-      "responsibility": "emit canonical UiPublicTurnProjection JSON for JS bridge",
-      "input_semantic": "no",
-      "output_semantic": "String?",
-      "caller": "MainActivity::pushSnapshotToWebView",
-      "callee": "latestRawTurnProjection",
-      "binding_status": "bound"
-    },
-    {
-      "step": "13",
-      "symbol_path": "com.freehand.android.ui.MainActivity::pushSnapshotToWebView",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "call window.__freehand.applySnapshot(json) on the fallback bridge only until remote daemon WebUI is loaded",
-      "input_semantic": "projector snapshot",
-      "output_semantic": "JS bridge invocation or no-op after remote WebUI load",
-      "caller": "ADP event callback, onPageFinished",
-      "callee": "TimelineProjector::latestTurnProjectionJson",
-      "binding_status": "bound"
-    },
-    {
-      "step": "14",
-      "symbol_path": "applySnapshot",
-      "file_path": "apps/freehand-android/app/src/main/assets/bridge.html",
-      "responsibility": "render UiPublicTurnProjection.public_conversation items as DOM turn cards in fallback/config-error mode only",
-      "input_semantic": "JSON snapshot",
-      "output_semantic": "DOM cards",
-      "caller": "native evaluateJavascript",
-      "callee": "DOM API",
-      "binding_status": "bound"
-    },
-    {
-      "step": "14a",
-      "symbol_path": "com.freehand.android.ui.MainActivity::loadRemoteWebUi",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "hide native chrome after ADP open and load daemon-hosted WebUI so Android shares WebUI visual/session/ADP rendering truth",
-      "input_semantic": "validated HostConfig",
-      "output_semantic": "WebView URL http://<host>:<port>/",
-      "caller": "MainActivity::connectToDaemon ADP onOpen",
-      "callee": "daemon-hosted WebUI",
-      "binding_status": "bound"
-    },
-    {
-      "step": "15",
-      "symbol_path": "com.freehand.android.data.DaemonConnectionConfigStore::write",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt",
-      "responsibility": "persist validated daemon config to the app-owned JSON file",
-      "input_semantic": "DaemonConnectionConfig",
-      "output_semantic": "normalized JSON file or explicit config error",
-      "caller": "MainActivity::saveHostConfig",
-      "callee": "file IO plus schema validator",
-      "binding_status": "bound"
-    },
-    {
-      "step": "16",
-      "symbol_path": "com.freehand.android.ui.MainActivity::saveHostConfig",
-      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "update the active profile endpoint, write app-owned JSON, and reconnect only after write success",
-      "input_semantic": "edited HostConfig",
-      "output_semantic": "updated config or visible config error",
-      "caller": "DrawerController callback",
-      "callee": "DaemonConnectionConfigStore::write",
-      "binding_status": "bound"
-    },
-    {
-      "step": "17",
-      "symbol_path": "freehand_server::handle_android_mock",
-      "file_path": "apps/freehand-server/src/lib.rs",
-      "responsibility": "serve self-contained mobile-mock.html for design review",
-      "input_semantic": "HTTP GET /mock/android",
-      "output_semantic": "HTML body",
-      "caller": "design-review operator",
-      "callee": "embedded mock asset",
-      "binding_status": "bound"
-    },
-    {
-      "step": "18",
       "symbol_path": "verify_device_ui",
       "file_path": "apps/freehand-android/scripts/verify-device-ui.sh",
-      "responsibility": "validate explicit-serial Android device UI foreground state and capture blocker or failure evidence",
-      "input_semantic": "adb serial plus debug APK",
+      "responsibility": "verify APK foreground state and canonical WebUI layout evidence on an explicit device",
+      "input_semantic": "ADB serial and APK",
       "output_semantic": "passed, blocked, or failed artifact directory",
       "caller": "operator",
       "callee": "adb install/start/dumpsys/logcat/screencap",
@@ -251,55 +149,18 @@
   ],
   "shared_functions": [
     {
-      "symbol": "handle_android_mock",
-      "owner": "apps/freehand-server/src/lib.rs",
-      "purpose": "serve self-contained mobile-mock.html for design review",
-      "allowed_callers": [
-        "design-review operator"
-      ],
-      "related_tests": [
-        "android_mock_route_returns_design_preview"
-      ],
-      "why_shared": "single preview route for all surfaces"
-    },
-    {
-      "symbol": "UiAdpResponse / UiSubscriptionEvent ADP projection",
-      "owner": "crates/freehand-ui-protocol/src/lib.rs",
-      "purpose": "daemon emits UiAdpResponse::SubscriptionEvent with UiSubscriptionEvent / UiProjection::Turn for any subscribing UI consumer",
-      "allowed_callers": [
-        "Android AdpEventStream",
-        "WebUI ADP client",
-        "any protocol-only UI consumer"
-      ],
-      "related_tests": [
-        "app.android-client TimelineProjectorTest"
-      ],
-      "why_shared": "Android and WebUI consume the same ADP event shape"
-    },
-    {
-      "symbol": "UiCommand enum",
-      "owner": "crates/freehand-ui-protocol/src/lib.rs",
-      "purpose": "protocol-owned command ingress shape shared by all UI consumers",
-      "allowed_callers": [
-        "Android CommandIngress",
-        "WebUI webui.js",
-        "CLI"
-      ],
-      "related_tests": [
-        "CommandIngressProtocolTest"
-      ],
-      "why_shared": "prevents a second command shape from being invented per UI surface"
+      "symbol": "reportCanonicalWebUiLayout",
+      "owner": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "purpose": "provide true-device evidence that the canonical WebUI rendered",
+      "allowed_callers": ["WebViewClient::onPageFinished"],
+      "related_tests": ["apps/freehand-android/scripts/verify-device-ui.sh"],
+      "why_shared": "device validation and runtime page-load evidence must use the same canonical WebUI selector probe"
     }
   ],
   "sync_status": [
-    "all 19 call table rows bound to real Kotlin symbols or owner scripts in apps/freehand-android/",
-    "Android daemon connection config bootstraps bundled assets/config/client.json into app-owned daemon-connection.json, then uses that JSON file as endpoint truth",
-    "SharedPreferences no longer owns daemon host or port persistence",
-    "Android live shell now defaults to AdpEventStream for status/control; ProtocolClient and SseEventStream remain compatibility transport classes but are not the default MainActivity live path",
-    "Android command receipt projection hides target_feature_id and payload ids from CommandResponse.message while preserving raw dispatch status in CommandResponse.code and marking unknown dispatch status unsupported",
-    "unit tests exist for TimelineProjector, HostConfig, and CommandIngress protocol, including ADP URL/frame/projector coverage",
-    "device UI verification script records pass/block/fail evidence for explicit-serial Android true-device validation",
-    "mainline JSON generated from function map",
-    "generated wiki must be regenerated from docs/mainline-calls/app.android-client.json when this function-map truth changes"
+    "Android native conversation/settings/update fallback files are physically deleted.",
+    "bridge.html, Android ADP/SSE/HTTP UI transports, native projector, native controllers, and Android mock route/assets are removed.",
+    "Android app-owned config contains only active Tailscale profile identity plus host and port; removed transport and relay fields fail explicitly.",
+    "Android APK update routes remain daemon-owned release distribution endpoints; Android does not render a native update panel."
   ]
 }

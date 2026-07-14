@@ -1,7 +1,6 @@
 package com.freehand.android.data
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -19,9 +18,6 @@ class DaemonConnectionConfigTest {
         assertEquals("tailscale-main", config.activeProfile)
         assertEquals("100.66.1.82", host.host)
         assertEquals(4041, host.port)
-        assertEquals("ws://100.66.1.82:4041/adp", host.adpUrl)
-        assertEquals("http://100.66.1.82:4041/health", host.healthUrl)
-        assertFalse(config.relay.enabled)
     }
 
     @Test
@@ -49,8 +45,6 @@ class DaemonConnectionConfigTest {
                     mode = "tailscale",
                     host = "freehand-tailnet",
                     port = 4042,
-                    adpPath = "/custom-adp",
-                    healthPath = "/custom-health",
                 ),
             ),
         )
@@ -60,16 +54,11 @@ class DaemonConnectionConfigTest {
 
         assertEquals("freehand-tailnet", reloaded.host)
         assertEquals(4042, reloaded.port)
-        assertEquals("ws://freehand-tailnet:4042/custom-adp", reloaded.adpUrl)
-        assertEquals("http://freehand-tailnet:4042/custom-health", reloaded.healthUrl)
     }
 
     @Test
-    fun `store migrates legacy bundled default port to release port`() {
-        val dir = Files.createTempDirectory("freehand-android-config-legacy-default").toFile()
-        val configFile = File(dir, DaemonConnectionConfig.DEFAULT_CONFIG_FILE)
-        configFile.writeText(
-            """
+    fun `removed native transport fields fail explicitly`() {
+        val json = """
             {
               "connectionMode": "tailscale",
               "activeProfile": "tailscale-main",
@@ -85,17 +74,14 @@ class DaemonConnectionConfigTest {
                   "queryPath": "/ui/query/latest-active-turn",
                   "subscribePath": "/ui/subscribe/turn/latest"
                 }
-              ],
-              "relay": { "enabled": false, "url": "", "authRef": "" }
+              ]
             }
-            """.trimIndent(),
-        )
-        val store = DaemonConnectionConfigStore(configFile) { readBundledConfig() }
+        """.trimIndent()
 
-        val host = store.load().activeHostConfig()
+        val error = expectConfigError { DaemonConnectionConfig.parse(json) }
 
-        assertEquals(4041, host.port)
-        assertTrue(configFile.readText().contains("\"port\":4041"))
+        assertTrue(error.message.orEmpty().contains("unsupported fields"))
+        assertTrue(error.message.orEmpty().contains("adpPath"))
     }
 
     @Test
@@ -112,15 +98,9 @@ class DaemonConnectionConfigTest {
                   "id": "tailscale-main",
                   "mode": "tailscale",
                   "host": "custom-tailnet",
-                  "port": 4042,
-                  "adpPath": "/adp",
-                  "healthPath": "/health",
-                  "commandPath": "/ui/command",
-                  "queryPath": "/ui/query/latest-active-turn",
-                  "subscribePath": "/ui/subscribe/turn/latest"
+                  "port": 4042
                 }
-              ],
-              "relay": { "enabled": false, "url": "", "authRef": "" }
+              ]
             }
             """.trimIndent(),
         )
@@ -145,7 +125,7 @@ class DaemonConnectionConfigTest {
     }
 
     @Test
-    fun `relay enabled is rejected instead of selected as fallback`() {
+    fun `removed relay routing field fails explicitly`() {
         val json = """
             {
               "connectionMode": "tailscale",
@@ -164,6 +144,7 @@ class DaemonConnectionConfigTest {
 
         val error = expectConfigError { DaemonConnectionConfig.parse(json) }
 
+        assertTrue(error.message.orEmpty().contains("unsupported fields"))
         assertTrue(error.message.orEmpty().contains("relay"))
     }
 
@@ -180,8 +161,7 @@ class DaemonConnectionConfigTest {
                   "host": "100.66.1.82",
                   "port": 4041
                 }
-              ],
-              "relay": { "enabled": false, "url": "", "authRef": "" }
+              ]
             }
         """.trimIndent()
 

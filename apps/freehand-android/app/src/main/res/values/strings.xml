@@ -1,24 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Freehand</string>
-    <string name="menu_open">打开快速控制菜单</string>
-    <string name="drawer_close">关闭</string>
-    <string name="drawer_title">连接设置</string>
-    <string name="section_connection">Daemon 连接</string>
-    <string name="action_save_connection">保存连接</string>
-    <string name="section_updates">APK 更新</string>
-    <string name="action_check_update">检查并下载更新</string>
-    <string name="update_status_idle">从当前 daemon 检查 Android 更新包。</string>
-    <string name="bottom_chat">Chat</string>
-    <string name="bottom_agents">Agents</string>
-    <string name="bottom_settings">Settings</string>
-    <string name="input_hint">给当前 agent 发消息…</string>
-    <string name="input_send">发送</string>
-    <string name="status_banner">当前 agent 状态仅做实时提示，不写入 session。</string>
-    <string name="agent_master_active">active</string>
-    <string name="agent_slave_switch">switch</string>
-    <string name="agent_slave_detail">detail</string>
-    <string name="session_meta_running">running</string>
-    <string name="session_meta_waiting">waiting</string>
-    <string name="session_meta_done">done</string>
 </resources>

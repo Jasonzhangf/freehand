@@ -6,17 +6,7 @@
       "id": "tailscale-main",
       "mode": "tailscale",
       "host": "100.66.1.82",
-      "port": 4041,
-      "adpPath": "/adp",
-      "healthPath": "/health",
-      "commandPath": "/ui/command",
-      "queryPath": "/ui/query/latest-active-turn",
-      "subscribePath": "/ui/subscribe/turn/latest"
+      "port": 4041
     }
-  ],
-  "relay": {
-    "enabled": false,
-    "url": "",
-    "authRef": ""
-  }
+  ]
 }

@@ -180,7 +180,7 @@ Use this skill for any non-trivial work in this repo.
 - Protocol-only async transports must still respect runtime execution boundaries: if injected runtime dispatch performs synchronous provider/live work, call it through an explicit blocking boundary such as `tokio::task::spawn_blocking` instead of executing it inline on the async handler thread.
 - Config-selected runtime host bootstrap should also prefer `freehand-runtime`; host apps should stay thin and must not reimplement config-selection-to-runtime wiring.
 - CLI and WebUI may render different views, but they must share one `freehand-ui-protocol` truth.
-- Android client work uses the same rule set: `apps/freehand-android` is the live shell, `apps/freehand-server/assets/mocks/android/mobile-mock.html` is preview-only, and `bridge.html` is the APK render host.
+- Android client work uses the same rule set: `apps/freehand-android` is only a thin WebView/platform bridge, and the daemon-hosted WebUI at `/?client=android-webview` is the only product UI. `bridge.html`, native Android conversation/settings/update UI, Android ADP/SSE/command projectors, and `/mock/android` are dead semantics and must not be restored. True-device Android acceptance requires canonical WebUI evidence (`FreehandWebUiLayout`, `data-webui-shell=true`, `layoutClient=android-webview`) plus screenshot; native fallback screenshots are failures.
 - No fallback, no silent downgrade, no duplicate semantic logic in orchestrators.
 - Start development and debugging from the function map owner, never from random grep alone.
 - Request/response/error mainlines must have logic descriptions in the function map, not only crate names.

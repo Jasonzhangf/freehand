@@ -25,7 +25,7 @@ Freehand 的 UI 不按平台分裂语义。Web、Android、iOS 共用同一份 p
 |----------|-------|-----------|-----------|---------|
 | Desktop Web | HTML/CSS responsive grid | `apps/freehand-server` serves WebUI assets | ADP WebSocket `/adp`; HTTP/SSE compatibility | v1 exists, needs responsive upgrade |
 | Mobile Web | Same HTML/CSS, stacked nav | Same `freehand-server` | ADP WebSocket `/adp` + touch adaptations | v1 pending |
-| Android | WebView wrapper + native bridge | Same protocol truth; live APK uses `bridge.html`, preview uses `mobile-mock.html` | ADP WebSocket `/adp`; HTTP/SSE compatibility | v1 scaffold present |
+| Android | Thin WebView wrapper + file-picker bridge | daemon-hosted WebUI is the only product UI; no local conversation shell | direct WebUI page load `/?client=android-webview` | WebUI-only shell present |
 | iOS | WebView wrapper + native bridge | Same WebUI | Same as Android | v2 |
 
 ### Android v1 不做原生壳的理由
@@ -302,7 +302,7 @@ body.theme-dark {
 | Subscribe latest turn compatibility | GET | `/ui/subscribe/turn/latest` | SSE stream |
 | Subscribe debug compatibility | GET | `/ui/subscribe/debug/:turn_id` | SSE debug stream |
 
-Android/iOS WebView 直接加载本地 `bridge.html`，再通过 ADP 连接 daemon。客户端不能假设 daemon 与手机同 LAN；连接配置必须从持久文件读取，并暴露为用户可编辑配置。
+Android WebView 直接加载 daemon-hosted WebUI：`http://<host>:<port>/?client=android-webview`。Android 不加载本地 HTML，不实现 native conversation/settings/update UI，也不自己连接 ADP/SSE/command endpoint；这些协议和 UI 入口由 WebUI 页面统一拥有。客户端不能假设 daemon 与手机同 LAN；连接配置必须从持久文件读取，并暴露为用户可编辑配置。
 
 ### Mobile Daemon Config Contract
 
@@ -319,66 +319,48 @@ First version config fields:
       "id": "tailscale-main",
       "mode": "tailscale",
       "host": "100.66.1.82",
-      "port": 4041,
-      "adpPath": "/adp",
-      "healthPath": "/health"
+      "port": 4041
     }
-  ],
-  "relay": {
-    "enabled": false,
-    "url": "",
-    "authRef": ""
-  }
+  ]
 }
 ```
 
 Rules:
 
 - Default mode is `tailscale`; the app connects to a configured Tailscale IP/DNS name and fixed daemon port.
-- Relay mode is reserved for a future server-mediated connection path and must stay disabled until its protocol and auth lifecycle are designed.
 - Config is bootstrapped from bundled assets, then copied to an app-owned file on first run. Later user edits persist to that file, not only to SharedPreferences/localStorage.
 - WebUI mobile and Android WebView should use the same logical config schema even if storage APIs differ.
-- Connection errors must surface the selected profile, endpoint, and concrete failure class. They must not silently fall back to localhost, LAN scan, or another profile.
+- Connection errors must surface the selected profile, endpoint, and concrete failure class. They must not silently fall back to localhost, LAN scan, another profile, relay, or local HTML/native UI.
+- Android config carries only the daemon origin (`host`, `port`) plus profile identity. ADP/query/command/subscription paths and relay routing are not Android-owned config.
 
-## 8. Android WebView Bridge (v1)
+## 8. Android WebView Host (v1)
 
-### 8.1 Bridge API
+### 8.1 Platform Bridge API
 
 ```typescript
 // Native → Web (通过 WebView.evaluateJavascript)
 interface NativeToWeb {
-  // 推送通知
-  onTurnComplete(turnId: string, status: string): void;
-  onSlaveStatusChange(agentId: string, status: string): void;
-  // 后台会话
-  onResumeSession(sessionId: string): void;
   // 文件选择结果
-  onFileSelected(path: string): void;
+  __freehandAndroidAttachmentSelected(kind: string, files: AttachmentFile[]): void;
 }
 
 // Web → Native (通过 @JavascriptInterface)
 interface WebToNative {
   // 文件选择
-  pickFile(mimeTypes: string[]): Promise<string>;
-  // 通知权限
-  requestNotificationPermission(): Promise<boolean>;
-  // 分享
-  shareText(text: string): void;
-  // 系统主题检测
-  getSystemTheme(): 'light' | 'dark' | 'system';
+  FreehandAndroidFilePicker.request(kind: 'image' | 'video' | 'file'): void;
 }
 ```
 
 ### 8.2 Android WebView 配置
 
-- WebView 加载 `file:///android_asset/bridge.html`
+- WebView 加载 `http://<host>:<port>/?client=android-webview`
 - `JavaScriptEnabled = true`
 - `DomStorageEnabled = true`
-- native 只向 Web 注入 `window.__freehand.applySnapshot(json)`，不反向托管第二套 truth
-- `mobile-mock.html` 保持为独立设计预览页，仍可通过 `file://` 或 `/mock/android` 打开
+- native 只提供 Android system file picker bridge，不注入 protocol snapshot、不反向托管第二套 truth
+- 缺配置或网络不可达时显式失败；没有 local HTML / mock / native fallback
 - 禁用缩放
 - 匹配系统 safe area（状态栏、导航栏）
-- 后台连接保持：WebView 切后台时不销毁，只暂停或重连 ADP 连接
+- WebUI 页面自己拥有 ADP/query/subscribe/command lifecycle
 
 ## 9. Current WebUI → Multi-Platform Migration Path
 
@@ -407,13 +389,12 @@ interface WebToNative {
 - 当前骨架已落盘到 `apps/freehand-android`
 - 现有模块：
   - `app/src/main/java/com/freehand/android/ui/MainActivity.kt`
-  - `app/src/main/java/com/freehand/android/ui/components/*`
-  - `app/src/main/java/com/freehand/android/data/*`
-  - `app/src/main/assets/bridge.html`
-- 设计预览仍由 `apps/freehand-server/assets/mocks/android/mobile-mock.html` 提供
-- live shell 使用 native ADP client，不引入第二套协议；HTTP/SSE 保留为 compatibility path
-- daemon 连接配置升级为文件持久化：bundled default -> app-owned editable config file -> active profile
-- 验证重点转为 WebView 首屏、协议投影、组件状态映射、断连态恢复
+  - `app/src/main/java/com/freehand/android/data/ClientConfig.kt`
+  - `app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt`
+  - `app/src/main/java/com/freehand/android/data/HostConfig.kt`
+- local HTML、native controllers、Android protocol clients/projectors、Android mock route/assets 已移除
+- daemon 连接配置为文件持久化：bundled default -> app-owned editable config file -> active profile
+- 验证重点是 WebView 首屏是否为 canonical daemon WebUI、Android layout selector/logcat、截图、无 native fallback
 
 ### Step 5: iOS WKWebView 包装 (v2)
 
@@ -423,8 +404,8 @@ interface WebToNative {
 |---------|---------|------------|-----------------|
 | File attachment | File input | File input | WebView file chooser → native picker |
 | Push notification | No | No | Web → Native bridge → Android Notification |
-| Background keepalive | Tab keeps alive | Tab may suspend | WebView not destroyed, ADP reconnect |
-| System theme | Manual toggle | `prefers-color-scheme` | Bridge `getSystemTheme()` |
+| Background keepalive | Tab keeps alive | Tab may suspend | WebUI page owns reconnect lifecycle |
+| System theme | Manual toggle | `prefers-color-scheme` | WebUI theme controls |
 | Safe area | `env(safe-area-inset-*)` | `env(safe-area-inset-*)` | WebView safe area CSS |
 | Touch targets | 32px min | 44px min (WCAG) | 44px min |
 | Keyboard handling | Default | `visualViewport` API | `window.ResizeObserver` + input scroll |
@@ -466,18 +447,18 @@ interface WebToNative {
 ```
 apps/freehand-server/
   assets/
-    mocks/android/mobile-mock.html   ← self-contained design preview
-    mocks/android/mobile-mock.css    ← shared token source for mock preview
+    webui.*                          ← canonical WebUI assets
 
 apps/freehand-android/
   app/
     src/main/
       java/com/freehand/android/
         ui/MainActivity.kt
-        ui/components/*
-        data/*
+        data/ClientConfig.kt
+        data/DaemonConnectionConfig.kt
+        data/HostConfig.kt
       assets/
-        bridge.html                  ← live WebView host
+        config/client.json           ← first-run daemon origin bootstrap
 
 docs/design/
   multi-platform-ui-architecture.md  ← 本文

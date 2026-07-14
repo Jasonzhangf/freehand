@@ -184,18 +184,21 @@ verify_device_ui() {
     exit 1
   fi
 
-  if ! grep -Eq '"shape":"(phone_portrait|tall_phone|tablet_portrait)"' "$artifact_dir/webui-layout-logcat.txt"; then
-    write_summary "failed" "webui_layout_not_mobile_conversation"
-    echo "[freehand-android-device] failed: WebUI did not report mobile conversation layout; see $artifact_dir" >&2
+  if ! grep -Fq '"webuiShell":true' "$artifact_dir/webui-layout-logcat.txt"; then
+    write_summary "failed" "canonical_webui_shell_missing"
+    echo "[freehand-android-device] failed: canonical WebUI shell selector is missing; see $artifact_dir" >&2
     exit 1
   fi
 
-  if ! grep -Fq '"sessionDrawerFixed":true' "$artifact_dir/webui-layout-logcat.txt" ||
-    ! grep -Fq '"detailDrawerFixed":true' "$artifact_dir/webui-layout-logcat.txt" ||
-    ! grep -Fq '"sessionDrawerInViewport":false' "$artifact_dir/webui-layout-logcat.txt" ||
-    ! grep -Fq '"detailDrawerInViewport":false' "$artifact_dir/webui-layout-logcat.txt"; then
-    write_summary "failed" "webui_drawers_not_offscreen"
-    echo "[freehand-android-device] failed: WebUI session/detail surfaces are not hidden as offscreen drawers; see $artifact_dir" >&2
+  if ! grep -Fq '"layoutClient":"android-webview"' "$artifact_dir/webui-layout-logcat.txt"; then
+    write_summary "failed" "webui_android_layout_client_missing"
+    echo "[freehand-android-device] failed: WebUI did not report android-webview layout client; see $artifact_dir" >&2
+    exit 1
+  fi
+
+  if ! grep -Eq '"layoutShape":"(phone_portrait|tall_phone|tablet_portrait)"' "$artifact_dir/webui-layout-logcat.txt"; then
+    write_summary "failed" "webui_layout_not_mobile_conversation"
+    echo "[freehand-android-device] failed: WebUI did not report a mobile layout shape; see $artifact_dir" >&2
     exit 1
   fi
 
