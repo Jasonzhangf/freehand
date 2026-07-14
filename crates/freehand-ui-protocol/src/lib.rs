@@ -656,9 +656,7 @@ pub struct UiConfigStatusProjection {
     pub agent_name: String,
     pub agent_mode: String,
     pub node_id: String,
-    pub paired_agent_name: String,
-    pub paired_agent_mode: String,
-    pub paired_node_id: String,
+    pub paired_agents: Vec<UiConfigPeerProjection>,
     pub provider_id: String,
     pub provider_type: String,
     pub provider_protocol: String,
@@ -667,6 +665,13 @@ pub struct UiConfigStatusProjection {
     pub provider_auth_type: String,
     pub provider_auth_source: String,
     pub restart_required_on_change: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiConfigPeerProjection {
+    pub agent_name: String,
+    pub agent_mode: String,
+    pub node_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4568,9 +4573,11 @@ mod tests {
             agent_name: "master".to_owned(),
             agent_mode: "master".to_owned(),
             node_id: "master-node".to_owned(),
-            paired_agent_name: "worker".to_owned(),
-            paired_agent_mode: "slave".to_owned(),
-            paired_node_id: "worker-node".to_owned(),
+            paired_agents: vec![UiConfigPeerProjection {
+                agent_name: "worker".to_owned(),
+                agent_mode: "slave".to_owned(),
+                node_id: "worker-node".to_owned(),
+            }],
             provider_id: "minimonth".to_owned(),
             provider_type: "anthropic".to_owned(),
             provider_protocol: "messages".to_owned(),

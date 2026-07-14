@@ -8,8 +8,8 @@
       "owner_crate": "crates/freehand-config",
       "identity": "agent profile plus config source path",
       "truth_store": "~/.freehand/config.toml",
-      "operations": ["load", "validate", "project_safe_config", "bootstrap_node_pairing", "compile_instruction_capability"],
-      "projections": ["runtime bootstrap config", "safe CLI/ADP config query"]
+      "operations": ["load", "validate", "compile_agent_topology", "project_safe_config", "bootstrap_node_pairing", "compile_instruction_capability"],
+      "projections": ["runtime bootstrap config", "ordered configured peer topology", "safe CLI/ADP config query"]
     },
     {
       "resource_type": "session",
@@ -270,7 +270,7 @@
       "owner_feature_id": "node.master-slave",
       "source_resource": "config",
       "target_resource": "node_pairing",
-      "effect": "materialize configured reciprocal master/slave pairing into node runtime state",
+      "effect": "materialize one config-approved relation from the compiled reciprocal Master/Worker peer topology into node runtime state",
       "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
       "binding_status": "bound"
     },
@@ -545,7 +545,7 @@
       "target_resource": "node_pairing",
       "allowed_direct": true,
       "via_resources": [],
-      "reason": "Config truth materializes reciprocal master/slave topology into node pairing state."
+      "reason": "Config truth compiles the reciprocal Master/Worker peer topology; node pairing may materialize only relations present in that compiled topology."
     },
     {
       "rule_id": "node-pairing-through-ui-projection",

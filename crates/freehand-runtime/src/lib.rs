@@ -31,6 +31,8 @@ use freehand_blocks::{
     parse_completion_submission_block, strip_completion_submission_block,
     validate_completion_submission,
 };
+#[cfg(test)]
+use freehand_config::SelectedPeerAgentConfig;
 use freehand_config::{
     AgentMode, ProviderConfigUpdate, ProviderProtocol as ConfigProviderProtocol, ProviderType,
     SelectedAgentConfig, SelectedProviderConfig, default_config_path, load_default_config,
@@ -101,17 +103,17 @@ use freehand_ui_protocol::{
     TurnProjectionInput, UiAgentBoardProjection, UiAgentLifecycleActivityProjection,
     UiAgentLifecycleProjection, UiAgentSnapshotProjection, UiCheckpointSummary, UiClientKind,
     UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort, UiCommandDispatchPortError,
-    UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting, UiConfigStatusProjection,
-    UiErrorCenterEventListProjection, UiErrorCenterEventProjection, UiExecutionFactCommand,
-    UiExecutionFactKind, UiMasterPollClassificationProjection, UiMasterPollProjection,
-    UiModelRequestKind, UiModelRequestWaiting, UiProtocolState, UiProviderConfigUpdate,
-    UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
-    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
-    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
-    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
-    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
-    UiTaskSnapshotProjection, UiTurnProjection, UiWorkerControlCommand,
-    UiWorkerControlEventProjection, UiWorkerControlProjection,
+    UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting, UiConfigPeerProjection,
+    UiConfigStatusProjection, UiErrorCenterEventListProjection, UiErrorCenterEventProjection,
+    UiExecutionFactCommand, UiExecutionFactKind, UiMasterPollClassificationProjection,
+    UiMasterPollProjection, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
+    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
+    UiSessionMetadataProjection, UiTaskAgentCreateCommand, UiTaskAssignCommand,
+    UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
+    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
+    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
+    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTurnProjection,
+    UiWorkerControlCommand, UiWorkerControlEventProjection, UiWorkerControlProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
 };
@@ -1878,14 +1880,18 @@ where
     let mut round = 0usize;
     let mut tool_executions = 0usize;
     let mut next_prompt = request.prompt.clone();
-    let configured_worker = match role {
-        LiveReasonExecutionRole::Master => Some(selected.paired_agent_name.as_str()),
+    let configured_workers = match role {
+        LiveReasonExecutionRole::Master => selected.worker_peer_names(),
+        LiveReasonExecutionRole::Worker => Vec::new(),
+    };
+    let configured_worker_set = match role {
+        LiveReasonExecutionRole::Master => Some(configured_workers.as_slice()),
         LiveReasonExecutionRole::Worker => None,
     };
     let mut carryover_segments = base_live_context_segments(
         &request.prompt,
         role,
-        configured_worker,
+        configured_worker_set,
         &request.runtime_home,
         request.cwd.as_deref(),
         &agent_id,
@@ -2362,7 +2368,7 @@ where
                     &request.runtime_home,
                     request.cwd.as_deref(),
                     role,
-                    configured_worker,
+                    configured_worker_set,
                     &turn,
                     &tool_call,
                 )?;
@@ -2615,7 +2621,7 @@ where
                 None,
                 LiveRoundContext {
                     role,
-                    configured_worker,
+                    configured_worker_set,
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
                     agent_id: &agent_id,
@@ -2755,7 +2761,7 @@ where
                     Some(feedback.as_str()),
                     LiveRoundContext {
                         role,
-                        configured_worker,
+                        configured_worker_set,
                         runtime_home: &request.runtime_home,
                         cwd: request.cwd.as_deref(),
                         agent_id: &agent_id,
@@ -2970,7 +2976,7 @@ where
                         None,
                         LiveRoundContext {
                             role,
-                            configured_worker,
+                            configured_worker_set,
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
                             agent_id: &agent_id,
@@ -3126,7 +3132,7 @@ where
                         None,
                         LiveRoundContext {
                             role,
-                            configured_worker,
+                            configured_worker_set,
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
                             agent_id: &agent_id,
@@ -3282,7 +3288,7 @@ where
                     Some(feedback.as_str()),
                     LiveRoundContext {
                         role,
-                        configured_worker,
+                        configured_worker_set,
                         runtime_home: &request.runtime_home,
                         cwd: request.cwd.as_deref(),
                         agent_id: &agent_id,
@@ -3359,23 +3365,25 @@ pub fn load_default_runtime_agent(
     let selected = config
         .select_agent(agent_name)
         .map_err(|err| RuntimeAgentBootstrapError::AgentSelection(err.to_string()))?;
-    let paired_pair_token = env::var(&selected.paired_pair_token_env).map_err(|_| {
-        RuntimeAgentBootstrapError::MissingPairedTokenEnv {
-            paired_agent_name: selected.paired_agent_name.clone(),
-            env_var: selected.paired_pair_token_env.clone(),
+    for peer in &selected.paired_agents {
+        let paired_pair_token = env::var(&peer.pair_token_env).map_err(|_| {
+            RuntimeAgentBootstrapError::MissingPairedTokenEnv {
+                paired_agent_name: peer.name.clone(),
+                env_var: peer.pair_token_env.clone(),
+            }
+        })?;
+        if paired_pair_token.trim().is_empty() {
+            return Err(RuntimeAgentBootstrapError::EmptyPairedTokenEnv {
+                paired_agent_name: peer.name.clone(),
+                env_var: peer.pair_token_env.clone(),
+            });
         }
-    })?;
-    if paired_pair_token.trim().is_empty() {
-        return Err(RuntimeAgentBootstrapError::EmptyPairedTokenEnv {
-            paired_agent_name: selected.paired_agent_name.clone(),
-            env_var: selected.paired_pair_token_env.clone(),
-        });
-    }
-    if paired_pair_token != selected.pair_token {
-        return Err(RuntimeAgentBootstrapError::PairTokenMismatch {
-            agent_name: selected.name.clone(),
-            paired_agent_name: selected.paired_agent_name.clone(),
-        });
+        if paired_pair_token != selected.pair_token {
+            return Err(RuntimeAgentBootstrapError::PairTokenMismatch {
+                agent_name: selected.name.clone(),
+                paired_agent_name: peer.name.clone(),
+            });
+        }
     }
     let runtime_home = default_config_path()
         .map_err(|err| RuntimeAgentBootstrapError::ConfigLoad(err.to_string()))?
@@ -3406,6 +3414,8 @@ pub enum RuntimeCommandDispatcherError {
     EmptyModel,
     #[error("runtime host requires a master agent, but `{agent_name}` is configured as `{mode}`")]
     HostRequiresMasterMode { agent_name: String, mode: String },
+    #[error("runtime host master `{agent_name}` requires at least one configured worker peer")]
+    HostRequiresWorkerPeer { agent_name: String },
     #[error("config load failed: {0}")]
     ConfigLoad(String),
     #[error("agent selection failed: {0}")]
@@ -3558,16 +3568,21 @@ impl RuntimeCommandDispatcher {
                 mode: selected.mode.as_str().to_owned(),
             });
         }
+        let first_worker_peer = selected.worker_peers().next().ok_or_else(|| {
+            RuntimeCommandDispatcherError::HostRequiresWorkerPeer {
+                agent_name: selected.name.clone(),
+            }
+        })?;
 
         Self::new(RuntimeCommandDispatcherConfig {
             session_id: SessionId::new(format!("runtime-session-{}", selected.name)),
             reason_agent_id: AgentId::new(selected.name.clone()),
             master_agent_id: AgentId::new(selected.name.clone()),
             master_node_id: selected.node_id.clone(),
-            slave_agent_id: AgentId::new(selected.paired_agent_name.clone()),
-            slave_node_id: selected.paired_node_id.clone(),
+            slave_agent_id: AgentId::new(first_worker_peer.name.clone()),
+            slave_node_id: first_worker_peer.node_id.clone(),
             pair_token: selected.pair_token.clone(),
-            allowed_pair_ip: selected.paired_allowed_pair_ip.map(|ip| ip.to_string()),
+            allowed_pair_ip: first_worker_peer.allowed_pair_ip.map(|ip| ip.to_string()),
             model: selected.provider.default_model.clone(),
             live,
         })
@@ -4505,9 +4520,15 @@ fn project_config_status_for_ui(selected: &SelectedAgentConfig) -> UiConfigStatu
         agent_name: selected.name.clone(),
         agent_mode: selected.mode.as_str().to_owned(),
         node_id: selected.node_id.clone(),
-        paired_agent_name: selected.paired_agent_name.clone(),
-        paired_agent_mode: selected.paired_agent_mode.as_str().to_owned(),
-        paired_node_id: selected.paired_node_id.clone(),
+        paired_agents: selected
+            .paired_agents
+            .iter()
+            .map(|peer| UiConfigPeerProjection {
+                agent_name: peer.name.clone(),
+                agent_mode: peer.mode.as_str().to_owned(),
+                node_id: peer.node_id.clone(),
+            })
+            .collect(),
         provider_id: selected.provider.id.clone(),
         provider_type: selected.provider.provider_type.as_str().to_owned(),
         provider_protocol: selected.provider.protocol.as_str().to_owned(),
@@ -7013,11 +7034,11 @@ fn control_status_contract_segment() -> ContextSegment {
 
 fn tool_guidance_segment(
     role: LiveReasonExecutionRole,
-    configured_worker: Option<&str>,
+    configured_worker_set: Option<&[String]>,
 ) -> ContextSegment {
     let content = match role {
         LiveReasonExecutionRole::Master => master_task_orchestration_guidance(
-            configured_worker.expect("Master guidance requires configured Worker"),
+            configured_worker_set.expect("Master guidance requires configured Worker"),
         ),
         LiveReasonExecutionRole::Worker => worker_execution_guidance().to_owned(),
     };
@@ -7040,7 +7061,7 @@ fn task_space_snapshot_segment(
     runtime_home: &Path,
     agent_id: &AgentId,
     role: LiveReasonExecutionRole,
-    configured_worker: Option<&str>,
+    configured_worker_set: Option<&[String]>,
 ) -> Result<Option<ContextSegment>, RuntimeLiveBridgeError> {
     if role != LiveReasonExecutionRole::Master {
         return Ok(None);
@@ -7101,7 +7122,7 @@ fn task_space_snapshot_segment(
     let snapshot = json!({
         "schema_version": 1,
         "purpose": "Current Freehand framework truth. Read this before exploratory task query/list/history calls.",
-        "configured_worker": configured_worker,
+        "configured_worker_ids": configured_worker_set.unwrap_or(&[]),
         "valid_task_status_filters": [
             "created",
             "waiting_agent",
@@ -7219,10 +7240,21 @@ fn worker_execution_guidance() -> &'static str {
     )
 }
 
-fn master_task_orchestration_guidance(configured_worker: &str) -> String {
+fn configured_worker_label(configured_worker_set: Option<&[String]>) -> String {
+    let Some(configured_worker_set) = configured_worker_set else {
+        return "<configured-worker>".to_owned();
+    };
+    if configured_worker_set.is_empty() {
+        return "<configured-worker>".to_owned();
+    }
+    configured_worker_set.join("`, `")
+}
+
+fn master_task_orchestration_guidance(configured_worker_set: &[String]) -> String {
+    let configured_worker_list = configured_worker_label(Some(configured_worker_set));
     format!(
-        "{}Configured paired Worker id: `{configured_worker}`.\n\
-- Current topology: assign production tasks only to this configured Worker id. Historical agents returned by list_agents are persisted history, not eligible production dispatch targets.\n\
+        "{}Configured Worker ids: `{configured_worker_list}`.\n\
+- Current topology: assign production tasks only to one of these configured Worker ids. Historical agents returned by list_agents are persisted history, not eligible production dispatch targets.\n\
 - Worker lifecycle boundary: never put task(...), claim_next, heartbeat, record_execution, approve, reject, or close instructions into Worker task content. The Worker does not receive the task tool. The production Worker runner owns claim/heartbeat and converts the Worker completion schema into TaskReviewSubmitted or TaskBlocked truth.\n\n{}",
         concat!(
             "Use the available Freehand framework tools when they help orchestration. Choose task for Task Center truth or dispatch, timer for durable wakeups, then provide the required Freehand completion schema.\n\n",
@@ -7231,7 +7263,7 @@ fn master_task_orchestration_guidance(configured_worker: &str) -> String {
             "- Dispatch when: work targets another cwd/repository, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
             "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside your current allowed workspace without isolated execution.\n",
             "- Master tool surface: your live provider tools are framework-only: task and timer. Do not try read_file, ls, grep, glob, write_file, edit_file, multi_edit, complete_step, todo_write, or shell from the Master.\n",
-            "- Workspace boundary: external repository analysis, report generation, deep inspection, or writing must be delegated. Create or reuse a worker resource, create a task with the correct existing target_cwd, assign it to the configured Worker, then let the production Worker runner claim and execute it.\n",
+            "- Workspace boundary: external repository analysis, report generation, deep inspection, or writing must be delegated. Create or reuse a worker resource, create a task with the correct existing target_cwd, assign it to one configured Worker, then let that production Worker runner claim and execute it.\n",
             "- Path duty before dispatch: for any user-supplied path, identify whether it is absolute or starts with ~. Treat ~ as the user's home path from the request context, not as the Master's runtime workspace. Expand ~/... to the user's absolute home path before writing target_cwd; do not pass ~, glob patterns, or broad search paths as target_cwd. If the path is outside your allowed workspace or requires repository inspection/mutation, dispatch a Worker task whose target_cwd is the workspace to inspect or mutate.\n",
             "- Symlink duty before dispatch: when a user path may include symlinks, instruct the Worker to check the path itself and each parent component for symlinks, resolve the canonical path, and report both the requested path and canonical path. The task goal/acceptance must preserve the original user-facing path and require canonical-path evidence.\n",
             "- target_cwd rule: target_cwd is the Worker agent cwd and must be the existing repository/workspace to inspect or mutate. A separate target path B is not automatically the cwd. Work on B requires dispatching a task whose target_cwd is B's existing workspace root, or asking the user/framework to create/select that workspace first.\n",
@@ -7240,7 +7272,7 @@ fn master_task_orchestration_guidance(configured_worker: &str) -> String {
             "- Concurrency control: assign only useful independent subtasks; avoid duplicate dispatch for work already running, recovering, blocked, or review_ready; poll task truth before starting more work.\n",
             "- Flow control: use task(op=\"list_agents\"), task(op=\"list_tasks\"), task(op=\"query\"), and task(op=\"history\") to inspect current framework truth before dispatching duplicates, retrying, approving, rejecting, or closing work.\n",
             "- Task tool workflow: create_agent only when needed; create a task with goal, deliverables, acceptance, target_cwd, and priority; assign it; query task/history while the Worker runner claims, heartbeats, and records execution; approve/reject; close only after accepted review.\n",
-            "- Task create dispatch: every task tool call must include top-level op. For production worker work, call task with {\"op\":\"create\", ..., \"target_cwd\":\"/absolute/existing/repo\", \"dispatch\":{\"mode\":\"none\"}} and then task with {\"op\":\"assign\", \"task_id\":\"...\", \"agent_id\":\"configured Worker\"}. Never omit dispatch and never use auto or self dispatch, because persisted historical agents are not production targets.\n",
+            "- Task create dispatch: every task tool call must include top-level op. For production worker work, call task with {\"op\":\"create\", ..., \"target_cwd\":\"/absolute/existing/repo\", \"dispatch\":{\"mode\":\"none\"}} and then task with {\"op\":\"assign\", \"task_id\":\"...\", \"agent_id\":\"one configured Worker id\"}. Never omit dispatch and never use auto or self dispatch, because persisted historical agents are not production targets.\n",
             "- Ownership boundary: as Master, do not call claim_next, heartbeat, or record_execution on behalf of a Worker. Those mutations are owned by the Worker runner. Use them only in explicit framework/debug tests, never as normal production orchestration.\n",
             "- Timer workflow: when all immediate Master-side actions are dispatched or waiting on worker progress, call timer(op=\"schedule\") with reason, prompt, and either delay_seconds, run_at_unix_seconds, or a repeat rule. If the next useful wait exceeds 3 minutes, schedule a timer instead of dead-waiting in the current turn. A timer is not scheduled until the timer tool returns `Timer scheduled`; do not claim or imply that a timer was scheduled in completion text unless this turn has a successful timer tool result. After scheduling the timer, continue any other ready Master-side work instead of blocking on the waited item. If no other work is ready and the user's requested final outcome is not yet delivered, finish the current turn with `claim=\"waiting\"` and name the Task Center/timer follow-up in `next_step`; do not use `claim=\"complete\"` for mere dispatch. The timer prompt must tell the future Master turn what current truth to inspect, what waited condition to revisit, and what decision to make. Timer truth is independent internal scheduler truth, not task truth. Daily, weekly, and cron repeat rules use the local timezone. Cron is 5 fields: minute hour day-of-month month weekday.\n",
             "- Completion boundary: `claim=\"complete\"` is allowed only after the user-visible objective is actually satisfied with evidence. A created/assigned Worker task, heartbeat, timer, or pending review is lifecycle progress, not user-task completion.\n",
@@ -7283,7 +7315,7 @@ fn original_task_segment(prompt: &str) -> ContextSegment {
 fn base_live_context_segments(
     original_prompt: &str,
     role: LiveReasonExecutionRole,
-    configured_worker: Option<&str>,
+    configured_worker_set: Option<&[String]>,
     runtime_home: &Path,
     cwd: Option<&Path>,
     agent_id: &AgentId,
@@ -7291,11 +7323,11 @@ fn base_live_context_segments(
     let mut segments = vec![
         completion_contract_segment(),
         control_status_contract_segment(),
-        tool_guidance_segment(role, configured_worker),
+        tool_guidance_segment(role, configured_worker_set),
         instruction_capability_segment(runtime_home, cwd)?,
     ];
     if let Some(segment) =
-        task_space_snapshot_segment(runtime_home, agent_id, role, configured_worker)?
+        task_space_snapshot_segment(runtime_home, agent_id, role, configured_worker_set)?
     {
         segments.push(segment);
     }
@@ -7314,7 +7346,7 @@ fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
 #[derive(Clone, Copy)]
 struct LiveRoundContext<'a> {
     role: LiveReasonExecutionRole,
-    configured_worker: Option<&'a str>,
+    configured_worker_set: Option<&'a [String]>,
     runtime_home: &'a Path,
     cwd: Option<&'a Path>,
     agent_id: &'a AgentId,
@@ -7329,7 +7361,7 @@ fn next_round_segments(
     let mut segments = base_live_context_segments(
         original_prompt,
         context.role,
-        context.configured_worker,
+        context.configured_worker_set,
         context.runtime_home,
         context.cwd,
         context.agent_id,
@@ -7438,7 +7470,7 @@ fn execute_registry_tool_call(
     runtime_home: &Path,
     workspace_root: Option<&Path>,
     role: LiveReasonExecutionRole,
-    configured_worker: Option<&str>,
+    configured_worker_set: Option<&[String]>,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ExecutedToolResult, RuntimeLiveBridgeError> {
@@ -7462,7 +7494,7 @@ fn execute_registry_tool_call(
                     runtime_home,
                     runtime_home,
                     role,
-                    configured_worker,
+                    configured_worker_set,
                     turn,
                     tool_call,
                 );
@@ -7471,7 +7503,7 @@ fn execute_registry_tool_call(
                 return Ok(master_capability_boundary_result(
                     turn,
                     tool_call,
-                    configured_worker,
+                    configured_worker_set,
                 ));
             }
             let mut root = fs::canonicalize(runtime_home).map_err(|err| {
@@ -7545,7 +7577,7 @@ fn execute_registry_tool_call(
             runtime_home,
             &root,
             role,
-            configured_worker,
+            configured_worker_set,
             turn,
             tool_call,
         )
@@ -7556,9 +7588,9 @@ fn execute_registry_tool_call(
 fn master_capability_boundary_result(
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
-    configured_worker: Option<&str>,
+    configured_worker_set: Option<&[String]>,
 ) -> ExecutedToolResult {
-    let worker = configured_worker.unwrap_or("<configured-worker>");
+    let worker = configured_worker_label(configured_worker_set);
     ExecutedToolResult {
         result: tool_result_reentry(
             turn,
@@ -7616,7 +7648,7 @@ fn execute_registry_tool_call_with_workspace(
     runtime_home: &Path,
     workspace_root: &Path,
     role: LiveReasonExecutionRole,
-    configured_worker: Option<&str>,
+    configured_worker_set: Option<&[String]>,
     turn: &TurnRecord,
     tool_call: &ReasonReq04ToolCall,
 ) -> Result<ExecutedToolResult, RuntimeLiveBridgeError> {
@@ -7659,7 +7691,8 @@ fn execute_registry_tool_call_with_workspace(
                 task_truth_changed: false,
             });
         }
-        if let Some(message) = configured_worker_task_boundary_failure(tool_call, configured_worker)
+        if let Some(message) =
+            configured_worker_task_boundary_failure(tool_call, configured_worker_set)
         {
             return Ok(ExecutedToolResult {
                 result: tool_result_reentry(turn, tool_call, ToolResultStatus::Failed, message),
@@ -8137,37 +8170,46 @@ fn execute_task_tool(
 
 fn configured_worker_task_boundary_failure(
     tool_call: &ReasonReq04ToolCall,
-    configured_worker: Option<&str>,
+    configured_worker_set: Option<&[String]>,
 ) -> Option<String> {
-    let configured_worker = configured_worker?;
+    let configured_worker_set = configured_worker_set?;
+    let configured_worker_list = configured_worker_label(Some(configured_worker_set));
     let args = tool_arguments_object(&tool_call.tool_call.arguments);
     match args.get("op").and_then(Value::as_str) {
         Some("assign") => args
             .get("agent_id")
             .and_then(Value::as_str)
-            .filter(|agent_id| *agent_id != configured_worker)
+            .filter(|agent_id| {
+                !configured_worker_set
+                    .iter()
+                    .any(|configured| configured == *agent_id)
+            })
             .map(|_| {
                 format!(
-                    "Configured topology boundary: task assignment must target paired Worker `{configured_worker}`."
+                    "Configured topology boundary: task assignment must target one configured Worker: `{configured_worker_list}`."
                 )
             }),
         Some("create") => match args.get("dispatch") {
             None => Some(format!(
-                "Configured topology boundary: task creation must set dispatch.mode to `none` for later assignment, or `agent` with agent_id `{configured_worker}`. Implicit dispatch is not allowed because it can select historical agents."
+                "Configured topology boundary: task creation must set dispatch.mode to `none` for later assignment, or `agent` with one configured Worker id `{configured_worker_list}`. Implicit dispatch is not allowed because it can select historical agents."
             )),
             Some(Value::Object(dispatch)) => match dispatch.get("mode").and_then(Value::as_str) {
                 Some("none") => None,
                 Some("agent") => dispatch
                     .get("agent_id")
                     .and_then(Value::as_str)
-                    .filter(|agent_id| *agent_id != configured_worker)
+                    .filter(|agent_id| {
+                        !configured_worker_set
+                            .iter()
+                            .any(|configured| configured == *agent_id)
+                    })
                     .map(|_| {
                         format!(
-                            "Configured topology boundary: task creation may dispatch only to paired Worker `{configured_worker}`."
+                            "Configured topology boundary: task creation may dispatch only to one configured Worker: `{configured_worker_list}`."
                         )
                     }),
                 Some("auto" | "self") => Some(format!(
-                    "Configured topology boundary: task creation cannot use auto or self dispatch. Use dispatch.mode `none`, then assign paired Worker `{configured_worker}`, or dispatch directly to that Worker."
+                    "Configured topology boundary: task creation cannot use auto or self dispatch. Use dispatch.mode `none`, then assign one configured Worker `{configured_worker_list}`, or dispatch directly to that Worker."
                 )),
                 _ => None,
             },
@@ -9232,7 +9274,7 @@ mod tests {
         );
 
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
-        selected.paired_agent_name = "worker".to_owned();
+        set_single_worker_peer(&mut selected, "worker");
         let outcome = run_master_lifecycle_reason_turn(
             &selected,
             lifecycle_live_request(&runtime_home, "lifecycle-target-event"),
@@ -9322,7 +9364,7 @@ mod tests {
         );
 
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
-        selected.paired_agent_name = "worker".to_owned();
+        set_single_worker_peer(&mut selected, "worker");
         let outcome = run_master_lifecycle_reason_turn(
             &selected,
             lifecycle_live_request(&runtime_home, "lifecycle-assignment-gate-event"),
@@ -9339,7 +9381,7 @@ mod tests {
         assert_eq!(outcome.tool_executions, 2);
         let requests = collect_provider_requests(&rx, 2);
         assert!(requests[1].contains(
-            "Configured topology boundary: task assignment must target paired Worker `worker`."
+            "Configured topology boundary: task assignment must target one configured Worker: `worker`."
         ));
         let reloaded =
             TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("reload runtime");
@@ -9361,6 +9403,94 @@ mod tests {
                 .get("agent_id")
                 .and_then(Value::as_str),
             Some("worker")
+        );
+
+        handle.join().expect("join provider");
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn master_assignment_gate_accepts_any_configured_worker_in_pool() {
+        let runtime_home = temp_runtime_home();
+        let runtime =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+        for worker_id in ["worker-alpha", "worker-beta", "worker-gamma"] {
+            runtime
+                .create_agent(AgentCreateRequest {
+                    agent_id: AgentId::new(worker_id),
+                    capabilities: vec!["workspace".to_owned()],
+                    actor: lifecycle_test_actor(),
+                    watermark: lifecycle_test_watermark(worker_id),
+                })
+                .expect("create configured worker");
+        }
+        runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: AgentId::new("historical-worker"),
+                capabilities: vec!["workspace".to_owned()],
+                actor: lifecycle_test_actor(),
+                watermark: lifecycle_test_watermark("historical"),
+            })
+            .expect("create historical worker");
+        let task = create_lifecycle_test_task(&runtime, "lifecycle-worker-pool-gate");
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                task_tool_use_response(
+                    "toolu_assign_historical_pool",
+                    json!({
+                        "op": "assign",
+                        "task_id": task.task_id.as_str(),
+                        "agent_id": "historical-worker"
+                    }),
+                ),
+                task_tool_use_response(
+                    "toolu_assign_beta_pool",
+                    json!({
+                        "op": "assign",
+                        "task_id": task.task_id.as_str(),
+                        "agent_id": "worker-beta"
+                    }),
+                ),
+            ],
+        );
+
+        let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        set_worker_peers(
+            &mut selected,
+            &["worker-alpha", "worker-beta", "worker-gamma"],
+        );
+        let outcome = run_master_lifecycle_reason_turn(
+            &selected,
+            lifecycle_live_request(&runtime_home, "lifecycle-worker-pool-gate-event"),
+            LiveReasonTaskDecisionBoundary {
+                task_id: task.task_id.clone(),
+                initial_event_seq: task.last_event_seq,
+                mode: LiveReasonTaskDecisionMode::TargetMutation,
+                max_rounds: 8,
+            },
+        )
+        .expect("corrected lifecycle assignment");
+
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(outcome.tool_executions, 2);
+        let requests = collect_provider_requests(&rx, 2);
+        assert!(requests[1].contains("`worker-alpha`, `worker-beta`, `worker-gamma`"));
+        let reloaded =
+            TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("reload runtime");
+        let assigned = reloaded.query_task(&task.task_id).expect("assigned task");
+        assert_eq!(assigned.status, TaskStatus::Assigned);
+        assert_eq!(
+            assigned.assignee.expect("configured assignee").agent_id,
+            AgentId::new("worker-beta")
+        );
+        let history = reloaded.task_history(&task.task_id).expect("task history");
+        assert_eq!(
+            history
+                .iter()
+                .filter(|event| event.event_type == "TaskAssigned")
+                .count(),
+            1
         );
 
         handle.join().expect("join provider");
@@ -9409,7 +9539,7 @@ mod tests {
         let mut request = live_request(false);
         request.runtime_home = runtime_home.clone();
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
-        selected.paired_agent_name = "worker".to_owned();
+        set_single_worker_peer(&mut selected, "worker");
 
         let outcome =
             run_live_reason_turn(&selected, request).expect("corrected task creation flow");
@@ -9472,7 +9602,7 @@ mod tests {
         );
 
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
-        selected.paired_agent_name = "worker".to_owned();
+        set_single_worker_peer(&mut selected, "worker");
         let outcome = run_master_lifecycle_reason_turn(
             &selected,
             lifecycle_live_request(&runtime_home, "lifecycle-unrelated-event"),
@@ -9994,7 +10124,8 @@ mod tests {
                 assert_eq!(status.agent_name, "agent-live");
                 assert_eq!(status.agent_mode, "master");
                 assert_eq!(status.node_id, "agent-live-node");
-                assert_eq!(status.paired_agent_name, "agent-live-worker");
+                assert_eq!(status.paired_agents.len(), 1);
+                assert_eq!(status.paired_agents[0].agent_name, "agent-live-worker");
                 assert_eq!(status.provider_id, "provider-live");
                 assert_eq!(status.provider_type, "anthropic");
                 assert_eq!(status.provider_protocol, "messages");
@@ -10039,7 +10170,7 @@ api_key_env = "FREEHAND_RUNTIME_PROVIDER_OLD"
 name = "agent-live"
 mode = "master"
 node_id = "agent-live-node"
-paired_agent = "agent-live-worker"
+paired_agents = ["agent-live-worker"]
 pair_token = "FREEHAND_RUNTIME_MASTER_TOKEN"
 provider = "old"
 
@@ -10047,7 +10178,7 @@ provider = "old"
 name = "agent-live-worker"
 mode = "slave"
 node_id = "agent-live-worker-node"
-paired_agent = "agent-live"
+paired_agents = ["agent-live"]
 pair_token = "FREEHAND_RUNTIME_WORKER_TOKEN"
 provider = "old"
 "#,
@@ -10178,7 +10309,7 @@ api_key_env = "FREEHAND_RUNTIME_PROVIDER_OLD_INVALID"
 name = "agent-live"
 mode = "master"
 node_id = "agent-live-node"
-paired_agent = "agent-live-worker"
+paired_agents = ["agent-live-worker"]
 pair_token = "FREEHAND_RUNTIME_MASTER_TOKEN_INVALID"
 provider = "old"
 
@@ -10186,7 +10317,7 @@ provider = "old"
 name = "agent-live-worker"
 mode = "slave"
 node_id = "agent-live-worker-node"
-paired_agent = "agent-live"
+paired_agents = ["agent-live"]
 pair_token = "FREEHAND_RUNTIME_WORKER_TOKEN_INVALID"
 provider = "old"
 "#,
@@ -11523,11 +11654,13 @@ provider = "old"
             name: "master".to_owned(),
             mode: AgentMode::Master,
             node_id: "master-node".to_owned(),
-            paired_agent_name: "worker".to_owned(),
-            paired_agent_mode: AgentMode::Slave,
-            paired_node_id: "worker-node".to_owned(),
-            paired_allowed_pair_ip: Some("127.0.0.1".parse().expect("ip")),
-            paired_pair_token_env: "FREEHAND_PAIR_TOKEN_WORKER".to_owned(),
+            paired_agents: vec![SelectedPeerAgentConfig {
+                name: "worker".to_owned(),
+                mode: AgentMode::Slave,
+                node_id: "worker-node".to_owned(),
+                allowed_pair_ip: Some("127.0.0.1".parse().expect("ip")),
+                pair_token_env: "FREEHAND_PAIR_TOKEN_WORKER".to_owned(),
+            }],
             allowed_pair_ip: None,
             pair_token_env: "FREEHAND_PAIR_TOKEN_MASTER".to_owned(),
             pair_token: "pair-token".to_owned(),
@@ -11558,11 +11691,13 @@ provider = "old"
             name: "agent-live".to_owned(),
             mode: AgentMode::Master,
             node_id: "agent-live-node".to_owned(),
-            paired_agent_name: "agent-live-worker".to_owned(),
-            paired_agent_mode: AgentMode::Slave,
-            paired_node_id: "agent-live-worker-node".to_owned(),
-            paired_allowed_pair_ip: None,
-            paired_pair_token_env: "FREEHAND_WORKER_TOKEN".to_owned(),
+            paired_agents: vec![SelectedPeerAgentConfig {
+                name: "agent-live-worker".to_owned(),
+                mode: AgentMode::Slave,
+                node_id: "agent-live-worker-node".to_owned(),
+                allowed_pair_ip: None,
+                pair_token_env: "FREEHAND_WORKER_TOKEN".to_owned(),
+            }],
             allowed_pair_ip: None,
             pair_token_env: "FREEHAND_MASTER_TOKEN".to_owned(),
             pair_token: "pair-token".to_owned(),
@@ -11579,6 +11714,48 @@ provider = "old"
             fallback_provider: None,
             restart_required_on_change: true,
         }
+    }
+
+    fn selected_peer(
+        name: impl Into<String>,
+        mode: AgentMode,
+        node_id: impl Into<String>,
+        pair_token_env: impl Into<String>,
+    ) -> SelectedPeerAgentConfig {
+        SelectedPeerAgentConfig {
+            name: name.into(),
+            mode,
+            node_id: node_id.into(),
+            allowed_pair_ip: None,
+            pair_token_env: pair_token_env.into(),
+        }
+    }
+
+    fn set_single_worker_peer(selected: &mut SelectedAgentConfig, worker_id: &str) {
+        set_worker_peers(selected, &[worker_id]);
+    }
+
+    fn set_worker_peers(selected: &mut SelectedAgentConfig, worker_ids: &[&str]) {
+        selected.paired_agents = worker_ids
+            .iter()
+            .map(|worker_id| {
+                selected_peer(
+                    *worker_id,
+                    AgentMode::Slave,
+                    format!("{worker_id}-node"),
+                    "FREEHAND_WORKER_TOKEN",
+                )
+            })
+            .collect();
+    }
+
+    fn set_single_master_peer(selected: &mut SelectedAgentConfig, master_id: &str) {
+        selected.paired_agents = vec![selected_peer(
+            master_id,
+            AgentMode::Master,
+            format!("{master_id}-node"),
+            "FREEHAND_MASTER_TOKEN",
+        )];
     }
 
     fn live_selected_agent_with_protocol(
@@ -11622,8 +11799,7 @@ provider = "old"
         let mut selected = live_selected_agent(base_url, provider_type);
         selected.name = "worker-live".to_owned();
         selected.mode = AgentMode::Slave;
-        selected.paired_agent_name = "master-live".to_owned();
-        selected.paired_agent_mode = AgentMode::Master;
+        set_single_master_peer(&mut selected, "master-live");
         selected
     }
 
@@ -12226,7 +12402,7 @@ provider = "old"
     fn assert_master_task_request_contract(
         raw_request: &str,
         sentinel: &str,
-        configured_worker: &str,
+        configured_worker_set: &str,
     ) {
         assert!(raw_request.contains(sentinel));
         assert!(raw_request.contains("Master task orchestration policy"));
@@ -12244,9 +12420,7 @@ provider = "old"
         assert!(raw_request.contains("Timer workflow"));
         assert!(raw_request.contains("Ordinary responses must omit it"));
         assert!(raw_request.contains("include only the required <freehand_completion> block"));
-        assert!(raw_request.contains(&format!(
-            "Configured paired Worker id: `{configured_worker}`"
-        )));
+        assert!(raw_request.contains(&format!("Configured Worker ids: `{configured_worker_set}`")));
         assert!(raw_request.contains("Historical agents returned by list_agents"));
         assert!(raw_request.contains("never put task(...)"));
         assert!(raw_request.contains("The Worker does not receive the task tool"));
@@ -12572,8 +12746,7 @@ provider = "old"
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
         selected.name = "worker-live".to_owned();
         selected.mode = AgentMode::Slave;
-        selected.paired_agent_name = "master-live".to_owned();
-        selected.paired_agent_mode = AgentMode::Master;
+        set_single_master_peer(&mut selected, "master-live");
 
         let outcome = run_worker_live_reason_turn(&selected, request).expect("worker live bridge");
         let raw_request = rx.recv().expect("provider request");
@@ -12622,8 +12795,7 @@ provider = "old"
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
         selected.name = "worker-live".to_owned();
         selected.mode = AgentMode::Slave;
-        selected.paired_agent_name = "master-live".to_owned();
-        selected.paired_agent_mode = AgentMode::Master;
+        set_single_master_peer(&mut selected, "master-live");
 
         let outcome = run_worker_live_reason_turn(&selected, request).expect("worker live bridge");
         let _first_request = rx.recv().expect("first provider request");
@@ -12657,7 +12829,7 @@ provider = "old"
 
         let mut worker = selected;
         worker.mode = AgentMode::Slave;
-        worker.paired_agent_mode = AgentMode::Master;
+        set_single_master_peer(&mut worker, "master");
         assert_eq!(
             run_worker_live_reason_turn(&worker, live_request(false)),
             Err(RuntimeLiveBridgeError::WorkerWorkspaceRequired)
@@ -14115,7 +14287,7 @@ provider = "old"
         request.prompt = master_autonomy_prompt(sentinel);
 
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
-        selected.paired_agent_name = worker_id.to_owned();
+        set_single_worker_peer(&mut selected, worker_id);
         let outcome =
             run_live_reason_turn(&selected, request).expect("master autonomy success path");
         let requests = collect_provider_requests(&rx, 9);
@@ -14252,7 +14424,7 @@ provider = "old"
         request.prompt = master_autonomy_prompt(sentinel);
 
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
-        selected.paired_agent_name = worker_id.to_owned();
+        set_single_worker_peer(&mut selected, worker_id);
         let outcome =
             run_live_reason_turn(&selected, request).expect("master autonomy execution error path");
         let requests = collect_provider_requests(&rx, 7);
@@ -14409,7 +14581,7 @@ provider = "old"
         request.prompt = master_autonomy_prompt(sentinel);
 
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
-        selected.paired_agent_name = worker_id.to_owned();
+        set_single_worker_peer(&mut selected, worker_id);
         let outcome = run_live_reason_turn(&selected, request)
             .expect("master autonomy rejected-review retry path");
         let requests = collect_provider_requests(&rx, 11);
@@ -14866,7 +15038,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         let mut debug_events = Vec::<DebugEvent>::new();
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
         selected.mode = AgentMode::Slave;
-        selected.paired_agent_mode = AgentMode::Master;
+        set_single_master_peer(&mut selected, "master-live");
 
         let outcome = run_live_reason_turn_with_policy(
             &selected,
@@ -15138,7 +15310,7 @@ data: {{\"type\":\"message_stop\"}}\n\n"
         request.cwd = Some(external_workspace.clone());
 
         let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
-        selected.paired_agent_name = agent_id.to_owned();
+        set_single_worker_peer(&mut selected, agent_id);
         let outcome = run_live_reason_turn(&selected, request).expect(
             "injected master read failure must return to model and still permit task dispatch",
         );

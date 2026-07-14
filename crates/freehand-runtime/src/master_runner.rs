@@ -435,17 +435,12 @@ impl ProductionMasterRunner {
             .task_history(&task.task_id)
             .map_err(task_center_error)?
             .len();
+        let worker_names = self.selected.worker_peer_names().join(", ");
         let summary = self
             .executor
             .execute(
                 &self.selected,
-                master_live_request(
-                    &self.runtime_home,
-                    &self.selected.paired_agent_name,
-                    &task,
-                    event,
-                    attempt,
-                )?,
+                master_live_request(&self.runtime_home, &worker_names, &task, event, attempt)?,
                 master_decision_boundary(&task),
             )
             .map_err(ProductionMasterRunnerError::Execution)?;
@@ -632,7 +627,7 @@ impl ProductionMasterRunner {
 
 fn master_live_request(
     runtime_home: &Path,
-    worker_name: &str,
+    worker_names: &str,
     task: &TaskSnapshot,
     event: &TaskEventInboxEntry,
     attempt: u32,
@@ -656,12 +651,12 @@ fn master_live_request(
         prompt: format!(
             "You are the production Master lifecycle coordinator.\n\
 Use the task tool and Task Center truth; do not answer with prose-only status.\n\
-Configured Worker: {worker_name}\n\
+Configured Worker ids: {worker_names}\n\
 \n\
 Rules:\n\
 - review_ready: query/history, then reject with concrete requirements or approve and close. Approved is not terminal; close it in the same lifecycle decision.\n\
 - execution_blocked: inspect the blocker. Reassign only when retry is justified; otherwise call task(op=\"append\", task_id=<task-id>, note=\"blocked_decision: <required external action>\") to persist why it remains blocked.\n\
-- execution_interrupted: assign the task back to the configured Worker for a new execution.\n\
+- execution_interrupted: assign the task back to one configured Worker for a new execution.\n\
 - one trigger event owns one decision turn. After the required Task Center mutation is persisted, stop; never wait inside this turn for a future Worker event.\n\
 - never fabricate completion, approval, evidence, or task state.\n\
 \n\

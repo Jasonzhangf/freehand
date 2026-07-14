@@ -12,7 +12,7 @@
     "`TaskRuntime::boot` loads task snapshots, task leases, self-agent snapshot, and persisted agent lifecycle snapshots into memory",
 "`TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired",
     "`TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance",
-    "create action writes append-only ledger events and atomic snapshots",
+    "create action writes append-only ledger events and atomic snapshots; shared atomic JSON persistence uses per-process unique temp paths so concurrent TaskRuntime boots or index writes do not steal each other's temp file",
     "dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`",
     "`TaskRuntime::assign_task` binds waiting, created, or interrupted tasks to an available agent",
     "`TaskRuntime::claim_next_task` lets an agent claim its highest-priority assigned task into lease-backed Running state with a durable execution_id",
@@ -99,6 +99,18 @@
         "task_tool_create_persists_and_queries_task"
       ],
       "why_shared": "keeps startup recovery in task owner, not UI/runtime glue"
+    },
+    {
+      "symbol": "write_json_atomic",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "atomically replace task/agent/index/lease JSON truth with unique temp paths safe for concurrent local Worker process boot",
+      "allowed_callers": [
+        "TaskStore persistence helpers"
+      ],
+      "related_tests": [
+        "atomic_json_write_survives_parallel_same_path_writers"
+      ],
+      "why_shared": "one atomic write owner prevents per-store ad hoc persistence and multi-process temp-file collisions"
     },
     {
       "symbol": "TaskRuntime::mutate_task",
@@ -560,6 +572,17 @@
       "output_semantic": "master poll outcome with classifications and next cursor",
       "caller": "runtime ADP command dispatch / CLI sample",
       "callee": "task owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "25",
+      "symbol_path": "write_json_atomic",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "atomically replace JSON persistence files with process/nanos/counter-qualified temp paths",
+      "input_semantic": "serializable task owner truth",
+      "output_semantic": "replaced JSON truth without cross-writer temp collisions",
+      "caller": "TaskStore persistence helpers",
+      "callee": "filesystem atomic rename",
       "binding_status": "bound"
     }
   ],

@@ -9,6 +9,10 @@ logs_dir="$runtime_home/logs"
 pair_token="${FREEHAND_PAIR_TOKEN_SHARED:-}"
 command="${1:-install}"
 
+sanitize_launchd_component() {
+  printf '%s\n' "$1" | sed 's/[^A-Za-z0-9_.-]/-/g'
+}
+
 detect_tailscale_ip() {
   if command -v tailscale >/dev/null 2>&1; then
     tailscale ip -4 2>/dev/null | sed -n '1p'
@@ -64,10 +68,12 @@ esac
 
 if [[ "$service_role" == "worker" ]]; then
   agent="${FREEHAND_WORKER_AGENT:-worker}"
+  agent_label_component="$(sanitize_launchd_component "$agent")"
+  default_label="${default_label}.${agent_label_component}"
   workdir="${FREEHAND_WORKER_WORKDIR:-"$runtime_home"}"
-  env_file="${FREEHAND_DAEMON_ENV_FILE:-"$runtime_home/worker${service_suffix}.env"}"
-  stdout_log="$logs_dir/worker${service_suffix}.stdout.log"
-  stderr_log="$logs_dir/worker${service_suffix}.stderr.log"
+  env_file="${FREEHAND_DAEMON_ENV_FILE:-"$runtime_home/worker${service_suffix}.${agent_label_component}.env"}"
+  stdout_log="$logs_dir/worker${service_suffix}.${agent_label_component}.stdout.log"
+  stderr_log="$logs_dir/worker${service_suffix}.${agent_label_component}.stderr.log"
 else
   agent="${FREEHAND_DAEMON_AGENT:-master}"
   workdir="${FREEHAND_DAEMON_WORKDIR:-"$runtime_home"}"
@@ -82,6 +88,17 @@ if [[ "$service_suffix" == "S" ]]; then
   daemon_bin="$bin_dir/freehand-daemonS-bin"
 fi
 launchd_wrapper="$bin_dir/freehand-daemon-launchd${service_suffix}"
+
+if [[ "${FREEHAND_LAUNCHD_PLAN_ONLY:-0}" == "1" ]]; then
+  printf 'role=%s\n' "$service_role"
+  printf 'agent=%s\n' "$agent"
+  printf 'label=%s\n' "$label"
+  printf 'env_file=%s\n' "$env_file"
+  printf 'stdout_log=%s\n' "$stdout_log"
+  printf 'stderr_log=%s\n' "$stderr_log"
+  printf 'plist_path=%s\n' "$plist_path"
+  exit 0
+fi
 
 bind_addr="$default_bind_addr"
 if [[ "$service_role" == "master" ]]; then

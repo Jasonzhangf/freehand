@@ -5,7 +5,10 @@
 - lifecycle path under test:
   - load `~/.freehand/config.toml`
   - resolve `[agents.<name>]`
-  - validate reciprocal peer-topology fields
+  - compile ordered `paired_agents` peer topology from the agent registry
+  - require every Master to have at least one configured Slave Worker
+  - require every Slave Worker to have exactly one configured Master
+  - validate reciprocal, opposite-mode, unique peer-topology fields
   - resolve `[providers.<id>]`
   - select one agent per process
   - select one enabled primary provider per agent
@@ -15,16 +18,18 @@
   - validate and persist owner-backed provider/model update requests through the canonical config path
   - validate restart-only config activation
 - white-box plan:
-  - parse and validate agent/provider schema, reciprocal peer-topology invariants, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
+  - parse and validate agent/provider schema, ordered reciprocal multi-peer topology invariants, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
   - assert inline and env auth providers project `ProviderAuthSourceKind` while resolved API keys remain runtime-only
   - assert `fallback_provider` resolves a second provider with its own type, protocol, model, endpoint, and auth source
   - reject fallback references that are missing, disabled, or equal to the primary provider
   - assert provider/model update accepts valid env-var auth, writes only `api_key_env`, returns a restart-required selected-agent projection, and does not write resolved API-key values
   - assert invalid provider update input fails before overwrite so the original config bytes remain unchanged
-  - positive peer-topology coverage locks selected-agent projection of local node id, paired agent name, paired mode, paired node id, paired allowed IP, and paired pair-token env
-  - negative peer-topology coverage locks self-pairing, missing paired agent, same-mode paired agents, and non-reciprocal paired agents
+  - positive peer-topology coverage locks one Master plus three ordered Workers and selected-agent projection of every peer name, mode, node id, allowed IP, and pair-token env
+  - negative peer-topology coverage locks empty peer sets, empty peer names, duplicate peers, self-pairing, missing peers, same-mode peers, non-reciprocal peers, and a Slave bound to multiple Masters
+  - legacy singular `paired_agent` is rejected as an unknown field; no compatibility parser or runtime fallback exists
 - module black-box plan:
-  - load config file and select named agent with full primary/fallback provider runtime selection plus paired-topology projection through public config boundary
+  - load config file and select named Master with full primary/fallback provider runtime selection plus stable ordered three-Worker topology projection through the public config boundary
+  - select each named Worker and prove its compiled peer set contains exactly its configured Master
 - project black-box impact:
   - CLI startup path consumes one named agent configuration and projects selected provider metadata without exposing API key
   - runtime/UI config status queries can consume `auth_source` without reading raw provider auth fields or resolved API keys
@@ -36,7 +41,8 @@
 - known gaps:
   - provider failover execution remains owned by `provider.reason-live-bridge`; `config.core` owns only validated route selection truth
 - sync status between design and implementation:
-  - white-box, module black-box, and project black-box baseline cover multi-provider registry, reciprocal peer topology, and selected-provider projection
+  - white-box, module black-box, and project black-box baseline cover multi-provider registry, reciprocal multi-peer topology, and selected-provider projection
+  - `cargo test -p freehand-config -- --nocapture` covers the three-Worker positive path plus legacy singular, duplicate, and multi-Master Worker negative paths
   - selected-provider auth source is regression-locked for inline and env configurations
   - provider/model update positive and invalid-input no-overwrite paths are regression-locked
   - migrated mainline-call source and generated wiki are kept in sync with this test design

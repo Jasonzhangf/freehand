@@ -5,6 +5,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_contracts::{AgentId, SessionId, TraceId, TurnId};
@@ -2134,6 +2135,7 @@ impl TaskRuntime {
 
 const DEFAULT_TASK_LEASE_TTL_SECONDS: u64 = 300;
 const RUNNING_LEASE_ACQUISITION_GRACE_SECONDS: u64 = 5;
+static ATOMIC_WRITE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 struct TaskStore {
@@ -3820,7 +3822,12 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, TaskError> 
 
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), TaskError> {
     ensure_parent_dir(path)?;
-    let temp = path.with_extension(format!("tmp-{}", now_unix_seconds()));
+    let temp = path.with_extension(format!(
+        "tmp-{}-{}-{}",
+        std::process::id(),
+        now_unix_nanos(),
+        ATOMIC_WRITE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     let raw = serde_json::to_string_pretty(value).map_err(json_err)?;
     fs::write(&temp, raw).map_err(io_err)?;
     fs::rename(&temp, path).map_err(io_err)
@@ -3913,6 +3920,45 @@ mod tests {
 
         assert_eq!(agent.status, AgentStatus::Available);
         assert!(agent.capabilities.contains(&"code_edit".to_owned()));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn atomic_json_write_survives_parallel_same_path_writers() {
+        let runtime_home = temp_runtime_home("task-atomic-parallel-write");
+        let path = runtime_home.join("state").join("agents").join("index.json");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(12));
+        let mut handles = Vec::new();
+        for index in 0..12 {
+            let barrier = std::sync::Arc::clone(&barrier);
+            let path = path.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                write_json_atomic(&path, &vec![format!("agent-{index}")])
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("join").expect("atomic write");
+        }
+
+        let written: Vec<String> = read_json(&path).expect("read final index");
+        assert_eq!(written.len(), 1);
+        let leftovers = fs::read_dir(path.parent().expect("parent"))
+            .expect("read parent")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.starts_with("tmp-"))
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            leftovers.is_empty(),
+            "atomic write temp files leaked: {leftovers:?}"
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 

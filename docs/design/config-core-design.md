@@ -31,7 +31,7 @@ Confirmed discussion only. Unconfirmed details remain `TBD`.
 - `name`
 - `mode`
 - `node_id`
-- `paired_agent`
+- `paired_agents`
 - `pair_token`
 - `provider`
 
@@ -104,17 +104,33 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker-alpha", "worker-beta", "worker-gamma"]
 pair_token = "FREEHAND_MASTER_TOKEN"
 provider = "mini27"
 
-[agents.worker]
-name = "worker"
+[agents.worker-alpha]
+name = "worker-alpha"
 mode = "slave"
-node_id = "worker-node"
-paired_agent = "master"
+node_id = "worker-alpha-node"
+paired_agents = ["master"]
 allowed_pair_ip = "127.0.0.1"
-pair_token = "FREEHAND_WORKER_TOKEN"
+pair_token = "FREEHAND_WORKER_ALPHA_TOKEN"
+provider = "claude"
+
+[agents.worker-beta]
+name = "worker-beta"
+mode = "slave"
+node_id = "worker-beta-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_WORKER_BETA_TOKEN"
+provider = "claude"
+
+[agents.worker-gamma]
+name = "worker-gamma"
+mode = "slave"
+node_id = "worker-gamma-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_WORKER_GAMMA_TOKEN"
 provider = "claude"
 ```
 
@@ -134,8 +150,11 @@ provider = "claude"
   - `master`
   - `slave`
 - `node_id` is required for all agents
-- `paired_agent` is required for all agents
-- `paired_agent` must reference another configured agent
+- `paired_agents` is required for all agents; legacy singular `paired_agent` is rejected
+- a Master must reference at least one configured Slave Worker
+- a Slave Worker must reference exactly one configured Master
+- peer names must be non-empty and unique
+- every peer must reference another configured agent
 - paired agents must point back to each other
 - paired agents must use opposite modes in first-version local topology
 - `allowed_pair_ip` is optional
@@ -149,7 +168,7 @@ provider = "claude"
 - one process starts one agent
 - CLI selects the target `agent name`
 - selected agent resolution also resolves the bound provider and provider auth source
-- selected agent resolution also carries paired node topology metadata for runtime bootstrap
+- selected agent resolution carries an ordered typed peer topology for runtime bootstrap
 
 ### Config activation
 

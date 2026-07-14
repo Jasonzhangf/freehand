@@ -2,7 +2,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-source_runtime_home="${FREEHAND_RUNTIME_HOME:-"$HOME/.freehand"}"
 isolated_home="${FREEHAND_THREE_WORKER_HOME:-"$(mktemp -d /tmp/freehand-three-worker-home.XXXXXX)"}"
 runtime_home="$isolated_home/.freehand"
 adp_url="${FREEHAND_THREE_WORKER_ADP_URL:-ws://127.0.0.1:4142/adp}"
@@ -19,7 +18,9 @@ mock_log="$backup_dir/mock-provider.log"
 target_cwd="$backup_dir/worker-target"
 mock_pid=""
 master_pid=""
-worker_pid=""
+worker_alpha_pid=""
+worker_beta_pid=""
+worker_gamma_pid=""
 
 cd "$repo_root"
 
@@ -46,7 +47,7 @@ wait_for_health() {
 
 restore_runtime_config() {
   local restore_status=0
-  for service_pid in "$worker_pid" "$master_pid"; do
+  for service_pid in "$worker_alpha_pid" "$worker_beta_pid" "$worker_gamma_pid" "$master_pid"; do
     if [[ -n "$service_pid" ]] && kill -0 "$service_pid" >/dev/null 2>&1; then
       kill "$service_pid" >/dev/null 2>&1 || restore_status=$?
       wait "$service_pid" >/dev/null 2>&1 || true
@@ -59,6 +60,54 @@ restore_runtime_config() {
     fi
   fi
   return "$restore_status"
+}
+
+write_isolated_config() {
+  cat >"$config_path" <<EOF
+[providers.minimax]
+id = "minimax"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "http://127.0.0.1:$port"
+default_model = "MiniMax-M3"
+
+[providers.minimax.auth]
+type = "apikey"
+api_key_env = "$fixture_key_name"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker-alpha", "worker-beta", "worker-gamma"]
+pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
+provider = "minimax"
+
+[agents.worker-alpha]
+name = "worker-alpha"
+mode = "slave"
+node_id = "worker-alpha-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
+provider = "minimax"
+
+[agents.worker-beta]
+name = "worker-beta"
+mode = "slave"
+node_id = "worker-beta-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
+provider = "minimax"
+
+[agents.worker-gamma]
+name = "worker-gamma"
+mode = "slave"
+node_id = "worker-gamma-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
+provider = "minimax"
+EOF
 }
 
 start_master() {
@@ -82,14 +131,41 @@ stop_master() {
 }
 
 start_worker() {
+  local agent_name="$1"
   env HOME="$isolated_home" \
     FREEHAND_PAIR_TOKEN_SHARED="$pair_token" \
     FREEHAND_CC_API_KEY="isolated-bootstrap-only" \
     "${fixture_key_name}=${fixture_key_value}" \
-    "$daemon_path" serve --agent worker \
-    >"$runtime_home/logs/worker.stdout.log" \
-    2>"$runtime_home/logs/worker.stderr.log" &
-  worker_pid="$!"
+    "$daemon_path" serve --agent "$agent_name" \
+    >"$runtime_home/logs/${agent_name}.stdout.log" \
+    2>"$runtime_home/logs/${agent_name}.stderr.log" &
+  worker_start_pid="$!"
+}
+
+start_workers() {
+  start_worker worker-alpha
+  worker_alpha_pid="$worker_start_pid"
+  start_worker worker-beta
+  worker_beta_pid="$worker_start_pid"
+  start_worker worker-gamma
+  worker_gamma_pid="$worker_start_pid"
+}
+
+verify_worker_processes() {
+  local duplicate=""
+  if [[ "$worker_alpha_pid" == "$worker_beta_pid" || "$worker_alpha_pid" == "$worker_gamma_pid" || "$worker_beta_pid" == "$worker_gamma_pid" ]]; then
+    duplicate="yes"
+  fi
+  if [[ -n "$duplicate" ]]; then
+    echo "three-worker verifier expected distinct worker PIDs, got alpha=$worker_alpha_pid beta=$worker_beta_pid gamma=$worker_gamma_pid" >&2
+    exit 2
+  fi
+  for service_pid in "$worker_alpha_pid" "$worker_beta_pid" "$worker_gamma_pid"; do
+    if ! kill -0 "$service_pid" >/dev/null 2>&1; then
+      echo "three-worker verifier worker PID is not alive: $service_pid" >&2
+      exit 2
+    fi
+  done
 }
 
 start_fixture() {
@@ -145,20 +221,22 @@ function idsFromBody(body) {
   const taskIdMatch = /task-three-worker-([0-9]+)-(?:alpha|beta|gamma|integration)/.exec(body);
   const stamp = match(body, "FH3_STAMP") || taskIdMatch?.[1] || "missing-stamp";
   const parentSessionMatch = /"session_id"\s*:\s*"(online-master-three-worker-[^"]+)"/.exec(body);
+  const workerFor = (name) => match(body, `FH3_WORKER_${name.toUpperCase()}`) || `worker-${name}`;
   return {
     stamp,
     session: match(body, "FH3_SESSION") || parentSessionMatch?.[1] || "online-master-three-worker-e2e",
     targetCwd: match(body, "FH3_TARGET_CWD") || process.env.FH3_TARGET_CWD,
-    worker: match(body, "FH3_WORKER") || "worker",
     tasks: ["alpha", "beta", "gamma"].map((name) => ({
       name,
       id: match(body, `FH3_TASK_${name.toUpperCase()}`) || `task-three-worker-${stamp}-${name}`,
       result: `worker_result_${name}=${stamp}`,
+      worker: workerFor(name),
     })),
     integration: {
       name: "integration",
       id: match(body, "FH3_TASK_INTEGRATION") || `task-three-worker-${stamp}-integration`,
       result: `worker_result_integration=${stamp}`,
+      worker: match(body, "FH3_WORKER_INTEGRATION") || "worker-alpha",
     },
   };
 }
@@ -274,7 +352,7 @@ function masterResponse(body) {
       return toolUse("fh3_assign_integration", {
         op: "assign",
         task_id: ids.integration.id,
-        agent_id: ids.worker,
+        agent_id: ids.integration.worker,
       });
     }
     return textResponse(waiting(
@@ -303,7 +381,7 @@ function masterResponse(body) {
   const assignTask = (task) => toolUse(`fh3_assign_${task.name}`, {
     op: "assign",
     task_id: task.id,
-    agent_id: ids.worker,
+    agent_id: task.worker,
   });
   const historyTask = (task) => toolUse(`fh3_history_${task.name}_${state.historyPolls}`, {
     op: "history",
@@ -356,32 +434,40 @@ function masterResponse(body) {
     return historyTask(task);
   }
 
-  const summary = `Three worker E2E complete: ${tasks.map((task) => task.result).join("; ")}`;
-  const evidence = tasks.map((task) => `${task.id}=approved_and_closed`).join("; ");
-  return textResponse(completion(summary, evidence, "Master created three Worker tasks, reviewed all results, and returned one user-visible summary."));
+  return textResponse(waiting(
+    "The first three required Worker tasks are closed. Wait for the production parent-goal evaluation to compare their accepted review truth with the overall objective before any final completion claim.",
+  ));
 }
 
 const server = http.createServer((req, res) => {
   let body = "";
   req.on("data", chunk => { body += chunk; });
   req.on("end", () => {
-    count += 1;
-    try {
-      const response = isWorkerRequest(body) ? workerResponse(body) : masterResponse(body);
-      const ids = idsFromBody(body);
-      console.log(JSON.stringify({
-        count,
-        url: req.url,
-        role: isWorkerRequest(body) ? "worker" : "master",
-        session: ids.session,
-        stage: sessions.get(ids.session)?.stage ?? null,
-      }));
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(response));
-    } catch (error) {
-      console.error(`three-worker-fixture-error ${error.message}`);
-      res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ type: "error", error: { type: "fixture_error", message: error.message } }));
+    const workerRequest = isWorkerRequest(body);
+    const respond = () => {
+      count += 1;
+      try {
+        const response = workerRequest ? workerResponse(body) : masterResponse(body);
+        const ids = idsFromBody(body);
+        console.log(JSON.stringify({
+          count,
+          url: req.url,
+          role: workerRequest ? "worker" : "master",
+          session: ids.session,
+          stage: sessions.get(ids.session)?.stage ?? null,
+        }));
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(response));
+      } catch (error) {
+        console.error(`three-worker-fixture-error ${error.message}`);
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ type: "error", error: { type: "fixture_error", message: error.message } }));
+      }
+    };
+    if (workerRequest) {
+      setTimeout(respond, 12000);
+    } else {
+      respond();
     }
   });
 });
@@ -416,15 +502,37 @@ run_adp_submit_and_verify() {
   local task_beta="$3"
   local task_gamma="$4"
   local task_integration="$5"
-  local prompt="$6"
-  python3 - "$adp_url" "$session_id" "$task_alpha" "$task_beta" "$task_gamma" "$task_integration" "$prompt" <<'PY'
+  local worker_alpha="$6"
+  local worker_beta="$7"
+  local worker_gamma="$8"
+  local worker_integration="$9"
+  local prompt="${10}"
+  python3 - "$adp_url" "$session_id" "$task_alpha" "$task_beta" "$task_gamma" "$task_integration" "$worker_alpha" "$worker_beta" "$worker_gamma" "$worker_integration" "$prompt" <<'PY'
 import asyncio
 import json
 import sys
 import websockets
 
-url, session_id, task_alpha, task_beta, task_gamma, task_integration, prompt = sys.argv[1:8]
+(
+    url,
+    session_id,
+    task_alpha,
+    task_beta,
+    task_gamma,
+    task_integration,
+    worker_alpha,
+    worker_beta,
+    worker_gamma,
+    worker_integration,
+    prompt,
+) = sys.argv[1:12]
 task_ids = [task_alpha, task_beta, task_gamma, task_integration]
+expected_workers = {
+    task_alpha: worker_alpha,
+    task_beta: worker_beta,
+    task_gamma: worker_gamma,
+    task_integration: worker_integration,
+}
 
 def adp_command(request_id, command):
     return {"kind": "command", "request_id": request_id, "command": command}
@@ -453,23 +561,29 @@ async def query_all():
         ]
         for task_id in task_ids:
             requests.append(adp_query(f"history-{task_id}", {"QueryTaskHistory": {"task_id": task_id}}))
+        responses = {}
         for request in requests:
             await ws.send(json.dumps(request))
-        return {request["request_id"]: await recv_until(ws, request["request_id"], 20) for request in requests}
+            responses[request["request_id"]] = await recv_until(
+                ws,
+                request["request_id"],
+                20,
+            )
+        return responses
 
 async def main():
     async with websockets.connect(url) as ws:
         await ws.send(json.dumps(adp_command("three-worker-submit", {
             "SubmitUserInput": {"text": prompt, "session_id": session_id}
         })))
-        receipt = await recv_until(ws, "three-worker-submit", 240)
+        receipt = await recv_until(ws, "three-worker-submit", 420)
     required_results = [
         "worker_result_alpha",
         "worker_result_beta",
         "worker_result_gamma",
         "worker_result_integration",
     ]
-    deadline = asyncio.get_event_loop().time() + 240
+    deadline = asyncio.get_event_loop().time() + 420
     while True:
         responses = await query_all()
         transcript = responses["turns"].get("result", {}).get("SessionTurns", {})
@@ -517,9 +631,33 @@ async def main():
     not_closed = [task for task in matching_tasks if task.get("status") != "closed"]
     if not_closed:
         raise RuntimeError(f"tasks not closed: {not_closed}")
+    wrong_assignees = [
+        task for task in matching_tasks
+        if task.get("assignee_agent_id") != expected_workers[task.get("task_id")]
+    ]
+    if wrong_assignees:
+        raise RuntimeError(f"tasks crossed configured Worker assignment boundaries: {wrong_assignees}")
 
-    required_events = ["TaskCreated", "TaskAssigned", "TaskResumed", "TaskReviewSubmitted", "TaskReviewApproved", "TaskClosed"]
+    premature_success = [
+        turn for turn in turns[:-1]
+        if turn.get("terminal_status") == "Success"
+    ]
+    if premature_success:
+        raise RuntimeError(
+            f"parent session exposed success before overall-goal evaluation closed next-round work: {premature_success}"
+        )
+
+    required_events = [
+        "TaskCreated",
+        "TaskAssigned",
+        "TaskResumed",
+        "TaskHeartbeat",
+        "TaskReviewSubmitted",
+        "TaskReviewApproved",
+        "TaskClosed",
+    ]
     histories = {}
+    execution_histories = {}
     for task_id in task_ids:
         events = (
             responses[f"history-{task_id}"]
@@ -532,14 +670,84 @@ async def main():
         missing = [event for event in required_events if event not in event_types]
         if missing:
             raise RuntimeError(f"{task_id} missing events {missing}: {event_types}")
+        expected_worker = expected_workers[task_id]
+        first_assignment = next(
+            event for event in events if event.get("event_type") == "TaskAssigned"
+        )
+        if first_assignment.get("actor_agent_id") != "master":
+            raise RuntimeError(
+                f"{task_id} first assignment was not authored by master: {first_assignment}"
+            )
+        assignment_workers = {
+            (event.get("payload") or {}).get("agent_id")
+            for event in events
+            if event.get("event_type") == "TaskAssigned"
+        }
+        if assignment_workers != {expected_worker}:
+            raise RuntimeError(
+                f"{task_id} assignment escaped configured worker {expected_worker}: {assignment_workers}"
+            )
+        for event in events:
+            event_type = event.get("event_type")
+            actor = event.get("actor_agent_id")
+            payload = event.get("payload") or {}
+            if event_type in {"TaskResumed", "TaskHeartbeat", "TaskReviewSubmitted"}:
+                if actor != expected_worker:
+                    raise RuntimeError(
+                        f"{task_id} {event_type} actor {actor} did not match {expected_worker}"
+                    )
+                payload_worker = payload.get("agent_id") or payload.get("claim_agent_id")
+                if payload_worker != expected_worker:
+                    raise RuntimeError(
+                        f"{task_id} {event_type} payload worker {payload_worker} did not match {expected_worker}"
+                    )
+            if event_type in {"TaskReviewRejected", "TaskReviewApproved", "TaskClosed"}:
+                if actor != "master":
+                    raise RuntimeError(
+                        f"{task_id} {event_type} actor {actor} was not master"
+                    )
+        execution_ids = {
+            (event.get("payload") or {}).get("execution_id")
+            for event in events
+            if event.get("event_type") in {"TaskResumed", "TaskReviewSubmitted"}
+            and (event.get("payload") or {}).get("execution_id")
+        }
+        if not execution_ids:
+            raise RuntimeError(f"{task_id} has no worker execution identity")
+        expected_execution_prefix = f"exec-worker-{expected_worker}-"
+        if any(not execution_id.startswith(expected_execution_prefix) for execution_id in execution_ids):
+            raise RuntimeError(
+                f"{task_id} execution ids do not belong to {expected_worker}: {sorted(execution_ids)}"
+            )
+        execution_histories[task_id] = sorted(execution_ids)
     beta_events = histories[task_beta]
     if "TaskReviewRejected" not in beta_events:
         raise RuntimeError(f"beta task was never rejected for rework: {beta_events}")
     if beta_events.count("TaskReviewSubmitted") < 2:
         raise RuntimeError(f"beta task did not resubmit after rejection: {beta_events}")
+    if len(execution_histories[task_beta]) < 2:
+        raise RuntimeError(
+            f"beta task did not use a new execution for rework: {execution_histories[task_beta]}"
+        )
+    first_round_execution_ids = {
+        execution_histories[task_id][0]
+        for task_id in [task_alpha, task_beta, task_gamma]
+    }
+    if len(first_round_execution_ids) != 3:
+        raise RuntimeError(
+            f"initial workers did not produce three distinct execution histories: {execution_histories}"
+        )
 
     agents = responses["agents"].get("result", {}).get("AgentBoard", {}).get("agents", [])
-    worker = next((agent for agent in agents if agent.get("agent_id") == "worker"), None)
+    worker_agents = {
+        agent.get("agent_id"): agent
+        for agent in agents
+        if agent.get("agent_id") in {worker_alpha, worker_beta, worker_gamma}
+    }
+    if set(worker_agents) != {worker_alpha, worker_beta, worker_gamma}:
+        raise RuntimeError(
+            f"AgentBoard did not expose all three configured Worker identities: {worker_agents}"
+        )
     result = {
         "ok": True,
         "session_id": session_id,
@@ -553,15 +761,20 @@ async def main():
                 "task_id": task.get("task_id"),
                 "status": task.get("status"),
                 "parent_session_id": task.get("parent_session_id"),
+                "assignee_agent_id": task.get("assignee_agent_id"),
                 "last_event_seq": task.get("last_event_seq"),
                 "events": histories[task.get("task_id")],
+                "execution_ids": execution_histories[task.get("task_id")],
             }
             for task in matching_tasks
         ],
-        "worker": None if worker is None else {
-            "state": worker.get("state"),
-            "current_task_id": worker.get("current_task_id"),
-            "current_execution_id": worker.get("current_execution_id"),
+        "workers": {
+            worker_id: {
+                "state": worker.get("state"),
+                "current_task_id": worker.get("current_task_id"),
+                "current_execution_id": worker.get("current_execution_id"),
+            }
+            for worker_id, worker in sorted(worker_agents.items())
         },
     }
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
@@ -636,62 +849,58 @@ run_three_worker_e2e() {
     echo "missing executable CLI: $cli_path" >&2
     exit 2
   fi
-  if [[ ! -f "$source_runtime_home/config.toml" || ! -f "$source_runtime_home/daemonS.env" ]]; then
-    echo "missing source S config/env under $source_runtime_home" >&2
+  if [[ ! -x "$daemon_path" ]]; then
+    echo "missing executable daemon: $daemon_path" >&2
     exit 2
   fi
 
   mkdir -p "$backup_dir" "$target_cwd" "$runtime_home/logs"
-  cp "$source_runtime_home/config.toml" "$config_path"
-  pair_token="$(awk -F= '$1 == "FREEHAND_PAIR_TOKEN_SHARED" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; exit }' "$source_runtime_home/daemonS.env")"
-  if [[ -z "$pair_token" ]]; then
-    echo "source S env has no FREEHAND_PAIR_TOKEN_SHARED" >&2
-    exit 2
-  fi
+  pair_token="three-worker-pair-token-$$"
+  write_isolated_config
   export FH3_TARGET_CWD="$target_cwd"
   printf 'fixture workspace\n' >"$target_cwd/README.txt"
 
-  local stamp task_alpha task_beta task_gamma task_integration prompt proof restart_proof
+  local stamp task_alpha task_beta task_gamma task_integration
+  local worker_alpha worker_beta worker_gamma worker_integration
+  local prompt proof restart_proof
   stamp="178$(date +%s)"
   task_alpha="task-three-worker-$stamp-alpha"
   task_beta="task-three-worker-$stamp-beta"
   task_gamma="task-three-worker-$stamp-gamma"
   task_integration="task-three-worker-$stamp-integration"
-  prompt=$'Three worker iterative goal proof.\n'"FH3_STAMP=$stamp"$'\n'"FH3_SESSION=$session_id"$'\n'"FH3_WORKER=worker"$'\n'"FH3_TARGET_CWD=$target_cwd"$'\n'"FH3_TASK_ALPHA=$task_alpha"$'\n'"FH3_TASK_BETA=$task_beta"$'\n'"FH3_TASK_GAMMA=$task_gamma"$'\n'"FH3_TASK_INTEGRATION=$task_integration"$'\nOverall goal: produce verified alpha, beta, and gamma results, reject and redo any result that is not integration-ready, then evaluate whether additional integration work is required. Do not finish merely by summarizing the first three results. Create exactly three initial Worker tasks for alpha, beta, and gamma and assign them to worker. The parent evaluation must create the integration task if the first accepted set still leaves the overall integration goal incomplete. Final completion requires all four exact worker_result_* tokens.'
+  worker_alpha="worker-alpha"
+  worker_beta="worker-beta"
+  worker_gamma="worker-gamma"
+  worker_integration="worker-alpha"
+  prompt=$'Three independent Worker iterative goal proof.\n'"FH3_STAMP=$stamp"$'\n'"FH3_SESSION=$session_id"$'\n'"FH3_WORKER_ALPHA=$worker_alpha"$'\n'"FH3_WORKER_BETA=$worker_beta"$'\n'"FH3_WORKER_GAMMA=$worker_gamma"$'\n'"FH3_WORKER_INTEGRATION=$worker_integration"$'\n'"FH3_TARGET_CWD=$target_cwd"$'\n'"FH3_TASK_ALPHA=$task_alpha"$'\n'"FH3_TASK_BETA=$task_beta"$'\n'"FH3_TASK_GAMMA=$task_gamma"$'\n'"FH3_TASK_INTEGRATION=$task_integration"$'\nOverall goal: produce verified alpha, beta, and gamma results, reject and redo any result that is not integration-ready, then evaluate whether additional integration work is required. Do not finish merely by summarizing the first three results. Create exactly three initial Worker tasks: assign alpha to worker-alpha, beta to worker-beta, and gamma to worker-gamma. Each independent Worker must execute only its assigned task. The parent evaluation must compare accepted review truth with the overall goal and create the integration task if the first accepted set still leaves the overall integration goal incomplete. Final completion requires the integration task to close and all four exact worker_result_* tokens to be verified.'
 
   start_fixture
 
   start_master
-  "$cli_path" adp-config-update \
-    --url "$adp_url" \
-    --agent master \
-    --provider minimax \
-    --type anthropic \
-    --protocol messages \
-    --base-url "http://127.0.0.1:$port" \
-    --model MiniMax-M3 \
-    --api-key-env "$fixture_key_name" >/dev/null
-  "$cli_path" adp-config-update \
-    --url "$adp_url" \
-    --agent worker \
-    --provider minimax \
-    --type anthropic \
-    --protocol messages \
-    --base-url "http://127.0.0.1:$port" \
-    --model MiniMax-M3 \
-    --api-key-env "$fixture_key_name" >/dev/null
-  stop_master
-  start_master
-  start_worker
+  start_workers
+  verify_worker_processes
 
   "$cli_path" adp-session-manage --url "$adp_url" --action delete --session "$session_id" >/dev/null 2>&1 || true
   "$cli_path" adp-session-manage --url "$adp_url" --action create --session "$session_id" --title "Three worker E2E" --cwd "$repo_root" >/dev/null
 
-  proof="$(run_adp_submit_and_verify "$stamp" "$task_alpha" "$task_beta" "$task_gamma" "$task_integration" "$prompt")"
+  proof="$(run_adp_submit_and_verify \
+    "$stamp" \
+    "$task_alpha" \
+    "$task_beta" \
+    "$task_gamma" \
+    "$task_integration" \
+    "$worker_alpha" \
+    "$worker_beta" \
+    "$worker_gamma" \
+    "$worker_integration" \
+    "$prompt")"
+  verify_worker_processes
   stop_master
   start_master
   restart_proof="$(verify_restart_idempotency "$stamp")"
-  echo "master_three_worker_e2e_ok url=$adp_url session=$session_id initial_tasks=$task_alpha,$task_beta,$task_gamma next_task=$task_integration"
+  printf '%s\n' "$proof" >"$backup_dir/three-worker-proof.json"
+  printf '%s\n' "$restart_proof" >"$backup_dir/restart-proof.json"
+  echo "master_three_worker_e2e_ok url=$adp_url session=$session_id initial_tasks=$task_alpha:$worker_alpha,$task_beta:$worker_beta,$task_gamma:$worker_gamma next_task=$task_integration:$worker_integration worker_pids=$worker_alpha_pid,$worker_beta_pid,$worker_gamma_pid evidence_dir=$backup_dir"
   echo "$proof"
   echo "$restart_proof"
 }

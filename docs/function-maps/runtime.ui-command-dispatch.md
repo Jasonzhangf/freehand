@@ -16,7 +16,9 @@
 
 - accepted UI command ingress arrives as a `UiCommandDispatchEnvelope`
 - runtime bootstrap may first select one configured agent from `~/.freehand/config.toml`
-- config-selected bootstrap consumes local node id, paired node id, paired allowed IP, and paired token env from `config.core`
+- config-selected bootstrap consumes local node id and the ordered configured
+  peer set, including each peer node id, allowed IP, and pair-token env, from
+  `config.core`
 - config-selected live bootstrap may also seed one shared metadata ledger path for node-owned bootstrap and pairing provenance
 - submit commands may carry an optional selected session id and selected cwd so a draft or explicitly chosen cwd-bound session can receive the new turn instead of always using the default session
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs
@@ -73,14 +75,19 @@
 - runtime-owned UI state reflects derived projections only, not authoritative turn truth
 - session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and the protocol projection has been refreshed
 - session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections
-- runtime-backed `QuerySessionTurns` refreshes the requested session transcript from reason-ledger truth at query time; parent-aggregation internal prompt turns hide their synthetic user text while preserving the final assistant summary
+- runtime-backed `QuerySessionTurns` refreshes the requested session transcript
+  from reason-ledger truth at query time; parent-goal evaluation internal prompt
+  turns hide their synthetic user text while preserving the final assistant
+  decision
 - runtime-backed task list and task history queries return UI-safe task projections sourced from `task.orchestration` snapshot and ledger APIs
 - runtime-backed task mutation commands return receipts only after `task.orchestration` accepts the mutation and task list projection publication succeeds
 - runtime-backed worker claim receipts include the claimed task id and execution id; no-task is explicit and not a success mutation
 - runtime-backed TaskBoard and AgentBoard queries return UI-safe board projections sourced from `task.orchestration` and `agent.lifecycle`
 - execution fact and scheduler tick dispatch receipts return only after `task.orchestration` accepts owner truth and task-list publication succeeds
 - runtime-backed error-center queries return UI-safe projections sourced from `metadata.core` ledger rows written by `error.center`
-- runtime-backed config status queries return UI-safe projections sourced from `config.core` selected agent truth and include auth source type only
+- runtime-backed config status queries return UI-safe projections sourced from
+  `config.core` selected agent truth and include the ordered peer
+  name/mode/node-id list plus auth source type only
 - successful provider/model updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and leave the active runtime/live provider config unchanged until daemon restart
 - runtime-backed task list subscription updates reuse the same projection helper and source task truth from `TaskRuntime::list_tasks`
 - runtime-backed EventInbox query returns UI-safe event rows sourced from
@@ -194,7 +201,7 @@
 | 11 | `RuntimeCommandDispatcher::dispatch_session_management` | `crates/freehand-runtime/src/lib.rs` | route protocol-owned session CRUD and rollback commands into reason persistence APIs and refresh UI projection | session CRUD or rollback dispatch envelope | dispatch receipt or target-not-found failure | `RuntimeCommandDispatcher::dispatch` | `ReasonPersistence` session metadata/rollback owner | bound |
 | 11a | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace a session transcript with persistence-owned effective projections after rollback | session id + effective turn projections | queryable transcript excluding rolled-back logical turn | `RuntimeCommandDispatcher::dispatch_session_management` | ui.protocol state | bound |
 | 12 | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | route read-only runtime queries such as session turns, config status, task list/history, and error-center events into owner APIs | UI query command | optional query result or explicit dispatch failure | WebUI/daemon ADP query transport | reason persistence / selected config / task runtime owner / metadata center | bound |
-| 12s | `RuntimeCommandDispatcher::query_runtime` / `UiProtocolState::replace_session_turn_projections` | `crates/freehand-runtime/src/lib.rs` / `crates/freehand-ui-protocol/src/lib.rs` | restore effective `QuerySessionTurns` snapshots from reason persistence and replace the derived transcript at query time | session id | fresh queryable transcript with internal parent-aggregation user text hidden | ADP query transport / runtime query tests | `ReasonPersistence::restore_turn_snapshots_for_ui` + ui.protocol state | bound |
+| 12s | `RuntimeCommandDispatcher::query_runtime` / `UiProtocolState::replace_session_turn_projections` | `crates/freehand-runtime/src/lib.rs` / `crates/freehand-ui-protocol/src/lib.rs` | restore effective `QuerySessionTurns` snapshots from reason persistence and replace the derived transcript at query time | session id | fresh queryable transcript with internal parent-goal evaluation user text hidden | ADP query transport / runtime query tests | `ReasonPersistence::restore_turn_snapshots_for_ui` + ui.protocol state | bound |
 | 12a | `project_config_status_for_ui` / `config_base_url_host_for_ui` | `crates/freehand-runtime/src/lib.rs` | convert selected live agent config into UI-safe active config status | selected agent config | secret-free config status projection | `RuntimeCommandDispatcher::query_runtime` | UI protocol DTO | bound |
 | 13 | `project_task_list_for_ui` / `project_task_history_for_ui` | `crates/freehand-runtime/src/lib.rs` | convert task owner snapshots and ledger events into protocol DTOs without changing task truth | task snapshots or ledger events | UI-safe task query projection | `RuntimeCommandDispatcher::query_runtime` | UI protocol DTOs | bound |
 | 14 | `task_list_projection_from_runtime` / `UiProtocolState::publish_task_list_projection` | `crates/freehand-runtime/src/lib.rs` / `crates/freehand-ui-protocol/src/lib.rs` | publish runtime-owned task list projection after successful task tool mutation | task runtime snapshot | UI task list subscription event | live task tool bridge | ui.protocol subscription channel | bound |

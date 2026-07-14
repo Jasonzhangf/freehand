@@ -15,6 +15,8 @@
 
 - daemon process accepts a host command to start the UI transport
 - daemon process may be started by macOS launchd through the installed `freehand-daemon-launchd` wrapper
+- each configured Worker process has an agent-specific launchd label, env file,
+  stdout log, and stderr log; a shared `workerS` service is not the Worker pool
 - daemon bootstrap selects one agent from default config and creates one runtime dispatcher
 - daemon bootstrap routes Master mode to the runtime-backed UI host and Slave mode to `runtime.master-worker-loop`
 - runtime bootstrap consumes configured local/paired node topology before daemon transport starts
@@ -38,7 +40,8 @@
 - daemon SSE subscriptions stay open across later runtime turn updates and observe the same protocol-owned projections as query consumers
 - daemon can rewind a previously checkpointed writable-tool mutation through runtime owner dispatch while leaving turn/session/UI truth untouched
 - daemon remains a host process and does not own reason or node semantics itself
-- Slave daemon runs the production Worker claim/execute/report loop without binding WebUI/ADP transport
+- each Slave daemon runs one configured Worker's production
+  claim/execute/report loop without binding WebUI/ADP transport
 
 ## Error Mainline
 
@@ -80,6 +83,14 @@
   - allowed callers: daemon Slave host and runtime tests
   - related tests: daemon Worker mode bootstrap, production Worker runner tests
   - why shared: keeps claim/execute/report semantics out of daemon app glue
+- `sanitize_launchd_component`
+  - owner: `scripts/install-launchd.sh`
+  - purpose: derive deterministic agent-specific Worker service/env/log names
+  - allowed callers: launchd install/restart worker profiles
+  - related tests: shell syntax plus
+    `scripts/verify-launchd-worker-naming.sh`
+  - why shared: one naming rule prevents different Worker processes from
+    overwriting the same service/env/log truth
 
 ## Function Call Table
 
@@ -94,6 +105,7 @@
 | 06a | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | serve daemon-hosted read-only runtime query frames such as task list/history and error-center metadata | ADP query command | ADP query result or failure frame | shared ADP transport | runtime owner query bridge | bound |
 | 07 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | `~/.freehand/daemon.env` | daemon process exec | macOS launchd | `FREEHAND_DAEMON_BIN serve` | bound |
 | 07a | `default_daemon_bind` / `detect_tailscale_ip` | `scripts/install-launchd.sh` | choose launchd default bind as the local Tailscale IPv4 on the fixed release/S port when Tailscale is available, otherwise fall back to loopback | install/restart profile | `<tailscale-ip>:4041` / `<tailscale-ip>:4042` or loopback fallback | launchd installer | `tailscale ip -4` | bound |
+| 07b | `sanitize_launchd_component` | `scripts/install-launchd.sh` | derive deterministic agent-specific Worker label/env/log components | configured Worker agent id | launchd-safe identity component | launchd installer | Worker service path builder | bound |
 | 08 | `handle_adp_socket` / `RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs` / `crates/freehand-runtime/src/lib.rs` | serve daemon ADP error-center query and initial subscription snapshots from runtime metadata truth | ADP error-center query or subscribe frame | ADP error-center query result or initial subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime metadata projection owner | bound |
 | 09 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | route configured Slave mode into the production Worker runner without UI transport | selected Slave bootstrap | long-running Worker service | daemon CLI | `run_blocking_worker_service` | bound |
 | 10 | `run_blocking_worker_service` | `apps/freehand-daemon/src/main.rs` | isolate the synchronous Worker/provider loop from the daemon async runtime thread | Worker service closure | Worker service result or explicit join failure | `run_worker_mode` | `tokio::task::spawn_blocking` | bound |
@@ -109,4 +121,7 @@
 - ADP error-center metadata query control is covered through the daemon app boundary
 - config-selected bootstrap is now bound in code and uses configured peer topology
 - configured Slave startup now binds `runtime.master-worker-loop` instead of failing the app host
+- Worker launchd defaults now bind identity as
+  `com.freehand.worker[ S].<agent>`, `worker[ S].<agent>.env`, and matching
+  agent-specific logs
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

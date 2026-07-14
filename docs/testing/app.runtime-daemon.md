@@ -15,7 +15,10 @@
   - latest-turn SSE reflects restored projections and continues streaming later runtime updates on the same connection
   - ADP WebSocket query/command/subscribe uses the same protocol truth without browser UI
   - provider execution failures surface through protocol-mapped HTTP failure payloads
-  - slave-mode agent selection starts the production Worker runner without UI transport
+  - slave-mode agent selection starts one configured Worker's production runner
+    without UI transport
+  - three configured Workers receive unique launchd labels, env files, and log
+    files so their processes cannot overwrite one another's service truth
 - white-box plan:
   - daemon bootstrap helper coverage
   - config-selected bootstrap coverage
@@ -36,6 +39,9 @@
   - daemon missing-checkpoint rewind HTTP failure smoke
   - daemon slave-mode production Worker runner bootstrap smoke
   - daemon Worker blocking-boundary positive and negative smoke
+  - launchd shell fixture proves `worker-alpha`, `worker-beta`, and
+    `worker-gamma` resolve to three unique labels/env/log paths through
+    `scripts/verify-launchd-worker-naming.sh`
   - daemon corrupt-checkpoint-bootstrap startup rejection smoke
   - daemon ADP WebSocket command/query/subscribe smoke
   - daemon ADP session CRUD plus rollback command/query smoke
@@ -55,7 +61,9 @@
   - `~/.freehand/logs/daemon.stderr.log`
 - known gaps:
   - real node-pairing websocket transport is not wired yet; daemon ADP WebSocket is a UI/control/status transport over existing runtime-owned local node semantics, not the node pairing transport
-  - online production Worker closure still requires a separate live Slave process and same-id TaskHistory evidence
+  - isolated controlled-provider three-process proof is green; production
+    closure still requires three agent-specific launchd services with managed
+    health/restart and real-provider recovery evidence
 - sync status between design and implementation:
   - daemon bootstrap helper is landed
   - runtime-backed submit/query/restart-restore/continuous-SSE/provider-failure/direct-message/checkpoint-rewind HTTP smoke is landed
@@ -68,4 +76,7 @@
   - daemon ADP error-center metadata query coverage is landed
   - config-selected bootstrap smoke is landed and uses configured peer topology
   - configured Slave bootstrap now constructs the production Worker runner
+  - agent-specific Worker launchd naming and its non-mutating executable fixture
+    are landed; isolated three-process runtime proof is green, while live
+    launchd-managed three-service proof remains required
   - migrated mainline-call source and generated wiki are kept in sync with this test design

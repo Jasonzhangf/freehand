@@ -6,6 +6,9 @@
   - task tool action is admitted by runtime tool bridge
   - task owner validates task fields
   - task owner writes ledger and snapshot
+  - task owner atomic JSON persistence uses unique temp paths so concurrent
+    local Worker process boot/index writes cannot collide on the same temporary
+    file
   - task runtime memory state is rebuilt on boot
   - running state is lease-backed and heartbeat-refreshable
   - boot recovery preserves a freshly resumed running task during the bounded
@@ -54,6 +57,8 @@
 ## White-Box Coverage
 
 - create task writes ledger, snapshot, index, and recovers after boot
+- atomic JSON persistence survives parallel same-path writers:
+  `atomic_json_write_survives_parallel_same_path_writers`
 - create with no dispatch becomes `WaitingAgent`
 - boot registers self agent as `Available`
 - review reject/resume/submit/approve/close lifecycle persists and recovers
@@ -176,6 +181,7 @@
 
 ```bash
 cargo test -p freehand-task
+cargo test -p freehand-task atomic_json_write_survives_parallel_same_path_writers -- --nocapture
 cargo test -p freehand-task boot_preserves_fresh_running_task_during_lease_acquisition_grace -- --nocapture
 cargo test -p freehand-task boot_interrupts_running_task_with_missing_lease_after_acquisition_grace -- --nocapture
 cargo test -p freehand-tools

@@ -15,7 +15,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - `TaskRuntime::boot` loads task snapshots, task leases, self-agent snapshot, and persisted agent lifecycle snapshots into memory
 - `TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired
 - `TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance
-- create action writes append-only ledger events and atomic snapshots
+- create action writes append-only ledger events and atomic snapshots; shared atomic JSON persistence uses per-process unique temp paths so concurrent TaskRuntime boots or index writes do not steal each other's temp file
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
 - `TaskRuntime::assign_task` binds waiting, created, or interrupted tasks to an available agent
 - `TaskRuntime::claim_next_task` lets an agent claim its highest-priority assigned task into lease-backed Running state with a durable execution_id
@@ -95,6 +95,12 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
   - allowed callers: runtime task tool bridge, future daemon bootstrap
   - related tests: create_task_writes_ledger_snapshot_and_recovers_on_boot, boot_preserves_fresh_running_task_during_lease_acquisition_grace, boot_interrupts_running_task_with_missing_lease_after_acquisition_grace, boot_interrupts_running_task_with_expired_lease, task_tool_create_persists_and_queries_task
   - why shared: keeps startup recovery in task owner, not UI/runtime glue
+- `write_json_atomic`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: atomically replace task/agent/index/lease JSON truth with unique temp paths safe for concurrent local Worker process boot
+  - allowed callers: TaskStore persistence helpers
+  - related tests: atomic_json_write_survives_parallel_same_path_writers
+  - why shared: one atomic write owner prevents per-store ad hoc persistence and multi-process temp-file collisions
 - `TaskRuntime::mutate_task`
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: re-read persisted task truth, validate lifecycle transitions, write ledger and snapshot, and update memory state
@@ -203,6 +209,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 22 | `TaskStore::write_agent_lifecycle_snapshot / TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and restore typed agent lifecycle projection separately from releasable agent resource state | agent lifecycle snapshot | restart-queryable lifecycle truth | task event projection / boot | lifecycle owner storage |  |  |  | bound |
 | 23 | `TaskRuntime::query_event_inbox` | `crates/freehand-task/src/lib.rs` | project master-visible event inbox entries from ordered task ledger events after a globally unique cursor, with legacy three-part cursor prefix compatibility; omitted limit drains all pending rows | task ledgers plus optional cursor | EventInbox projection and next cursor | runtime query dispatch / CLI sample | task owner |  |  |  | bound |
 | 24 | `TaskRuntime::run_master_poll` | `crates/freehand-task/src/lib.rs` | load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and persist processed cursor without task business mutations; replay_from_start plus omitted limit drains all pending rows | master poll request plus explicit replay cursor mode or persisted cursor | master poll outcome with classifications and next cursor | runtime ADP command dispatch / CLI sample | task owner |  |  |  | bound |
+| 25 | `write_json_atomic` | `crates/freehand-task/src/lib.rs` | atomically replace JSON persistence files with process/nanos/counter-qualified temp paths | serializable task owner truth | replaced JSON truth without cross-writer temp collisions | TaskStore persistence helpers | filesystem atomic rename |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

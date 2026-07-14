@@ -43,7 +43,9 @@
   task during the bounded lease-acquisition window, and interrupts running
   tasks whose lease is still missing after that window or is invalid/expired
 - `TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance
-- create action writes append-only ledger events and atomic snapshots
+- create action writes append-only ledger events and atomic snapshots; the
+  shared atomic JSON writer uses per-process unique temp paths so concurrent
+  TaskRuntime boots or index writes do not steal each other's temp file
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
 - `assign_task` binds waiting/created/interrupted tasks to an available agent
 - `claim_next_task` lets an agent claim its highest-priority assigned task into `Running` with a lease and durable `execution_id`
@@ -155,6 +157,14 @@
   - purpose: rebuild memory state from persisted task, agent, and lifecycle snapshots
   - allowed callers: runtime task tool bridge, future daemon bootstrap
   - why shared: keeps startup recovery in task owner, not UI/runtime glue
+- `write_json_atomic`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: atomically replace task/agent/index/lease JSON truth with unique
+    temp paths safe for concurrent local Worker process boot
+  - allowed callers: TaskStore persistence helpers
+  - related tests: `atomic_json_write_survives_parallel_same_path_writers`
+  - why shared: one atomic write owner prevents per-store ad hoc persistence
+    and multi-process temp-file collisions
 - `TaskRuntime::query_task_board`
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: project owner-backed TaskBoard truth from task snapshots,
@@ -232,6 +242,7 @@
 | 22 | `TaskStore::write_agent_lifecycle_snapshot` / `TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and restore typed agent lifecycle projection separately from releasable agent resource state | agent lifecycle snapshot | restart-queryable lifecycle truth | task event projection / boot | lifecycle owner storage | bound |
 | 23 | `TaskRuntime::query_event_inbox` | `crates/freehand-task/src/lib.rs` | project master-visible event inbox entries from ordered task ledger events after a globally unique cursor, with legacy three-part cursor prefix compatibility | task ledgers + optional cursor | EventInbox projection and next cursor | runtime query dispatch / CLI sample | task owner | bound |
 | 24 | `TaskRuntime::run_master_poll` | `crates/freehand-task/src/lib.rs` | load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and persist processed cursor without task business mutations | master poll request + persisted cursor | master poll outcome with classifications and next cursor | runtime ADP command dispatch / CLI sample | task owner | bound |
+| 25 | `write_json_atomic` | `crates/freehand-task/src/lib.rs` | atomically replace JSON persistence files with process/nanos/counter-qualified temp paths | serializable task owner truth | replaced JSON truth without cross-writer temp collisions | TaskStore persistence helpers | filesystem atomic rename | bound |
 
 ## Sync Status Against Code
 

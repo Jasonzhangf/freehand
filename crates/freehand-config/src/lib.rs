@@ -1,6 +1,6 @@
 //! Config loading and validation for Freehand.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -81,7 +81,7 @@ pub struct AgentConfig {
     pub name: String,
     pub mode: AgentMode,
     pub node_id: String,
-    pub paired_agent_name: String,
+    pub paired_agent_names: Vec<String>,
     pub allowed_pair_ip: Option<IpAddr>,
     pub pair_token_env: String,
     pub provider_id: String,
@@ -205,22 +205,28 @@ impl LoadedConfig {
             }
             None => None,
         };
-        let paired = self.agents.get(&agent.paired_agent_name).ok_or_else(|| {
-            ConfigError::PairedAgentNotFound {
-                agent_name: agent.name.clone(),
-                paired_agent_name: agent.paired_agent_name.clone(),
-            }
-        })?;
+        let mut paired_agents = Vec::new();
+        for paired_agent_name in &agent.paired_agent_names {
+            let paired = self.agents.get(paired_agent_name).ok_or_else(|| {
+                ConfigError::PairedAgentNotFound {
+                    agent_name: agent.name.clone(),
+                    paired_agent_name: paired_agent_name.clone(),
+                }
+            })?;
+            paired_agents.push(SelectedPeerAgentConfig {
+                name: paired.name.clone(),
+                mode: paired.mode,
+                node_id: paired.node_id.clone(),
+                allowed_pair_ip: paired.allowed_pair_ip,
+                pair_token_env: paired.pair_token_env.clone(),
+            });
+        }
 
         Ok(SelectedAgentConfig {
             name: agent.name.clone(),
             mode: agent.mode,
             node_id: agent.node_id.clone(),
-            paired_agent_name: agent.paired_agent_name.clone(),
-            paired_agent_mode: paired.mode,
-            paired_node_id: paired.node_id.clone(),
-            paired_allowed_pair_ip: paired.allowed_pair_ip,
-            paired_pair_token_env: paired.pair_token_env.clone(),
+            paired_agents,
             allowed_pair_ip: agent.allowed_pair_ip,
             pair_token_env: agent.pair_token_env.clone(),
             pair_token,
@@ -245,17 +251,40 @@ pub struct SelectedAgentConfig {
     pub name: String,
     pub mode: AgentMode,
     pub node_id: String,
-    pub paired_agent_name: String,
-    pub paired_agent_mode: AgentMode,
-    pub paired_node_id: String,
-    pub paired_allowed_pair_ip: Option<IpAddr>,
-    pub paired_pair_token_env: String,
+    pub paired_agents: Vec<SelectedPeerAgentConfig>,
     pub allowed_pair_ip: Option<IpAddr>,
     pub pair_token_env: String,
     pub pair_token: String,
     pub provider: SelectedProviderConfig,
     pub fallback_provider: Option<SelectedProviderConfig>,
     pub restart_required_on_change: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectedPeerAgentConfig {
+    pub name: String,
+    pub mode: AgentMode,
+    pub node_id: String,
+    pub allowed_pair_ip: Option<IpAddr>,
+    pub pair_token_env: String,
+}
+
+impl SelectedAgentConfig {
+    pub fn master_peer(&self) -> Option<&SelectedPeerAgentConfig> {
+        self.paired_agents
+            .iter()
+            .find(|peer| peer.mode == AgentMode::Master)
+    }
+
+    pub fn worker_peers(&self) -> impl Iterator<Item = &SelectedPeerAgentConfig> {
+        self.paired_agents
+            .iter()
+            .filter(|peer| peer.mode == AgentMode::Slave)
+    }
+
+    pub fn worker_peer_names(&self) -> Vec<String> {
+        self.worker_peers().map(|peer| peer.name.clone()).collect()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -304,8 +333,13 @@ pub enum ConfigError {
     EmptyPairTokenEnv { agent_name: String },
     #[error("agent `{agent_name}` node_id must be non-empty")]
     EmptyAgentNodeId { agent_name: String },
-    #[error("agent `{agent_name}` paired_agent must be a non-empty agent name")]
-    EmptyPairedAgentBinding { agent_name: String },
+    #[error("agent `{agent_name}` paired_agents contains an empty agent name")]
+    EmptyPairedAgentName { agent_name: String },
+    #[error("agent `{agent_name}` paired_agents contains duplicate `{paired_agent_name}`")]
+    DuplicatePairedAgentBinding {
+        agent_name: String,
+        paired_agent_name: String,
+    },
     #[error("agent `{agent_name}` provider must be a non-empty provider id")]
     EmptyProviderBinding { agent_name: String },
     #[error("agent `{agent_name}` cannot pair with itself")]
@@ -324,13 +358,20 @@ pub enum ConfigError {
         paired_agent_name: String,
         paired_agent_mode: String,
     },
+    #[error("master agent `{agent_name}` must pair with at least one slave worker")]
+    MasterRequiresWorkerPeer { agent_name: String },
+    #[error("slave agent `{agent_name}` must pair with exactly one master, found {peer_count}")]
+    SlaveRequiresSingleMasterPeer {
+        agent_name: String,
+        peer_count: usize,
+    },
     #[error(
-        "agent `{agent_name}` expects reciprocal pairing from `{paired_agent_name}`, but that agent points to `{actual_paired_agent_name}`"
+        "agent `{agent_name}` expects reciprocal pairing from `{paired_agent_name}`, but that agent points to `{actual_paired_agent_names}`"
     )]
     PairedAgentReciprocalMismatch {
         agent_name: String,
         paired_agent_name: String,
-        actual_paired_agent_name: String,
+        actual_paired_agent_names: String,
     },
     #[error("provider `{provider_id}` base_url must be non-empty")]
     EmptyProviderBaseUrl { provider_id: String },
@@ -452,7 +493,7 @@ struct RawAgentConfig {
     name: String,
     mode: AgentMode,
     node_id: String,
-    paired_agent: String,
+    paired_agents: Vec<String>,
     allowed_pair_ip: Option<IpAddr>,
     pair_token: String,
     provider: String,
@@ -617,10 +658,33 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
                 agent_name: raw_agent.name,
             });
         }
-        if raw_agent.paired_agent.trim().is_empty() {
-            return Err(ConfigError::EmptyPairedAgentBinding {
-                agent_name: raw_agent.name,
+        if raw_agent.paired_agents.is_empty() {
+            return Err(match raw_agent.mode {
+                AgentMode::Master => ConfigError::MasterRequiresWorkerPeer {
+                    agent_name: raw_agent.name,
+                },
+                AgentMode::Slave => ConfigError::SlaveRequiresSingleMasterPeer {
+                    agent_name: raw_agent.name,
+                    peer_count: 0,
+                },
             });
+        }
+        let mut paired_agent_names = Vec::new();
+        let mut seen_paired_agents = BTreeSet::new();
+        for paired_agent_name in raw_agent.paired_agents {
+            let trimmed = paired_agent_name.trim();
+            if trimmed.is_empty() {
+                return Err(ConfigError::EmptyPairedAgentName {
+                    agent_name: raw_agent.name,
+                });
+            }
+            if !seen_paired_agents.insert(trimmed.to_owned()) {
+                return Err(ConfigError::DuplicatePairedAgentBinding {
+                    agent_name: raw_agent.name,
+                    paired_agent_name: trimmed.to_owned(),
+                });
+            }
+            paired_agent_names.push(trimmed.to_owned());
         }
         if raw_agent.provider.trim().is_empty() {
             return Err(ConfigError::EmptyProviderBinding {
@@ -632,7 +696,7 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
             name: raw_agent.name.clone(),
             mode: raw_agent.mode,
             node_id: raw_agent.node_id,
-            paired_agent_name: raw_agent.paired_agent,
+            paired_agent_names,
             allowed_pair_ip: raw_agent.allowed_pair_ip,
             pair_token_env: raw_agent.pair_token,
             provider_id: raw_agent.provider,
@@ -642,31 +706,49 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
     }
 
     for agent in agents.values() {
-        if agent.paired_agent_name == agent.name {
-            return Err(ConfigError::SelfPairedAgent {
+        if agent.mode == AgentMode::Master && agent.paired_agent_names.is_empty() {
+            return Err(ConfigError::MasterRequiresWorkerPeer {
                 agent_name: agent.name.clone(),
             });
         }
-        let paired = agents.get(&agent.paired_agent_name).ok_or_else(|| {
-            ConfigError::PairedAgentNotFound {
+        if agent.mode == AgentMode::Slave && agent.paired_agent_names.len() != 1 {
+            return Err(ConfigError::SlaveRequiresSingleMasterPeer {
                 agent_name: agent.name.clone(),
-                paired_agent_name: agent.paired_agent_name.clone(),
+                peer_count: agent.paired_agent_names.len(),
+            });
+        }
+        for paired_agent_name in &agent.paired_agent_names {
+            if paired_agent_name == &agent.name {
+                return Err(ConfigError::SelfPairedAgent {
+                    agent_name: agent.name.clone(),
+                });
             }
-        })?;
-        if paired.mode == agent.mode {
-            return Err(ConfigError::PairedAgentModeMismatch {
-                agent_name: agent.name.clone(),
-                agent_mode: agent.mode.as_str().to_owned(),
-                paired_agent_name: paired.name.clone(),
-                paired_agent_mode: paired.mode.as_str().to_owned(),
-            });
-        }
-        if paired.paired_agent_name != agent.name {
-            return Err(ConfigError::PairedAgentReciprocalMismatch {
-                agent_name: agent.name.clone(),
-                paired_agent_name: paired.name.clone(),
-                actual_paired_agent_name: paired.paired_agent_name.clone(),
-            });
+            let paired =
+                agents
+                    .get(paired_agent_name)
+                    .ok_or_else(|| ConfigError::PairedAgentNotFound {
+                        agent_name: agent.name.clone(),
+                        paired_agent_name: paired_agent_name.clone(),
+                    })?;
+            if paired.mode == agent.mode {
+                return Err(ConfigError::PairedAgentModeMismatch {
+                    agent_name: agent.name.clone(),
+                    agent_mode: agent.mode.as_str().to_owned(),
+                    paired_agent_name: paired.name.clone(),
+                    paired_agent_mode: paired.mode.as_str().to_owned(),
+                });
+            }
+            if !paired
+                .paired_agent_names
+                .iter()
+                .any(|candidate| candidate == &agent.name)
+            {
+                return Err(ConfigError::PairedAgentReciprocalMismatch {
+                    agent_name: agent.name.clone(),
+                    paired_agent_name: paired.name.clone(),
+                    actual_paired_agent_names: paired.paired_agent_names.join(","),
+                });
+            }
         }
     }
 
@@ -1018,7 +1100,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "MASTER_TOKEN"
 provider = "mini27"
 
@@ -1026,7 +1108,7 @@ provider = "mini27"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 allowed_pair_ip = "127.0.0.1"
 pair_token = "SLAVE_TOKEN"
 provider = "claude"
@@ -1042,7 +1124,7 @@ provider = "claude"
         assert_eq!(worker.name, "worker");
         assert_eq!(worker.mode, AgentMode::Slave);
         assert_eq!(worker.node_id, "worker-node");
-        assert_eq!(worker.paired_agent_name, "master");
+        assert_eq!(worker.paired_agent_names, vec!["master".to_owned()]);
         assert_eq!(worker.provider_id, "claude");
         assert_eq!(
             worker.allowed_pair_ip,
@@ -1053,6 +1135,222 @@ provider = "claude"
         assert_eq!(mini27.auth.source_kind(), ProviderAuthSourceKind::Inline);
 
         fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn loads_master_with_three_ordered_worker_peers() {
+        let path = write_temp_config(
+            r#"
+[providers.mini27]
+id = "mini27"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "http://guizhouyun.site:2080"
+default_model = "MiniMax-M2.7"
+
+[providers.mini27.auth]
+type = "apikey"
+api_key = "sk-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker-alpha", "worker-beta", "worker-gamma"]
+pair_token = "MASTER_TOKEN"
+provider = "mini27"
+
+[agents.worker-alpha]
+name = "worker-alpha"
+mode = "slave"
+node_id = "worker-alpha-node"
+paired_agents = ["master"]
+pair_token = "WORKER_ALPHA_TOKEN"
+provider = "mini27"
+
+[agents.worker-beta]
+name = "worker-beta"
+mode = "slave"
+node_id = "worker-beta-node"
+paired_agents = ["master"]
+pair_token = "WORKER_BETA_TOKEN"
+provider = "mini27"
+
+[agents.worker-gamma]
+name = "worker-gamma"
+mode = "slave"
+node_id = "worker-gamma-node"
+paired_agents = ["master"]
+pair_token = "WORKER_GAMMA_TOKEN"
+provider = "mini27"
+"#,
+        );
+        // SAFETY: test process controls this environment variable in a scoped test.
+        unsafe { env::set_var("MASTER_TOKEN", "pair-token") };
+
+        let config = load_config_from_path(&path).expect("load config");
+        let selected = config.select_agent("master").expect("select master");
+
+        assert_eq!(
+            config
+                .agents()
+                .get("master")
+                .expect("master")
+                .paired_agent_names,
+            vec![
+                "worker-alpha".to_owned(),
+                "worker-beta".to_owned(),
+                "worker-gamma".to_owned()
+            ]
+        );
+        assert_eq!(
+            selected.worker_peer_names(),
+            vec![
+                "worker-alpha".to_owned(),
+                "worker-beta".to_owned(),
+                "worker-gamma".to_owned()
+            ]
+        );
+        assert_eq!(selected.paired_agents[1].node_id, "worker-beta-node");
+        assert_eq!(
+            selected.paired_agents[2].pair_token_env,
+            "WORKER_GAMMA_TOKEN"
+        );
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe { env::remove_var("MASTER_TOKEN") };
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn rejects_legacy_singular_paired_agent_field() {
+        let path = write_temp_config(
+            r#"
+[providers.mini27]
+id = "mini27"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "http://guizhouyun.site:2080"
+default_model = "MiniMax-M2.7"
+
+[providers.mini27.auth]
+type = "apikey"
+api_key = "sk-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agent = "worker"
+pair_token = "MASTER_TOKEN"
+provider = "mini27"
+"#,
+        );
+
+        let err = load_config_from_path(&path).expect_err("legacy field must fail");
+        assert!(
+            err.to_string().contains("unknown field `paired_agent`"),
+            "unexpected error: {err}"
+        );
+
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn rejects_duplicate_and_multi_master_worker_peers() {
+        let duplicate_path = write_temp_config(
+            r#"
+[providers.mini27]
+id = "mini27"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "http://guizhouyun.site:2080"
+default_model = "MiniMax-M2.7"
+
+[providers.mini27.auth]
+type = "apikey"
+api_key = "sk-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker", "worker"]
+pair_token = "MASTER_TOKEN"
+provider = "mini27"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "mini27"
+"#,
+        );
+        let duplicate_err =
+            load_config_from_path(&duplicate_path).expect_err("duplicate peer must fail");
+        assert!(matches!(
+            duplicate_err,
+            ConfigError::DuplicatePairedAgentBinding {
+                agent_name,
+                paired_agent_name
+            } if agent_name == "master" && paired_agent_name == "worker"
+        ));
+        fs::remove_file(duplicate_path).expect("cleanup");
+
+        let multi_master_path = write_temp_config(
+            r#"
+[providers.mini27]
+id = "mini27"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "http://guizhouyun.site:2080"
+default_model = "MiniMax-M2.7"
+
+[providers.mini27.auth]
+type = "apikey"
+api_key = "sk-inline"
+
+[agents.master-a]
+name = "master-a"
+mode = "master"
+node_id = "master-a-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_A_TOKEN"
+provider = "mini27"
+
+[agents.master-b]
+name = "master-b"
+mode = "master"
+node_id = "master-b-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_B_TOKEN"
+provider = "mini27"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master-a", "master-b"]
+pair_token = "WORKER_TOKEN"
+provider = "mini27"
+"#,
+        );
+        let multi_master_err =
+            load_config_from_path(&multi_master_path).expect_err("worker multi-master must fail");
+        assert!(matches!(
+            multi_master_err,
+            ConfigError::SlaveRequiresSingleMasterPeer {
+                agent_name,
+                peer_count
+            } if agent_name == "worker" && peer_count == 2
+        ));
+        fs::remove_file(multi_master_path).expect("cleanup");
     }
 
     #[test]
@@ -1075,7 +1373,7 @@ apiKey = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "MASTER_TOKEN"
 provider = "mini27"
 
@@ -1083,7 +1381,7 @@ provider = "mini27"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "mini27"
 "#,
@@ -1120,7 +1418,7 @@ api_key = "sk-inline"
 name = "other"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "MASTER_TOKEN"
 provider = "mini27"
 
@@ -1128,7 +1426,7 @@ provider = "mini27"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "mini27"
 "#,
@@ -1166,7 +1464,7 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "MASTER_TOKEN"
 provider = "mini27"
 "#,
@@ -1201,7 +1499,7 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "MASTER_TOKEN"
 provider = "mini27"
 "#,
@@ -1239,7 +1537,7 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "MASTER_TOKEN"
 provider = "mini27"
 
@@ -1247,7 +1545,7 @@ provider = "mini27"
 name = "worker"
 mode = "master"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "mini27"
 "#,
@@ -1290,7 +1588,7 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "MASTER_TOKEN"
 provider = "mini27"
 
@@ -1298,7 +1596,7 @@ provider = "mini27"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "other-master"
+paired_agents = ["other-master"]
 pair_token = "WORKER_TOKEN"
 provider = "mini27"
 "#,
@@ -1310,10 +1608,10 @@ provider = "mini27"
             ConfigError::PairedAgentReciprocalMismatch {
                 agent_name,
                 paired_agent_name,
-                actual_paired_agent_name
+                actual_paired_agent_names
             } if agent_name == "master"
                 && paired_agent_name == "worker"
-                && actual_paired_agent_name == "other-master"
+                && actual_paired_agent_names == "other-master"
         ));
 
         fs::remove_file(path).expect("cleanup");
@@ -1352,7 +1650,7 @@ api_key = "sk-backup"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "{token_name}"
 provider = "mini27"
 fallback_provider = "backup"
@@ -1361,7 +1659,7 @@ fallback_provider = "backup"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "mini27"
 "#,
@@ -1375,10 +1673,12 @@ provider = "mini27"
         assert_eq!(selected.name, "master");
         assert_eq!(selected.mode, AgentMode::Master);
         assert_eq!(selected.node_id, "master-node");
-        assert_eq!(selected.paired_agent_name, "worker");
-        assert_eq!(selected.paired_agent_mode, AgentMode::Slave);
-        assert_eq!(selected.paired_node_id, "worker-node");
-        assert_eq!(selected.paired_pair_token_env, "WORKER_TOKEN");
+        assert_eq!(selected.paired_agents.len(), 1);
+        let worker_peer = &selected.paired_agents[0];
+        assert_eq!(worker_peer.name, "worker");
+        assert_eq!(worker_peer.mode, AgentMode::Slave);
+        assert_eq!(worker_peer.node_id, "worker-node");
+        assert_eq!(worker_peer.pair_token_env, "WORKER_TOKEN");
         assert_eq!(selected.pair_token_env, token_name);
         assert_eq!(selected.pair_token, "token-value");
         assert_eq!(selected.provider.id, "mini27");
@@ -1454,7 +1754,7 @@ api_key = "sk-disabled"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "{pair_token_env}"
 provider = "primary"
 {fallback_line}
@@ -1463,7 +1763,7 @@ provider = "primary"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "primary"
 "#,
@@ -1508,7 +1808,7 @@ api_key_env = "{api_key_env}"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "{pair_token_env}"
 provider = "claude"
 
@@ -1516,7 +1816,7 @@ provider = "claude"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "MASTER_TOKEN"
 provider = "claude"
 "#,
@@ -1534,9 +1834,11 @@ provider = "claude"
         assert_eq!(selected.provider.protocol, ProviderProtocol::Messages);
         assert_eq!(selected.provider.auth_source, ProviderAuthSourceKind::Env);
         assert_eq!(selected.provider.api_key, "claude-secret");
-        assert_eq!(selected.paired_agent_name, "master");
-        assert_eq!(selected.paired_node_id, "master-node");
-        assert_eq!(selected.paired_pair_token_env, "MASTER_TOKEN");
+        assert_eq!(selected.paired_agents.len(), 1);
+        let master_peer = &selected.paired_agents[0];
+        assert_eq!(master_peer.name, "master");
+        assert_eq!(master_peer.node_id, "master-node");
+        assert_eq!(master_peer.pair_token_env, "MASTER_TOKEN");
 
         // SAFETY: undo the test environment mutation before exit.
         unsafe {
@@ -1567,7 +1869,7 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "{token_name}"
 provider = "mini27"
 
@@ -1575,7 +1877,7 @@ provider = "mini27"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "mini27"
 "#,
@@ -1616,7 +1918,7 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "{token_name}"
 provider = "mini27"
 
@@ -1624,7 +1926,7 @@ provider = "mini27"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "mini27"
 "#,
@@ -1680,7 +1982,7 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "FREEHAND_MASTER_TOKEN"
 provider = "mini27"
 
@@ -1688,7 +1990,7 @@ provider = "mini27"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "mini27"
 "#,
@@ -1724,7 +2026,7 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "FREEHAND_MASTER_TOKEN"
 provider = "minimonth"
 
@@ -1732,7 +2034,7 @@ provider = "minimonth"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "minimonth"
 "#,
@@ -1766,7 +2068,7 @@ api_key = "sk-inline-should-disappear"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "{pair_token_env}"
 provider = "old"
 
@@ -1774,7 +2076,7 @@ provider = "old"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "old"
 "#
@@ -1838,7 +2140,7 @@ api_key = "sk-inline"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "FREEHAND_MASTER_TOKEN"
 provider = "old"
 
@@ -1846,7 +2148,7 @@ provider = "old"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "WORKER_TOKEN"
 provider = "old"
 "#,

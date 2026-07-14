@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_config::{
     AgentMode, ProviderAuthSourceKind, ProviderAuthType, ProviderProtocol, ProviderType,
-    SelectedAgentConfig, SelectedProviderConfig,
+    SelectedAgentConfig, SelectedPeerAgentConfig, SelectedProviderConfig,
 };
 use freehand_contracts::{AgentId, FeatureId, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_reason::{ReasonTurnEngine, SessionHistory, TurnStartInput};
@@ -1461,11 +1461,13 @@ fn selected_master() -> SelectedAgentConfig {
         name: "master".to_owned(),
         mode: AgentMode::Master,
         node_id: "master-node".to_owned(),
-        paired_agent_name: "worker".to_owned(),
-        paired_agent_mode: AgentMode::Slave,
-        paired_node_id: "worker-node".to_owned(),
-        paired_allowed_pair_ip: None,
-        paired_pair_token_env: "FREEHAND_PAIR_TOKEN_WORKER".to_owned(),
+        paired_agents: vec![SelectedPeerAgentConfig {
+            name: "worker".to_owned(),
+            mode: AgentMode::Slave,
+            node_id: "worker-node".to_owned(),
+            allowed_pair_ip: None,
+            pair_token_env: "FREEHAND_PAIR_TOKEN_WORKER".to_owned(),
+        }],
         allowed_pair_ip: None,
         pair_token_env: "FREEHAND_PAIR_TOKEN_MASTER".to_owned(),
         pair_token: "pair-token".to_owned(),

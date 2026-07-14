@@ -1948,7 +1948,7 @@ mod tests {
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "minimonth"
 
@@ -1956,7 +1956,7 @@ provider = "minimonth"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 allowed_pair_ip = "127.0.0.1"
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "minimonth"
@@ -1983,7 +1983,7 @@ api_key = "test-api-key"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 allowed_pair_ip = "127.0.0.1"
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "minimonth"
@@ -1992,7 +1992,7 @@ provider = "minimonth"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "minimonth"
 

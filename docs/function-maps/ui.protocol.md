@@ -118,7 +118,10 @@
   owner code through `UiRuntimeQueryPort`
 - task list subscription events expose the same UI-safe task list projection as query results so task panels can refresh from push without polling or app-local task state
 - error-center event query results expose UI-safe watermarked metadata fields plus raw hash only; raw provider/tool/request/user/assistant text is not part of the protocol DTO
-- config status query results expose UI-safe active agent/provider/model fields plus auth source type only; API keys, pair tokens, provider raw payloads, and full credential-bearing URLs are not part of the DTO
+- config status query results expose UI-safe active agent/provider/model fields,
+  an ordered peer list of agent name/mode/node id, and auth source type only;
+  API keys, pair-token env/value fields, provider raw payloads, and full
+  credential-bearing URLs are not part of the DTO
 - provider/model update command receipts report owner dispatch status only; the restart-required and saved provider/model state is observed by a follow-up config status query/projection, not by protocol-local config truth
 - error-center subscription initial snapshots use the same `UiErrorCenterEventListProjection` as query results
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards; tool status/outcome is conveyed by the status field while the public body stays semantic and target-focused instead of echoing success/failure result text

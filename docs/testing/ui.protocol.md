@@ -98,7 +98,9 @@
     op-specific `question`/`constraint` required fields
   - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
   - error-center query command validation covers empty session id and command-ingress rejection for query-route misuse
-  - config status query covers command-ingress rejection, runtime-owned protocol-state rejection, JSON roundtrip, and no-secret DTO serialization
+  - config status query covers command-ingress rejection, runtime-owned
+    protocol-state rejection, ordered multi-peer JSON roundtrip, and no-secret
+    DTO serialization
   - provider/model update covers owner routing to `config.core`, empty-field rejection, unsupported-protocol rejection, JSON roundtrip, and no credential/API-key value field in serialization
   - error-center subscription selector and matcher cover accepted error-center projections
 - module black-box plan:

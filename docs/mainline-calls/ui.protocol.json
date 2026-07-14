@@ -26,6 +26,7 @@
     "Phase 2C WorkerControl and QueryWorkerControl are protocol-owned command/query DTOs for already-running worker execution control; protocol validates ids, op names, and op-specific payloads before runtime dispatch",
     "RunMasterPoll.replay_from_start is a protocol-owned cursor-mode field that defaults false for older clients and is rejected when combined with after_cursor",
     "error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied",
+    "config status query is a protocol-owned read-only ADP/query shape while config.core and runtime.ui-command-dispatch supply selected-agent truth",
     "provider/model update is a protocol-owned mutation command shape that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to config.core",
     "subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams",
     "CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id",
@@ -65,6 +66,7 @@
     "rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth",
     "error-center query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
     "task list subscription events carry UI-safe task list projections published by runtime owner code",
+    "config status query results expose the active agent/provider/model/auth-source fields and the ordered paired agent name/mode/node list without pair tokens or provider credential values",
     "provider/model update command receipts report owner dispatch status only; restart-required and saved provider/model state are observed by follow-up config status projection",
     "Phase 2B EventInbox and MasterPoll results expose UI-safe event rows, cursor values, compact classifications, and recommended semantic action labels supplied by runtime owner code through UiRuntimeQueryPort",
     "WorkerControl query results expose UI-safe persisted control events plus optional task/agent/lifecycle/task-event projections supplied by runtime owner code"
@@ -534,6 +536,17 @@
       "input_semantic": "UI query command",
       "output_semantic": "optional UI query result or dispatch failure",
       "caller": "WebUI/daemon ADP query transport",
+      "callee": "runtime owner query implementation",
+      "binding_status": "bound"
+    },
+    {
+      "step": "20a",
+      "symbol_path": "UiCommand::QueryConfigStatus / UiQueryResult::ConfigStatus / UiConfigStatusProjection / UiConfigPeerProjection",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "define the secret-free selected config query/result DTO with an ordered peer list",
+      "input_semantic": "config status query",
+      "output_semantic": "active agent/provider/model/auth-source plus ordered paired agent name/mode/node projections",
+      "caller": "ADP query transport",
       "callee": "runtime owner query implementation",
       "binding_status": "bound"
     },

@@ -167,10 +167,15 @@ has owner truth to project.
 
 Closed:
 
-- `runtime.master-worker-loop` owns one configured Slave Worker runner
-- Slave daemon mode claims assigned tasks, renews heartbeats, runs the real
+- `config.core` compiles ordered `paired_agents`; Master supports multiple
+  explicit Worker peers while every Worker has exactly one Master
+- `runtime.master-worker-loop` owns one runner per selected configured Worker
+- Slave daemon mode claims only tasks assigned to its own agent id, renews heartbeats, runs the real
   provider/tool loop inside the task cwd, and reports `review_ready` or
   `blocked`
+- Master guidance, TaskSpaceSnapshot, and task mutation boundary consume the
+  full configured Worker set and reject historical/non-configured agents
+- Worker launchd service/env/log naming is agent-specific
 - Master prompt ownership is locked to create/assign/query/review; Worker owns
   claim/heartbeat/execution facts
 - real-provider S-profile task `task-1783657707` produced
@@ -179,8 +184,10 @@ Closed:
 
 Still open:
 
+- three independent Worker process online proof; the old verifier started one
+  Worker process for three tasks and is not multi-agent evidence
 - managed Worker process auto-start/restart and health projection
-- multiple configured Worker resource allocation/release
+- concurrent configured Worker allocation/release proof
 - background Master timeout/poll scheduler outside an active user turn
 - production Master lifecycle runner and interrupted/rejected Worker requeue are
   implemented locally; real-provider blocked/reject/retry/reassignment proof
@@ -209,7 +216,7 @@ cargo run -p xtask -- gates check
 git diff --check
 ```
 
-### P1: Single Configured Worker Runner — Completed
+### P1: Configured Worker Runner — Completed
 
 Deliverables:
 
@@ -230,7 +237,36 @@ cargo run -p xtask -- mainlines check
 cargo run -p xtask -- gates check
 ```
 
-### P2: Managed Worker Lifecycle And Pool
+### P2: Compiled Multi-Worker Topology — Controlled Online Closure Proven
+
+Landed:
+
+- only `paired_agents` is accepted; singular `paired_agent` is rejected
+- Master has one-or-more reciprocal Slave peers; Slave has exactly one Master
+- runtime Master assignment/create gate accepts any configured Worker and
+  rejects historical/non-configured agents before Task Center mutation
+- launchd Worker defaults use agent-specific label/env/log paths
+- isolated verifier starts three separate Worker daemon processes and binds
+  alpha/beta/gamma to `worker-alpha`/`worker-beta`/`worker-gamma`
+- online TaskHistory proves distinct PIDs, agent ids, execution ids,
+  heartbeat/review histories, and no cross-claim
+- beta reject/rework uses a new execution; first parent evaluation creates an
+  integration task; only the later evaluation completes the parent goal
+- Master restart proof preserves exactly one final parent evaluation
+- Task Center atomic JSON temp paths are process-unique, preventing concurrent
+  Worker boot from stealing another process's index temp file
+
+Validation:
+
+```bash
+cargo test -p freehand-config -- --nocapture
+cargo test -p freehand-runtime master_assignment_gate -- --nocapture
+bash -n scripts/install-launchd.sh
+scripts/verify-launchd-worker-naming.sh
+scripts/verify-master-three-worker-e2e-online.sh
+```
+
+### P3: Managed Worker Lifecycle And Pool
 
 Deliverables:
 
@@ -245,10 +281,10 @@ Validation:
 scripts/install-launchd.sh restartS
 curl -4fsS http://127.0.0.1:4042/health
 freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp
-# managed Worker lifecycle verifier to be added in P2
+# managed Worker lifecycle verifier remains a P3 deliverable
 ```
 
-### P3: Background Master Scheduling And Recovery — In Progress
+### P4: Background Master Scheduling And Recovery — In Progress
 
 Deliverables:
 
@@ -265,7 +301,7 @@ freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp
 # recovery-loop verifier to be added in P3
 ```
 
-### P4: Formal Research And UI Evidence
+### P5: Formal Research And UI Evidence
 
 Deliverables:
 

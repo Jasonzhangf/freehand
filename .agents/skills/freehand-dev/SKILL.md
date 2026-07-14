@@ -136,10 +136,15 @@ Use this skill for any non-trivial work in this repo.
 - local multiple agents are managed by `config.toml`, and one `config.toml` may define multiple local agents.
 - config source path is only `~/.freehand/config.toml`.
 - one process starts one agent, chosen by CLI agent name.
-- each configured agent must have explicit `node_id` and `paired_agent`.
-- peer topology is config-owned: paired agents must be reciprocal and opposite mode in the first local topology version.
+- each configured agent must have explicit `node_id` and `paired_agents`.
+- peer topology is config-owned and compiled in declared order: every Master
+  has one or more reciprocal opposite-mode Slave Worker peers; every Slave
+  Worker has exactly one reciprocal Master peer.
+- legacy singular `paired_agent` is invalid. Do not add a compatibility parser,
+  primary-worker field, or reverse-lookup fallback.
 - runtime/daemon code must consume selected peer topology from `freehand-config`; it must not derive synthetic master/slave node ids.
-- current first version master/slave scope is local one-master one-slave only.
+- current local execution topology supports one Master plus multiple explicit
+  configured Worker identities, with one daemon process per agent.
 - pairing transport is WebSocket handshake.
 - each agent has a startup configuration file that decides its startup mode.
 - whichever side is configured as `master` accepts user input and dispatches to local sub-agents or paired remote slaves.
@@ -355,6 +360,14 @@ Use this skill for any non-trivial work in this repo.
   allowed to create correction, improvement, or newly discovered child tasks.
   Reject any design or online verifier that proves only result aggregation; the
   verifier must force at least one next-round task before final completion.
+- One Worker process executing three child tasks is not multi-agent proof.
+  A three-Worker closure verifier must start three explicit Worker processes,
+  prove three distinct live PIDs and configured agent ids, bind one initial task
+  to each Worker, and verify TaskAssigned/TaskResumed/TaskHeartbeat/
+  TaskReviewSubmitted history never crosses the assigned Worker identity.
+- Task Center atomic JSON temp paths must be process-unique. A timestamp rounded
+  to seconds is invalid because concurrent Worker boot/index writes can race on
+  the same temp file and terminate one Worker before it claims work.
 - When global `~/.freehand` EventInbox/TaskBoard contains unrelated historical truth, run Master/Worker lifecycle fixtures with an isolated temporary `HOME/.freehand`; do not delete, skip, or rewrite global truth to obtain a pass. Switch both the fixture Master and Worker provider configurations through the config owner before submitting work, and stop only the explicit fixture/server/worker PIDs started by that verifier.
 - Before an isolated online verifier launches a workspace binary such as
   `target/debug/freehand-daemon`, rebuild that exact binary after source changes;

@@ -9,6 +9,7 @@
   "request_mainline": [
     "daemon process accepts a host command to start the UI transport",
     "daemon process may be started by macOS launchd through the installed freehand-daemon-launchd wrapper",
+    "each configured Worker process has an agent-specific launchd label, env file, stdout log, and stderr log; a shared workerS service is not the Worker pool",
     "daemon bootstrap selects one agent from default config and creates one runtime dispatcher",
     "daemon bootstrap routes Master mode to the runtime-backed UI host and Slave mode to the production Worker runner",
     "runtime bootstrap consumes configured local and paired node topology before daemon transport starts",
@@ -37,7 +38,7 @@
     "daemon serves task list subscription events from runtime-published task projections after task tool mutations",
     "daemon serves error-center initial subscription snapshots from runtime metadata projection",
     "daemon ADP session management can create, rename, archive, list archived sessions, restore, submit turns, rollback latest effective turn, and query the resulting effective transcript"
-    ,"Slave daemon runs the production Worker claim/execute/report loop without binding WebUI or ADP transport"
+    ,"each Slave daemon runs one configured Worker's production claim/execute/report loop without binding WebUI or ADP transport"
   ],
   "error_mainline": [
     "invalid daemon CLI input returns explicit startup error",
@@ -237,6 +238,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "09a",
+      "symbol_path": "sanitize_launchd_component",
+      "file_path": "scripts/install-launchd.sh",
+      "responsibility": "derive deterministic agent-specific Worker label, env, and log components",
+      "input_semantic": "configured Worker agent id",
+      "output_semantic": "launchd-safe identity component",
+      "caller": "launchd worker install and restart profiles",
+      "callee": "Worker service path builder",
+      "binding_status": "bound"
+    },
+    {
       "step": "09",
       "symbol_path": "handle_adp_socket / RuntimeCommandDispatcher::query_runtime",
       "file_path": "apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs",
@@ -291,6 +303,8 @@
     "checkpoint query projection is covered through daemon HTTP after writable mutation and after rewind",
     "config-selected bootstrap is now bound in code and uses configured peer topology",
     "configured Slave startup binds runtime.master-worker-loop instead of failing the app host",
+    "Worker launchd defaults bind identity as com.freehand.worker[ S].<agent>, worker[ S].<agent>.env, and matching agent-specific logs",
+    "agent-specific launchd naming has a non-mutating executable fixture, and isolated runtime proof starts three distinct Slave daemon processes while launchd-managed three-service recovery remains open",
     "generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes"
   ]
 }

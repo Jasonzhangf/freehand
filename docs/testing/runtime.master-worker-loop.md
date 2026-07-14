@@ -16,12 +16,15 @@
 
 ## Lifecycle Under Test
 
-1. Master Task Center has a registered Worker and an Assigned task.
-2. Slave daemon selects the configured Worker and starts the production runner.
-3. Worker LaunchAgent starts at login, stays alive, and restarts the same
-   configured Worker process after an unexpected exit.
-4. Runner opens the paired Master's Task Center namespace.
-5. Runner claims one task for its Worker identity and persists lease heartbeat.
+1. Master Task Center has three registered configured Workers and one Assigned
+   task per Worker.
+2. Each Slave daemon selects one configured Worker and starts its own production
+   runner.
+3. Agent-specific Worker LaunchAgents start at login, stay alive, and restart
+   the same configured Worker process after an unexpected exit.
+4. Each runner opens its only configured Master's Task Center namespace.
+5. Each runner claims only the task assigned to its own Worker identity and
+   persists lease heartbeat.
 6. Runner expands a leading `~`, canonicalizes `task.target_cwd` through symlinks, and locks the Worker to that canonical workspace.
 7. Runner executes one provider/reason turn under Worker identity and Worker tool policy.
 8. Runner writes `review_ready` on successful completion, `interrupted` on
@@ -49,9 +52,10 @@
 
 ## Current-Configuration Closure Matrix
 
-The production acceptance target is the configured one-Master/one-Worker
-topology in `~/.freehand/config.toml`. More workers and multiple independent
-BigTasks remain out of scope until every row below is closed.
+The production acceptance target is one configured Master plus at least three
+explicit configured Worker identities in `~/.freehand/config.toml`. Every
+Worker runs in its own daemon process and may execute at most one claimed task
+at a time. Multiple independent BigTasks remain outside this slice.
 
 | branch | required owner truth | required next action |
 | --- | --- | --- |
@@ -81,13 +85,16 @@ Task Center truth before another execution starts.
 
 - Worker tool definitions include governed read/write/search tools and local planning tools.
 - Worker tool definitions exclude `task` and unrestricted shell tools.
-- Master guidance names the configured paired Worker and forbids assigning
+- Master guidance names the complete ordered configured Worker id set and forbids assigning
   production tasks to historical AgentBoard entries.
 - Master task execution accepts `task(op="assign")` only when `agent_id`
-  exactly matches the configured paired Worker; the accepted assignment writes
+  belongs to the configured Worker set; the accepted assignment writes
   one `TaskAssigned` event for that Worker.
+- a multi-Worker positive test accepts the second configured Worker while a
+  historical/non-configured Worker is rejected first; the failed attempt writes
+  no task mutation.
 - Master task creation accepts only `dispatch.mode="none"` or
-  `dispatch.mode="agent"` targeting the configured paired Worker. Omitted,
+  `dispatch.mode="agent"` targeting one configured Worker. Omitted,
   `auto`, and `self` dispatch cannot select from persisted historical agents.
 - Master guidance forbids embedding `task(...)` lifecycle calls in Worker task
   content; the Worker runner owns claim, heartbeat, review submission, and
@@ -136,7 +143,7 @@ Task Center truth before another execution starts.
 - due timer failure cannot starve pending Task Center lifecycle events; a
   review-ready task is still approved/closed before the failed timer wakeup is
   retried.
-- interrupted tasks assigned to the configured Worker are requeued once and
+- interrupted tasks assigned to the same configured Worker are requeued once and
   claimed with a new execution id.
 - rejected submissions are requeued to the same Worker and the next prompt
   contains the persisted rejection requirements.
@@ -218,6 +225,7 @@ Task Center truth before another execution starts.
 - failure to persist the blocked fact remains an explicit runner error.
 - blocked tasks are not silently retried by the Worker.
 - an interrupted/rejected retry never reuses the previous execution id.
+- a Worker runner cannot claim a task assigned to another configured Worker.
 - Master review failure does not approve or close the task.
 - A Master turn that only creates/assigns a Worker task must not project
   `TerminalStatus::Success` or a completed final answer for the user objective;
@@ -305,8 +313,11 @@ Task Center truth before another execution starts.
   - Master mode creates UI host
   - Slave mode creates Worker runner
   - Slave mode does not bind WebUI/ADP transport
+- config/runtime boundary tests prove the Master consumes an ordered
+  three-Worker set while every selected Worker consumes exactly one Master peer
 - restart test opens a new runner against the same runtime home and verifies same task/execution/agent/history ids.
-- strict restart recovery proofs stop/unload daemonS/workerS as needed, seed
+- strict restart recovery proofs stop/unload the exact Master/agent-specific
+  Worker services as needed, seed
   review/rejected/blocked/running truth through
   `freehand-cliS task-restart-seed-*`, restart daemonS/workerS as needed, and
   verify TaskHistory reaches the expected next lifecycle event.
@@ -314,19 +325,29 @@ Task Center truth before another execution starts.
 ## Project Black-Box Coverage
 
 - start S-profile Master daemon on fixed port 4042
-- start a separate configured Slave daemon process
-- install the S-profile Worker LaunchAgent and prove `RunAtLoad`, `KeepAlive`,
-  no `--bind`, shared pair token, and stable running PID
+- start three separate configured Slave daemon processes:
+  `worker-alpha`, `worker-beta`, and `worker-gamma`
+- install agent-specific S-profile Worker LaunchAgents and prove unique labels,
+  env files, log files, `RunAtLoad`, `KeepAlive`, no `--bind`, shared pair
+  token, and three stable distinct PIDs
 - submit a real Master request that creates and assigns work outside `~/.freehand`
-- verify Worker TaskHistory contains:
+- verify three distinct Worker TaskHistory streams contain:
   - `TaskAssigned`
   - `TaskResumed`
   - `TaskHeartbeat`
-- `TaskReviewSubmitted`, `TaskInterrupted`, or `TaskBlocked`
+  - `TaskReviewSubmitted`, `TaskInterrupted`, or `TaskBlocked`
+- prove the alpha/beta/gamma tasks use three distinct `agent_id` values and no
+  Worker claims another Worker's assigned task
 - verify the same task/execution/agent ids after Worker restart
-- three-worker online proof must require the original parent session final
-  summary after all child tasks close, with every expected worker_result token
-  present in that same session transcript
+- three-worker online proof must require Master quality evaluation against the
+  original goal, decomposed goal/deliverables/acceptance, and accepted review
+  truth; the first evaluation must create next-round work and only the later
+  evaluation may complete the original parent session
+- controlled online proof is landed in
+  `scripts/verify-master-three-worker-e2e-online.sh`: it starts three explicit
+  Worker processes in an isolated runtime home, writes JSON evidence, forces
+  beta reject/rework and an integration next round, rejects premature parent
+  success, and checks final-evaluation restart idempotency
 - only claim production closure when the Worker produced a real deliverable or an explicit real-provider blocked result
 
 ## Runtime Evidence
@@ -343,11 +364,13 @@ Task Center truth before another execution starts.
 ## Known Non-Goals
 
 - multi-task context switching inside one Worker process
-- more than one concurrently executing task
+- more than one concurrently executing task per Worker process
 - recursive Worker-created subagents
 - task approval/close by the Worker
 - UI projection changes
 - remote node transport; first production slice uses the shared local Task Center runtime home
+- launchd-managed crash/restart and real-provider recovery remain outside the
+  controlled fixture proof
 
 ## Definition Of Done
 
@@ -355,10 +378,16 @@ Task Center truth before another execution starts.
 - function map and mainline manifest bind real symbols
 - `cargo test -p freehand-tools worker_implemented -- --nocapture`
 - `cargo test -p freehand-runtime production_worker_runner -- --nocapture`
+- `cargo test -p freehand-runtime master_assignment_gate -- --nocapture`
 - `cargo test -p freehand-daemon worker_mode -- --nocapture`
 - `cargo test -p xtask ci_cd -- --nocapture`
 - `bash -n scripts/install-launchd.sh`
+- `scripts/verify-launchd-worker-naming.sh`
+- `bash -n scripts/verify-master-three-worker-e2e-online.sh`
+- `scripts/verify-master-three-worker-e2e-online.sh`
 - `cargo run -p xtask -- mainlines generate`
 - `cargo run -p xtask -- mainlines check`
 - `cargo run -p xtask -- gates check`
-- S-profile online TaskHistory proves claim + heartbeat + terminal execution fact
+- S-profile online TaskHistory proves three distinct Worker agent/process ids,
+  claim + heartbeat + terminal execution fact, Master review/rework, next-round
+  task creation, and final parent-goal completion

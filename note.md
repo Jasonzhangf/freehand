@@ -5715,3 +5715,87 @@ Current real root cause split:
     rollback, and resume need a typed contract before enabling it.
   - No commit. Existing unrelated dirty/untracked files, including `output/`,
     remain untouched.
+
+# 2026-07-13 Multi-worker topology and three-process convergence proof
+
+- configuration truth:
+  - `AgentConfig` now uses ordered `paired_agents = [...]` as the only peer
+    topology schema.
+  - Master agents may declare multiple reciprocal Slave Worker peers.
+  - Slave Worker agents must declare exactly one reciprocal Master peer.
+  - Legacy singular `paired_agent` is rejected by config parsing; no
+    compatibility parser, primary-worker field, or reverse lookup fallback was
+    added.
+- runtime/UI behavior:
+  - Master guidance, TaskSpaceSnapshot, task assignment boundary checks, runtime
+    bootstrap token checks, and UI config projection consume the complete
+    configured Worker set.
+  - Worker runner startup verifies the selected agent is Slave mode, has exactly
+    one paired Master, and uses the selected Worker agent id for task execution
+    identity.
+  - Parent evaluation remains a quality/goal decision loop, not aggregation:
+    all current child tasks closed only triggers evaluation; the Master may
+    reject, create next-round work, block, or finish only after total-goal
+    verification.
+- launchd and verifier:
+  - `scripts/install-launchd.sh` can name agent-specific worker services such
+    as `com.freehand.workerS.worker-alpha`.
+  - `FREEHAND_LAUNCHD_PLAN_ONLY=1` plus
+    `scripts/verify-launchd-worker-naming.sh` verifies labels/env/log paths
+    without installing or mutating launchd state.
+  - `scripts/verify-master-three-worker-e2e-online.sh` now runs in an isolated
+    temporary `HOME/.freehand`, starts one Master plus three explicit Worker
+    daemon processes, and stops only the PIDs it created.
+- bug found during real three-process online proof:
+  - First true concurrent Worker run failed one Worker at Task Center boot with
+    `No such file or directory (os error 2)`.
+  - Root cause was `crates/freehand-task/src/lib.rs::write_json_atomic` using a
+    seconds-granularity temp file name, so concurrent writers to the same JSON
+    path raced on one temp path and one rename lost its source.
+  - Fix uses process/nanosecond/atomic-counter unique temp paths.
+- latest online proof:
+  - Session: `online-master-three-worker-evaluation-1783960928`.
+  - Evidence dir:
+    `/tmp/freehand-three-worker-home.Zyn1U6/.freehand/tmp/three-worker-e2e-20260714T004208-50363`.
+  - Distinct Worker PIDs: `worker-alpha=51939`, `worker-beta=51940`,
+    `worker-gamma=51941`; after verifier cleanup all three were stopped.
+  - Initial task mapping:
+    `alpha -> worker-alpha`, `beta -> worker-beta`, `gamma -> worker-gamma`.
+  - Integration next-round task mapping: `integration -> worker-alpha`.
+  - Beta was rejected and rerun with a new execution id before approval/close.
+  - First all-children-closed evaluation created the integration task instead
+    of final completion.
+  - Second evaluation completed at `runtime-turn-3`; restart proof kept
+    `final_evaluation_count=1` and `restart_idempotent=true`.
+- verification already run for this batch:
+  - `cargo test -p freehand-config -- --nocapture` -> 20 passed.
+  - `cargo test -p freehand-ui-protocol -- --nocapture` -> 56 passed.
+  - `cargo test -p freehand-runtime master_assignment_gate -- --nocapture` ->
+    2 passed.
+  - `cargo test -p freehand-runtime production_worker_runner -- --nocapture` ->
+    13 passed.
+  - `cargo test -p freehand-runtime parent_evaluation -- --nocapture` ->
+    4 passed.
+  - `cargo test -p freehand-daemon worker_mode -- --nocapture` -> 1 passed.
+  - `cargo test -p freehand-task atomic_json_write_survives_parallel_same_path_writers -- --nocapture`
+    -> 1 passed.
+  - `cargo test -p freehand-task -- --nocapture` -> 50 passed.
+  - targeted clippy for config/task/runtime/ui-protocol/daemon/cli passed.
+  - `cargo fmt --check`, `xtask mainlines generate/check`, `xtask gates check`,
+    launchd naming verifier, script syntax checks, online three-worker verifier,
+    and `git diff --check` passed before final memory updates.
+- known non-green adjacent baselines:
+  - `cargo test -p freehand-cli -- --nocapture`: 24 passed / 2 failed from stale
+    tests expecting old Master tool/provider unsupported behavior.
+  - `cargo test -p freehand-daemon -- --nocapture`: 14 passed / 5 failed from
+    stale Master tool/workspace/provider expectation and an existing
+    subscription timeout path.
+  - These are not closed by the topology commit and should not be hidden.
+- remaining multi-agent gaps:
+  - launchd-managed three-service lifecycle is not yet online-proven.
+  - Worker health/restart owner truth is not complete.
+  - real-provider crash/recovery/takeover proof is not complete.
+  - cross-machine multi-peer node transport remains singular/first-peer in old
+    node transport paths.
+  - shared `leases.json` remains a potential multi-process read-modify-write
+    lost-update risk even though the latest controlled proof passed.

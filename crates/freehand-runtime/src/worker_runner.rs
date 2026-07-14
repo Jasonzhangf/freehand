@@ -62,6 +62,13 @@ pub enum ProductionWorkerRunnerError {
     RequiresSlaveMode { agent_name: String, mode: String },
     #[error("worker runner requires a paired master, got `{mode}` for `{agent_name}`")]
     RequiresPairedMaster { agent_name: String, mode: String },
+    #[error(
+        "worker runner requires exactly one paired master, got {peer_count} peer(s) for `{agent_name}`"
+    )]
+    RequiresSinglePairedMaster {
+        agent_name: String,
+        peer_count: usize,
+    },
     #[error("worker Task Center failed: {0}")]
     TaskCenter(String),
     #[error("worker heartbeat failed: {0}")]
@@ -144,16 +151,29 @@ impl ProductionWorkerRunner {
                 mode: selected.mode.as_str().to_owned(),
             });
         }
-        if selected.paired_agent_mode != AgentMode::Master {
-            return Err(ProductionWorkerRunnerError::RequiresPairedMaster {
-                agent_name: selected.paired_agent_name.clone(),
-                mode: selected.paired_agent_mode.as_str().to_owned(),
+        if selected.paired_agents.len() != 1 {
+            return Err(ProductionWorkerRunnerError::RequiresSinglePairedMaster {
+                agent_name: selected.name.clone(),
+                peer_count: selected.paired_agents.len(),
             });
         }
+        let master_peer = selected.master_peer().ok_or_else(|| {
+            ProductionWorkerRunnerError::RequiresPairedMaster {
+                agent_name: selected.name.clone(),
+                mode: "none".to_owned(),
+            }
+        })?;
+        if master_peer.mode != AgentMode::Master {
+            return Err(ProductionWorkerRunnerError::RequiresPairedMaster {
+                agent_name: master_peer.name.clone(),
+                mode: master_peer.mode.as_str().to_owned(),
+            });
+        }
+        let master_peer_name = master_peer.name.clone();
         fs::create_dir_all(&runtime_home)
             .map_err(|error| ProductionWorkerRunnerError::TaskCenter(error.to_string()))?;
         let runner = Self {
-            task_owner_agent_id: AgentId::new(selected.paired_agent_name.clone()),
+            task_owner_agent_id: AgentId::new(master_peer_name),
             worker_agent_id: AgentId::new(selected.name.clone()),
             selected,
             runtime_home,

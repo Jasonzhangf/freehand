@@ -61,7 +61,9 @@
   - selected-session cwd inheritance coverage
   - session metadata dispatch coverage for create, rename, archive, restore, and delete-as-archive
   - session rollback dispatch coverage for append-only marker write plus effective transcript refresh
-  - runtime query-session-turns coverage for persistence-backed transcript refresh, including parent-aggregation internal prompt hiding and assistant summary visibility
+  - runtime query-session-turns coverage for persistence-backed transcript
+    refresh, including parent-goal evaluation internal prompt hiding and final
+    assistant decision visibility
   - session metadata negative coverage for unknown session id and empty title rejection before runtime dispatch
   - live tool execution with requested session cwd coverage
   - persisted latest-turn restore coverage
@@ -85,7 +87,9 @@
     failure, and no runtime-local success projection
   - missing task history query target-not-found coverage
   - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
-  - config status runtime query coverage, including base URL host projection, auth source projection, and no API key/pair token leakage
+  - config status runtime query coverage, including ordered multi-peer
+    projection, base URL host projection, auth source projection, and no API
+    key/pair-token leakage
   - provider/model update dispatch coverage, including valid save, invalid no-overwrite, no secret projection, and active runtime model/provider unchanged until restart
   - task list publication coverage after successful task tool mutation
   - task mutation command dispatch coverage for create/review/approve/close, including task list projection publication and missing task failures

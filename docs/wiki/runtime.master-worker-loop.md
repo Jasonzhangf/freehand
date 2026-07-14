@@ -21,13 +21,13 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 - each actionable event attempt uses a task-scoped internal master-lifecycle reason session, deterministic event-and-attempt-isolated turn and trace ids, and an explicit target-task decision boundary
 - when a child task_closed event arrives, the runner checks all terminal-included child tasks with the same parent_session_id and starts an overall-goal evaluation turn in the original parent session only after every current child is Closed; the evaluation receives original user objective history, decomposed child task requirements, and accepted review truth
 - Slave mode constructs a production Worker runner instead of a Master UI dispatcher
-- Worker opens the paired Master's Task Center namespace and uses its own configured agent id as execution identity
+- each Worker opens its only configured Master's Task Center namespace and uses its own distinct configured agent id as execution identity
 - each Worker tick claims the highest-priority Assigned task for that Worker
 - claim persists one execution id and lease heartbeat
 - task target cwd expands a leading ~, canonicalizes through symlinks, and becomes the locked Worker execution root
 - Worker live reasoning receives the requested target_cwd, canonical locked workspace, and path-preflight instructions for absolute paths, ~, and symlinks
 - Worker provider requests expose governed workspace tools but exclude recursive `task` and unrestricted shell tools
-- Master provider guidance binds dispatch to the configured paired Worker id, excludes historical AgentBoard entries as production targets, forbids task lifecycle calls in Worker task content, and requires path/symlink/canonical evidence for external cwd delegation
+- Master provider guidance binds dispatch to the ordered configured Worker id set, excludes historical AgentBoard entries as production targets, forbids task lifecycle calls in Worker task content, and requires path/symlink/canonical evidence for external cwd delegation
 - Master task-tool execution independently rejects assignment to any non-configured Worker before Task Center mutation
 - Master task creation rejects omitted, auto, self, or non-configured-agent dispatch before persisted historical agents can be selected
 
@@ -118,8 +118,8 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 | 14 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke the Master model for current review-ready, blocked, interrupted, or all-children-closed parent evaluation truth | task snapshot and trigger event | task advanced, blocked observed, parent evaluated, no-op, or explicit error | ProductionMasterRunner::run_once | run_master_lifecycle_reason_turn, parent evaluation live turn, ReasonPersistence, and task owner |  |  |  | bound |
 | 14a | `ProductionMasterRunner::handle_parent_task_closed` | `crates/freehand-runtime/src/master_runner.rs` | decide whether a child task_closed event completes the current parent child set and build an idempotent overall-goal evaluation request | original parent user objective history plus closed child task definitions and accepted review truth | next-round task creation, explicit blocker, verified final completion, or no-op | ProductionMasterRunner::handle_event | TaskRuntime, ReasonPersistence, and Master live reason turn |  |  |  | bound |
 | 15 | `run_master_lifecycle_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one event-isolated lifecycle decision with a target-task boundary and finite round budget | selected Master config, typed lifecycle prompt, and decision boundary | closed Master turn and target Task Center mutation | ProductionMasterRunner::handle_event | provider and reason live bridge |  |  |  | bound |
-| 16 | `configured_worker_task_boundary_failure` | `crates/freehand-runtime/src/lib.rs` | validate Master task create and assign routing against the configured Worker topology | task tool call and configured Worker id | explicit topology failure or allowed mutation path | execute_registry_tool_call_with_workspace | pure boundary validator |  |  |  | bound |
-| 17 | `execute_registry_tool_call_with_workspace` | `crates/freehand-runtime/src/lib.rs` | enforce configured Worker task routing before task-tool mutation and route Master timer calls to independent timer truth | Master task or timer call and configured Worker id | paired failed result or owner-routed task/timer mutation | provider and reason live bridge | configured_worker_task_boundary_failure, task tool owner, and timer store owner |  |  |  | bound |
+| 16 | `configured_worker_task_boundary_failure` | `crates/freehand-runtime/src/lib.rs` | validate Master task create and assign routing against the configured Worker topology | task tool call and ordered configured Worker id set | explicit topology failure or allowed mutation path | execute_registry_tool_call_with_workspace | pure boundary validator |  |  |  | bound |
+| 17 | `execute_registry_tool_call_with_workspace` | `crates/freehand-runtime/src/lib.rs` | enforce configured Worker-set routing before task-tool mutation and route Master timer calls to independent timer truth | Master task or timer call and ordered configured Worker id set | paired failed result or owner-routed task/timer mutation | provider and reason live bridge | configured_worker_task_boundary_failure, task tool owner, and timer store owner |  |  |  | bound |
 | 18 | `run_master_mode` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP host and Master lifecycle runner under one daemon lifetime | Master bootstrap and bind | supervised Master daemon | daemon CLI | server host and ProductionMasterRunner::run_until |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
@@ -129,6 +129,9 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
 - independent timer schedule truth, Master due-timer wakeup routing, and failure release are code-bound
 - production Master lifecycle runner, durable cursor, and supervised Master daemon startup are code-bound
 - production Worker runner, retryable interrupted/rejected requeue, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound
+- config-selected Master guidance, TaskSpaceSnapshot, and task mutation boundary consume the full ordered Worker peer set; singular configured-Worker fields are physically removed
+- each Slave Worker runner consumes its one configured Master peer and keeps task claim/execution identity distinct per configured Worker process
+- the controlled online verifier starts worker-alpha, worker-beta, and worker-gamma as three distinct daemon processes, proves one initial task per Worker without cross-claim, forces beta reject/rework plus a next-round integration task, and persists JSON proof before explicit PID cleanup
 - deterministic positive and negative tests cover Master review close/reject/missing-decision plus Worker idle/review-ready/blocked/retry/missing-workspace/role boundaries
 - generated wiki must be regenerated whenever this mainline changes
 - Worker startup and Task Center boot now recover historical blocked-task paused snapshots without erasing explicit pause truth

@@ -54,13 +54,14 @@
   event-and-attempt-isolated turn and trace ids, and an explicit target-task
   decision boundary
 - Slave mode constructs a production Worker runner instead of a Master UI dispatcher
-- Worker opens the paired Master's Task Center namespace and uses its own configured agent id as execution identity
+- each Worker opens its only configured Master's Task Center namespace and uses
+  its own distinct configured agent id as execution identity
 - each worker tick queries the highest-priority Assigned task for that worker
 - a selected task is claimed with one execution id and lease heartbeat
 - the task target cwd expands a leading `~`, canonicalizes through symlinks, and becomes the worker's locked execution root
 - worker live reasoning receives task goal, content, deliverables, acceptance criteria, the requested `target_cwd`, the canonical locked workspace, and path-preflight instructions
 - worker provider requests expose governed workspace tools but exclude recursive `task` and unrestricted shell tools
-- Master provider guidance binds dispatch to the configured paired Worker id,
+- Master provider guidance binds dispatch to the ordered configured Worker id set,
   rejects historical AgentBoard entries as production dispatch targets, and
   forbids putting `task(...)` lifecycle instructions into Worker task content
 - Master provider guidance tells the model that waits exceeding 3 minutes must
@@ -83,8 +84,8 @@ continue other ready work rather than dead-waiting in the current turn
   the model must inspect Task Center truth, wait, or approve/close required
   child work before final user-facing synthesis can be accepted
 - When a child `task_closed` event arrives, the runner checks every terminal-included child task with the same `parent_session_id`; if all are `Closed` and the same parent/child-set evaluation was not already recorded, it starts a follow-up Master turn in the original parent session. The turn evaluates original user objective history against each decomposed task's goal/deliverables/acceptance and accepted Worker review truth, then either creates/assigns correction or next-round child tasks, records an explicit blocker, or claims final completion only when the overall objective is verified complete.
-- Master task-tool execution independently enforces the configured paired
-  Worker id; a non-configured assignment becomes a paired failed tool result
+- Master task-tool execution independently enforces membership in the configured
+  Worker set; a non-configured assignment becomes a paired failed tool result
   and cannot mutate Task Center truth
 - Master task creation independently rejects omitted, auto, self, or
   non-configured-agent dispatch so persisted historical agents cannot be
@@ -120,6 +121,9 @@ continue other ready work rather than dead-waiting in the current turn
   noting lifecycle provider unavailability and continues other pending events;
   this never marks the blocked task successful
 - interrupted truth remains retryable until the task leaves `Interrupted`
+- multiple configured Worker runner processes may independently claim only
+  tasks assigned to their own agent id; one runner cannot consume another
+  configured Worker's task
 - Worker startup/ticks requeue only retryable `Interrupted` and
   `Rejected` tasks previously bound to that Worker
 - claim persists `TaskResumed` and `TaskHeartbeat` before provider execution
@@ -225,8 +229,8 @@ continue other ready work rather than dead-waiting in the current turn
 | 14 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke Master decision for current review-ready, blocked, interrupted, or all-children-closed parent evaluation truth | task snapshot + trigger event | task advanced, blocked observed, parent evaluated, no-op, or explicit error | `run_once` | Master live reason turn + task owner | bound |
 | 14a | `ProductionMasterRunner::handle_parent_task_closed` | `crates/freehand-runtime/src/master_runner.rs` | decide whether a child `task_closed` event completes the current parent child set and build an idempotent overall-goal evaluation request | original parent user objective history + closed child task definitions + accepted review truth | next-round task creation, explicit blocker, verified final completion, or no-op | `handle_event` | TaskRuntime + ReasonPersistence + Master live reason turn | bound |
 | 15 | `run_master_lifecycle_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one event-isolated lifecycle decision with a target-task boundary and finite round budget | selected Master config + typed lifecycle prompt + decision boundary | closed Master turn and Task Center mutation | `ProductionMasterRunner::handle_event` | provider/reason live bridge | bound |
-| 16 | `configured_worker_task_boundary_failure` | `crates/freehand-runtime/src/lib.rs` | validate Master task create/assign routing against the configured Worker topology | task tool call + configured Worker id | explicit topology failure or allowed mutation path | `execute_registry_tool_call_with_workspace` | pure boundary validator | bound |
-| 17 | `execute_registry_tool_call_with_workspace` | `crates/freehand-runtime/src/lib.rs` | enforce configured Worker task routing before task-tool mutation and route Master timer tool calls to independent timer truth | Master task/timer tool call + configured Worker id | paired failed result or owner-routed task/timer mutation | provider/reason live bridge | topology validator + task tool/timer owners | bound |
+| 16 | `configured_worker_task_boundary_failure` | `crates/freehand-runtime/src/lib.rs` | validate Master task create/assign routing against the configured Worker topology | task tool call + ordered configured Worker id set | explicit topology failure or allowed mutation path | `execute_registry_tool_call_with_workspace` | pure boundary validator | bound |
+| 17 | `execute_registry_tool_call_with_workspace` | `crates/freehand-runtime/src/lib.rs` | enforce configured Worker-set routing before task-tool mutation and route Master timer tool calls to independent timer truth | Master task/timer tool call + ordered configured Worker id set | paired failed result or owner-routed task/timer mutation | provider/reason live bridge | topology validator + task tool/timer owners | bound |
 | 18 | `run_master_mode` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP host and Master lifecycle runner under one daemon lifetime | Master bootstrap + bind | supervised Master daemon | daemon CLI | server host + `ProductionMasterRunner::run_until` | bound |
 
 ## Sync Status Against Code
@@ -234,5 +238,14 @@ continue other ready work rather than dead-waiting in the current turn
 - Task Center claim, heartbeat, execution fact, persistence, and recovery APIs are already bound
 - Master framework-only tool boundary, external-cwd delegation, and path/symlink dispatch guidance are already bound; Master delegates external repo read/search/write/report work to Worker tasks instead of directly using file/search/write tools
 - production Worker runner, Worker-specific live tool policy, periodic heartbeat, and Slave daemon startup are code-bound
+- config-selected Master guidance, TaskSpaceSnapshot, and task mutation boundary
+  consume the full ordered Worker peer set; singular configured-Worker fields
+  are physically removed
+- each Slave Worker runner consumes its one configured Master peer and keeps
+  task claim/execution identity distinct per configured Worker process
+- the controlled online verifier starts `worker-alpha`, `worker-beta`, and
+  `worker-gamma` as three distinct daemon processes, enforces one initial task
+  per Worker without cross-claim, forces reject/rework plus a next-round
+  integration task, and persists JSON proof before explicit PID cleanup
 - deterministic positive/negative tests cover idle, review-ready, blocked, missing workspace, role mismatch, and Worker tool capability boundaries
 - generated wiki must be regenerated whenever this mainline changes

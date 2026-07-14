@@ -1626,15 +1626,19 @@ fn summarize_config_query_result(
 ) -> Result<String, String> {
     match result {
         freehand_ui_protocol::UiQueryResult::ConfigStatus(status) => {
+            let paired_agents = status
+                .paired_agents
+                .iter()
+                .map(|peer| format!("{}:{}:{}", peer.agent_name, peer.agent_mode, peer.node_id))
+                .collect::<Vec<_>>()
+                .join(",");
             let output = format!(
-                "adp_config_query_ok url={} agent={} mode={} node={} paired_agent={} paired_mode={} paired_node={} provider={} provider_type={} provider_protocol={} base_url_host={} default_model={} auth_type={} auth_source={} restart_required_on_change={}",
+                "adp_config_query_ok url={} agent={} mode={} node={} paired_agents={} provider={} provider_type={} provider_protocol={} base_url_host={} default_model={} auth_type={} auth_source={} restart_required_on_change={}",
                 url,
                 status.agent_name,
                 status.agent_mode,
                 status.node_id,
-                status.paired_agent_name,
-                status.paired_agent_mode,
-                status.paired_node_id,
+                paired_agents,
                 status.provider_id,
                 status.provider_type,
                 status.provider_protocol,

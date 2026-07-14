@@ -12,6 +12,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 
 - daemon process accepts a host command to start the UI transport
 - daemon process may be started by macOS launchd through the installed freehand-daemon-launchd wrapper
+- each configured Worker process has an agent-specific launchd label, env file, stdout log, and stderr log; a shared workerS service is not the Worker pool
 - daemon bootstrap selects one agent from default config and creates one runtime dispatcher
 - daemon bootstrap routes Master mode to the runtime-backed UI host and Slave mode to the production Worker runner
 - runtime bootstrap consumes configured local and paired node topology before daemon transport starts
@@ -41,7 +42,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - daemon serves task list subscription events from runtime-published task projections after task tool mutations
 - daemon serves error-center initial subscription snapshots from runtime metadata projection
 - daemon ADP session management can create, rename, archive, list archived sessions, restore, submit turns, rollback latest effective turn, and query the resulting effective transcript
-- Slave daemon runs the production Worker claim/execute/report loop without binding WebUI or ADP transport
+- each Slave daemon runs one configured Worker's production claim/execute/report loop without binding WebUI or ADP transport
 
 ## Error Mainline
 
@@ -107,6 +108,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 | 08 | `handle_adp_connection` | `apps/freehand-server/src/lib.rs` | serve protocol-owned ADP command/query/subscribe frames and matching subscription events on one connection | WebSocket ADP connection plus shared protocol state plus dispatch port | ADP response frames and subscription events | ADP socket route | protocol state and runtime dispatch port |  |  |  | bound |
 | 08a | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | serve daemon-hosted read-only runtime query frames such as task list/history and error-center metadata | ADP query command | ADP query result or failure frame | shared ADP transport | runtime owner query bridge |  |  |  | bound |
 | 09 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | ~/.freehand/daemon.env | daemon process exec | macOS launchd | FREEHAND_DAEMON_BIN serve |  |  |  | bound |
+| 09a | `sanitize_launchd_component` | `scripts/install-launchd.sh` | derive deterministic agent-specific Worker label, env, and log components | configured Worker agent id | launchd-safe identity component | launchd worker install and restart profiles | Worker service path builder |  |  |  | bound |
 | 09 | `handle_adp_socket / RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP task list/error-center query and subscribe surfaces from runtime owner truth | ADP task or error-center query/subscribe frame | ADP task/error-center query result or subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime query/projection owner |  |  |  | bound |
 | 10 | `handle_adp_socket / RuntimeCommandDispatcher::dispatch` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP session CRUD and rollback commands through shared protocol transport and runtime owner dispatch | ADP session management command or session transcript query frame | ADP command receipt plus active/archived/effective transcript query projection | daemon-hosted ADP client | shared WebUI transport plus runtime.ui-command-dispatch |  |  |  | bound |
 | 11 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | route configured Slave mode into the production Worker runner without UI transport | selected Slave bootstrap | long-running Worker service | daemon CLI | run_blocking_worker_service |  |  |  | bound |
@@ -123,4 +125,6 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - checkpoint query projection is covered through daemon HTTP after writable mutation and after rewind
 - config-selected bootstrap is now bound in code and uses configured peer topology
 - configured Slave startup binds runtime.master-worker-loop instead of failing the app host
+- Worker launchd defaults bind identity as com.freehand.worker[ S].<agent>, worker[ S].<agent>.env, and matching agent-specific logs
+- agent-specific launchd naming has a non-mutating executable fixture, and isolated runtime proof starts three distinct Slave daemon processes while launchd-managed three-service recovery remains open
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

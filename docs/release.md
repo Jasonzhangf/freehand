@@ -272,7 +272,7 @@ apiKey = "sk-local"
 name = "master"
 mode = "master"
 node_id = "master-node"
-paired_agent = "worker"
+paired_agents = ["worker"]
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "mini27"
 
@@ -280,7 +280,7 @@ provider = "mini27"
 name = "worker"
 mode = "slave"
 node_id = "worker-node"
-paired_agent = "master"
+paired_agents = ["master"]
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "mini27"
 ```
