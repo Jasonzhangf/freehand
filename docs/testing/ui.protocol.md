@@ -76,7 +76,7 @@
   - debug-state query and subscription routing
   - protocol-owned subscription channel fanout
   - incremental turn projection updates from shared contracts
-  - model request waiting projection, typed phase kind, timing-key stability, and response-clear behavior
+  - model request waiting projection, typed phase kind, timing-key stability, and response-clear behavior, including transient provider retry/failover activity that never becomes a permanent conversation error after recovery
   - completion-schema mismatch waiting projection with `kind=SchemaRetry` and compact `schema polishing #N: issue` detail
   - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
   - structured tool display projection from read/search/write/plan/shell/generic parser output
@@ -171,7 +171,7 @@
   - checkpoint summary projection/query is code-bound as read-only UI protocol state
   - protocol-owned continuous subscription channel landed
   - incremental turn projection update methods from shared contracts landed
-  - typed model request waiting projection is landed and regression-locked for normal thinking and schema retry; tool-result continuation uses the same typed activity surface
+  - typed model request waiting projection is landed and regression-locked for normal thinking, schema retry, provider retry, and provider failover; tool-result continuation uses the same typed activity surface
   - minimal per-turn debug-state query/subscribe baseline landed
   - debug receiver-drain bridge from `debug.core` into protocol state landed
   - debug-state snapshot shape now comes from `freehand-debug`

@@ -22,6 +22,8 @@ Use this skill when implementing or debugging provider protocol behavior in Free
 - treat local reference files as the fast search surface, not as a replacement for official docs
 - keep provider wire DTOs inside provider adapters
 - map only unified semantic events into shared contracts
+- treat JSON `error:null` as absent; field presence alone is not provider failure evidence
+- retry/failover progress that can recover belongs in transient runtime/UI status, not provider semantic error truth
 - if protocol behavior changes implementation truth, update:
   - provider design docs
   - provider test design

@@ -180,6 +180,7 @@
 - WebUI tool cards now normalize by `tool_call_id`, waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
 - WebUI submit/dispatch pending state and tool waiting state now both refresh with visible elapsed time instead of static waiting text
 - WebUI model-response waiting state is driven by protocol-projected typed `model_request.kind`, not local-only guessing or non-empty detail strings; lifecycle clocks are keyed by session/turn/model phase instead of a single global `modelRequestStartedAt`
+- WebUI renders typed provider retry/failover activity as an updating Provider status row; recovered turns replace that row with normal response truth and do not retain an Error card
 - WebUI completed/failed tool cards now render protocol-projected semantic target/body while status/outcome stays in the status line, and tool-complete-to-next-model waiting has its own elapsed timer
 - WebUI current-live-turn-only wait gating is landed so historical completed turns cannot keep blinking, even when the selected-session transcript still contains protocol model_request fields from earlier rounds
 - WebUI neutral inactive waiting state is landed so text-only/restored turns cannot be mislabeled as live streaming, while inactive tool precursor rounds are projected from their protocol tool status rather than left as neutral waiting cards

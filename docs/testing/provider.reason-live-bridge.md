@@ -110,6 +110,7 @@
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
   - recoverable non-stream provider HTTP/executor failure retries ten attempts with exponential backoff starting at 1 second before explicit dispatch failure, materializes failed terminal/error truth with a concrete provider error code, and leaves no active turn hanging
   - recoverable non-stream provider HTTP/executor failure can succeed after earlier attempts; metadata records `retry_same_step` attempts without terminal `fail_turn`
+  - each actual retry and accepted fallback switch updates the same turn's typed model-request activity (`provider_retry` / `provider_failover`) before sleeping, retrying, or entering fallback; the next semantic response or terminal event clears that transient activity, and recovered turns contain no provider error event
   - OpenAI Responses HTTP 402 on the primary route immediately activates the configured Anthropic fallback; fallback success persists the fallback model and explicit route-switch metadata while retaining the primary error code, and the error-center recovery action is `failover_provider` rather than the contradictory `fail_turn`
   - retryable primary HTTP 500 exhausts ten attempts before activating the configured fallback
   - primary success does not call fallback, and adapter/callback/local invalid-config errors do not activate fallback

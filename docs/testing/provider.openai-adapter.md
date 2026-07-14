@@ -9,8 +9,11 @@
   - live HTTP/SSE executor renders the selected OpenAI-compatible protocol, captures raw response/error/stream bodies, and returns only provider-neutral semantic outputs to runtime
 - white-box plan:
   - request renderer, response parser, stream parser, partial tool accumulator, executor raw capture, executor HTTP status classification surface
+  - Responses and Chat Completions success bodies carrying a wire-level `error: null` field must not emit `ProviderSemanticOutput::Error`
+  - a non-null wire-level error object must still emit the typed provider error semantic output
 - module black-box plan:
   - adapter emits provider-neutral text/tool/usage/terminal/error outputs for both OpenAI protocols
+  - successful completed output with `error: null` remains semantically successful and cannot create a user-visible error projection, while a real error object remains observable
   - executor drives OpenAI-compatible responses and chat-completions requests through local mock HTTP/SSE endpoints without runtime owning wire paths
 - project black-box impact:
   - reason layer can consume OpenAI semantic outputs without protocol leakage

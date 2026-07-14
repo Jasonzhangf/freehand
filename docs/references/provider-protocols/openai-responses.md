@@ -68,10 +68,12 @@
 - map reasoning-bearing output into `SemanticEventKind::Reasoning`
 - map tool invocation items into `ToolCallContract`
 - map tool outputs re-entering later turns into `ReasonReq05ToolResultReentry`
+- treat an optional `error` member with JSON null as absent; only a non-null error object maps to provider error semantics
 - preserve raw events only in debug-mode retention
 
 ## Watchpoints
 
 - do not model OpenAI `responses` as plain chat messages only
+- completed responses may carry `error: null`; field presence alone is not failure evidence
 - do not leak item-level or wire-level DTOs outside the OpenAI adapter
 - when docs and observed payloads diverge, keep raw evidence and update adapter references

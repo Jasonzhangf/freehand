@@ -47,7 +47,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel, or waits for the first turn when the latest-turn stream is subscribed before any turn exists
 - ADP subscribe returns an explicit SubscriptionAccepted frame before later SubscriptionEvent frames so UI-less clients can distinguish waiting from transport failure
 - projections are read-only views over owner-written truth
-- model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection when runtime reports the provider request has been built and sent, and it clears when response/tool/usage/terminal/error projection arrives
+- model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, provider retry, provider failover, and tool-result continuation, and it clears when response/tool/usage/terminal/error projection arrives
 - terminal completion shows only final projected text
 - public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines

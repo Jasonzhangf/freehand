@@ -299,6 +299,8 @@ pub enum UiModelRequestKind {
     #[default]
     Thinking,
     SchemaRetry,
+    ProviderRetry,
+    ProviderFailover,
     ToolResultContinuation,
 }
 
@@ -307,6 +309,8 @@ impl UiModelRequestKind {
         match self {
             UiModelRequestKind::Thinking => "thinking",
             UiModelRequestKind::SchemaRetry => "schema_retry",
+            UiModelRequestKind::ProviderRetry => "provider_retry",
+            UiModelRequestKind::ProviderFailover => "provider_failover",
             UiModelRequestKind::ToolResultContinuation => "tool_result_continuation",
         }
     }
@@ -3865,6 +3869,66 @@ mod tests {
         );
         assert_eq!(responded.model_request, None);
         assert_eq!(responded.text, vec!["model response arrived".to_owned()]);
+    }
+
+    #[test]
+    fn provider_recovery_activity_updates_in_place_and_clears_on_response() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("session-provider-recovery");
+        let turn_id = TurnId::new("turn-provider-recovery");
+
+        let retrying = state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            kind: UiModelRequestKind::ProviderRetry,
+            detail: Some("provider request retry 2/10".to_owned()),
+            slave_substream_card: false,
+        });
+        assert_eq!(
+            retrying
+                .model_request
+                .as_ref()
+                .map(|activity| activity.kind),
+            Some(UiModelRequestKind::ProviderRetry)
+        );
+        assert!(retrying.errors.is_empty());
+
+        let failover = state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            kind: UiModelRequestKind::ProviderFailover,
+            detail: Some("provider route switched to fallback".to_owned()),
+            slave_substream_card: false,
+        });
+        assert_eq!(
+            failover
+                .model_request
+                .as_ref()
+                .map(|activity| activity.kind),
+            Some(UiModelRequestKind::ProviderFailover)
+        );
+        assert!(failover.errors.is_empty());
+
+        let recovered = state.apply_semantic_event(
+            AgentId::new("agent-1"),
+            "node-1".to_owned(),
+            &ReasonResp01SemanticEvent {
+                session_id,
+                turn_id,
+                trace_id: TraceId::new("trace-provider-recovery"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                kind: SemanticEventKind::Text,
+                content: "provider recovered".to_owned(),
+            },
+            false,
+        );
+        assert!(recovered.model_request.is_none());
+        assert!(recovered.errors.is_empty());
     }
 
     #[test]

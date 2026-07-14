@@ -23,12 +23,15 @@
 ## Response Mainline
 
 - OpenAI single-shot body or stream chunk becomes provider-neutral semantic output
+- optional wire `error` fields are absent when missing or JSON null; only a non-null error object becomes a provider semantic error
 - partial tool calls stay adapter-local until enough JSON exists to emit structured arguments
 - OpenAI executor owns HTTP endpoint selection, bearer auth, status/body capture, SSE reading, and callback mapping before returning provider-neutral semantic outputs
 
 ## Error Mainline
 
 - unsupported protocol, invalid JSON body, and invalid tool-argument payload are explicit adapter errors
+- a successful OpenAI-compatible response carrying `error: null` is not a provider error and must not enter turn/UI error truth
+- non-null wire error objects remain typed provider semantic errors
 - OpenAI finish reasons are semantic metadata, not Freehand completion truth
 
 ## Shared Multi-Reference Functions

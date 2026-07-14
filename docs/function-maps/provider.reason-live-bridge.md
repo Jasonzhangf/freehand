@@ -43,6 +43,7 @@
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
 - retryable non-stream HTTP/network failure retries on the primary route; after primary exhaustion, or immediately for failover-eligible non-retryable HTTP status such as 402, the bridge switches once to the configured fallback at the provider-neutral semantic request boundary
+- actual retry and fallback-switch progress is projected as typed transient model-request activity on the same turn before the bridge sleeps, retries, or enters the fallback route; a later provider semantic response replaces it, while retry/error-center evidence remains outside public conversation truth
 - the first master tool-capable request exposes the Reasonix-aligned
   framework-only master-safe registry subset through provider-neutral request
   metadata: `task` and `timer` only
@@ -77,6 +78,7 @@
 - every provider raw response/error/event body retained in debug mode is written through `ReasonPersistence::record_provider_raw_event` into the debug-only provider ledger
 - provider-neutral outputs are applied back into the active round through `ReasonTurnEngine::apply_provider_output`
 - when fallback succeeds, the active turn provider payload and persisted model truth use the fallback model, while the primary error and explicit `provider.failover_from`/`provider.failover_to` routing metadata remain queryable
+- recovered retry/failover turns contain no provider semantic error event; the temporary provider recovery activity is cleared by the normal response/terminal projection
 - every applied live semantic output is recorded through `ReasonPersistence::record_provider_output_applied`
 - tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures; runtime publishes a model-continuation waiting event after tool results are paired for the next provider request
 - master capability-boundary failures for injected non-framework tools remain

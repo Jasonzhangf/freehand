@@ -2043,6 +2043,7 @@ where
                 ],
             },
         );
+        drain_debug_events(&debug_receiver, &mut on_debug);
 
         if request.stream {
             let stream_persistence_error = RefCell::new(None::<RuntimeLiveBridgeError>);
@@ -2119,15 +2120,6 @@ where
                     retry_cap: 1,
                     pipeline_node: "RuntimeLive05ProviderError",
                 })?;
-                emit_provider_retry_debug(
-                    &debug_hub,
-                    &agent_id,
-                    &request.session_id,
-                    &turn,
-                    &info,
-                    1,
-                    1,
-                );
                 let mut failure_ctx = ProviderExecutorFailureContext {
                     engine: &engine,
                     persistence: &persistence,
@@ -2207,15 +2199,6 @@ where
                             retry_cap: retry_plan.cap,
                             pipeline_node: error_pipeline_node,
                         })?;
-                        emit_provider_retry_debug(
-                            &debug_hub,
-                            &agent_id,
-                            &request.session_id,
-                            &turn,
-                            &info,
-                            retry_index,
-                            retry_plan.cap,
-                        );
                         if should_failover
                             && let Some(fallback_provider) = selected.fallback_provider.as_ref()
                         {
@@ -2308,6 +2291,7 @@ where
                                     ],
                                 },
                             );
+                            drain_debug_events(&debug_receiver, &mut on_debug);
                             retry_index = 0;
                             continue;
                         }
@@ -2332,6 +2316,16 @@ where
                             turns.push(turn);
                             return Err(mapped);
                         }
+                        emit_provider_retry_debug(
+                            &debug_hub,
+                            &agent_id,
+                            &request.session_id,
+                            &turn,
+                            &info,
+                            retry_index,
+                            retry_plan.cap,
+                        );
+                        drain_debug_events(&debug_receiver, &mut on_debug);
                         ensure_live_not_cancelled(&request)?;
                         sleep_provider_retry(retry_plan.backoff_duration(retry_index));
                     }
@@ -8741,14 +8735,19 @@ fn apply_runtime_debug_event(
     event: &DebugEvent,
 ) {
     let mut ui = ui_state.lock().expect("lock ui state");
-    if event.envelope.semantic.pipeline_node.as_deref() == Some("RuntimeLive02ProviderRequestBuilt")
-    {
+    let model_request_kind = match event.envelope.semantic.pipeline_node.as_deref() {
+        Some("RuntimeLive02ProviderRequestBuilt") => Some(UiModelRequestKind::Thinking),
+        Some("RuntimeLive05ProviderError") => Some(UiModelRequestKind::ProviderRetry),
+        Some("RuntimeLive05ProviderFailover") => Some(UiModelRequestKind::ProviderFailover),
+        _ => None,
+    };
+    if let Some(kind) = model_request_kind {
         ui.apply_model_request_waiting_kind(UiModelRequestWaiting {
             source_agent_id: reason_agent_id.clone(),
             source_node_id: master_node_id.to_owned(),
             session_id: event.envelope.semantic.session_id.clone(),
             turn_id: event.envelope.semantic.turn_id.clone(),
-            kind: UiModelRequestKind::Thinking,
+            kind,
             detail: event
                 .snapshot
                 .as_ref()
@@ -10832,6 +10831,78 @@ provider = "old"
     }
 
     #[test]
+    fn provider_recovery_debug_updates_same_turn_activity() {
+        let ui_state = Arc::new(Mutex::new(UiProtocolState::default()));
+        let session_id = SessionId::new("session-provider-recovery");
+        let turn_id = TurnId::new("runtime-turn-provider-recovery");
+        let trace_id = TraceId::new("trace-provider-recovery");
+
+        for (pipeline_node, status_text, expected_kind) in [
+            (
+                "RuntimeLive05ProviderError",
+                "provider error retry scheduled",
+                UiModelRequestKind::ProviderRetry,
+            ),
+            (
+                "RuntimeLive05ProviderFailover",
+                "provider route switched to fallback",
+                UiModelRequestKind::ProviderFailover,
+            ),
+        ] {
+            let semantic = DebugSemanticPosition {
+                feature_id: FeatureId::new("provider.reason-live-bridge"),
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: trace_id.clone(),
+                agent_id: Some(AgentId::new("agent-1")),
+                pipeline_node: Some(pipeline_node.to_owned()),
+            };
+            let scene = DebugScenePosition {
+                crate_name: "freehand-runtime".to_owned(),
+                file: "src/lib.rs".to_owned(),
+                function: "test".to_owned(),
+                line: None,
+                artifact_path: None,
+                raw_exchange_id: None,
+            };
+            let event = DebugEvent {
+                envelope: DebugTraceEnvelope {
+                    semantic: semantic.clone(),
+                    scene: scene.clone(),
+                    input_hash: None,
+                    output_hash: None,
+                    artifact_path: None,
+                    timestamp: "1".to_owned(),
+                },
+                snapshot: Some(DebugStateSnapshot::new(
+                    semantic,
+                    scene,
+                    status_text,
+                    Vec::new(),
+                )),
+            };
+
+            apply_runtime_debug_event(&ui_state, &AgentId::new("agent-1"), "node-1", &event);
+            let query = ui_state
+                .lock()
+                .expect("lock ui")
+                .query(&UiCommand::QueryTurn {
+                    turn_id: turn_id.clone(),
+                })
+                .expect("query turn");
+            match query {
+                UiQueryResult::Turn(Some(turn)) => {
+                    let activity = turn.model_request.expect("provider recovery activity");
+                    assert_eq!(activity.kind, expected_kind);
+                    assert_eq!(activity.detail.as_deref(), Some(status_text));
+                    assert!(turn.errors.is_empty());
+                }
+                other => panic!("unexpected query result: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn live_dispatch_projects_schema_polishing_feedback_to_client_before_mismatch_completes() {
         let _cwd_lock = cwd_lock()
             .lock()
@@ -11129,6 +11200,7 @@ provider = "old"
     #[test]
     fn live_bridge_retries_recoverable_provider_errors_then_succeeds() {
         let runtime_home = temp_runtime_home();
+        let mut debug_events = Vec::new();
         let (base_url, rx, handle) = spawn_status_sequence_server(vec![
             (
                 500,
@@ -11152,7 +11224,7 @@ provider = "old"
                 ..live_request(false)
             },
             |_| {},
-            |_| {},
+            |event| debug_events.push(event.clone()),
             |_| {},
         )
         .expect("provider retry should recover");
@@ -11165,6 +11237,13 @@ provider = "old"
                 .summary
                 .contains("retry ok")
         );
+        assert!(outcome.turn.error_events.is_empty());
+        assert!(debug_events.iter().any(|event| {
+            event.envelope.semantic.pipeline_node.as_deref() == Some("RuntimeLive05ProviderError")
+                && event.snapshot.as_ref().is_some_and(|snapshot| {
+                    snapshot.status_text == "provider error retry scheduled"
+                })
+        }));
         assert_eq!(rx.iter().take(3).count(), 3);
         handle.join().expect("join provider");
         let metadata =
@@ -11175,6 +11254,72 @@ provider = "old"
             .collect::<Vec<_>>();
         assert!(retry_actions.contains(&"retry_same_step".to_owned()));
         assert!(!retry_actions.contains(&"fail_turn".to_owned()));
+
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn live_bridge_publishes_provider_retry_before_next_attempt() {
+        let runtime_home = temp_runtime_home();
+        let (base_url, request_rx, release_second_attempt, provider_handle) =
+            spawn_retry_gate_server();
+        let (debug_tx, debug_rx) = mpsc::channel::<String>();
+        let runner_home = runtime_home.clone();
+        let runner = thread::spawn(move || {
+            run_live_reason_turn_with_hooks(
+                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+                LiveReasonTurnRequest {
+                    runtime_home: runner_home,
+                    ..live_request(false)
+                },
+                |_| {},
+                |event| {
+                    if event.envelope.semantic.pipeline_node.as_deref()
+                        == Some("RuntimeLive05ProviderError")
+                    {
+                        let _ = debug_tx.send(
+                            event
+                                .snapshot
+                                .as_ref()
+                                .map(|snapshot| snapshot.status_text.clone())
+                                .unwrap_or_default(),
+                        );
+                    }
+                },
+                |_| {},
+            )
+            .expect("provider retry should recover")
+        });
+
+        let first_request = request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("first provider request");
+        assert!(first_request.starts_with("POST /v1/messages "));
+        let retry_status = debug_rx.recv_timeout(Duration::from_secs(2));
+        release_second_attempt
+            .send(())
+            .expect("release second provider attempt");
+        let second_request = request_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("second provider request");
+        assert!(second_request.starts_with("POST /v1/messages "));
+        let outcome = runner.join().expect("join live runner");
+        provider_handle.join().expect("join provider");
+
+        assert_eq!(
+            retry_status.as_deref(),
+            Ok("provider error retry scheduled"),
+            "provider retry status must be published while the retry is still pending"
+        );
+        assert!(outcome.turn.error_events.is_empty());
+        assert!(
+            outcome
+                .turn
+                .terminal_event
+                .expect("terminal")
+                .summary
+                .contains("retry gate ok")
+        );
 
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
@@ -11229,6 +11374,7 @@ provider = "old"
                 .summary
                 .contains("fallback completed")
         );
+        assert!(outcome.turn.error_events.is_empty());
 
         let metadata =
             metadata_ledger_records(&runtime_home, "agent-live", &SessionId::new("session-live"));
@@ -11309,6 +11455,7 @@ provider = "old"
                 .map(|terminal| terminal.status.clone()),
             Some(TerminalStatus::Success)
         );
+        assert!(outcome.turn.error_events.is_empty());
 
         let metadata =
             metadata_ledger_records(&runtime_home, "agent-live", &SessionId::new("session-live"));
@@ -12197,6 +12344,66 @@ provider = "old"
             }
         });
         (base_url, rx, handle)
+    }
+
+    fn spawn_retry_gate_server() -> (
+        String,
+        mpsc::Receiver<String>,
+        mpsc::Sender<()>,
+        thread::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let base_url = format!("http://{}", listener.local_addr().expect("addr"));
+        let (request_tx, request_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            let responses = [
+                (
+                    500,
+                    "application/json",
+                    r#"{"type":"error","error":{"type":"api_error","message":"first upstream failure"}}"#
+                        .to_owned(),
+                ),
+                (
+                    200,
+                    "application/json",
+                    complete_single_response("retry gate ok"),
+                ),
+            ];
+            for (index, (status, content_type, response_body)) in responses.into_iter().enumerate()
+            {
+                if index == 1 {
+                    release_rx
+                        .recv_timeout(Duration::from_secs(3))
+                        .expect("release second attempt");
+                }
+                let (mut stream, _) = listener.accept().expect("accept");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .expect("timeout");
+                let mut raw = Vec::new();
+                let mut buffer = [0_u8; 1024];
+                loop {
+                    let read = stream.read(&mut buffer).expect("read");
+                    if read == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&buffer[..read]);
+                    if request_is_complete(&raw) {
+                        break;
+                    }
+                }
+                request_tx
+                    .send(String::from_utf8(raw).expect("utf8"))
+                    .expect("send request");
+                let response = format!(
+                    "HTTP/1.1 {status} OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\n\r\n{response_body}",
+                    response_body.len()
+                );
+                stream.write_all(response.as_bytes()).expect("write");
+            }
+        });
+        (base_url, request_rx, release_tx, handle)
     }
 
     fn request_is_complete(raw: &[u8]) -> bool {

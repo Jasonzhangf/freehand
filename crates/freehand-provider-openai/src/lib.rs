@@ -437,7 +437,7 @@ impl OpenAiAdapter {
             events.push(terminal_event_from_reason(status));
         }
 
-        if let Some(error) = value.get("error") {
+        if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
             events.push(ProviderAdapterEvent::Error(error_hint_from_value(error)));
         }
         Ok(events)
@@ -474,7 +474,7 @@ impl OpenAiAdapter {
         if let Some(reason) = finish_reason {
             events.push(terminal_event_from_reason(&reason));
         }
-        if let Some(error) = value.get("error") {
+        if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
             events.push(ProviderAdapterEvent::Error(error_hint_from_value(error)));
         }
         Ok(events)
@@ -1105,6 +1105,85 @@ mod tests {
             )
             .expect("parsed");
         assert_eq!(outputs.len(), 5);
+    }
+
+    #[test]
+    fn responses_success_with_null_error_does_not_emit_error_semantics() {
+        let mut adapter = OpenAiAdapter::new();
+        let outputs = adapter
+            .parse_response(
+                &ctx(),
+                ProviderProtocol::OpenAiResponses,
+                r#"{
+                    "status":"completed",
+                    "error":null,
+                    "output":[
+                        {"type":"message","content":[{"type":"output_text","text":"done"}]}
+                    ]
+                }"#,
+            )
+            .expect("parsed");
+
+        assert!(outputs.iter().any(|output| matches!(
+            output,
+            ProviderSemanticOutput::SemanticEvent(event) if event.content == "done"
+        )));
+        assert!(outputs.iter().any(|output| matches!(
+            output,
+            ProviderSemanticOutput::Terminal(event) if event.status == TerminalStatus::Success
+        )));
+        assert!(
+            !outputs
+                .iter()
+                .any(|output| matches!(output, ProviderSemanticOutput::Error(_)))
+        );
+    }
+
+    #[test]
+    fn responses_non_null_error_still_emits_error_semantics() {
+        let mut adapter = OpenAiAdapter::new();
+        let outputs = adapter
+            .parse_response(
+                &ctx(),
+                ProviderProtocol::OpenAiResponses,
+                r#"{
+                    "status":"failed",
+                    "error":{"code":"rate_limit_exceeded","message":"retry later"},
+                    "output":[]
+                }"#,
+            )
+            .expect("parsed");
+
+        assert!(outputs.iter().any(|output| matches!(
+            output,
+            ProviderSemanticOutput::Error(event)
+                if event.error.code == "rate_limit_exceeded"
+                    && event.error.message == "retry later"
+        )));
+    }
+
+    #[test]
+    fn chat_success_with_null_error_does_not_emit_error_semantics() {
+        let mut adapter = OpenAiAdapter::new();
+        let outputs = adapter
+            .parse_response(
+                &ctx(),
+                ProviderProtocol::OpenAiChatCompletions,
+                r#"{
+                    "choices":[{
+                        "message":{"content":"done"},
+                        "finish_reason":"stop"
+                    }],
+                    "error":null
+                }"#,
+            )
+            .expect("parsed");
+
+        assert!(
+            !outputs
+                .iter()
+                .any(|output| matches!(output, ProviderSemanticOutput::Error(_)))
+        );
     }
 
     #[test]

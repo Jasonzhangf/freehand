@@ -1737,6 +1737,10 @@ mod tests {
         assert!(js_body.contains("turnIsWaitingForModelResponse"));
         assert!(js_body.contains("schema polishing"));
         assert!(js_body.contains("thinking after tool result"));
+        assert!(js_body.contains("provider retry"));
+        assert!(js_body.contains("provider failover"));
+        assert!(js_body.contains("provider_retry"));
+        assert!(js_body.contains("provider_failover"));
         assert!(!js_body.contains("turnIsWaitingForModel("));
         assert!(js_body.contains("rememberInputHistory"));
         assert!(js_body.contains("recallInputHistory"));

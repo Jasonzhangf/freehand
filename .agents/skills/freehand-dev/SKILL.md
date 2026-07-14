@@ -194,6 +194,8 @@ Use this skill for any non-trivial work in this repo.
 - New features and bug fixes both require lifecycle thinking, not just local code patches.
 - In provider work, preserve raw provider events in debug mode and rely on unified semantic events for normal operation.
 - In provider work, read local official protocol snapshots under `docs/references/provider-protocols/` before inventing wire behavior.
+- Provider retry/failover that later recovers is transient same-turn `UiModelRequestActivity`; publish it before sleeping, retrying, or entering fallback, then let the next semantic response clear it. Do not materialize intermediate retry/failover as `turn.error_events` or a persistent WebUI Error card.
+- In OpenAI-compatible adapters, JSON `error:null` is absent, not failure evidence. Only non-null wire error objects may emit provider error semantics.
 - In reason-turn work, provider `finish_reason=stop/end_turn` is not enough to stop. Completion schema decides stop.
 - In control-status work, the simple user-input stop field is `simple_question`, not `simple_request`. `simple_question=true` means the previous user input is a simple question/answer request and may allow natural stop; do not add aliases or fallback fields for this decision.
 - Reason context planning follows locked Reasonix/Codex direction:

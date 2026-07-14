@@ -5939,3 +5939,34 @@ Current real root cause split:
 - remaining:
   - real-provider crash/recovery/reassignment/takeover remains open.
   - cross-machine multi-peer transport remains open.
+
+# 2026-07-14 Provider transient retry UI recovery closeout
+
+- user correction:
+  - Provider errors during retry/failover are transient status updates, not durable user-visible turn errors.
+  - Recovered turns must update in place: show provider retry/failover while pending, then clear it when normal provider output arrives.
+  - Only exhausted provider routes may materialize a failed turn/Error card.
+- root cause 1:
+  - OpenAI-compatible successful Responses payloads can contain `"error": null`.
+  - The adapter treated field presence as error evidence, so `error:null` emitted `ProviderSemanticOutput::Error` and created persistent `openai_error` / UI Error truth on a successful turn.
+- root cause 2:
+  - Runtime emitted provider retry debug events but drained the debug receiver only after the backoff/next provider output path, so true transient retry status was not reliably observable in WebUI during the retry window.
+- implementation:
+  - OpenAI Responses and Chat Completions parsers now ignore JSON-null `error` and still emit typed errors for non-null error objects.
+  - UI protocol added `UiModelRequestKind::ProviderRetry` and `ProviderFailover`; WebUI renders them as a Provider status row.
+  - Runtime maps `RuntimeLive05ProviderError` / `RuntimeLive05ProviderFailover` to transient same-turn model-request activity and drains debug immediately after provider request built, retry scheduled, and failover switch events.
+  - Recovered retry/failover turns keep `turn.error_events` empty; normal semantic response clears transient provider activity.
+  - Added `scripts/verify-provider-recovery-webui-online.mjs` fixture verifier: first two OpenAI Responses requests return HTTP 500, third returns `status=completed,error=null`, with S-profile config/env restored in `finally`.
+- evidence so far:
+  - `cargo test -p freehand-provider-openai` -> 11 passed.
+  - `cargo test -p freehand-ui-protocol provider_recovery_activity_updates_in_place_and_clears_on_response` passed.
+  - `cargo test -p freehand-runtime provider_recovery_debug_updates_same_turn_activity` passed.
+  - `cargo test -p freehand-runtime live_bridge_retries_recoverable_provider_errors_then_succeeds` passed.
+  - `cargo test -p freehand-runtime live_bridge_publishes_provider_retry_before_next_attempt` passed.
+  - `cargo test -p freehand-runtime live_bridge_failover_` -> 2 passed.
+  - `cargo test -p freehand-server webui_smoke_renders_shell_and_asset_routes` passed.
+  - Online S-profile verifier passed: `artifacts/webui-online/provider-recovery-20260714T092758-10239/summary.json` has `requestCount=3`, `providerRetryVisible=true`, `finalNoOpenAiRequestFailed=true`, `adpTerminalStatus=Success`, `adpErrors=[]`.
+  - During-retry DOM showed Provider/provider retry row with no Error text; final DOM cleared provider status and showed normal final response.
+  - Post-verifier S-profile restored to `provider=cc`, `provider_protocol=responses`, `base_url_host=api.anyint.ai`, health `ok`, fixture env grep empty.
+- remaining before commit:
+  - run fmt/clippy/mainline/gates/diff checks after final doc/memory updates.

@@ -1925,7 +1925,11 @@ function buildModelRequestRenderRow(turn, lifecycle) {
   const label = modelRequestLabel(turn);
   return {
     kind: "system",
-    title: label === "schema polishing" ? "Schema" : "Model",
+    title: label.startsWith("provider ")
+      ? "Provider"
+      : label === "schema polishing"
+        ? "Schema"
+        : "Model",
     body: [turn.model_request.detail || "Waiting for model response."],
     status: lifecycle.elapsed || "0s",
     identity: { turnId: turn.turn_id },
@@ -2033,6 +2037,12 @@ function modelRequestPhase(turn) {
   if (kind === "toolresultcontinuation" || kind === "tool_result_continuation") {
     return "tool_result_continuation";
   }
+  if (kind === "providerretry" || kind === "provider_retry") {
+    return "provider_retry";
+  }
+  if (kind === "providerfailover" || kind === "provider_failover") {
+    return "provider_failover";
+  }
   return "thinking";
 }
 
@@ -2051,6 +2061,12 @@ function modelRequestLabel(turn) {
   }
   if (kind === "toolresultcontinuation" || kind === "tool_result_continuation") {
     return "thinking after tool result";
+  }
+  if (kind === "providerretry" || kind === "provider_retry") {
+    return "provider retry";
+  }
+  if (kind === "providerfailover" || kind === "provider_failover") {
+    return "provider failover";
   }
   return "thinking";
 }
