@@ -176,6 +176,9 @@ FREEHAND_DAEMON_BIN="$daemon_bin"
 FREEHAND_PAIR_TOKEN_SHARED="$pair_token"
 PATH="$bin_dir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 EOF
+    if [[ -n "${FREEHAND_PROVIDER_RETRY_BACKOFF_MS:-}" ]]; then
+      printf 'FREEHAND_PROVIDER_RETRY_BACKOFF_MS="%s"\n' "$FREEHAND_PROVIDER_RETRY_BACKOFF_MS" >>"$env_file"
+    fi
     if [[ "$service_role" == "master" ]]; then
       printf 'FREEHAND_DAEMON_BIND="%s"\n' "$bind_addr" >>"$env_file"
     fi
@@ -201,6 +204,11 @@ EOF
     upsert_env_var "FREEHAND_DAEMON_WORKDIR" "$workdir"
     upsert_env_var "FREEHAND_DAEMON_BIN" "$daemon_bin"
     upsert_env_var "FREEHAND_PAIR_TOKEN_SHARED" "$pair_token"
+    if [[ -n "${FREEHAND_PROVIDER_RETRY_BACKOFF_MS:-}" ]]; then
+      upsert_env_var "FREEHAND_PROVIDER_RETRY_BACKOFF_MS" "$FREEHAND_PROVIDER_RETRY_BACKOFF_MS"
+    else
+      remove_env_var "FREEHAND_PROVIDER_RETRY_BACKOFF_MS"
+    fi
     if [[ "$service_role" == "master" ]]; then
       upsert_env_var "FREEHAND_DAEMON_BIND" "$bind_addr"
     else

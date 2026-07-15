@@ -1,24 +1,35 @@
 package com.freehand.android.ui
 
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.util.Log
+import android.view.Gravity
+import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.freehand.android.data.ClientConfig
-import com.freehand.android.data.HostConfig
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -31,6 +42,9 @@ import org.json.JSONObject
  */
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
+    private lateinit var startupOverlay: FrameLayout
+    private lateinit var startupStatus: TextView
+    private var startupAnimator: AnimatorSet? = null
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var nativeAttachmentKind: String? = null
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
@@ -77,10 +91,29 @@ class MainActivity : AppCompatActivity() {
                     super.onPageFinished(view, url)
                     reportCanonicalWebUiLayout(view)
                 }
+
+                override fun onReceivedError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    error: WebResourceError?,
+                ) {
+                    super.onReceivedError(view, request, error)
+                    if (request?.isForMainFrame == true) {
+                        showStartupError(error?.description?.toString() ?: "WebUI load failed")
+                    }
+                }
             }
         }
         root.addView(
             webView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        startupOverlay = buildStartupOverlay()
+        root.addView(
+            startupOverlay,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -209,13 +242,125 @@ class MainActivity : AppCompatActivity() {
 
     private fun reportCanonicalWebUiLayout(view: WebView?) {
         view?.evaluateJavascript(
-            "({" +
-                "webuiShell:!!document.querySelector('[data-webui-shell=true]')," +
+            "(" +
+                "function(){" +
+                "const shell=document.querySelector('[data-webui-shell=true]');" +
+                "const shellStyle=shell?window.getComputedStyle(shell):null;" +
+                "return {" +
+                "webuiShell:!!shell," +
                 "layoutClient:document.body.dataset.layoutClient||''," +
-                "layoutShape:document.body.dataset.layoutShape||''" +
-                "})",
-        ) { value -> Log.i(WEBUI_LAYOUT_TAG, value ?: "null") }
+                "layoutShape:document.body.dataset.layoutShape||''," +
+                "readyState:document.readyState||''," +
+                "stylesheetCount:(document.styleSheets||[]).length," +
+                "webuiCssApplied:!!(shellStyle&&shellStyle.display==='grid')," +
+                "webuiJsReady:document.body.dataset.webuiJsReady==='true'," +
+                "stylesheetHrefs:Array.from(document.styleSheets||[]).map(function(sheet){return sheet.href||'inline';}).slice(0,4)" +
+                "};" +
+                "}" +
+                ")()",
+        ) { value ->
+            Log.i(WEBUI_LAYOUT_TAG, value ?: "null")
+            val verdict = WebUiStartupGate.evaluate(value)
+            if (verdict.ready) {
+                dismissStartupOverlay()
+            } else {
+                showStartupError(verdict.status)
+            }
+        }
     }
+
+    private fun buildStartupOverlay(): FrameLayout {
+        val overlay = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(23, 23, 23))
+            contentDescription = "Freehand is starting"
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        val logo = ImageView(this).apply {
+            setImageResource(com.freehand.android.R.mipmap.ic_launcher)
+            contentDescription = getString(com.freehand.android.R.string.app_name)
+        }
+        content.addView(
+            logo,
+            LinearLayout.LayoutParams(dp(76), dp(76)).apply { bottomMargin = dp(18) },
+        )
+        content.addView(
+            TextView(this).apply {
+                text = getString(com.freehand.android.R.string.app_name)
+                setTextColor(Color.rgb(245, 245, 245))
+                textSize = 24f
+                gravity = Gravity.CENTER
+            },
+        )
+        startupStatus = TextView(this).apply {
+            text = "Connecting to workspace"
+            setTextColor(Color.rgb(163, 163, 163))
+            textSize = 13f
+            gravity = Gravity.CENTER
+        }
+        content.addView(
+            startupStatus,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(8) },
+        )
+        content.addView(
+            ProgressBar(this).apply {
+                isIndeterminate = true
+                indeterminateTintList = ColorStateList.valueOf(Color.rgb(37, 99, 235))
+            },
+            LinearLayout.LayoutParams(dp(26), dp(26)).apply { topMargin = dp(20) },
+        )
+        overlay.addView(
+            content,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER,
+            ),
+        )
+        startupAnimator = AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(logo, View.SCALE_X, 1f, 1.06f),
+                ObjectAnimator.ofFloat(logo, View.SCALE_Y, 1f, 1.06f),
+                ObjectAnimator.ofFloat(logo, View.ALPHA, 0.72f, 1f),
+            )
+            duration = 900L
+            childAnimations.forEach { animator ->
+                if (animator is ObjectAnimator) {
+                    animator.repeatCount = ObjectAnimator.INFINITE
+                    animator.repeatMode = ObjectAnimator.REVERSE
+                }
+            }
+            start()
+        }
+        return overlay
+    }
+
+    private fun dismissStartupOverlay() {
+        if (!::startupOverlay.isInitialized || startupOverlay.parent == null) return
+        startupStatus.text = "Workspace ready"
+        startupOverlay.animate()
+            .alpha(0f)
+            .setDuration(180L)
+            .withEndAction {
+                startupAnimator?.cancel()
+                startupAnimator = null
+                (startupOverlay.parent as? FrameLayout)?.removeView(startupOverlay)
+            }
+            .start()
+    }
+
+    private fun showStartupError(message: String) {
+        if (!::startupStatus.isInitialized || startupOverlay.parent == null) return
+        startupStatus.text = message
+        startupStatus.setTextColor(Color.rgb(203, 213, 225))
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun applyInsets(root: FrameLayout) {
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
@@ -228,6 +373,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         fileChooserCallback?.onReceiveValue(null)
         fileChooserCallback = null
+        startupAnimator?.cancel()
+        startupAnimator = null
         if (::webView.isInitialized) webView.destroy()
         super.onDestroy()
     }
@@ -237,6 +384,3 @@ class MainActivity : AppCompatActivity() {
         private const val WEBUI_LAYOUT_TAG = "FreehandWebUiLayout"
     }
 }
-
-private val HostConfig.webUiUrl: String
-    get() = "$baseUrl/?client=android-webview"

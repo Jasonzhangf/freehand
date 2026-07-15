@@ -51,7 +51,6 @@ pub enum ProductionWorkerTickOutcome {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkerRetryKind {
-    Interrupted,
     ReviewRejected,
 }
 
@@ -362,7 +361,6 @@ impl ProductionWorkerRunner {
             .map_err(task_center_error)?
             .into_iter()
             .find_map(|task| match task.status {
-                TaskStatus::Interrupted => Some((task, WorkerRetryKind::Interrupted)),
                 TaskStatus::Rejected => Some((task, WorkerRetryKind::ReviewRejected)),
                 _ => None,
             });
@@ -554,12 +552,12 @@ fn worker_task_prompt(
     retry_kind: Option<WorkerRetryKind>,
 ) -> String {
     let retry_context = match retry_kind {
-        Some(WorkerRetryKind::Interrupted) => {
-            "\nRetry context:\nThe previous execution was interrupted. Inspect persisted workspace state, continue safely, and re-run verification before submission.".to_owned()
-        }
         Some(WorkerRetryKind::ReviewRejected) => format!(
             "\nReview rejection:\nReason: {}\nRequired changes:\n{}",
-            task.review.reject_reason.as_deref().unwrap_or("not provided"),
+            task.review
+                .reject_reason
+                .as_deref()
+                .unwrap_or("not provided"),
             render_lines(&task.review.next_requirements),
         ),
         None => String::new(),

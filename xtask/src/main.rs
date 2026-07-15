@@ -1944,13 +1944,13 @@ fn verify_mainline_manifest_links(root: &Path) -> Result<(), String> {
             "docs/architecture/feature-map.md",
         )?;
         for row in &doc.call_table {
-            if let Some(resource_operation) = &row.resource_operation {
-                if !doc.resource_operations.contains(resource_operation) {
-                    return Err(format!(
-                        "mainline `{}` step `{}` references resource_operation `{}` that is not listed in resource_operations",
-                        doc.feature_id, row.step, resource_operation
-                    ));
-                }
+            if let Some(resource_operation) = &row.resource_operation
+                && !doc.resource_operations.contains(resource_operation)
+            {
+                return Err(format!(
+                    "mainline `{}` step `{}` references resource_operation `{}` that is not listed in resource_operations",
+                    doc.feature_id, row.step, resource_operation
+                ));
             }
         }
     }
@@ -2934,12 +2934,12 @@ fn validate_coverage_command_entry(
     }
     match parts[0] {
         "cargo" => {
-            if let Some(package) = command_package_arg(&parts) {
-                if !package_names.contains(package) {
-                    return Err(format!(
-                        "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage references unknown cargo package `{package}`"
-                    ));
-                }
+            if let Some(package) = command_package_arg(&parts)
+                && !package_names.contains(package)
+            {
+                return Err(format!(
+                    "test design `{rel_path}` Resource Operation Test Coverage row for bound `{operation_id}` {column_name} coverage references unknown cargo package `{package}`"
+                ));
             }
         }
         "make" => {

@@ -9,29 +9,30 @@
   "request_mainline": [
     "MainActivity::onCreate loads app-owned daemon endpoint config",
     "DaemonConnectionConfig accepts only active Tailscale profile identity plus host and port; removed transport, relay, and alternate endpoint fields are explicit errors",
-    "MainActivity::onCreate immediately loads the canonical daemon WebUI URL with client=android-webview",
+    "MainActivity::onCreate renders a native neutral startup overlay before WebView navigation and immediately loads the canonical version-addressed daemon WebUI URL with client=android-webview",
     "WebUI owns ADP query/subscribe/command, settings, lifecycle dashboard, transcript, composer, and error rendering",
     "Android only exposes the system file-picker bridge for WebUI attachment controls"
   ],
   "response_mainline": [
     "daemon root returns the canonical WebUI shell and mobile layout attributes",
-    "WebViewClient::onPageFinished logs canonical WebUI selector/layout evidence",
+    "WebViewClient::onPageFinished logs canonical WebUI selector/layout/asset readiness evidence and removes the startup overlay only after WebUiStartupGate accepts the Android WebUI shell, applied stylesheet, and module-JavaScript probe",
     "Android file-picker result returns URI metadata to window.__freehandAndroidAttachmentSelected"
   ],
   "error_mainline": [
     "config parse/load failure is an explicit Android startup failure",
     "unknown config fields, including removed ADP/SSE/command path or relay fields, are rejected rather than ignored or migrated",
     "WebView network failure remains a WebView/network failure; Android does not render local fallback UI",
-    "missing FreehandWebUiLayout evidence is a device-validation failure"
+    "missing FreehandWebUiLayout evidence is a device-validation failure",
+    "missing, malformed, wrong-client, stylesheet-not-applied, or WebUI-JavaScript-not-ready startup probes leave the startup state visible instead of pretending the app is ready"
   ],
   "call_table": [
     {
       "step": "01",
       "symbol_path": "com.freehand.android.ui.MainActivity::onCreate",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "load config, configure WebView, attach file picker bridge, and load canonical daemon WebUI",
+      "responsibility": "load config, render startup overlay, configure WebView, attach file picker bridge, and load the version-addressed canonical daemon WebUI",
       "input_semantic": "activity intent",
-      "output_semantic": "WebView loading http://<host>:<port>/?client=android-webview",
+      "output_semantic": "startup overlay plus WebView loading http://<host>:<port>/?client=android-webview&v=<bootstrap-version>",
       "caller": "Android framework",
       "callee": "ClientConfig::store, DaemonConnectionConfigStore::load, DaemonConnectionConfig::activeHostConfig, WebView::loadUrl",
       "binding_status": "bound"
@@ -60,11 +61,11 @@
     },
     {
       "step": "04",
-      "symbol_path": "com.freehand.android.data.HostConfig::baseUrl",
+      "symbol_path": "com.freehand.android.data.HostConfig::baseUrl / com.freehand.android.data.HostConfig::webUiUrl",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt",
-      "responsibility": "build daemon WebUI origin",
+      "responsibility": "build daemon origin and version-addressed Android WebUI URL",
       "input_semantic": "host and port",
-      "output_semantic": "http://<host>:<port>",
+      "output_semantic": "http://<host>:<port> plus version-addressed client=android-webview URL",
       "caller": "MainActivity::onCreate",
       "callee": "pure URL builder",
       "binding_status": "bound"
@@ -106,11 +107,22 @@
       "step": "08",
       "symbol_path": "com.freehand.android.ui.MainActivity::reportCanonicalWebUiLayout",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "log canonical WebUI selector/layout evidence",
+      "responsibility": "log canonical WebUI selector/layout/style/script evidence and hide startup overlay only after canonical shell plus asset readiness",
       "input_semantic": "loaded page DOM",
-      "output_semantic": "FreehandWebUiLayout logcat row",
+      "output_semantic": "FreehandWebUiLayout logcat row plus startup overlay readiness decision",
       "caller": "WebViewClient::onPageFinished",
-      "callee": "WebView JavaScript",
+      "callee": "WebView JavaScript / WebUiStartupGate",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08a",
+      "symbol_path": "com.freehand.android.ui.WebUiStartupGate::isCanonicalProbe / com.freehand.android.ui.WebUiStartupGate::evaluate",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/WebUiStartupGate.kt",
+      "responsibility": "accept only canonical Android WebUI shell, applied stylesheet, and module-JS-ready probe before native startup overlay removal",
+      "input_semantic": "WebView DOM/CSS/JS readiness probe JSON",
+      "output_semantic": "ready/not-ready decision plus status text",
+      "caller": "MainActivity::reportCanonicalWebUiLayout",
+      "callee": "pure JSON gate",
       "binding_status": "bound"
     },
     {

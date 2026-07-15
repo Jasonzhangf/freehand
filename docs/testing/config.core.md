@@ -16,6 +16,8 @@
   - resolve provider auth source without leaking secret projection
   - preserve safe auth source kind on selected provider config for downstream UI-safe status projection
   - validate and persist owner-backed provider/model update requests through the canonical config path
+  - validate and persist owner-backed Master Worker resource-count updates through the canonical config path
+  - keep active Worker resources in `1..=5`, preserve declared peer order, clone the first Worker as the shared-provider template when growing, and remove trailing reciprocal Worker tables when shrinking
   - validate restart-only config activation
 - white-box plan:
   - parse and validate agent/provider schema, ordered reciprocal multi-peer topology invariants, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
@@ -24,6 +26,9 @@
   - reject fallback references that are missing, disabled, or equal to the primary provider
   - assert provider/model update accepts valid env-var auth, writes only `api_key_env`, returns a restart-required selected-agent projection, and does not write resolved API-key values
   - assert invalid provider update input fails before overwrite so the original config bytes remain unchanged
+  - assert a resource-count update grows one Master from one to five reciprocal Workers, gives every active Worker the Master provider/fallback bindings, and returns a restart-required selected-agent projection
+  - assert shrinking removes only trailing Workers owned by that Master and preserves surviving peer order
+  - assert zero, six, unknown-agent, and non-Master resource-count updates fail before overwrite so original config bytes remain unchanged
   - positive peer-topology coverage locks one Master plus three ordered Workers and selected-agent projection of every peer name, mode, node id, allowed IP, and pair-token env
   - negative peer-topology coverage locks empty peer sets, empty peer names, duplicate peers, self-pairing, missing peers, same-mode peers, non-reciprocal peers, and a Slave bound to multiple Masters
   - legacy singular `paired_agent` is rejected as an unknown field; no compatibility parser or runtime fallback exists
@@ -34,6 +39,7 @@
   - CLI startup path consumes one named agent configuration and projects selected provider metadata without exposing API key
   - runtime/UI config status queries can consume `auth_source` without reading raw provider auth fields or resolved API keys
   - runtime/UI config update commands can persist provider/model edits only through `config.core` and must surface restart-required semantics instead of hot-reload success
+  - runtime/UI Agent resource controls can persist only config-owned reciprocal topology; frontend state cannot invent capacity
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - config fixtures under crate test fixtures
@@ -45,4 +51,5 @@
   - `cargo test -p freehand-config -- --nocapture` covers the three-Worker positive path plus legacy singular, duplicate, and multi-Master Worker negative paths
   - selected-provider auth source is regression-locked for inline and env configurations
   - provider/model update positive and invalid-input no-overwrite paths are regression-locked
+  - Agent resource-count grow/shrink plus out-of-range/no-overwrite paths are regression-locked
   - migrated mainline-call source and generated wiki are kept in sync with this test design

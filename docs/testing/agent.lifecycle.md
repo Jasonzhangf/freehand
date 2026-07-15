@@ -46,6 +46,10 @@
 - `blocked` state from typed blocker fact
 - current activity, last activity, elapsed time, task/execution/turn binding, and model/tool/error counters
 - worker progress, review_ready, retrying, approved, and closed task lifecycle projections keep the current execution id visible until terminal close
+- `TaskInterrupted` releases the former Worker resource: AgentBoard projects
+  `state=idle`, clears current task/execution/turn binding, and retains one
+  `last_activity.kind=interrupted` record naming the released task. A later
+  takeover assignment must not restore the former Worker's running state
 - persisted lifecycle snapshot survives reboot and keeps the same execution id
   visible for Phase 2A verification
 - raw assistant prose is not accepted as lifecycle input
@@ -65,6 +69,8 @@
 - runtime can query one AgentLifecycleSnapshot by agent id
 - CLI/ADP headless sample can query lifecycle truth for a known agent id
 - malformed lifecycle event returns explicit validation error and does not mutate truth
+- interrupted task truth cannot leave the former Worker projected as running
+  after its lease/execution has ended
 - CLI/ADP Phase 2A sample can query lifecycle truth for the worker across
   claim, blocked, recovering, review/retry, approved, and closed phases
 

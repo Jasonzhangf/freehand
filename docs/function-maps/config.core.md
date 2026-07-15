@@ -13,6 +13,8 @@
   - `LoadedConfig::providers`
   - `update_provider_config_in_path`
   - `ProviderConfigUpdate`
+  - `update_agent_resource_config_in_path`
+  - `AgentResourceConfigUpdate`
   - `parse_config`
   - `validate_config`
 
@@ -25,6 +27,7 @@
 - selected agent references one primary `[providers.<id>]` entry and may reference one distinct fallback provider through `fallback_provider`
 - validation resolves startup mode, ordered unique reciprocal multi-peer bindings, primary/fallback provider bindings, explicit protocol declarations, auth-source invariants, and unknown-field rejection
 - provider/model update requests enter only through `ProviderConfigUpdate` and `update_provider_config_in_path`; the config owner validates provider id, provider type, protocol, base URL, model, and env-var auth before persistence
+- Agent resource-count update requests enter only through `AgentResourceConfigUpdate` and `update_agent_resource_config_in_path`; the config owner validates Master-only intent and `1..=5` Worker resources before persistence
 
 ## Response Mainline
 
@@ -32,6 +35,7 @@
 - selected agent runtime configuration includes explicit local node id plus an ordered typed peer list containing peer name, mode, node id, allowed IP, and pair-token env metadata for runtime bootstrap
 - selected provider runtime configuration carries safe auth source kind (`inline` or `env`) separately from the resolved API key so UI projections do not infer or expose secret values
 - provider/model updates persist to the canonical config path with env-var auth only, return a selected-agent safe projection, and mark restart-required semantics for runtime/UI consumers
+- Agent resource-count updates persist reciprocal Master/Worker topology to the canonical config path, preserve surviving peer order, clone the first Worker as the shared-provider template when growing, remove trailing Worker tables when shrinking, and return a restart-required selected-agent projection
 - restart is required before config changes take effect
 
 ## Error Mainline
@@ -39,6 +43,7 @@
 - missing config, invalid agent selection, empty/duplicate/self peer, missing peer, same-mode peer, non-reciprocal relation, Master without a Worker, Slave with zero or multiple Masters, invalid primary/fallback provider binding, invalid auth source, unknown provider fields, disabled provider selection, or permission mismatch return explicit errors
 - legacy singular `paired_agent` is rejected by the typed parser; only `paired_agents` is valid
 - invalid provider update inputs or missing env-var auth fail before overwrite; failed updates must leave the previous config bytes intact
+- invalid Agent resource-count updates, non-Master targets, and missing targets fail before overwrite; failed updates must leave the previous config bytes intact
 - fallback provider selection fails explicitly when the referenced provider is missing, disabled, or equal to the primary provider
 - API keys and pair token values are runtime-only fields and must not enter UI-safe config status projection
 
@@ -62,6 +67,8 @@
 | 10 | `update_provider_config_in_path` | `crates/freehand-config/src/lib.rs` | validate, apply, reparse, select, and atomically persist provider/model config changes | config path + provider update | selected agent projection from saved config | runtime.ui-command-dispatch / tests | config persistence owner | bound |
 | 11 | `persist_config_atomically` | `crates/freehand-config/src/lib.rs` | write new config through temp file plus rename after validation succeeds | validated TOML text | replaced canonical config file | `update_provider_config_in_path` | filesystem persistence | bound |
 | 12 | `select_provider_for_agent` | `crates/freehand-config/src/lib.rs` | resolve one typed primary or fallback provider binding and its independent auth source | provider registry + agent name + provider id + route role | selected provider runtime config or route-specific explicit config error | `LoadedConfig::select_agent` | provider registry/auth resolver | bound |
+| 13 | `AgentResourceConfigUpdate` | `crates/freehand-config/src/lib.rs` | carry owner-backed Master Worker resource-count intent | agent name + resource count | validated config-owner update input | runtime.ui-command-dispatch | config owner DTO | bound |
+| 14 | `update_agent_resource_config_in_path` | `crates/freehand-config/src/lib.rs` | validate, apply, reparse, select, and atomically persist reciprocal Master/Worker resource topology changes | config path + resource-count update | selected agent projection from saved config | runtime.ui-command-dispatch / tests | config persistence owner | bound |
 
 ## Sync Status Against Code
 
@@ -70,4 +77,5 @@
 - singular `paired_agent` schema and selected-agent fields are physically removed
 - selected-provider projection now includes `auth_source` so downstream UI-safe projections can show auth source type without exposing API keys
 - provider/model update is bound through `ProviderConfigUpdate` and `update_provider_config_in_path`; invalid updates do not overwrite config and saved env-var auth never writes resolved secret values
+- Agent resource-count update is bound through `AgentResourceConfigUpdate` and `update_agent_resource_config_in_path`; invalid or non-Master updates do not overwrite config, and saved topology remains reciprocal and restart-only
 - generated wiki must be regenerated from `docs/mainline-calls/config.core.json` when this function-map truth changes

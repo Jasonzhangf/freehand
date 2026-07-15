@@ -23,7 +23,7 @@
   - query returns snapshot truth
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
   - task list/history ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies persisted task truth
-  - Phase 1 TaskBoard/AgentBoard/AgentLifecycle ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies owner truth
+  - Phase 1 TaskBoard/AgentBoard/AgentLifecycle ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies owner truth; task DTOs carry parent/observing session scope plus canonical Worker session id
   - task mutation ADP command frames use protocol-owned command DTOs while runtime/task owners perform create/create_agent/assign/claim/review/reject/approve/close mutation and persistence
   - Phase 1 ApplyExecutionFact/RunSchedulerTick ADP command frames use protocol-owned command DTOs while runtime/task owners perform execution-fact sync and scheduler fact emission
   - Phase 2B QueryEventInbox/RunMasterPoll ADP frames use protocol-owned DTOs
@@ -39,6 +39,7 @@
   - error-center ADP query/subscribe frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies metadata-backed truth
   - config status ADP query frames use protocol-owned command/result DTOs while runtime owner code supplies config.core-backed truth
   - provider/model update ADP command frames use protocol-owned DTOs while runtime/config owners perform validation, persistence, and restart-required projection
+  - Agent resource-count ADP command frames carry only non-empty `agent_name` plus `resource_count`; protocol rejects values outside `1..=5` before dispatch
   - debug query returns per-turn read-only debug snapshot truth
   - checkpoint query returns read-only runtime-owned checkpoint summary projections
   - subscribe returns an initial snapshot plus continuous incremental truth, or waits for the first matching turn when subscribing before any turn exists
@@ -102,6 +103,7 @@
     protocol-state rejection, ordered multi-peer JSON roundtrip, and no-secret
     DTO serialization
   - provider/model update covers owner routing to `config.core`, empty-field rejection, unsupported-protocol rejection, JSON roundtrip, and no credential/API-key value field in serialization
+  - Agent resource-count update covers owner routing to `config.core`, zero/six rejection, JSON roundtrip, and safe status projection of configured count/max/shared provider
   - error-center subscription selector and matcher cover accepted error-center projections
 - module black-box plan:
   - command ingress accept/reject smoke

@@ -48,6 +48,10 @@
   runner over Task Center EventInbox truth
 - the Master lifecycle runner keeps a durable event cursor and invokes the
   Master model for current review-ready, blocked, interrupted, or all-current-children-closed parent-evaluation truth
+- interrupted decisions include current AgentBoard resource truth. Agent
+  identity is independent of Session; Master may retry the same Worker or
+  replace the temporary assignment with another available configured Worker
+  while preserving task id and parent session id
 - Task Center lifecycle events have priority over due internal timers; due
   timers are claimed only when no current task event produced a lifecycle
   outcome, so a failed timer wakeup cannot starve pending review/blocked/
@@ -100,8 +104,13 @@ continue other ready work rather than dead-waiting in the current turn
 ## Response Mainline
 
 - no Assigned task returns an explicit idle outcome without task mutation
-- a due one-shot timer fires as a Master internal wakeup and then completes
-  without creating or mutating task truth
+- a due one-shot timer injects its persisted wakeup prompt as a new turn in
+  its persisted original user session when source-session truth exists; it
+  does not reopen or resume the source turn. Source-less timers use an internal
+  Master wakeup. Both complete without creating or mutating task truth
+- timer ancestry is resolved through persisted schedules so an older
+  `master-timer-*` source cannot drift subsequent wakeups away from the
+  original user session
 - a due recurring timer fires, increments its fire count, and reschedules until
   its configured run limit is reached; daily, weekly, and cron recurrence uses
   local timezone semantics
@@ -130,8 +139,11 @@ continue other ready work rather than dead-waiting in the current turn
 - multiple configured Worker runner processes may independently claim only
   tasks assigned to their own agent id; one runner cannot consume another
   configured Worker's task
-- Worker startup/ticks requeue only retryable `Interrupted` and
-  `Rejected` tasks previously bound to that Worker
+- Worker ticks never requeue `Interrupted` tasks. Interrupted truth remains
+  unchanged until Master explicitly chooses same-Worker retry or cross-Worker
+  takeover and reassigns the same task
+- Worker ticks requeue only `Rejected` tasks previously bound to that Worker,
+  because Master already made the explicit review/rework decision
 - claim persists `TaskResumed` and `TaskHeartbeat` before provider execution
 - successful worker completion writes one `ExecutionFactKind::ReviewReady`
 - provider/network system failure after internal provider retry exhaustion writes one
@@ -169,6 +181,8 @@ continue other ready work rather than dead-waiting in the current turn
   explicit `MissingBlockedDecision` error
 - Master interrupted prose without reassignment is an explicit
   `MissingInterruptedDecision` error
+- interrupted takeover cannot create a duplicate task for the same objective;
+  it must mutate assignment on the existing Task
 - unrelated task mutation cannot satisfy the current event decision boundary
 - assignment to a historical or non-configured Worker returns a paired failed
   tool result and writes no `TaskAssigned` event
@@ -236,7 +250,7 @@ continue other ready work rather than dead-waiting in the current turn
 | 11 | `ProductionMasterRunner::run_once` | `crates/freehand-runtime/src/master_runner.rs` | drain Task Center events before due timer wakeups and persist cursor/retry state | Task Center cursor + timer store | task decision, timer-fired, or idle outcome | Master lifecycle service/tests | EventInbox + `handle_event` + `handle_due_timer` | bound |
 | 12 | `ProductionMasterRunner::handle_due_timer` | `crates/freehand-runtime/src/master_runner.rs` | execute a due independent timer wakeup and complete/reschedule/release timer truth | due timer schedule | timer-fired outcome or retryable execution error | `run_once` | timer store + live reason turn | bound |
 | 13 | `TimerStore::claim_due` / `TimerStore::complete_due` / `TimerStore::fail_due` | `crates/freehand-runtime/src/lib.rs` | persist independent timer schedule state and timer ledger events outside Task Center truth | timer state json + timer ledger | running/completed/active timer truth | Master timer tool + Master runner | timer store owner | bound |
-| 14 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke Master decision for current review-ready, blocked, interrupted, or all-children-closed parent evaluation truth | task snapshot + trigger event | task advanced, blocked observed, parent evaluated, no-op, or explicit error | `run_once` | Master live reason turn + task owner | bound |
+| 14 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke Master decision for current review-ready, blocked, interrupted, or all-children-closed parent evaluation truth; interrupted decisions receive AgentBoard resource truth and may replace the existing task assignment | task snapshot + trigger event + AgentBoard | same task advanced, blocked observed, parent evaluated, no-op, or explicit error | `run_once` | Master live reason turn + task owner | bound |
 | 14a | `ProductionMasterRunner::handle_parent_task_closed` | `crates/freehand-runtime/src/master_runner.rs` | decide whether a child `task_closed` event completes the current parent child set and build an idempotent overall-goal evaluation request | original parent user objective history + closed child task definitions + accepted review truth | next-round task creation, explicit blocker, verified final completion, or no-op | `handle_event` | TaskRuntime + ReasonPersistence + Master live reason turn | bound |
 | 15 | `run_master_lifecycle_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one event-isolated lifecycle decision with a target-task boundary and finite round budget | selected Master config + typed lifecycle prompt + decision boundary | closed Master turn and Task Center mutation | `ProductionMasterRunner::handle_event` | provider/reason live bridge | bound |
 | 16 | `configured_worker_task_boundary_failure` | `crates/freehand-runtime/src/lib.rs` | validate Master task create/assign routing against the configured Worker topology | task tool call + ordered configured Worker id set | explicit topology failure or allowed mutation path | `execute_registry_tool_call_with_workspace` | pure boundary validator | bound |

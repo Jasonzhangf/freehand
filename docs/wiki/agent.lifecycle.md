@@ -23,12 +23,13 @@ Generated from `docs/mainline-calls/agent.lifecycle.json`. Do not edit by hand.
 - lifecycle snapshots are persisted independently from resource AgentSnapshot so worker resource release can return to available while lifecycle query still reports the last typed task state for restart proof
 - Task Center execution binding supplies current task, execution, and turn ids when available
 - Phase 2A task execution events project worker running, progress, blocked, recovering, review_ready, retrying, approved, and closed semantics without parsing raw assistant prose
+- TaskInterrupted releases the former Worker resource, clears current task, execution, and turn binding, projects idle current activity, and keeps the interruption as typed last activity
 - runtime or ADP query surface requests AgentBoard or one AgentLifecycleSnapshot
 
 ## Response Mainline
 
 - AgentLifecycleSnapshot returns one agent's intrinsic state plus process PID, process-instance identity, start/heartbeat timestamps, and restart count
-- AgentBoardProjection derives alive from the owner heartbeat TTL while retaining current task, execution, and activity history
+- AgentBoardProjection derives alive from the owner heartbeat TTL; interruption clears ended current task and execution binding while retaining typed last activity
 - scheduler and master prompt context consume AgentBoard summaries, not raw logs
 - UI and Android render lifecycle projections and do not infer state from raw text
 
@@ -41,6 +42,7 @@ Generated from `docs/mainline-calls/agent.lifecycle.json`. Do not edit by hand.
 - lifecycle query without initialized lifecycle truth returns explicit not-ready or empty-board truth, not fallback state
 - missing or stale process heartbeat projects alive=false; task activity and persisted AgentSnapshot status are not health fallbacks
 - missing execution id on execution-bound lifecycle events is rejected by task owner before lifecycle projection is accepted
+- interrupted task truth must not leave its former Worker projected as running or bound to the ended task and execution
 - persisted lifecycle snapshot parse/write failures surface as task persistence errors; query must not rebuild a false idle lifecycle when persisted typed truth exists
 
 ## Shared Multi-Reference Functions
@@ -73,7 +75,7 @@ Generated from `docs/mainline-calls/agent.lifecycle.json`. Do not edit by hand.
 | 03 | `AgentBoardProjection` | `crates/freehand-task/src/lib.rs` | project all agent lifecycle snapshots for master, scheduler, UI, and headless query | lifecycle state map | AgentBoard projection | lifecycle owner | runtime query dispatch |  |  |  | bound |
 | 04 | `TaskRuntime::query_agent_lifecycle` | `crates/freehand-task/src/lib.rs` | query one agent lifecycle snapshot | agent id | lifecycle snapshot or explicit not-found | runtime query dispatch | lifecycle owner |  |  |  | bound |
 | 05 | `TaskRuntime::query_agent_board` | `crates/freehand-task/src/lib.rs` | query AgentBoard projection | optional filters | AgentBoard projection | runtime query dispatch | lifecycle owner |  |  |  | bound |
-| 06 | `TaskRuntime::apply_execution_fact / TaskRuntime::reject_review / TaskRuntime::approve_review / TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | derive Phase 2A worker lifecycle state from typed task execution and review events | execution/review task events with execution id | AgentLifecycleSnapshot and AgentBoard truth | task.orchestration | agent.lifecycle reducer |  |  |  | bound |
+| 06 | `TaskRuntime::apply_execution_fact / TaskRuntime::reject_review / TaskRuntime::approve_review / TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | derive Worker lifecycle state from typed task execution and review events, including releasing current Worker binding on interruption | execution/review task events with execution id | AgentLifecycleSnapshot and AgentBoard truth | task.orchestration | agent.lifecycle reducer |  |  |  | bound |
 | 07 | `TaskStore::write_agent_lifecycle_snapshot / TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and reload latest lifecycle snapshot for restart same-id query | lifecycle snapshot | durable lifecycle projection | task event projection / boot | lifecycle owner storage |  |  |  | bound |
 | 08 | `TaskRuntime::apply_agent_lifecycle_event` | `crates/freehand-task/src/lib.rs` | validate and persist process start and heartbeat truth, derive restart count, and project TTL-backed alive state | typed Worker process lifecycle event | durable process identity and queryable health | production Worker runner | agent.lifecycle owner | agent | agent | agent.heartbeat | bound |
 

@@ -97,6 +97,8 @@ pub struct TaskSnapshot {
     pub active_execution_id: Option<String>,
     pub review: TaskReviewState,
     pub parent: TaskParentRef,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attached_session_ids: Vec<SessionId>,
     pub created_at: u64,
     pub updated_at: u64,
     pub last_progress_at: Option<u64>,
@@ -844,6 +846,7 @@ impl TaskRuntime {
                 next_requirements: Vec::new(),
             },
             parent: request.parent,
+            attached_session_ids: Vec::new(),
             created_at,
             updated_at: created_at,
             last_progress_at: None,
@@ -924,6 +927,46 @@ impl TaskRuntime {
             .get(task_id)
             .cloned()
             .ok_or_else(|| TaskError::TaskNotFound(task_id.as_str().to_owned()))
+    }
+
+    pub fn attach_task_to_session(
+        &self,
+        task_id: &TaskId,
+        session_id: &SessionId,
+        actor: TaskActor,
+        watermark: TaskWatermark,
+    ) -> Result<TaskSnapshot, TaskError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|err| TaskError::Persistence(err.to_string()))?;
+        self.refresh_task_from_store_locked(&mut state, task_id)?;
+        let task = state
+            .tasks
+            .get_mut(task_id)
+            .ok_or_else(|| TaskError::TaskNotFound(task_id.as_str().to_owned()))?;
+        if task.parent.session_id.as_ref() == Some(session_id)
+            || task
+                .attached_session_ids
+                .iter()
+                .any(|attached| attached == session_id)
+        {
+            return Ok(task.clone());
+        }
+        task.attached_session_ids.push(session_id.clone());
+        task.attached_session_ids.sort();
+        let event = build_event(
+            task,
+            Some(task.status.clone()),
+            task.status.clone(),
+            "TaskSessionAttached",
+            &actor,
+            &watermark,
+            json!({"session_id": session_id}),
+        );
+        apply_event(task, &event);
+        self.store.append_event_and_snapshot(task, &event)?;
+        Ok(task.clone())
     }
 
     pub fn list_tasks(&self, query: TaskListQuery) -> Result<Vec<TaskSnapshot>, TaskError> {
@@ -1557,25 +1600,31 @@ impl TaskRuntime {
         let mut events = Vec::new();
         for task in candidates {
             let task_facts = scheduler_facts_for_task(&task, &state.leases, &request);
+            let mut task_snapshot = task;
             for fact in task_facts {
                 let event = build_event(
-                    &task,
-                    Some(task.status.clone()),
-                    task.status.clone(),
+                    &task_snapshot,
+                    Some(task_snapshot.status.clone()),
+                    task_snapshot.status.clone(),
                     "TaskSchedulerTick",
                     &request.actor,
                     &request.watermark,
                     json!({"scheduler_fact": fact}),
                 );
-                self.store.append_event_and_snapshot(&task, &event)?;
+                apply_event(&mut task_snapshot, &event);
+                self.store
+                    .append_event_and_snapshot(&task_snapshot, &event)?;
                 state
                     .scheduler_facts
-                    .entry(task.task_id.clone())
+                    .entry(task_snapshot.task_id.clone())
                     .or_default()
                     .push(fact.clone());
                 events.push(event);
                 facts.push(fact);
             }
+            state
+                .tasks
+                .insert(task_snapshot.task_id.clone(), task_snapshot);
         }
         Ok(SchedulerTickOutcome { facts, events })
     }
@@ -2118,19 +2167,38 @@ impl TaskRuntime {
         limit: usize,
     ) -> Result<Vec<TaskEventInboxEntry>, TaskError> {
         let limit = if limit == 0 { usize::MAX } else { limit };
-        let mut entries = self
+        let mut events = self
             .store
             .load_all_task_ledger_events()?
             .into_iter()
-            .filter_map(|event| task_event_inbox_entry(&event))
+            .filter(|event| master_visible_event_kind(&event.event_type).is_some())
             .collect::<Vec<_>>();
-        entries.sort_by(|left, right| left.cursor.cmp(&right.cursor));
-        let start_index = if let Some(cursor) = after_cursor {
-            event_inbox_start_index_after_cursor(&entries, cursor)?
-        } else {
-            0
-        };
-        Ok(entries.into_iter().skip(start_index).take(limit).collect())
+        events.sort_by(|left, right| {
+            left.timestamp
+                .cmp(&right.timestamp)
+                .then_with(|| left.task_id.cmp(&right.task_id))
+                .then_with(|| left.seq.cmp(&right.seq))
+                .then_with(|| left.event_id.cmp(&right.event_id))
+        });
+        let mut watermark = event_inbox_watermark(&events, after_cursor)?;
+        let mut entries = Vec::new();
+        for event in events {
+            if event.seq <= watermark.get(event.task_id.as_str()).copied().unwrap_or(0) {
+                continue;
+            }
+            if entries.len() >= limit {
+                break;
+            }
+            watermark
+                .entry(event.task_id.as_str().to_owned())
+                .and_modify(|seq| *seq = (*seq).max(event.seq))
+                .or_insert(event.seq);
+            let mut entry = task_event_inbox_entry(&event)
+                .expect("master-visible event kind was checked before projection");
+            entry.cursor = encode_event_inbox_watermark(&watermark)?;
+            entries.push(entry);
+        }
+        Ok(entries)
     }
 
     fn validate_worker_control_target(
@@ -2228,6 +2296,15 @@ impl TaskStore {
     }
 
     fn load_task_snapshots(&self) -> Result<Vec<TaskSnapshot>, TaskError> {
+        let mut tasks = self.load_task_snapshots_raw()?;
+        for snapshot in &mut tasks {
+            let events = self.load_task_session_attachment_events(&snapshot.task_id)?;
+            *snapshot = hydrate_task_session_attachments_from_ledger(snapshot.clone(), &events);
+        }
+        Ok(tasks)
+    }
+
+    fn load_task_snapshots_raw(&self) -> Result<Vec<TaskSnapshot>, TaskError> {
         let task_dir = self.task_state_dir();
         if !task_dir.is_dir() {
             return Ok(Vec::new());
@@ -2249,7 +2326,11 @@ impl TaskStore {
         if !path.is_file() {
             return Err(TaskError::TaskNotFound(task_id.as_str().to_owned()));
         }
-        read_json(&path)
+        let snapshot: TaskSnapshot = read_json(&path)?;
+        let events = self.load_task_session_attachment_events(task_id)?;
+        Ok(hydrate_task_session_attachments_from_ledger(
+            snapshot, &events,
+        ))
     }
 
     fn load_task_ledger(&self, task_id: &TaskId) -> Result<Vec<TaskLedgerEvent>, TaskError> {
@@ -2271,9 +2352,34 @@ impl TaskStore {
         Ok(events)
     }
 
+    fn load_task_session_attachment_events(
+        &self,
+        task_id: &TaskId,
+    ) -> Result<Vec<TaskLedgerEvent>, TaskError> {
+        let path = self.task_ledger_path(task_id);
+        if !path.is_file() {
+            return Err(TaskError::TaskNotFound(task_id.as_str().to_owned()));
+        }
+        let file = fs::File::open(&path).map_err(io_err)?;
+        let reader = BufReader::new(file);
+        let mut events = Vec::new();
+        for line in reader.lines() {
+            let line = line.map_err(io_err)?;
+            if !line.contains("\"event_type\":\"TaskSessionAttached\"") {
+                continue;
+            }
+            let event: TaskLedgerEvent = serde_json::from_str(&line).map_err(json_err)?;
+            if event.event_type == "TaskSessionAttached" {
+                events.push(event);
+            }
+        }
+        events.sort_by_key(|event| event.seq);
+        Ok(events)
+    }
+
     fn load_all_task_ledger_events(&self) -> Result<Vec<TaskLedgerEvent>, TaskError> {
         let mut events = Vec::new();
-        for task in self.load_task_snapshots()? {
+        for task in self.load_task_snapshots_raw()? {
             events.extend(self.load_task_ledger(&task.task_id)?);
         }
         events.sort_by(|left, right| {
@@ -2375,7 +2481,7 @@ impl TaskStore {
 
     fn write_task_index(&self) -> Result<(), TaskError> {
         let tasks = self
-            .load_task_snapshots()?
+            .load_task_snapshots_raw()?
             .into_iter()
             .map(|task| task.task_id)
             .collect::<Vec<_>>();
@@ -3083,21 +3189,52 @@ fn task_event_legacy_cursor_prefix(event: &TaskLedgerEvent) -> String {
     )
 }
 
-fn event_inbox_start_index_after_cursor(
-    entries: &[TaskEventInboxEntry],
-    cursor: &str,
-) -> Result<usize, TaskError> {
-    if let Some(index) = entries.iter().rposition(|event| event.cursor == cursor) {
-        return Ok(index.saturating_add(1));
+fn event_inbox_watermark(
+    events: &[TaskLedgerEvent],
+    cursor: Option<&str>,
+) -> Result<BTreeMap<String, u64>, TaskError> {
+    let Some(cursor) = cursor else {
+        return Ok(BTreeMap::new());
+    };
+    if let Some(encoded) = cursor.strip_prefix("v2:") {
+        return serde_json::from_str(encoded)
+            .map_err(|_| TaskError::InvalidCursorMode(cursor.to_owned()));
     }
-    let legacy_prefix = format!("{cursor}:");
-    if let Some(index) = entries
-        .iter()
-        .rposition(|event| event.cursor.starts_with(&legacy_prefix))
-    {
-        return Ok(index.saturating_add(1));
+    let mut parts = cursor.splitn(4, ':');
+    let timestamp = parts
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or_else(|| TaskError::CursorNotFound(cursor.to_owned()))?;
+    let task_id = parts
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| TaskError::CursorNotFound(cursor.to_owned()))?;
+    let seq = parts
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or_else(|| TaskError::CursorNotFound(cursor.to_owned()))?;
+    let cursor_exists = events.iter().any(|event| {
+        event.timestamp == timestamp && event.task_id.as_str() == task_id && event.seq == seq
+    });
+    if !cursor_exists {
+        return Err(TaskError::CursorNotFound(cursor.to_owned()));
     }
-    Err(TaskError::CursorNotFound(cursor.to_owned()))
+    let mut watermark = BTreeMap::new();
+    for event in events {
+        if event.timestamp < timestamp || (event.task_id.as_str() == task_id && event.seq <= seq) {
+            watermark
+                .entry(event.task_id.as_str().to_owned())
+                .and_modify(|known: &mut u64| *known = (*known).max(event.seq))
+                .or_insert(event.seq);
+        }
+    }
+    Ok(watermark)
+}
+
+fn encode_event_inbox_watermark(watermark: &BTreeMap<String, u64>) -> Result<String, TaskError> {
+    serde_json::to_string(watermark)
+        .map(|encoded| format!("v2:{encoded}"))
+        .map_err(json_err)
 }
 
 fn task_event_inbox_entry(event: &TaskLedgerEvent) -> Option<TaskEventInboxEntry> {
@@ -3391,6 +3528,43 @@ fn project_task_event_to_lifecycle(
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
     });
+    if event_type == "TaskInterrupted" {
+        snapshot.state = AgentLifecycleState::Idle;
+        snapshot.state_entered_at = now;
+        snapshot.elapsed_ms = 0;
+        snapshot.current_task_id = None;
+        snapshot.current_execution_id = None;
+        snapshot.current_turn_id = None;
+        snapshot.last_activity = Some(AgentLifecycleActivity {
+            kind: "interrupted".to_owned(),
+            semantic_summary: payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("task execution interrupted")
+                .to_owned(),
+            target: Some(task.task_id.as_str().to_owned()),
+            started_at: now,
+            elapsed_ms: 0,
+            tool_name: None,
+            model: None,
+            retry_count: None,
+            visibility: "compact".to_owned(),
+        });
+        snapshot.current_activity = Some(AgentLifecycleActivity {
+            kind: "idle".to_owned(),
+            semantic_summary: "available after interrupted execution".to_owned(),
+            target: None,
+            started_at: now,
+            elapsed_ms: 0,
+            tool_name: None,
+            model: None,
+            retry_count: None,
+            visibility: "compact".to_owned(),
+        });
+        snapshot.last_seen_at = now;
+        state.lifecycle.insert(assignee.agent_id.clone(), snapshot);
+        return;
+    }
     let (state_kind, activity_kind, summary, retry_count) = match event_type {
         "TaskResumed" if matches!(task.status, TaskStatus::Rejected) => (
             AgentLifecycleState::Retrying,
@@ -4016,10 +4190,43 @@ fn build_event(
 }
 
 fn apply_event(snapshot: &mut TaskSnapshot, event: &TaskLedgerEvent) {
+    apply_session_attachment_event(snapshot, event);
     snapshot.status = event.to_status.clone();
     snapshot.updated_at = event.timestamp;
     snapshot.last_event_seq = event.seq;
     snapshot.last_event_id = event.event_id.clone();
+}
+
+fn apply_session_attachment_event(snapshot: &mut TaskSnapshot, event: &TaskLedgerEvent) {
+    if event.event_type != "TaskSessionAttached" {
+        return;
+    }
+    let Some(session_id) = event.payload.get("session_id").and_then(Value::as_str) else {
+        return;
+    };
+    if session_id.trim().is_empty() {
+        return;
+    }
+    let session_id = SessionId::new(session_id.to_owned());
+    if snapshot.parent.session_id.as_ref() != Some(&session_id)
+        && !snapshot
+            .attached_session_ids
+            .iter()
+            .any(|attached| attached == &session_id)
+    {
+        snapshot.attached_session_ids.push(session_id);
+        snapshot.attached_session_ids.sort();
+    }
+}
+
+fn hydrate_task_session_attachments_from_ledger(
+    mut snapshot: TaskSnapshot,
+    events: &[TaskLedgerEvent],
+) -> TaskSnapshot {
+    for event in events {
+        apply_session_attachment_event(&mut snapshot, event);
+    }
+    snapshot
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, TaskError> {
@@ -4099,6 +4306,126 @@ mod tests {
 
         assert_eq!(task.status, TaskStatus::Assigned);
         assert_eq!(task.last_event_seq, 2);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn attach_task_to_session_is_idempotent_and_preserves_parent() {
+        let runtime_home = temp_runtime_home("task-session-attachment");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let task = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create")
+            .task;
+        let observer = SessionId::new("observer-session");
+
+        runtime
+            .attach_task_to_session(
+                &task.task_id,
+                &observer,
+                sample_actor(agent_id.clone()),
+                sample_watermark(),
+            )
+            .expect("attach");
+        runtime
+            .attach_task_to_session(
+                &task.task_id,
+                &observer,
+                sample_actor(agent_id.clone()),
+                sample_watermark(),
+            )
+            .expect("idempotent attach");
+
+        let recovered = TaskRuntime::boot(&runtime_home, agent_id).expect("recover");
+        let attached = recovered.query_task(&task.task_id).expect("task");
+        assert_eq!(
+            attached.parent.session_id.as_ref().map(SessionId::as_str),
+            Some("session-1")
+        );
+        assert_eq!(attached.attached_session_ids, vec![observer]);
+        assert_eq!(
+            recovered
+                .task_history(&task.task_id)
+                .expect("history")
+                .iter()
+                .filter(|event| event.event_type == "TaskSessionAttached")
+                .count(),
+            1
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn attachment_survives_later_snapshot_without_attachment() {
+        let runtime_home = temp_runtime_home("task-session-attachment-hydration");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let task = runtime
+            .create_task(sample_create_request(agent_id.clone()))
+            .expect("create")
+            .task;
+        let observer = SessionId::new("observer-session");
+
+        runtime
+            .attach_task_to_session(
+                &task.task_id,
+                &observer,
+                sample_actor(agent_id.clone()),
+                sample_watermark(),
+            )
+            .expect("attach");
+
+        let store = TaskStore::new(&runtime_home, agent_id.clone());
+        let mut stale_snapshot = task.clone();
+        stale_snapshot.status = TaskStatus::Running;
+        stale_snapshot.attached_session_ids.clear();
+        stale_snapshot.last_event_seq = 99;
+        stale_snapshot.last_event_id = format!("{}:99", task.task_id.as_str());
+        stale_snapshot.updated_at = now_unix_seconds();
+        let stale_event = TaskLedgerEvent {
+            schema_version: 1,
+            task_id: task.task_id.clone(),
+            seq: 99,
+            event_id: format!("{}:99", task.task_id.as_str()),
+            event_type: "TaskHeartbeat".to_owned(),
+            from_status: Some(TaskStatus::Running),
+            to_status: TaskStatus::Running,
+            timestamp: now_unix_seconds(),
+            actor: sample_actor(agent_id.clone()),
+            watermark: sample_watermark(),
+            payload: json!({"agent_id":"worker"}),
+        };
+        store
+            .append_event_and_snapshot(&stale_snapshot, &stale_event)
+            .expect("append stale snapshot");
+
+        let recovered = TaskRuntime::boot(&runtime_home, agent_id).expect("recover");
+        let attached = recovered.query_task(&task.task_id).expect("task");
+        assert_eq!(attached.attached_session_ids, vec![observer.clone()]);
+        assert_eq!(attached.last_event_seq, 99);
+        assert_eq!(
+            attached.last_event_id,
+            format!("{}:99", task.task_id.as_str())
+        );
+
+        recovered
+            .attach_task_to_session(
+                &task.task_id,
+                &observer,
+                sample_actor(AgentId::new("master")),
+                sample_watermark(),
+            )
+            .expect("idempotent attach after hydration");
+        assert_eq!(
+            recovered
+                .task_history(&task.task_id)
+                .expect("history")
+                .iter()
+                .filter(|event| event.event_type == "TaskSessionAttached")
+                .count(),
+            1
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 
@@ -5573,9 +5900,11 @@ mod tests {
         let runtime_home = temp_runtime_home("execution-fact-interrupted");
         let owner_id = AgentId::new("master");
         let worker_id = AgentId::new("worker-interrupted");
+        let takeover_worker_id = AgentId::new("worker-takeover");
         let execution_id = "exec-worker-interrupted";
         let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
         create_worker_agent(&runtime, &owner_id, &worker_id);
+        create_worker_agent(&runtime, &owner_id, &takeover_worker_id);
         let task = create_claimed_worker_task(
             &runtime,
             &owner_id,
@@ -5611,17 +5940,81 @@ mod tests {
                 .iter()
                 .any(|event| event.event_type == "TaskBlocked")
         );
+        let interrupted_board = runtime
+            .query_agent_board()
+            .expect("interrupted agent board");
+        let interrupted_worker = interrupted_board
+            .agents
+            .iter()
+            .find(|agent| agent.agent_id == worker_id)
+            .expect("interrupted worker projection");
+        assert_eq!(interrupted_worker.state, AgentLifecycleState::Idle);
+        assert_eq!(interrupted_worker.current_task_id, None);
+        assert_eq!(interrupted_worker.current_execution_id, None);
+        assert_eq!(interrupted_worker.current_turn_id, None);
+        assert_eq!(
+            interrupted_worker
+                .current_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("idle")
+        );
+        assert_eq!(
+            interrupted_worker
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("interrupted")
+        );
 
         let reassigned = runtime
             .assign_task(TaskAssignRequest {
                 task_id: task.task_id.clone(),
-                agent_id: worker_id,
+                agent_id: takeover_worker_id.clone(),
                 actor: sample_actor(owner_id),
                 watermark: sample_watermark(),
             })
             .expect("reassign interrupted task");
         assert_eq!(reassigned.task.status, TaskStatus::Assigned);
         assert_eq!(reassigned.task.task_id, task.task_id);
+        assert_eq!(
+            reassigned
+                .task
+                .assignee
+                .as_ref()
+                .expect("takeover assignee")
+                .agent_id,
+            takeover_worker_id
+        );
+        let assigned_agents: Vec<_> = runtime
+            .task_history(&task.task_id)
+            .expect("takeover history")
+            .into_iter()
+            .filter(|event| event.event_type == "TaskAssigned")
+            .filter_map(|event| {
+                event
+                    .payload
+                    .get("agent_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_owned)
+            })
+            .collect();
+        assert_eq!(
+            assigned_agents,
+            vec![
+                worker_id.as_str().to_owned(),
+                takeover_worker_id.as_str().to_owned()
+            ]
+        );
+        let takeover_board = runtime.query_agent_board().expect("takeover agent board");
+        let released_worker = takeover_board
+            .agents
+            .iter()
+            .find(|agent| agent.agent_id == worker_id)
+            .expect("released worker projection");
+        assert_eq!(released_worker.state, AgentLifecycleState::Idle);
+        assert_eq!(released_worker.current_task_id, None);
+        assert_eq!(released_worker.current_execution_id, None);
         let _ = fs::remove_dir_all(runtime_home);
     }
 
@@ -6314,7 +6707,7 @@ mod tests {
     }
 
     #[test]
-    fn phase2b_event_cursor_uses_event_id_tiebreak_and_legacy_cursor_skips_duplicates() {
+    fn phase2b_event_cursor_uses_task_sequence_watermark_and_legacy_skips_duplicates() {
         let runtime_home = temp_runtime_home("phase2b-legacy-cursor-duplicates");
         let owner_id = AgentId::new("master");
         let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
@@ -6339,11 +6732,21 @@ mod tests {
                 limit: 0,
             })
             .expect("full inbox");
-        assert!(
-            full.events
-                .iter()
-                .any(|event| event.cursor.ends_with(&duplicate.event_id)),
-            "cursor must include event_id as a uniqueness tiebreak"
+        let latest_cursor = full
+            .events
+            .last()
+            .map(|event| event.cursor.clone())
+            .expect("latest cursor");
+        let watermark: BTreeMap<String, u64> = serde_json::from_str(
+            latest_cursor
+                .strip_prefix("v2:")
+                .expect("v2 watermark prefix"),
+        )
+        .expect("v2 watermark json");
+        assert_eq!(
+            watermark.get(created.task.task_id.as_str()),
+            Some(&duplicate.seq),
+            "cursor must record the consumed sequence for each task"
         );
         let legacy_cursor = task_event_legacy_cursor_prefix(&duplicate);
         let after_legacy = runtime
@@ -6356,11 +6759,6 @@ mod tests {
             after_legacy.events.is_empty(),
             "legacy three-part cursor must skip all matching duplicate-prefix events"
         );
-        let latest_cursor = full
-            .events
-            .last()
-            .map(|event| event.cursor.clone())
-            .expect("latest cursor");
         let after_latest = runtime
             .query_event_inbox(TaskEventInboxQuery {
                 after_cursor: Some(latest_cursor),
@@ -6368,6 +6766,64 @@ mod tests {
             })
             .expect("latest cursor query");
         assert!(after_latest.events.is_empty());
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn phase2b_v2_cursor_delivers_new_lower_task_id_event_with_same_timestamp() {
+        let runtime_home = temp_runtime_home("phase2b-v2-lower-task-same-time");
+        let owner_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        let mut first_request = sample_create_request(owner_id.clone());
+        first_request.task_id = Some(TaskId::new("task-z-existing"));
+        let first = runtime
+            .create_task(first_request)
+            .expect("create first task");
+        let first_query = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: None,
+                limit: 0,
+            })
+            .expect("first inbox");
+        let cursor = first_query.next_cursor.expect("v2 cursor");
+
+        let mut lower_request = sample_create_request(owner_id);
+        lower_request.task_id = Some(TaskId::new("task-a-created-later"));
+        let lower = runtime
+            .create_task(lower_request)
+            .expect("create lower task");
+        let same_timestamp = first.events.last().expect("first event").timestamp;
+        let mut lower_events = runtime
+            .task_history(&lower.task.task_id)
+            .expect("lower history");
+        for event in &mut lower_events {
+            event.timestamp = same_timestamp;
+        }
+        let ledger = lower_events
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("serialize lower events")
+            .join("\n");
+        fs::write(
+            runtime.store.task_ledger_path(&lower.task.task_id),
+            format!("{ledger}\n"),
+        )
+        .expect("rewrite same-timestamp fixture");
+
+        let after = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: Some(cursor),
+                limit: 0,
+            })
+            .expect("query after v2 cursor");
+        assert!(
+            after
+                .events
+                .iter()
+                .any(|event| event.task_id == lower.task.task_id),
+            "per-task sequence watermark must deliver later lower-sorting task events"
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 

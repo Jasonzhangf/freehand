@@ -158,6 +158,9 @@ pub enum UiCommand {
     UpdateProviderConfig {
         update: UiProviderConfigUpdate,
     },
+    UpdateAgentResourceConfig {
+        update: UiAgentResourceConfigUpdate,
+    },
     CreateTask {
         task: UiTaskCreateCommand,
     },
@@ -236,6 +239,12 @@ pub struct UiProviderConfigUpdate {
     pub base_url: String,
     pub default_model: String,
     pub api_key_env: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAgentResourceConfigUpdate {
+    pub agent_name: String,
+    pub resource_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -466,6 +475,10 @@ pub struct UiTaskSnapshotProjection {
     pub target_cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attached_session_ids: Vec<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_session_id: Option<SessionId>,
     pub assignee_agent_id: Option<AgentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_execution_id: Option<String>,
@@ -673,6 +686,11 @@ pub struct UiConfigStatusProjection {
     pub agent_mode: String,
     pub node_id: String,
     pub paired_agents: Vec<UiConfigPeerProjection>,
+    pub agent_resource_count: usize,
+    pub agent_resource_limit: usize,
+    pub agent_resource_provider_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_resource_provider_id: Option<String>,
     pub provider_id: String,
     pub provider_type: String,
     pub provider_protocol: String,
@@ -688,6 +706,9 @@ pub struct UiConfigPeerProjection {
     pub agent_name: String,
     pub agent_mode: String,
     pub node_id: String,
+    pub provider_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1135,6 +1156,8 @@ pub enum UiProtocolError {
     EmptyProviderDefaultModel,
     #[error("config update requires non-empty API key environment variable name")]
     EmptyProviderApiKeyEnv,
+    #[error("agent resource count must be between 1 and 5, received {resource_count}")]
+    AgentResourceCountOutOfRange { resource_count: usize },
     #[error("command ingress route only accepts mutation-intent commands")]
     IngressCommandKindMismatch,
     #[error("stream kind mismatch for requested projection")]
@@ -1841,6 +1864,16 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::UpdateProviderConfig { update } if update.api_key_env.trim().is_empty() => {
             Err(UiProtocolError::EmptyProviderApiKeyEnv)
         }
+        UiCommand::UpdateAgentResourceConfig { update } if update.agent_name.trim().is_empty() => {
+            Err(UiProtocolError::EmptyConfigAgentName)
+        }
+        UiCommand::UpdateAgentResourceConfig { update }
+            if !(1..=5).contains(&update.resource_count) =>
+        {
+            Err(UiProtocolError::AgentResourceCountOutOfRange {
+                resource_count: update.resource_count,
+            })
+        }
         UiCommand::QueryErrorCenterEvents { session_id, .. }
         | UiCommand::SubscribeErrorCenterEvents { session_id, .. }
             if session_id.as_str().trim().is_empty() =>
@@ -1958,6 +1991,7 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptyProviderBaseUrl => "empty_provider_base_url",
         UiProtocolError::EmptyProviderDefaultModel => "empty_provider_default_model",
         UiProtocolError::EmptyProviderApiKeyEnv => "empty_provider_api_key_env",
+        UiProtocolError::AgentResourceCountOutOfRange { .. } => "agent_resource_count_out_of_range",
         UiProtocolError::IngressCommandKindMismatch => "ingress_command_kind_mismatch",
         UiProtocolError::StreamKindMismatch => "stream_kind_mismatch",
     };
@@ -2523,6 +2557,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryWorkerControl { .. } => "query_worker_control",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
+        UiCommand::UpdateAgentResourceConfig { .. } => "update_agent_resource_config",
         UiCommand::CreateTask { .. } => "create_task",
         UiCommand::CreateTaskAgent { .. } => "create_task_agent",
         UiCommand::AssignTask { .. } => "assign_task",
@@ -2558,6 +2593,7 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::RollbackLatestSessionTurn { .. }
             | UiCommand::SubmitUserInput { .. }
             | UiCommand::UpdateProviderConfig { .. }
+            | UiCommand::UpdateAgentResourceConfig { .. }
             | UiCommand::CreateTask { .. }
             | UiCommand::CreateTaskAgent { .. }
             | UiCommand::AssignTask { .. }
@@ -2595,7 +2631,9 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         UiCommand::RewindCheckpoint { .. } => {
             ("runtime.checkpoint-rewind", "crates/freehand-runtime")
         }
-        UiCommand::UpdateProviderConfig { .. } => ("config.core", "crates/freehand-config"),
+        UiCommand::UpdateProviderConfig { .. } | UiCommand::UpdateAgentResourceConfig { .. } => {
+            ("config.core", "crates/freehand-config")
+        }
         UiCommand::CreateTask { .. }
         | UiCommand::CreateTaskAgent { .. }
         | UiCommand::AssignTask { .. }
@@ -3591,6 +3629,108 @@ mod tests {
                 .as_ref()
                 .map(|display| display.kind.as_str()),
             Some("search")
+        );
+    }
+
+    #[test]
+    fn framework_tool_public_projection_uses_task_and_timer_display_semantics() {
+        let projection = turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("master"),
+            source_node_id: "master-node".to_owned(),
+            session_id: SessionId::new("session-framework-tools"),
+            turn_id: TurnId::new("runtime-turn-framework-tools"),
+            cwd: None,
+            user_text: Some("delegate work and schedule a check".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: vec![
+                ReasonReq04ToolCall {
+                    session_id: SessionId::new("session-framework-tools"),
+                    turn_id: TurnId::new("runtime-turn-framework-tools"),
+                    trace_id: TraceId::new("trace-framework-tools"),
+                    feature_id: FeatureId::new("ui.protocol"),
+                    agent_id: AgentId::new("master"),
+                    tool_call: freehand_contracts::ToolCallContract {
+                        tool_call_id: freehand_contracts::ToolCallId::new("tool-task"),
+                        tool_name: "task".to_owned(),
+                        arguments: vec![
+                            freehand_contracts::ToolArgument {
+                                name: "op".to_owned(),
+                                value: serde_json::json!("assign"),
+                            },
+                            freehand_contracts::ToolArgument {
+                                name: "task_id".to_owned(),
+                                value: serde_json::json!("task-123"),
+                            },
+                            freehand_contracts::ToolArgument {
+                                name: "agent_id".to_owned(),
+                                value: serde_json::json!("worker-alpha"),
+                            },
+                        ],
+                        arguments_complete: true,
+                    },
+                },
+                ReasonReq04ToolCall {
+                    session_id: SessionId::new("session-framework-tools"),
+                    turn_id: TurnId::new("runtime-turn-framework-tools"),
+                    trace_id: TraceId::new("trace-framework-tools"),
+                    feature_id: FeatureId::new("ui.protocol"),
+                    agent_id: AgentId::new("master"),
+                    tool_call: freehand_contracts::ToolCallContract {
+                        tool_call_id: freehand_contracts::ToolCallId::new("tool-timer"),
+                        tool_name: "timer".to_owned(),
+                        arguments: vec![
+                            freehand_contracts::ToolArgument {
+                                name: "op".to_owned(),
+                                value: serde_json::json!("schedule"),
+                            },
+                            freehand_contracts::ToolArgument {
+                                name: "delay_seconds".to_owned(),
+                                value: serde_json::json!(300),
+                            },
+                            freehand_contracts::ToolArgument {
+                                name: "reason".to_owned(),
+                                value: serde_json::json!("re-check worker review"),
+                            },
+                            freehand_contracts::ToolArgument {
+                                name: "prompt".to_owned(),
+                                value: serde_json::json!(
+                                    "Read TaskBoard and decide the next step."
+                                ),
+                            },
+                        ],
+                        arguments_complete: true,
+                    },
+                },
+            ],
+            tool_results: Vec::new(),
+            usage_events: Vec::new(),
+            terminal_event: None,
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        });
+
+        let items = public_conversation_items(&projection);
+        let task = items
+            .iter()
+            .find(|item| item.tool_call_id.as_deref() == Some("tool-task"))
+            .expect("task tool");
+        assert_eq!(task.title, "Assign Worker task");
+        assert_eq!(task.body, "op=assign · task=task-123 · agent=worker-alpha");
+        assert_eq!(
+            task.display.as_ref().map(|display| display.kind.as_str()),
+            Some("task")
+        );
+
+        let timer = items
+            .iter()
+            .find(|item| item.tool_call_id.as_deref() == Some("tool-timer"))
+            .expect("timer tool");
+        assert_eq!(timer.title, "Schedule timer");
+        assert!(timer.body.contains("when=in 300s"));
+        assert!(timer.body.contains("reason=re-check worker review"));
+        assert_eq!(
+            timer.display.as_ref().map(|display| display.kind.as_str()),
+            Some("timer")
         );
     }
 
@@ -4653,7 +4793,13 @@ mod tests {
                 agent_name: "worker".to_owned(),
                 agent_mode: "slave".to_owned(),
                 node_id: "worker-node".to_owned(),
+                provider_id: "minimonth".to_owned(),
+                fallback_provider_id: None,
             }],
+            agent_resource_count: 1,
+            agent_resource_limit: 5,
+            agent_resource_provider_mode: "shared".to_owned(),
+            agent_resource_provider_id: Some("minimonth".to_owned()),
             provider_id: "minimonth".to_owned(),
             provider_type: "anthropic".to_owned(),
             provider_protocol: "messages".to_owned(),
@@ -4666,6 +4812,8 @@ mod tests {
         let encoded = serde_json::to_string(&result).expect("config status json");
         assert!(encoded.contains("ConfigStatus"));
         assert!(encoded.contains("provider_auth_source"));
+        assert!(encoded.contains("agent_resource_count"));
+        assert!(encoded.contains("agent_resource_provider_id"));
         assert!(!encoded.contains("api_key"));
         assert!(!encoded.contains("pair_token"));
         assert!(!encoded.contains("secret"));
@@ -4725,6 +4873,47 @@ mod tests {
         assert!(!encoded.contains("api_key\""));
         assert!(!encoded.contains("secret"));
         assert!(!encoded.contains("sk-"));
+    }
+
+    #[test]
+    fn agent_resource_config_update_routes_to_config_owner_and_rejects_out_of_range() {
+        let command = UiCommand::UpdateAgentResourceConfig {
+            update: UiAgentResourceConfigUpdate {
+                agent_name: "master".to_owned(),
+                resource_count: 5,
+            },
+        };
+        validate_command(&command).expect("valid Agent resource update");
+        let envelope = build_command_dispatch_envelope(&command).expect("dispatch envelope");
+        assert_eq!(envelope.target_feature_id, "config.core");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-config");
+        assert_eq!(
+            envelope.ingress.command_kind,
+            "update_agent_resource_config"
+        );
+
+        for resource_count in [0, 6] {
+            let err = validate_command(&UiCommand::UpdateAgentResourceConfig {
+                update: UiAgentResourceConfigUpdate {
+                    agent_name: "master".to_owned(),
+                    resource_count,
+                },
+            })
+            .expect_err("out-of-range resource count rejected");
+            assert_eq!(
+                err,
+                UiProtocolError::AgentResourceCountOutOfRange { resource_count }
+            );
+            assert_eq!(
+                protocol_rejection(err).code,
+                "agent_resource_count_out_of_range"
+            );
+        }
+
+        let encoded = serde_json::to_string(&command).expect("resource update JSON");
+        assert!(encoded.contains("UpdateAgentResourceConfig"));
+        assert!(encoded.contains("resource_count"));
+        assert!(!encoded.contains("provider_api_key"));
     }
 
     #[test]

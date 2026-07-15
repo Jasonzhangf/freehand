@@ -17,7 +17,7 @@
   - active turn truth is refreshed after durable reason-ledger append
   - terminal turn truth is materialized as immutable per-turn files
   - restart recovery restores from snapshot plus reason-ledger tail, or from reason-ledger-only rebuild when snapshots are missing or invalid
-  - UI restore can read latest per-turn ledger snapshots so non-terminal multi-round tool activity remains projectable after restart without becoming closed-turn truth
+  - UI restore reads authoritative closed/active snapshots plus rollback-marker sidecar truth when available, coalesces repaired `-rN` rounds into one effective logical turn, and does not replay huge reason ledgers for normal transcript queries
   - derived UI and index sidecars rebuild from authoritative truth and are never recovery truth
   - reason-owned session display metadata stores `title` and `archived` state for shared UI CRUD without entering provider-visible session history
   - append-only rollback markers filter effective transcript restore while preserving raw closed-turn files for audit
@@ -34,7 +34,9 @@
   - stale duplicate reason-ledger row skip test gated by presence of a later authoritative expected-sequence row
   - snapshot-plus-tail replay tests
   - ledger-only rebuild tests
-  - ledger-backed UI snapshot restore tests through runtime bootstrap
+  - authoritative-snapshot-backed UI restore tests through runtime bootstrap
+  - logical repair-round coalescing tests for `runtime-turn-N-rM` style turn ids
+  - UI restore test that poisons the reason ledger after authoritative snapshots exist, proving transcript query does not depend on replaying the ledger
   - atomic snapshot replace tests
   - provider-raw debug-ledger write tests
   - provider-raw-ledger exclusion tests
@@ -53,7 +55,7 @@
   - snapshot-missing recovery smoke
   - derived-sidecar rebuild smoke
   - session metadata sidecar reload smoke
-  - rollback marker reload smoke through `restore` and `restore_turn_snapshots_for_ui`
+  - rollback marker sidecar reload smoke through `restore` and `restore_turn_snapshots_for_ui`
   - provider-raw debug-ledger append smoke
 - project black-box impact:
   - CLI persistence restore smoke
@@ -71,7 +73,7 @@
 - sync status between design and implementation:
   - design is locked
   - session snapshot, active-turn snapshot, reason-ledger append, provider-raw debug-ledger append, terminal turn materialization, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
-  - ledger-backed UI snapshot restore is implemented through `ReasonPersistence::restore_turn_snapshots_for_ui`
+  - authoritative-snapshot-backed logical-turn UI restore is implemented through `ReasonPersistence::restore_turn_snapshots_for_ui`
   - shared harness and CLI smoke are implemented
   - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
   - runtime white-box coverage now explicitly locks ledger sequence-gap rejection plus provider-raw-only and UI-sidecar-only missing-recovery rejection

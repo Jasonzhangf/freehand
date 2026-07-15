@@ -9,6 +9,8 @@ pub enum ToolDisplayKind {
     Search,
     List,
     Plan,
+    Task,
+    Timer,
     Shell,
     Generic,
 }
@@ -21,6 +23,8 @@ impl ToolDisplayKind {
             ToolDisplayKind::Search => "search",
             ToolDisplayKind::List => "list",
             ToolDisplayKind::Plan => "plan",
+            ToolDisplayKind::Task => "task",
+            ToolDisplayKind::Timer => "timer",
             ToolDisplayKind::Shell => "shell",
             ToolDisplayKind::Generic => "generic",
         }
@@ -84,6 +88,8 @@ pub fn project_tool_call_display(
         ToolDisplayKind::FileMutation => parse_file_mutation_tool_display(tool_name, arguments),
         ToolDisplayKind::Search => parse_search_tool_display(tool_name, arguments),
         ToolDisplayKind::Plan => parse_plan_tool_display(tool_name, arguments),
+        ToolDisplayKind::Task => parse_task_tool_display(arguments),
+        ToolDisplayKind::Timer => parse_timer_tool_display(arguments),
         ToolDisplayKind::Shell => parse_shell_tool_display(arguments),
         ToolDisplayKind::Generic => parse_generic_tool_display(tool_name, arguments),
     }
@@ -108,6 +114,8 @@ pub fn classify_tool_display_kind(tool_name: &str, arguments: &[ToolArgument]) -
         "write_file" | "edit_file" | "multi_edit" | "delete_range" => ToolDisplayKind::FileMutation,
         "glob" | "grep" => ToolDisplayKind::Search,
         "todo_write" | "complete_step" => ToolDisplayKind::Plan,
+        "task" => ToolDisplayKind::Task,
+        "timer" => ToolDisplayKind::Timer,
         "bash" => classify_shell_command(arguments),
         _ => ToolDisplayKind::Generic,
     }
@@ -285,6 +293,130 @@ pub fn parse_plan_tool_display(
     }
 }
 
+pub fn parse_task_tool_display(arguments: &[ToolArgument]) -> ToolDisplayProjection {
+    let op = string_argument(arguments, "op").unwrap_or_else(|| "unknown".to_owned());
+    let task_id = compact_string_argument(arguments, "task_id", 72);
+    let title = compact_string_argument(arguments, "title", 96);
+    let agent_id = string_argument(arguments, "agent_id")
+        .or_else(|| string_argument(arguments, "assignee_agent_id"))
+        .or_else(|| dispatch_string_argument(arguments, "agent_id"));
+    let status = string_argument(arguments, "status");
+    let target_cwd = compact_string_argument(arguments, "target_cwd", 96);
+    let phase = compact_string_argument(arguments, "phase", 48);
+    let note = compact_string_argument(arguments, "note", 96);
+    let dispatch_mode = dispatch_string_argument(arguments, "mode");
+    let target = task_id
+        .clone()
+        .or_else(|| title.clone())
+        .or_else(|| agent_id.clone())
+        .or_else(|| status.clone())
+        .unwrap_or_else(|| "Task Center".to_owned());
+    let action = match op.as_str() {
+        "create" => "Create Worker task",
+        "assign" => "Assign Worker task",
+        "claim_next" => "Claim next task",
+        "record_execution" => "Record task execution",
+        "submit_review" => "Submit task review",
+        "approve" => "Approve task review",
+        "reject" => "Reject task review",
+        "close" => "Close task",
+        "append" => "Append task note",
+        "heartbeat" => "Update task heartbeat",
+        "query" => "Query task",
+        "history" => "Query task history",
+        "list_tasks" | "query_board" => "Query TaskBoard",
+        "create_agent" => "Create Worker agent",
+        "list_agents" => "List Worker agents",
+        "query_agent" => "Query Worker agent",
+        "close_agent" => "Close Worker agent",
+        "pause" => "Pause task",
+        "resume" => "Resume task",
+        "cancel" => "Cancel task",
+        _ => "Run task operation",
+    }
+    .to_owned();
+    ToolDisplayProjection {
+        kind: ToolDisplayKind::Task,
+        outcome: ToolDisplayOutcome::Waiting,
+        action: action.clone(),
+        target: Some(target.clone()),
+        parameter_summary: parameter_summary_for(vec![
+            ("op", Some(op.clone())),
+            ("task", task_id.clone()),
+            ("title", title.clone()),
+            ("agent", agent_id.clone()),
+            ("status", status.clone()),
+            ("cwd", target_cwd.clone()),
+            ("dispatch", dispatch_mode.clone()),
+        ]),
+        summary: format!("{action}: {target}"),
+        result_summary: None,
+        fields: compact_fields([
+            field("tool", "task"),
+            field("op", &op),
+            optional_field("task", task_id),
+            optional_field("title", title),
+            optional_field("agent", agent_id),
+            optional_field("status", status),
+            optional_field("cwd", target_cwd),
+            optional_field("dispatch", dispatch_mode),
+            optional_field("phase", phase),
+            optional_field("note", note),
+        ]),
+        diff: None,
+    }
+}
+
+pub fn parse_timer_tool_display(arguments: &[ToolArgument]) -> ToolDisplayProjection {
+    let op = string_argument(arguments, "op").unwrap_or_else(|| "unknown".to_owned());
+    let timer_id = compact_string_argument(arguments, "timer_id", 72);
+    let mode = string_argument(arguments, "mode");
+    let when = timer_when_summary(arguments);
+    let reason = compact_string_argument(arguments, "reason", 96);
+    let prompt = compact_string_argument(arguments, "prompt", 120);
+    let repeat_kind = repeat_string_argument(arguments, "kind");
+    let target = timer_id
+        .clone()
+        .or_else(|| when.clone())
+        .or_else(|| reason.clone())
+        .unwrap_or_else(|| "timer schedule".to_owned());
+    let action = match op.as_str() {
+        "schedule" => "Schedule timer",
+        "cancel" => "Cancel timer",
+        "list" => "List timers",
+        _ => "Run timer operation",
+    }
+    .to_owned();
+    ToolDisplayProjection {
+        kind: ToolDisplayKind::Timer,
+        outcome: ToolDisplayOutcome::Waiting,
+        action: action.clone(),
+        target: Some(target.clone()),
+        parameter_summary: parameter_summary_for(vec![
+            ("op", Some(op.clone())),
+            ("timer", timer_id.clone()),
+            ("when", when.clone()),
+            ("mode", mode.clone()),
+            ("repeat", repeat_kind.clone()),
+            ("reason", reason.clone()),
+            ("prompt", prompt.clone()),
+        ]),
+        summary: format!("{action}: {target}"),
+        result_summary: None,
+        fields: compact_fields([
+            field("tool", "timer"),
+            field("op", &op),
+            optional_field("timer", timer_id),
+            optional_field("when", when),
+            optional_field("mode", mode),
+            optional_field("repeat", repeat_kind),
+            optional_field("reason", reason),
+            optional_field("prompt", prompt),
+        ]),
+        diff: None,
+    }
+}
+
 pub fn parse_shell_tool_display(arguments: &[ToolArgument]) -> ToolDisplayProjection {
     let command =
         string_argument(arguments, "command").unwrap_or_else(|| "unknown command".to_owned());
@@ -382,6 +514,8 @@ fn shell_command_target(command: &str, kind: ToolDisplayKind) -> String {
         ToolDisplayKind::Shell
         | ToolDisplayKind::Generic
         | ToolDisplayKind::Plan
+        | ToolDisplayKind::Task
+        | ToolDisplayKind::Timer
         | ToolDisplayKind::FileMutation => command.trim().to_owned(),
     }
 }
@@ -397,6 +531,8 @@ fn result_summary_for(display: &ToolDisplayProjection, result: &ToolResultContra
         ToolDisplayKind::Search => format!("{prefix}: {}", display.target_label("query")),
         ToolDisplayKind::List => format!("{prefix}: {}", display.target_label("path")),
         ToolDisplayKind::Plan => format!("{prefix}: {}", display.target_label("plan")),
+        ToolDisplayKind::Task => format!("{prefix}: {}", display.target_label("task")),
+        ToolDisplayKind::Timer => format!("{prefix}: {}", display.target_label("timer")),
         ToolDisplayKind::Shell => format!("{prefix}: shell command"),
         ToolDisplayKind::Generic => {
             if result.output.trim().is_empty() {
@@ -429,6 +565,73 @@ fn string_argument(arguments: &[ToolArgument], name: &str) -> Option<String> {
         Value::Number(value) => Some(value.to_string()),
         _ => None,
     }
+}
+
+fn compact_string_argument(
+    arguments: &[ToolArgument],
+    name: &str,
+    max_chars: usize,
+) -> Option<String> {
+    string_argument(arguments, name).map(|value| compact_display_text(&value, max_chars))
+}
+
+fn dispatch_string_argument(arguments: &[ToolArgument], field: &str) -> Option<String> {
+    arguments
+        .iter()
+        .find(|argument| argument.name == "dispatch")
+        .and_then(|argument| argument.value.as_object())
+        .and_then(|object| object.get(field))
+        .and_then(value_to_string)
+        .map(|value| compact_display_text(&value, 72))
+}
+
+fn repeat_string_argument(arguments: &[ToolArgument], field: &str) -> Option<String> {
+    arguments
+        .iter()
+        .find(|argument| argument.name == "repeat")
+        .and_then(|argument| argument.value.as_object())
+        .and_then(|object| object.get(field))
+        .and_then(value_to_string)
+        .map(|value| compact_display_text(&value, 72))
+}
+
+fn timer_when_summary(arguments: &[ToolArgument]) -> Option<String> {
+    if let Some(delay) = string_argument(arguments, "delay_seconds") {
+        return Some(format!("in {delay}s"));
+    }
+    if let Some(run_at) = string_argument(arguments, "run_at_unix_seconds") {
+        return Some(format!("unix {run_at}"));
+    }
+    if let Some(interval) = repeat_string_argument(arguments, "interval_seconds") {
+        return Some(format!("every {interval}s"));
+    }
+    if let Some(local_seconds) = repeat_string_argument(arguments, "time_of_day_seconds_local") {
+        return Some(format!("local day second {local_seconds}"));
+    }
+    repeat_string_argument(arguments, "expression").or_else(|| {
+        repeat_string_argument(arguments, "cron_expression")
+            .map(|expression| format!("cron {expression}"))
+    })
+}
+
+fn value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.trim().to_owned()).filter(|value| !value.is_empty()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn compact_display_text(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    let count = trimmed.chars().count();
+    if count <= max_chars {
+        return trimmed.to_owned();
+    }
+    let mut compact = trimmed.chars().take(max_chars).collect::<String>();
+    compact.push('…');
+    compact
 }
 
 fn array_len_argument(arguments: &[ToolArgument], name: &str) -> Option<usize> {
@@ -574,6 +777,84 @@ mod tests {
                 .iter()
                 .any(|field| { field.label == "items" && field.value == "2" })
         );
+    }
+
+    #[test]
+    fn task_projection_shows_operation_task_assignee_and_target() {
+        let display = project_tool_call_display(
+            "task",
+            &[
+                arg("op", json!("create")),
+                arg("title", json!("分析 zterm 项目结构并生成 HTML 架构图")),
+                arg("target_cwd", json!("/Volumes/extension/code/zterm")),
+                arg(
+                    "dispatch",
+                    json!({"mode": "agent", "agent_id": "worker-alpha"}),
+                ),
+            ],
+        );
+
+        assert_eq!(display.kind, ToolDisplayKind::Task);
+        assert_eq!(display.action, "Create Worker task");
+        assert_eq!(
+            display.target.as_deref(),
+            Some("分析 zterm 项目结构并生成 HTML 架构图")
+        );
+        let summary = display.parameter_summary.as_deref().expect("summary");
+        assert!(summary.contains("op=create"));
+        assert!(summary.contains("title=分析 zterm"));
+        assert!(summary.contains("agent=worker-alpha"));
+        assert!(summary.contains("cwd=/Volumes/extension/code/zterm"));
+        assert!(summary.contains("dispatch=agent"));
+    }
+
+    #[test]
+    fn task_assign_projection_shows_task_and_worker() {
+        let display = project_tool_call_display(
+            "task",
+            &[
+                arg("op", json!("assign")),
+                arg("task_id", json!("task-123")),
+                arg("agent_id", json!("worker-beta")),
+            ],
+        );
+
+        assert_eq!(display.kind, ToolDisplayKind::Task);
+        assert_eq!(display.action, "Assign Worker task");
+        assert_eq!(display.target.as_deref(), Some("task-123"));
+        assert_eq!(
+            display.parameter_summary.as_deref(),
+            Some("op=assign · task=task-123 · agent=worker-beta")
+        );
+    }
+
+    #[test]
+    fn timer_projection_shows_delay_reason_and_wakeup_prompt() {
+        let display = project_tool_call_display(
+            "timer",
+            &[
+                arg("op", json!("schedule")),
+                arg("mode", json!("relative")),
+                arg("delay_seconds", json!(300)),
+                arg("reason", json!("worker dispatched; re-check review state")),
+                arg(
+                    "prompt",
+                    json!(
+                        "Read TaskBoard and decide whether to approve, reject, close, or schedule another timer."
+                    ),
+                ),
+            ],
+        );
+
+        assert_eq!(display.kind, ToolDisplayKind::Timer);
+        assert_eq!(display.action, "Schedule timer");
+        assert_eq!(display.target.as_deref(), Some("in 300s"));
+        let summary = display.parameter_summary.as_deref().expect("summary");
+        assert!(summary.contains("op=schedule"));
+        assert!(summary.contains("when=in 300s"));
+        assert!(summary.contains("mode=relative"));
+        assert!(summary.contains("reason=worker dispatched"));
+        assert!(summary.contains("prompt=Read TaskBoard"));
     }
 
     #[test]

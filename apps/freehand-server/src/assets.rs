@@ -35,10 +35,16 @@ pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
         _ => return Err(StatusCode::NOT_FOUND),
     };
     Ok((
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static(asset.content_type),
-        )],
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(asset.content_type),
+            ),
+            (
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store, max-age=0"),
+            ),
+        ],
         asset.body,
     )
         .into_response())

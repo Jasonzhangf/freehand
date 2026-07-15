@@ -66,9 +66,10 @@ at a time. Multiple independent BigTasks remain outside this slice.
 | --- | --- | --- |
 | success | `TaskReviewSubmitted` with deliverables and evidence | Master approves and closes, or rejects with requirements |
 | review rejected | `TaskReviewRejected` remains durable | same Worker receives a new execution with rejection requirements |
-| provider/network system failure after internal retries | `TaskInterrupted` with paired reason/evidence | same task is requeued to the configured Worker with a new execution |
+| provider/network system failure after internal retries | `TaskInterrupted` with paired reason/evidence | Worker leaves the task interrupted; Master chooses same-Worker retry or cross-Worker takeover, then explicitly reassigns the same task |
 | task-content, path-preflight, or model-terminal failure | `TaskBlocked` with paired reason/evidence | Master explicitly retries/reassigns or leaves the task blocked |
-| Worker process crash | boot writes `TaskInterrupted` for missing/expired lease | task is requeued to the configured Worker with a new execution |
+| Worker process crash | boot writes `TaskInterrupted` for missing/expired lease | Worker leaves the task interrupted; Master inspects TaskHistory plus AgentBoard and explicitly reassigns the same task |
+| Worker-specific route no longer productive | interruption evidence plus AgentBoard availability remain owner truth | Master may replace the same task's assignment with another configured available Worker; task id and parent session id stay unchanged |
 | Worker process heartbeat stale/missing | AgentBoard retains task/execution history and projects `alive=false` after the owner TTL | launchd may supervise the process, while Master/UI rely only on AgentBoard owner truth |
 | daemon restart while idle | task/agent/cursor truth reloads unchanged | loops resume without duplicate task mutation |
 | daemon restart while review is pending | review truth reloads unchanged | Master review loop continues from durable task truth |
@@ -96,6 +97,14 @@ Task Center truth before another execution starts.
 - Master task execution accepts `task(op="assign")` only when `agent_id`
   belongs to the configured Worker set; the accepted assignment writes
   one `TaskAssigned` event for that Worker.
+- interrupted Master decision receives AgentBoard resource truth and explicitly
+  treats Agent as a reusable pool resource independent of Session ownership
+- interrupted prose without assignment fails with
+  `MissingInterruptedDecision`; a positive takeover test reassigns the same
+  task from `worker-gamma` to `worker-alpha`, preserves parent session id, and
+  writes no duplicate Task:
+  `production_master_runner_requires_interrupted_assignment_decision`,
+  `production_master_runner_can_take_over_interrupted_task_to_another_worker`
 - a multi-Worker positive test accepts the second configured Worker while a
   historical/non-configured Worker is rejected first; the failed attempt writes
   no task mutation.
@@ -141,16 +150,24 @@ Task Center truth before another execution starts.
 - Worker prompt includes both requested `target_cwd` and canonical locked workspace, and requires path preflight for absolute paths, `~`, and symlinks.
 - Symlinked `~/...` target cwd can execute: the runner expands `~`, follows the symlink to the canonical workspace, preserves the requested path in task truth, and asks the Worker to report both paths.
 - no-task tick returns `Idle` and leaves task history unchanged.
-- due one-shot timer runs an internal Master wakeup with the persisted prompt,
-  completes timer truth, and leaves Task Center truth empty.
+- due one-shot timer with persisted source-session truth injects its persisted
+  wakeup prompt as a new turn in that original session; it never reopens or
+  resumes the old turn. The prior turn remains terminal, the injected turn gets
+  the next runtime-turn ordinal, timer truth completes, and Task Center truth
+  is unchanged. A timer without a source session remains an internal wakeup.
+- chained timers whose stored source points at an older `master-timer-*`
+  execution resolve through timer truth to the original user session instead
+  of allowing source-session drift.
 - due recurring timer fires once, increments `fired_count`, and reschedules
   while below `max_runs`; daily, weekly, and cron recurrence uses local timezone
   semantics.
 - due timer failure cannot starve pending Task Center lifecycle events; a
   review-ready task is still approved/closed before the failed timer wakeup is
   retried.
-- interrupted tasks assigned to the same configured Worker are requeued once and
-  claimed with a new execution id.
+- interrupted tasks are not requeued by a Worker. A Worker tick stays idle and
+  writes no new `TaskAssigned` event until Master explicitly reassigns the
+  same task to the selected configured Worker; only then may a new execution
+  begin.
 - rejected submissions are requeued to the same Worker and the next prompt
   contains the persisted rejection requirements.
 - Master review processing converts `ReviewSubmitted` into either
@@ -195,6 +212,11 @@ Task Center truth before another execution starts.
 - interrupted truth remains retryable until it leaves `Interrupted`.
 
 ### Negative
+
+- A source-backed timer must not execute only in a hidden `master-timer-*`
+  session, must not reuse/reopen its source turn id, and a chained timer must
+  not retain an internal session when persisted timer ancestry identifies a
+  user session.
 
 - Master config cannot construct `ProductionWorkerRunner`.
 - Worker cannot execute `task` even if a malformed/provider-injected call bypasses schema exposure.
@@ -257,6 +279,8 @@ Task Center truth before another execution starts.
   forever; after the retry cap, the runner records the provider-unavailable
   blocked decision as `TaskProgressed`.
 - interrupted prose without reassignment leaves the event retryable.
+- Worker-owned interrupted auto-requeue is a red path: it must not race the
+  Master lifecycle decision or silently preserve the previous assignee.
 - a successful mutation of another task does not satisfy the current event's
   decision boundary.
 - a `continue` response without a target-task decision cannot run forever;
@@ -352,13 +376,17 @@ Task Center truth before another execution starts.
 - controlled online proof is landed in
   `scripts/verify-master-three-worker-e2e-online.sh`: it starts three explicit
   Worker processes in an isolated runtime home, writes JSON evidence, forces
-  beta reject/rework and an integration next round, rejects premature parent
-  success, and checks final-evaluation restart idempotency
+  gamma provider retry exhaustion into `TaskInterrupted`, requires Master to
+  replace the same gamma task assignment with alpha, forces beta reject/rework
+  and an integration next round, rejects premature parent success, and checks
+  final-evaluation restart idempotency
 - launchd-managed online proof is landed in
   `scripts/verify-launchd-three-worker-services-online.sh`: it reuses the same
   three-Worker parent-evaluation verifier with Worker start mode set to
-  launchd, then kills gamma and requires KeepAlive to restart the same agent
-  with a new PID/process instance and AgentBoard `restart_count=1`
+  launchd, then kills the now-idle gamma resource and requires KeepAlive to
+  restart the same reusable Agent with a new PID/process instance and
+  AgentBoard `restart_count=1`; task identity and execution ownership remain
+  proven separately by the gamma-to-alpha TaskHistory
 - only claim production closure when the Worker produced a real deliverable or an explicit real-provider blocked result
 
 ## Runtime Evidence

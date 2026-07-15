@@ -5970,3 +5970,198 @@ Current real root cause split:
   - Post-verifier S-profile restored to `provider=cc`, `provider_protocol=responses`, `base_url_host=api.anyint.ai`, health `ok`, fixture env grep empty.
 - remaining before commit:
   - run fmt/clippy/mainline/gates/diff checks after final doc/memory updates.
+
+# 2026-07-14 timer prompt injection and closed-loop contract unit lock
+
+- user correction:
+  - Timer due does not restore/resume an old session turn. It injects the persisted wakeup prompt as a new next-ordinal turn into the original source session, pushing reasoning forward from current truth.
+  - Master closed-loop standard is not aggregation. Master evaluates total goal + decomposed child goals + accepted Worker review truth, then either creates next-round work, records a blocker, or completes only after objective truth is closed.
+  - EventInbox delivery must not guess from time ordering. Use deterministic contract/protocol truth.
+- implementation:
+  - `timer_live_request` now resolves timer source ancestry and injects due source-backed timer prompt into the original session as a new `runtime-turn-N`; source-less timers still use internal `master-timer-*` turns.
+  - timer prompt says this is a new follow-up turn injected by due timer, not a resume/reopen of source turn.
+  - Task attachment truth added through `TaskRuntime::attach_task_to_session`; query/history from visible user sessions persists `TaskSessionAttached` without changing immutable parent.
+  - WebUI current-session task filtering uses parent or `attached_session_ids`, not global task fallback.
+  - EventInbox cursor changed to v2 per-task sequence watermark. Eligibility is `event.seq > watermark[task_id]`; timestamp/task id only order a returned batch.
+  - `run_scheduler_tick` now applies each event to the task snapshot before building the next scheduler event so same-task multiple scheduler facts get monotonic seq.
+- unit evidence:
+  - `cargo test -p freehand-runtime production_master_runner_injects_due_timer_prompt_as_new_source_session_turn -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_master_runner_fires_source_less_timer_in_internal_new_turn -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_master_runner_resolves_chained_timer_to_original_session -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_master_runner_releases_due_timer_after_wakeup_failure -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_master_runner_closed_loop_requires_next_round_before_final_evaluation -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_master_runner_does_not_evaluate_while_sibling_open -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_master_rejects_complete_while_parent_child_task_open -- --nocapture` passed.
+  - `cargo test -p freehand-task phase2b_v2_cursor_delivers_new_lower_task_id_event_with_same_timestamp -- --nocapture` passed.
+  - `cargo test -p freehand-task phase2b_event_cursor_uses_task_sequence_watermark_and_legacy_skips_duplicates -- --nocapture` passed.
+  - `cargo test -p freehand-task attach_task_to_session_is_idempotent_and_preserves_parent -- --nocapture` passed.
+  - `cargo test -p freehand-runtime task_tool_query_attaches_existing_task_to_current_visible_session -- --nocapture` passed.
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture` passed.
+  - `cargo test -p freehand-task -- --nocapture` passed: 56 tests.
+  - `cargo test -p freehand-runtime master_runner::tests:: -- --nocapture` passed: 25 tests.
+  - `bash -n scripts/verify-timer-tool-online.sh`, `node --check apps/freehand-server/assets/webui.js`, `cargo fmt --check`, `cargo run -p xtask -- mainlines generate/check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- remaining:
+  - Online proof still not rerun after this exact unit-contract change. Do not claim online closed loop until S-profile verifies timer injected turn appears in original session transcript and current-session task dashboard observes attachment.
+# 2026-07-14 Android launcher icon switched to repository logo
+
+- request: use `assets/logo.png` as the project app icon.
+- owner: `app.android-client`.
+- implementation:
+  - replaced square and round launcher PNGs for mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi with deterministic 48/72/96/144/192 px derivatives of `assets/logo.png`.
+  - added `apps/freehand-android/scripts/generate-launcher-icons.sh` as the single derivation path.
+  - added `apps/freehand-android/scripts/verify-launcher-icons.sh` to reject missing assets, wrong dimensions, and pixel drift.
+  - synced function map, test design, mainline call manifest, and generated wiki.
+- evidence:
+  - launcher verifier passed for all ten Android resources.
+  - `./gradlew testDebugUnitTest assembleDebug` passed; APK is `apps/freehand-android/app/build/outputs/apk/debug/app-debug.apk`.
+  - extracted APK resources match resized `assets/logo.png`; manifest still binds `android:icon` and `android:roundIcon`.
+  - bash syntax, mainlines generate/check, gates check, and `git diff --check` passed.
+- live gap:
+  - `adb devices -l` returned no devices.
+  - `adb connect 100.104.163.65:5555` did not complete and was interrupted explicitly.
+  - `verify-device-ui.sh 100.104.163.65:5555` returned blocked `adb_state_unavailable`; evidence: `artifacts/android-device/20260714T140530Z-100.104.163.65_5555-97976`.
+  - APK installation and launcher screenshot are not claimed.
+
+# 2026-07-14 Android WebUI-only shell and native fallback removal
+
+- user correction:
+  - Android must align directly with the existing daemon WebUI.
+  - No local HTML, native conversation/settings/update/status UI, Android protocol projector, mock page, automatic endpoint switch, schema migration, or replacement UI is acceptable; errors remain explicit failures.
+- root cause:
+  - `MainActivity` previously loaded `file:///android_asset/bridge.html` and rendered native topbar/drawer/composer/status/timeline/update surfaces while waiting for Android-owned ADP transport.
+  - the device retained `127.0.0.1:4042`, which is unreachable from the phone and left the obsolete native shell visible.
+- implementation:
+  - `MainActivity` is now a thin WebView/platform bridge and immediately loads `http://<host>:<port>/?client=android-webview`.
+  - physically removed local `bridge.html`, native UI controllers/resources, Android ADP/SSE/HTTP clients/projector/update UI, their tests, and the server `/mock/android` page/assets.
+  - Android config now admits only active Tailscale profile identity plus host/port. Removed transport/relay fields fail strict schema validation and are neither ignored nor migrated.
+  - device verifier now requires `webuiShell=true`, `layoutClient=android-webview`, and a mobile `layoutShape`; old native-drawer probes were removed.
+  - deleted obsolete Android native-shell design/goal documents and updated feature map, function maps, test design, mainline JSON/wiki, architecture doc, local skill, and README.
+- verified evidence:
+  - `./gradlew testDebugUnitTest assembleDebug` passed.
+  - `cargo test -p freehand-server --lib -- --nocapture` passed 13 tests, including canonical Android WebUI shell and `/mock/android` 404.
+  - APK inspection shows `assets/config/client.json` and no `bridge.html`, native UI/projector/transport artifacts.
+  - launcher icon verifier, verifier bash syntax, `cargo fmt --check`, mainlines generate/check, gates check, and `git diff --check` passed.
+  - daemon live URL `http://100.66.1.82:4041/?client=android-webview` returned canonical `data-webui-shell=true` HTML.
+  - debug APK installed successfully on ADB device `100.104.163.65:5555` (PLZ110); app-owned config was explicitly replaced with strict `100.66.1.82:4041` host/port schema.
+- true-device closure:
+  - after Jason unlocked the device, ADB was reconnected explicitly to `100.104.163.65:5555` and `verify-device-ui.sh` passed.
+  - evidence: `artifacts/android-device/20260715T000253Z-100.104.163.65_5555-46095`.
+  - `FreehandWebUiLayout` reported `webuiShell=true`, `layoutClient=android-webview`, and `layoutShape=tall_phone`.
+  - summary recorded foreground `com.freehand.android/.ui.MainActivity` with no fatal logcat.
+  - screenshot manual review confirmed the canonical WebUI mobile header, agent strip, conversation cards, and composer; no native settings/update/status/timeline shell remained.
+  - app-owned config remained strict `100.66.1.82:4041` host/port-only truth.
+
+# 2026-07-15 current-session delegated task dashboard correction
+
+- Jason corrected the mobile multi-Agent information architecture:
+  - Header must show current-session running Agents and delegated tasks.
+  - first tap must show the current session's child-task list only.
+  - task tap must open the task-bound Worker session conversation.
+- live evidence before the fix:
+  - `QueryTaskBoard(include_terminal=false)` returned running `task-1784013898` with parent `webui-session-20260714072351-8e59cbcd` but omitted `attached_session_ids`.
+  - its task ledger contained 23 `TaskSessionAttached` events for `webui-session-20260714100320-084ee172`, while the current task snapshot had `attached_session_ids=null`; later heartbeat/execution snapshot writers erased observation projection.
+  - persisted Worker turns existed under `~/.freehand/state/turns/worker/worker-task-task-1784013898`, while ADP `QuerySessionTurns(worker-task-task-1784013898)` returned zero turns because runtime queried only the master reason namespace.
+  - WebUI synthesized `worker-task-<task_id>` and changed selection without immediately refreshing `QuerySessionTurns`.
+- implementation in progress:
+  - task snapshot load hydrates attachment membership from only matching `TaskSessionAttached` ledger rows without replaying/rewinding lifecycle status or sequence.
+  - TaskBoard DTO now carries canonical `worker_session_id` from runtime owner projection.
+  - runtime `QuerySessionTurns` searches only the master and configured Worker reason namespaces and preserves owning agent/node source.
+  - mobile Agent sheet was reduced to delegated child tasks; Header renders running Agent/delegated task counts and active task title; task tap consumes `worker_session_id` and immediately refreshes the Worker transcript.
+- local evidence so far:
+  - `attachment_survives_later_snapshot_without_attachment` passed after fixing the stale-snapshot fixture to carry its later event seq.
+  - `runtime_query_session_turns_restores_worker_task_namespace` passed, including the missing-session negative case.
+  - `freehand-server --lib` passed 13 tests; JS syntax, mainlines generate/check, gates check, and diff check passed before the final doc/test adjustments.
+- remaining before closure:
+  - rerun final package/gate stack after all edits.
+  - rebuild/restart the live master daemon, prove TaskBoard attachment plus Worker transcript over ADP, then verify Header -> task list -> Worker conversation on the unlocked Android device with screenshots/DOM evidence.
+# 2026-07-15 Android startup overlay and Agent resource count closeout
+
+- user target:
+  - Android startup must not show a long blank white screen; it needs a simple visible loading animation.
+  - the top/mobile Agents surface must expose configurable Agent resource count, currently capped at 5, with today shared provider semantics and a future path for per-Agent provider/properties.
+- implementation:
+  - Android `MainActivity` now renders a native dark startup overlay with the repo launcher logo, `Freehand`, `Connecting to workspace`, and an indeterminate blue spinner before WebView readiness.
+  - `WebUiStartupGate` removes the overlay only after the WebView DOM probe reports `webuiShell=true` and `layoutClient=android-webview`; page-finished alone is not accepted as ready.
+  - config owner added `AgentResourceConfigUpdate` with `1..=5` validation, Master-only mutation, atomic config persistence, deterministic Worker peer grow/shrink, and shared provider/fallback provider copied from the first Worker template.
+  - UI protocol and runtime added `UpdateAgentResourceConfig`; runtime routes the mutation into `config.core`, returns restart-required config projection, and does not fabricate live AgentBoard Workers.
+  - WebUI mobile Agents sheet now shows `Agent resources / Worker pool`, +/- controls, limit, shared provider label, save action, and current delegated task list; header summary includes running/delegated/configured counts.
+- validation:
+  - `cargo test -p freehand-config update_agent_resource_config -- --nocapture` passed.
+  - `cargo test -p freehand-ui-protocol agent_resource_config -- --nocapture` passed.
+  - `cargo test -p freehand-runtime runtime_dispatch_updates_agent_resource_count_without_fabricating_live_agents -- --nocapture` passed.
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `cargo test -p freehand-server --lib -- --nocapture` passed 13/13; the printed `dispatch worker panicked` is the intentional join-failure projection test.
+  - `cargo fmt --check`, `git diff --check`, `cargo run -p xtask -- mainlines check`, and `cargo run -p xtask -- gates check` passed.
+  - Android: `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest --tests 'com.freehand.android.ui.WebUiStartupGateTest'` passed, and `./gradlew assembleDebug` passed.
+  - online WebUI: `http://100.66.1.82:4041/?client=android-webview&v=20260715-agent-resource-final` served canonical shell containing `mobile-agent-resource-count/save/increment/decrement`; JS asset returned `cache-control: no-store`.
+  - Playwright mobile evidence `/tmp/freehand-mobile-agent-resource-sheet.png` showed header `1 running agent · 1 delegated task · 1 configured`, `Worker pool`, count `1 of 5`, `shared · cc`, save disabled when unchanged, and one current delegated task card.
+  - Android device `100.104.163.65:5555` installed the rebuilt debug APK successfully; package `lastUpdateTime=2026-07-15 12:34:14`.
+  - pre-lock true-device screenshot `/tmp/freehand-android-startup-or-webui.png` showed the startup overlay instead of white screen; logcat earlier reported canonical `FreehandWebUiLayout` JSON.
+- remaining/risk:
+  - after reinstall, the device is on secure lockscreen (`mDreamingLockscreen=true`, NotificationShade focus), so the current installed APK's post-load visible screen could not be re-screenshotted without Jason unlocking the phone. Do not claim that screenshot as current-install visual proof until unlocked.
+  - prior full `cargo test -p freehand-runtime --lib -- --nocapture` still has unrelated live bridge/checkpoint failures and is not a green umbrella.
+  - MemoryPalace re-mine was attempted after dry-run proved the first 5 files were `Cargo.toml`, `note.md`, `MEMORY.md`, `CACHE.md`, and `rust-toolchain.toml`; actual mine was blocked by existing external palace lock PID 30147 running a 12h+ `mempalace mine ... --wing routecodex ...`. Do not kill that unrelated process without explicit authorization.
+
+# 2026-07-15 Worker transcript restore speed and fake User prompt closeout
+
+- user target:
+  - session switch must not flash an empty `New conversation` before the real transcript renders.
+  - Worker/subagent transcript must not render framework task/continuation prompts as user-authored messages.
+  - provider retry/failover errors that recover stay same-step transient provider activity; they do not require restarting reasoning or persisting Error cards.
+- root causes:
+  - runtime projected Worker `original_task` context segments into `UiTurnProjection.user_text`, so Worker internal task prompts looked like repeated User messages.
+  - WebUI cleared the selected transcript and rendered immediately on session switch, so slow `QuerySessionTurns` looked like a new empty conversation.
+  - `ReasonPersistence::restore_turn_snapshots_for_ui` replayed the full reason ledger and keyed rows by full `turn_id`; a real Worker sample had only 6 authoritative turn files but a 7.4GB reason ledger and expanded to 218 UI rows, causing a 75.2s online ADP query.
+- implementation:
+  - runtime `QuerySessionTurns` searches configured Master/Worker reason namespaces, preserves source-agent attribution, and hides `worker-task-*` framework prompts from `user_text`.
+  - WebUI selected-session switch now uses `sessionRefreshInFlight` / `sessionRefreshError`, pins the requested session id, discards late transcript responses, renders an explicit loading/failure card, and never shows empty `New conversation` while a selected transcript query is in flight.
+  - `ReasonPersistence::restore_turn_snapshots_for_ui` now uses authoritative closed/active turn snapshots plus rollback-marker sidecar truth when available, coalesces repaired `-rN` rounds to the latest logical turn, and reserves ledger rebuild for missing authoritative snapshots.
+  - rollback now persists a compact `rollback-markers.json` sidecar so effective UI transcript filtering no longer requires reading the full reason ledger on normal query paths.
+- local evidence:
+  - `cargo test -p freehand-reason --lib -- --nocapture` passed 61/61.
+  - `cargo test -p freehand-runtime runtime_query_session_turns -- --nocapture` passed both parent-evaluation and Worker task namespace cases.
+  - `cargo test -p freehand-server --lib -- --nocapture` passed 13/13; the printed `dispatch worker panicked` is the intentional join-failure projection test.
+  - provider recovery contract tests passed: runtime same-step retry success, retry-before-next-attempt, provider recovery debug update, and UI protocol recovery-clears-activity.
+  - `node --check apps/freehand-server/assets/webui.js`, `jq empty` for touched mainline JSON, `cargo fmt --check`, `xtask mainlines generate/check`, `xtask gates check`, and `git diff --check` passed.
+- online S-profile evidence:
+  - `scripts/install-launchd.sh restartS` installed the current debug daemon and restarted `com.freehand.daemonS`.
+  - `curl http://127.0.0.1:4042/health` returned `ok`; `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+  - served WebUI JS/CSS hashes matched workspace: `webui.js` `d408e0c06875cc2c9eaa680e13da68052eeec4e23fcf06b0b3c21e38ce2dae59`, `webui.css` `64501adb5952bfa62edd4a73aa2f9c26af3a7daf28cea9775b93a9a5b7f57096`.
+  - before reason.persistence fix, ADP `QuerySessionTurns(worker-task-task-1784013898)` took `75204ms`, returned `218` rows, `user_text` non-null `0`, forbidden prompt count `0`.
+  - after fix, the same real Worker session returned in `133ms`, raw response `9291` bytes, `6` rows, `user_text` non-null `0`, forbidden prompt count `0`, `terminalOrFinalRows=6`, `sources=["worker"]`.
+  - mobile WebUI CDP artifact `artifacts/webui-online/session-switch-worker-1784128322135/summary.json`: parent selected session `webui-session-20260714100320-084ee172`; task click selected `worker-task-task-1784013898`; immediate state had loading visible, no chat empty `New conversation`, userMessageCount `0`; final state had worker nav, chatMessageCount `2`, userMessageCount `0`, fake prompt regex `false`.
+- remaining:
+  - no Android APK rebuild was needed in this slice because Android native code did not change; Android WebView consumes the daemon-hosted WebUI assets.
+
+# 2026-07-15 framework tool semantics and per-child inspection closeout
+
+- root causes:
+  - `task` and `timer` were classified as generic tool displays, so WebUI could only show `Run tool · task/timer` instead of owner-projected operation semantics.
+  - live pending/cancelled Worker projections published raw internal `worker-task-*` request text even though persisted `QuerySessionTurns` already hid it.
+  - mobile delegated-task rendering capped the current-session list at eight rows, preventing deterministic one-by-one inspection for larger parent sessions.
+- implementation:
+  - `tool.display` now owns first-class `Task` and `Timer` kinds. `parse_task_tool_display` projects operation/task/title/agent/status/cwd/dispatch; `parse_timer_tool_display` projects operation/timer/timing/reason/wakeup prompt. `ui.protocol` carries those fields to public tool activity.
+  - runtime live pending/cancelled and persisted query projections share `ui_should_hide_user_text`; framework parent/Worker prompts project no user-authored message while ordinary session prompts remain visible.
+  - mobile Agent sheet renders every current parent child task, adds `1/N`, `data-task-id`, and owner-projected `data-worker-session-id`.
+  - `scripts/verify-worker-subtasks-online.py` read-only enumerates TaskBoard children for one parent and queries every canonical Worker transcript.
+  - `scripts/verify-worker-subtasks-webui-online.mjs` drives the real mobile WebUI through CDP, waits for sheet open/closed geometry, verifies task identity, Worker entry, prompt absence, return path, and saves screenshots.
+  - timer verifier now uses an independent temporary `timer-fixture` provider id so a configured `fallback_provider=minimax` does not violate the primary/fallback-distinct config contract.
+- local evidence:
+  - `freehand-blocks` projection tests: 10 passed.
+  - `framework_tool_public_projection_uses_task_and_timer_display_semantics`: passed.
+  - `live_worker_task_projection_hides_internal_user_text`: passed.
+  - `live_regular_session_projection_keeps_user_text`: passed.
+  - `runtime_query_session_turns`: 2 passed.
+  - `root_and_asset_routes_return_webui_shell_files`: passed.
+  - JS/Python/bash/JSON syntax, `cargo fmt --check`, mainlines generate/check, gates check, and `git diff --check`: passed.
+- online S-profile evidence:
+  - current debug daemon restarted on `127.0.0.1:4042`; health and ADP smoke passed.
+  - served JS/CSS SHA-256 matched workspace: JS `cadd993553415833d04a052ae370c62a4c217a76e4a11f17ce1fb9082c978700`, CSS `64501adb5952bfa62edd4a73aa2f9c26af3a7daf28cea9775b93a9a5b7f57096`.
+  - real three-child parent `online-master-three-worker-e2e-current` passed the read-only checker with alpha/beta/gamma transcripts non-empty, terminal Success, and `user_text_leak_count=0` for all three.
+  - real mobile WebUI artifact `artifacts/webui-online/worker-subtasks-1784133884215/summary.json` passed: current parent sheet card carried task/Worker session ids; task click selected `worker-task-task-1784128683`; Worker nav was visible; `userMessageCount=0`; forbidden internal prompt text was absent; Back returned to the exact parent. Manual screenshot review confirmed the opened sheet and clean Worker transcript.
+  - real archived ADP turn `online-master-three-worker-e2e` projected `task` as `Create Worker task` with task/title/cwd/dispatch semantics after daemon restart.
+  - S-profile was restored to `cc` / OpenAI Responses / `api.anyint.ai` / `gpt-5.5` / env auth.
+- unclosed evidence:
+  - there was no current persisted `timer` tool activity available for a WebUI screenshot. Unit/protocol semantics are green, but timer-card browser-visible proof is not claimed.
+  - `verify-timer-tool-online.sh` created and completed timer `timer-online-proof-1784133281-65729`, but its mock did not observe the due-turn provider request before the script timed out; the due turn later appeared in the source session and timer state was completed/fired once. Treat this as a verifier timing/route gap, not a green timer online closeout.
+  - Android device `100.104.163.65:5555` was online but locked/dozing; `FREEHAND_ANDROID_SKIP_INSTALL=1 verify-device-ui.sh` was blocked at `artifacts/android-device/20260715T164610Z-100.104.163.65_5555-52926`. No current true-device claim.

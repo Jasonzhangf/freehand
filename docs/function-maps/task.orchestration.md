@@ -21,6 +21,7 @@
   - `TaskRuntime::reject_review`
   - `TaskRuntime::close_task`
   - `TaskRuntime::query_task`
+  - `TaskRuntime::attach_task_to_session`
   - `TaskRuntime::list_tasks`
   - `TaskRuntime::task_history`
   - `TaskRuntime::list_agents`
@@ -32,6 +33,29 @@
   - `TaskRuntime::run_scheduler_tick`
 - mainline call source: `docs/mainline-calls/task.orchestration.json`
 - generated wiki: `docs/wiki/task.orchestration.md`
+
+## Resource Map Binding
+
+- owned resources:
+  - `task`
+- touched resources:
+  - `session`
+  - `agent`
+- resource operations:
+  - `task.create` (`task -> session`): persist the optional parent session id
+    on task truth; this does not attach or assign the Agent to the Session
+  - `task.attach_session` (`task -> session`): persist an observing session for
+    an explicitly queried existing task while preserving its creation parent
+    and without granting task mutation authority
+  - `task.assign` (`task -> agent`): create or replace the temporary assignment
+    while preserving the same task id and parent session id
+- forbidden shortcuts:
+  - Session must not own or directly bind Agent lifecycle truth
+  - current-session Agent attachment must be derived through Task parent truth
+    plus current task assignment/lease/execution
+  - interruption/retry/takeover must not create a duplicate Task for the same
+    task objective
+- resource map: `docs/resource-maps/core.json`
 
 ## Request Mainline
 
@@ -50,7 +74,9 @@
   read-modify-write transaction through one TaskStore lock; boot recovery
   removes only invalid task ids instead of replacing concurrent lease truth
 - dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`
-- `assign_task` binds waiting/created/interrupted tasks to an available agent
+- `assign_task` binds waiting/created/interrupted tasks to an available agent;
+  an interrupted task may replace its previous assignee with another available
+  Agent without changing task id or parent session id
 - `claim_next_task` lets an agent claim its highest-priority assigned task into `Running` with a lease and durable `execution_id`
 - `record_execution` writes worker execution progress only for running tasks
 - `create_agent` and `close_agent` manage persisted worker agent snapshots
@@ -74,11 +100,13 @@
 - SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without
   making business decisions
 - Phase 2B EventInbox projects master-visible task, execution, review, and
-  scheduler events from Task Center ledger truth with a globally unique
-  cursor shaped as timestamp, task id, sequence, and event id
+  scheduler events from Task Center ledger truth with a v2 per-task sequence
+  watermark cursor. Timestamp/task-id ordering is presentation-only; delivery
+  truth is each task ledger's monotonic sequence
 - Phase 2B EventInbox accepts legacy three-part cursors by skipping all events
-  with the matching legacy prefix, so duplicated historical cursor rows do not
-  replay as new events
+  already proven consumed by strictly older timestamps or the named task
+  sequence; other same-timestamp tasks replay conservatively so no later event
+  can be skipped
 - `replay_from_start=true` makes MasterPoll ignore the persisted cursor and
   rescan EventInbox from the beginning; omitted EventInbox/MasterPoll limit
   means drain all matching rows, while explicit finite limits remain pagination
@@ -90,6 +118,13 @@
 ## Response Mainline
 
 - `TaskRuntime::query_task` returns persisted task snapshot truth
+- explicit query/history from another visible user session persists one
+  idempotent `TaskSessionAttached` observation relation; framework-internal
+  lifecycle/timer/Worker sessions do not attach
+- task snapshot load rehydrates observing-session membership from matching
+  `TaskSessionAttached` ledger rows so later heartbeat/execution snapshots
+  cannot erase current-session observability; hydration does not change task
+  status, `last_event_seq`, or `last_event_id`
 - `TaskRuntime::list_tasks` returns task snapshot lists filtered by status and assignee
 - `TaskRuntime::task_history` returns ordered persisted task ledger events
 - `TaskRuntime::list_agents` returns current in-memory agent registry projection
@@ -235,7 +270,7 @@
 | 01 | `reasonix_aligned_builtin_specs` | `crates/freehand-tools/src/lib.rs` | expose one `task` tool schema with op-dispatched arguments | static registry truth | provider tool definition | runtime live bridge | tool registry | bound |
 | 02 | `execute_task_tool` | `crates/freehand-runtime/src/lib.rs` | route task tool calls into task owner with runtime home/session/turn context | task tool call | tool result text | runtime live bridge | task runtime | bound |
 | 03 | `TaskRuntime::boot` | `crates/freehand-task/src/lib.rs` | load task and agent snapshots into memory | runtime home + owner agent | ready task runtime | runtime task bridge | task owner | bound |
-| 04 | `TaskRuntime::create_task` | `crates/freehand-task/src/lib.rs` | validate, persist, assign/wait, and update memory state | task create request | task snapshot + ledger events | runtime task bridge | task owner | bound |
+| 04 | `TaskRuntime::create_task` | `crates/freehand-task/src/lib.rs` | validate, persist, attach optional parent session, assign/wait, and update memory state | task create request | task snapshot + ledger events | runtime task bridge | task owner | bound |
 | 05 | `TaskRuntime::query_task` | `crates/freehand-task/src/lib.rs` | return one task snapshot truth | task id | task snapshot | runtime task bridge | task owner | bound |
 | 06 | `TaskRuntime::list_tasks` | `crates/freehand-task/src/lib.rs` | return task snapshots filtered by status and assignee for queue/UI projection | task list query | task snapshots | runtime task bridge | task owner | bound |
 | 07 | `TaskRuntime::task_history` | `crates/freehand-task/src/lib.rs` | return ordered task ledger events for timeline/debug projection | task id | task ledger events | runtime task bridge | task owner | bound |
@@ -244,7 +279,7 @@
 | 10 | `TaskRuntime::submit_review` / `approve_review` / `reject_review` / `close_task` | `crates/freehand-task/src/lib.rs` | enforce review-before-close lifecycle and persist each transition | review mutation request | task snapshot + ledger event | runtime task bridge | task owner | bound |
 | 11 | `TaskRuntime::heartbeat_task` | `crates/freehand-task/src/lib.rs` | refresh the lease for an assigned running task and persist a heartbeat event | task heartbeat request | running task snapshot + lease | runtime task bridge | task owner | bound |
 | 12 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | preserve fresh lease-acquisition windows, then interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots + lease snapshot | recovered runtime state | task boot | task owner | bound |
-| 13 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting/created/interrupted task to an available agent | task assignment request | assigned task snapshot + agent queued state | runtime task bridge | task owner | bound |
+| 13 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting/created/interrupted task to an available agent, including replacing an interrupted task's previous assignee | task assignment request | same task snapshot + new temporary assignment + agent queued state | runtime task bridge | task owner | bound |
 | 14 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | claim the highest-priority assigned task for an agent and enter lease-backed running state | agent task-claim request | claimed running task snapshot or no-task outcome | runtime task bridge | task owner | bound |
 | 15 | `TaskRuntime::record_execution` | `crates/freehand-task/src/lib.rs` | append semantic worker execution progress for a running task | worker execution record request | running task snapshot + progress event | runtime task bridge | task owner | bound |
 | 16 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal task and release assignee state | task mutation request | cancelled task snapshot + released agent | runtime task bridge | task owner | bound |

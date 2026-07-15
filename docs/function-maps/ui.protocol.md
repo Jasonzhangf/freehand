@@ -86,6 +86,7 @@
 - error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
 - config status query is a protocol-owned ADP/query command shape, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
 - provider/model update is a protocol-owned mutation command shape (`UpdateProviderConfig`) that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to `config.core`; WebUI and CLI must not write config files directly
+- Agent resource-count update is a protocol-owned mutation command shape (`UpdateAgentResourceConfig`) that carries only agent name plus `resource_count`; protocol rejects values outside `1..=5` before runtime dispatch and routes valid intent to `config.core`
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 
 ## Response Mainline
@@ -106,7 +107,7 @@
 - session list and transcript projections expose session `cwd`, and turn projections carry `cwd` when the runtime owner has bound a session to a workspace
 - session list projections expose only owner-supplied persisted session metadata (`CreateSession` / session metadata truth) as top-level active or archived sessions, so WebUI, Android, CLI, and headless ADP clients share one CRUD truth instead of deriving global sessions from raw turns
 - session list projections hide internal framework sessions such as `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` from user-facing active and archived lists, while explicit `QuerySessionTurns { session_id }` remains queryable for debug/replay truth
-- task board projections carry `parent_session_id` for worker-created task summaries so WebUI can render worker transcript sessions only as child rows under the owning persisted master session
+- task board projections carry `parent_session_id`, observing `attached_session_ids`, and canonical `worker_session_id` so WebUI can scope tasks to the selected parent/observer session and open the Worker transcript without synthesizing an id
 - rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth
 - task list and task history query results expose UI-safe task snapshot and ledger-event projections supplied by runtime owner code through `UiRuntimeQueryPort`
 - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results expose UI-safe board/lifecycle projections supplied by runtime owner code through `UiRuntimeQueryPort`
@@ -123,6 +124,7 @@
   API keys, pair-token env/value fields, provider raw payloads, and full
   credential-bearing URLs are not part of the DTO
 - provider/model update command receipts report owner dispatch status only; the restart-required and saved provider/model state is observed by a follow-up config status query/projection, not by protocol-local config truth
+- Agent resource-count update command receipts report owner dispatch status only; the restart-required and saved topology state is observed by a follow-up config status query/projection, not by protocol-local config truth
 - error-center subscription initial snapshots use the same `UiErrorCenterEventListProjection` as query results
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards; tool status/outcome is conveyed by the status field while the public body stays semantic and target-focused instead of echoing success/failure result text
 - public conversation tool summaries carry `tool.display` structured semantic projection from `tool.display`, so UI clients render category/action/target/parameters/result without parsing raw tool terms
@@ -152,6 +154,7 @@
 - task list/history commands sent to command ingress are rejected as query-route misuse instead of mutating task truth
 - config status command sent to command ingress is rejected as query-route misuse instead of becoming a UI-local config read or mutation
 - provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO
+- Agent resource-count update commands reject empty agent names and counts outside `1..=5` before dispatch; provider credentials and process-start state do not exist in the DTO
 - `RunMasterPoll` rejects empty cursors and rejects `replay_from_start=true`
   combined with `after_cursor` before dispatch
 - task history remains query-only; task list subscribe accepts only list filters and must reject history/query misuse on the subscribe route
@@ -255,8 +258,9 @@
 | 19 | `validate_command` / `command_dispatch_target` | `crates/freehand-ui-protocol/src/lib.rs` | validate session-management mutation intents and route them to the session persistence owner | session CRUD or rollback command | owner-routed dispatch envelope or protocol rejection | WebUI/Android/CLI transports | runtime/reason persistence owner path | bound |
 | 19a | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session's effective transcript projection after persistence-owned rollback | session id plus effective turn projections | queryable session transcript without rolled-back turns | runtime.ui-command-dispatch | protocol state | bound |
 | 20 | `UiRuntimeQueryPort::query_runtime` | `crates/freehand-ui-protocol/src/lib.rs` | define runtime-backed read-only query extension point without making app transports import runtime owners | UI query command | optional runtime-owned query result or explicit dispatch failure | WebUI/daemon ADP query transport | runtime query owner | bound |
-| 20a | `UiCommand::QueryConfigStatus` / `UiQueryResult::ConfigStatus` / `UiConfigStatusProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define UI-safe active config query/result DTO without secrets | config status query | active agent/provider/model/auth-source projection | ADP query transport | runtime query port | bound |
+| 20a | `UiCommand::QueryConfigStatus` / `UiQueryResult::ConfigStatus` / `UiConfigStatusProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define UI-safe active config query/result DTO without secrets | config status query | active agent/provider/model/auth-source/resource-count projection | ADP query transport | runtime query port | bound |
 | 20b | `UiProviderConfigUpdate` / `UiCommand::UpdateProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider/model update command DTO without credential values and route it to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
+| 20c | `UiAgentResourceConfigUpdate` / `UiCommand::UpdateAgentResourceConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define Agent resource-count update command DTO without provider credentials and route it to the config owner | agent name + `1..=5` resource count | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 21 | `UiCommand::QueryErrorCenterEvents` / `UiQueryResult::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center query/result DTOs | session/trace/turn/domain filters | UI-safe error-center projection | ADP query transport | runtime query port | bound |
 | 22 | `UiCommand::SubscribeErrorCenterEvents` / `UiProjection::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define error-center subscription command and projection event shape | error-center subscription filters | UI-safe error-center subscription event | ADP subscribe transport | protocol selector matcher | bound |
 | 23 | `UiCommand::QueryTaskBoard` / `UiCommand::QueryAgentBoard` / `UiCommand::QueryAgentLifecycle` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 board and lifecycle query DTOs without owning task/lifecycle truth | board or lifecycle query filters | runtime-backed UI-safe board/lifecycle projections | ADP query transport | runtime query port | bound |
@@ -292,6 +296,7 @@
 - error-center query/subscription DTOs and runtime query-port routing are protocol-bound; runtime owner code supplies metadata-backed read projections
 - config status query/result DTO is protocol-bound; runtime owner code supplies selected config projection and protocol state rejects local handling
 - provider/model update command DTO is protocol-bound, owner-routed to `config.core`, rejects invalid/empty fields, and serializes without credential/API-key values
+- Agent resource-count update command DTO is protocol-bound, owner-routed to `config.core`, rejects out-of-range counts, and serializes without provider credentials or live-process state
 - task mutation command DTOs are protocol-bound, owner-routed to `task.orchestration`, and rejected at the protocol boundary when required task, worker, execution, or review fields are empty
 - Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs are landed and locked by protocol owner tests
 - Phase 2C worker-control command/query DTOs are landed and locked by protocol owner tests

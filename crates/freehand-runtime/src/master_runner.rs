@@ -322,7 +322,7 @@ impl ProductionMasterRunner {
         };
         let summary = match self.executor.execute_timer(
             &self.selected,
-            timer_live_request(&self.runtime_home, &due)?,
+            timer_live_request(&self.runtime_home, &self.master_agent_id, &due)?,
         ) {
             Ok(summary) => summary,
             Err(error) => {
@@ -436,11 +436,24 @@ impl ProductionMasterRunner {
             .map_err(task_center_error)?
             .len();
         let worker_names = self.selected.worker_peer_names().join(", ");
+        let agent_board_json = serde_json::to_string_pretty(
+            &task_runtime
+                .query_agent_board()
+                .map_err(task_center_error)?,
+        )
+        .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
         let summary = self
             .executor
             .execute(
                 &self.selected,
-                master_live_request(&self.runtime_home, &worker_names, &task, event, attempt)?,
+                master_live_request(
+                    &self.runtime_home,
+                    &worker_names,
+                    &agent_board_json,
+                    &task,
+                    event,
+                    attempt,
+                )?,
                 master_decision_boundary(&task),
             )
             .map_err(ProductionMasterRunnerError::Execution)?;
@@ -628,6 +641,7 @@ impl ProductionMasterRunner {
 fn master_live_request(
     runtime_home: &Path,
     worker_names: &str,
+    agent_board_json: &str,
     task: &TaskSnapshot,
     event: &TaskEventInboxEntry,
     attempt: u32,
@@ -656,9 +670,19 @@ Configured Worker ids: {worker_names}\n\
 Rules:\n\
 - review_ready: query/history, then reject with concrete requirements or approve and close. Approved is not terminal; close it in the same lifecycle decision.\n\
 - execution_blocked: inspect the blocker. Reassign only when retry is justified; otherwise call task(op=\"append\", task_id=<task-id>, note=\"blocked_decision: <required external action>\") to persist why it remains blocked.\n\
-- execution_interrupted: assign the task back to one configured Worker for a new execution.\n\
+- execution_interrupted: treat the task as schedulable work, not as session-owned Worker failure. Use TaskHistory plus AgentBoard to choose retry_same_worker or takeover_to_another_available_configured_worker. Reassign the same task_id; do not create a duplicate task for the same objective.\n\
 - one trigger event owns one decision turn. After the required Task Center mutation is persisted, stop; never wait inside this turn for a future Worker event.\n\
 - never fabricate completion, approval, evidence, or task state.\n\
+\n\
+Resource model:\n\
+- Agent is a reusable execution resource in the pool, independent of session ownership.\n\
+- Session is the user goal/progress context.\n\
+- Task is the schedulable work item attached to a parent session when present.\n\
+- Assignment, lease, and execution are temporary bindings between task and agent.\n\
+- Retrying or taking over must preserve task_id and parent_session_id while creating a new execution later.\n\
+\n\
+AgentBoard resource truth:\n\
+{agent_board_json}\n\
 \n\
 Task snapshot:\n{task_json}\n\
 \n\
@@ -881,32 +905,77 @@ fn parent_user_objectives(
 
 fn timer_live_request(
     runtime_home: &Path,
+    agent_id: &AgentId,
     due: &DueTimerSchedule,
 ) -> Result<LiveReasonTurnRequest, ProductionMasterRunnerError> {
     let timer_json = serde_json::to_string_pretty(&due.schedule)
         .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
     let timer_key = sanitize_identifier(&due.schedule.timer_id);
+    let source_session_id = resolve_timer_source_session(runtime_home, agent_id, due)?;
+    let session_id = source_session_id
+        .clone()
+        .unwrap_or_else(|| SessionId::new(format!("master-timer-{timer_key}")));
+    let turn_id = if source_session_id.is_some() {
+        next_parent_evaluation_turn_id(runtime_home, agent_id, &session_id)?
+    } else {
+        TurnId::new(format!("master-timer-{timer_key}-fire-{}", due.fired_at))
+    };
     Ok(LiveReasonTurnRequest {
         runtime_home: runtime_home.to_path_buf(),
-        session_id: SessionId::new(format!("master-timer-{timer_key}")),
-        turn_id: TurnId::new(format!("master-timer-{timer_key}-fire-{}", due.fired_at)),
+        session_id,
+        turn_id,
         trace_id: TraceId::new(format!(
             "master-timer-trace-{timer_key}-fire-{}",
             due.fired_at
         )),
         prompt: format!(
-            "You are the production Master resumed by an internal timer.\n\
-Use current framework truth and the timer wakeup prompt; do not assume task state from memory.\n\
+            "You are the production Master starting a new follow-up turn injected by a due timer.\n\
+This is a new turn in the source session, not a resume or reopening of the source turn.\n\
+Use current framework truth and the injected timer prompt; do not assume task state from memory.\n\
 \n\
 Timer schedule truth:\n{timer_json}\n\
 \n\
-Wakeup prompt:\n{}",
+Injected timer prompt:\n{}",
             due.schedule.prompt
         ),
         cwd: Some(runtime_home.to_path_buf()),
         stream: false,
         cancel_token: None,
     })
+}
+
+fn resolve_timer_source_session(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    due: &DueTimerSchedule,
+) -> Result<Option<SessionId>, ProductionMasterRunnerError> {
+    let schedules = super::TimerStore::new(runtime_home, agent_id)
+        .load_schedules()
+        .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
+    let mut current = due.schedule.source_session_id.clone();
+    let mut visited = BTreeSet::new();
+    while let Some(session_id) = current {
+        let Some(internal_key) = session_id.as_str().strip_prefix("master-timer-") else {
+            return Ok(Some(session_id));
+        };
+        if !visited.insert(session_id.clone()) {
+            return Err(ProductionMasterRunnerError::State(format!(
+                "timer source-session ancestry contains a cycle at `{}`",
+                session_id.as_str()
+            )));
+        }
+        let ancestor = schedules
+            .iter()
+            .find(|schedule| sanitize_identifier(&schedule.timer_id) == internal_key);
+        current = ancestor.and_then(|schedule| schedule.source_session_id.clone());
+        if ancestor.is_none() {
+            return Err(ProductionMasterRunnerError::State(format!(
+                "timer source session `{}` has no persisted timer ancestry",
+                session_id.as_str()
+            )));
+        }
+    }
+    Ok(None)
 }
 
 fn master_decision_boundary(task: &TaskSnapshot) -> LiveReasonTaskDecisionBoundary {

@@ -19,4 +19,12 @@ class HostConfigTest {
             HostConfig("freehand-tailnet", 4042).baseUrl,
         )
     }
+
+    @Test
+    fun `webUiUrl versions the canonical Android WebView shell`() {
+        assertEquals(
+            "http://100.66.1.82:4041/?client=android-webview&v=20260715-agent-dashboard-2",
+            HostConfig("100.66.1.82", 4041).webUiUrl,
+        )
+    }
 }

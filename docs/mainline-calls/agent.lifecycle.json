@@ -19,11 +19,12 @@
     "lifecycle snapshots are persisted independently from resource AgentSnapshot so worker resource release can return to available while lifecycle query still reports the last typed task state for restart proof",
     "Task Center execution binding supplies current task, execution, and turn ids when available",
     "Phase 2A task execution events project worker running, progress, blocked, recovering, review_ready, retrying, approved, and closed semantics without parsing raw assistant prose",
+    "TaskInterrupted releases the former Worker resource, clears current task, execution, and turn binding, projects idle current activity, and keeps the interruption as typed last activity",
     "runtime or ADP query surface requests AgentBoard or one AgentLifecycleSnapshot"
   ],
   "response_mainline": [
     "AgentLifecycleSnapshot returns one agent's intrinsic state plus process PID, process-instance identity, start/heartbeat timestamps, and restart count",
-    "AgentBoardProjection derives alive from the owner heartbeat TTL while retaining current task, execution, and activity history",
+    "AgentBoardProjection derives alive from the owner heartbeat TTL; interruption clears ended current task and execution binding while retaining typed last activity",
     "scheduler and master prompt context consume AgentBoard summaries, not raw logs",
     "UI and Android render lifecycle projections and do not infer state from raw text"
   ],
@@ -35,6 +36,7 @@
     "lifecycle query without initialized lifecycle truth returns explicit not-ready or empty-board truth, not fallback state",
     "missing or stale process heartbeat projects alive=false; task activity and persisted AgentSnapshot status are not health fallbacks",
     "missing execution id on execution-bound lifecycle events is rejected by task owner before lifecycle projection is accepted",
+    "interrupted task truth must not leave its former Worker projected as running or bound to the ended task and execution",
     "persisted lifecycle snapshot parse/write failures surface as task persistence errors; query must not rebuild a false idle lifecycle when persisted typed truth exists"
   ],
   "shared_functions": [
@@ -141,7 +143,7 @@
       "step": "06",
       "symbol_path": "TaskRuntime::apply_execution_fact / TaskRuntime::reject_review / TaskRuntime::approve_review / TaskRuntime::close_task",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "derive Phase 2A worker lifecycle state from typed task execution and review events",
+      "responsibility": "derive Worker lifecycle state from typed task execution and review events, including releasing current Worker binding on interruption",
       "input_semantic": "execution/review task events with execution id",
       "output_semantic": "AgentLifecycleSnapshot and AgentBoard truth",
       "caller": "task.orchestration",

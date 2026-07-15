@@ -175,6 +175,16 @@ provider = "claude"
 - config changes take effect only after restart
 - hot reload is not part of v1
 
+### Agent resource count
+
+- Master Worker resource count is config-owned topology, not UI-local state.
+- owner update API: `AgentResourceConfigUpdate` through `update_agent_resource_config_in_path`.
+- allowed count: `1..=5` Worker resources for the selected Master.
+- current resource mode is shared-provider: generated or retained Worker peers use the first existing Worker as the provider/fallback template.
+- growing preserves existing peer order and appends deterministic Worker ids from the first Worker name.
+- shrinking removes trailing reciprocal Worker agent tables because the v1 schema has no disabled Worker state.
+- persisted changes are restart-only; live AgentBoard/process truth must not be fabricated before daemon/Worker restart.
+
 ## Remaining TBD
 
 - whether provider-specific auth types beyond `apikey` are needed

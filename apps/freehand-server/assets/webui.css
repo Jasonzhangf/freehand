@@ -746,6 +746,92 @@ body.theme-dark .phase2-failed {
   opacity: 0.68;
 }
 
+.settings-agent-resource-control {
+  display: grid;
+  grid-template-columns: 42px minmax(34px, auto) auto 42px;
+  align-items: center;
+  justify-content: start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid rgba(31, 108, 88, 0.14);
+  border-radius: 12px;
+  background: rgba(247, 251, 248, 0.52);
+}
+
+.settings-agent-resource-control button {
+  width: 42px;
+  height: 38px;
+  border: 1px solid rgba(31, 108, 88, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.settings-agent-resource-control button:disabled {
+  opacity: 0.36;
+}
+
+.settings-agent-resource-control strong {
+  min-width: 30px;
+  font-size: 24px;
+  line-height: 1;
+  text-align: center;
+}
+
+.settings-agent-resource-control > span {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.worker-session-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(31, 108, 88, 0.18);
+  border-radius: 18px;
+  background: rgba(247, 251, 248, 0.86);
+}
+
+.worker-session-nav[hidden] {
+  display: none !important;
+}
+
+.worker-session-nav-kicker {
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.worker-session-nav strong {
+  display: block;
+  max-width: 54vw;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worker-session-nav button {
+  flex: 0 0 auto;
+  border: 1px solid rgba(31, 108, 88, 0.2);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--master);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+}
+
 body.theme-dark .settings-hero,
 body.theme-dark .settings-card {
   background: rgba(255, 255, 255, 0.04);
@@ -3752,17 +3838,10 @@ body[data-mobile-agent-sheet="open"] .mobile-drawer-scrim {
   padding: 0 1px 4px;
 }
 
-.mobile-agent-master-card,
 .mobile-agent-section {
   border: 1px solid var(--mobile-agent-border);
   border-radius: 18px;
   background: var(--mobile-agent-panel);
-}
-
-.mobile-agent-master-card {
-  display: grid;
-  gap: 7px;
-  padding: 13px;
 }
 
 .mobile-agent-card-kicker {
@@ -3773,39 +3852,6 @@ body[data-mobile-agent-sheet="open"] .mobile-drawer-scrim {
   text-transform: uppercase;
 }
 
-.mobile-agent-master-phase {
-  font-size: 18px;
-  font-weight: 780;
-  line-height: 1.18;
-  letter-spacing: -0.02em;
-}
-
-.mobile-agent-sheet[data-tone="active"] .mobile-agent-master-phase,
-.mobile-agent-sheet[data-tone="evaluating"] .mobile-agent-master-phase {
-  color: var(--mobile-agent-blue);
-}
-
-.mobile-agent-sheet[data-tone="accepted"] .mobile-agent-master-phase {
-  color: var(--mobile-agent-green);
-}
-
-.mobile-agent-master-copy,
-.mobile-agent-goal,
-.mobile-agent-round {
-  color: var(--mobile-agent-muted);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-
-.mobile-agent-goal {
-  padding-top: 7px;
-  border-top: 1px solid var(--mobile-agent-border);
-  color: var(--mobile-agent-text);
-}
-
-.mobile-agent-round {
-  font-size: 10.5px;
-}
 
 .mobile-agent-section {
   padding: 12px;
@@ -3916,9 +3962,6 @@ body.theme-dark[data-layout-shape="tablet_portrait"] .mobile-agent-summary-butto
 body.theme-dark[data-layout-shape="phone_portrait"] .mobile-agent-sheet,
 body.theme-dark[data-layout-shape="tall_phone"] .mobile-agent-sheet,
 body.theme-dark[data-layout-shape="tablet_portrait"] .mobile-agent-sheet,
-body.theme-dark[data-layout-shape="phone_portrait"] .mobile-agent-master-card,
-body.theme-dark[data-layout-shape="tall_phone"] .mobile-agent-master-card,
-body.theme-dark[data-layout-shape="tablet_portrait"] .mobile-agent-master-card,
 body.theme-dark[data-layout-shape="phone_portrait"] .mobile-agent-section,
 body.theme-dark[data-layout-shape="tall_phone"] .mobile-agent-section,
 body.theme-dark[data-layout-shape="tablet_portrait"] .mobile-agent-section {

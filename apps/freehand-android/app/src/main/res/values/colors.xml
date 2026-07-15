@@ -37,6 +37,11 @@
     <color name="fh_text_secondary_dark">#94A3B8</color>
     <color name="fh_line_dark">#334155</color>
 
+    <!-- Native launch presentation before the canonical WebUI shell is ready. -->
+    <color name="fh_startup_background">#171717</color>
+    <color name="fh_startup_text">#F5F5F5</color>
+    <color name="fh_startup_text_muted">#A3A3A3</color>
+
     <!-- 透明遮罩 -->
     <color name="fh_scrim">#80000000</color>
 </resources>

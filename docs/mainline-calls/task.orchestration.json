@@ -6,6 +6,11 @@
   "test_design_doc": "docs/testing/task.orchestration.md",
   "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
   "generated_wiki_doc": "docs/wiki/task.orchestration.md",
+  "resource_operations": [
+    "task.create",
+    "task.attach_session",
+    "task.assign"
+  ],
   "request_mainline": [
     "runtime receives a provider tool call named `task`",
     "runtime routes `task` tool calls to `execute_task_tool` instead of generic file/tool execution",
@@ -356,7 +361,10 @@
       "output_semantic": "task snapshot plus ledger events",
       "caller": "runtime task bridge",
       "callee": "task owner",
-      "binding_status": "bound"
+      "binding_status": "bound",
+      "resource_operation": "task.create",
+      "source_resource": "task",
+      "target_resource": "session"
     },
     {
       "step": "05",
@@ -455,7 +463,10 @@
       "output_semantic": "assigned task snapshot plus queued agent state",
       "caller": "runtime task bridge",
       "callee": "task owner",
-      "binding_status": "bound"
+      "binding_status": "bound",
+      "resource_operation": "task.assign",
+      "source_resource": "task",
+      "target_resource": "agent"
     },
     {
       "step": "17a",
@@ -571,7 +582,7 @@
       "step": "23",
       "symbol_path": "TaskRuntime::query_event_inbox",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "project master-visible event inbox entries from ordered task ledger events after a globally unique cursor, with legacy three-part cursor prefix compatibility; omitted limit drains all pending rows",
+      "responsibility": "project master-visible event inbox entries after a deterministic v2 per-task sequence watermark, with conservative legacy timestamp/task/seq cursor migration; omitted limit drains all pending rows",
       "input_semantic": "task ledgers plus optional cursor",
       "output_semantic": "EventInbox projection and next cursor",
       "caller": "runtime query dispatch / CLI sample",
@@ -609,6 +620,20 @@
       "output_semantic": "complete leases.json truth without lost updates or stale reintroduction",
       "caller": "TaskStore lease helpers",
       "callee": "filesystem advisory lock plus atomic rename",
+      "binding_status": "bound"
+    },
+    {
+      "step": "27",
+      "symbol_path": "TaskRuntime::attach_task_to_session",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "persist an idempotent observing-session attachment while preserving the immutable task creation parent, and rehydrate attachment membership from matching TaskSessionAttached ledger rows when later snapshots omit it",
+      "input_semantic": "existing task id plus visible observing session id",
+      "output_semantic": "TaskSessionAttached ledger event and hydrated task snapshot attachment projection without status or last-event rewind",
+      "caller": "runtime task query/history tool owner",
+      "callee": "TaskStore append_event_and_snapshot",
+      "source_resource": "task",
+      "target_resource": "session",
+      "resource_operation": "task.attach_session",
       "binding_status": "bound"
     }
   ],

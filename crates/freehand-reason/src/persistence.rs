@@ -474,35 +474,46 @@ impl ReasonPersistence {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<TurnRecord>, ReasonPersistenceError> {
-        let mut turns_by_id = BTreeMap::<TurnId, TurnRecord>::new();
+        if let Some(restored) = self.load_authoritative_state(session_id)? {
+            let mut turns_by_logical_key = BTreeMap::<String, TurnRecord>::new();
+            for turn in restored.closed_turns {
+                upsert_latest_ui_turn_snapshot(&mut turns_by_logical_key, turn);
+            }
+            if let Some(active) = restored.active_turn {
+                upsert_latest_ui_turn_snapshot(&mut turns_by_logical_key, active.turn);
+            }
+            return Ok(turns_by_logical_key.into_values().collect());
+        }
+
+        let mut turns_by_logical_key = BTreeMap::<String, TurnRecord>::new();
         for row in self.load_reason_ledger(session_id)? {
             match row.payload {
                 ReasonLedgerPayload::TurnStarted { snapshot }
                 | ReasonLedgerPayload::ProviderOutputApplied { snapshot, .. }
                 | ReasonLedgerPayload::CompletionRejected { snapshot, .. } => {
-                    turns_by_id.insert(snapshot.turn.request.turn_id.clone(), snapshot.turn);
+                    upsert_latest_ui_turn_snapshot(&mut turns_by_logical_key, snapshot.turn);
                 }
                 ReasonLedgerPayload::TurnClosed { turn, .. } => {
-                    turns_by_id.insert(turn.request.turn_id.clone(), turn);
+                    upsert_latest_ui_turn_snapshot(&mut turns_by_logical_key, turn);
                 }
                 ReasonLedgerPayload::SessionRollback { marker } => {
-                    turns_by_id.retain(|turn_id, _| {
-                        logical_turn_key(turn_id) != marker.target_logical_turn_key
+                    turns_by_logical_key.retain(|logical_turn_key, _| {
+                        *logical_turn_key != marker.target_logical_turn_key
                     });
                 }
                 ReasonLedgerPayload::RewriteStateUpdated => {}
             }
         }
-        if turns_by_id.is_empty() {
+        if turns_by_logical_key.is_empty() {
             let restored = self.restore(session_id)?;
             for turn in restored.closed_turns {
-                turns_by_id.insert(turn.request.turn_id.clone(), turn);
+                upsert_latest_ui_turn_snapshot(&mut turns_by_logical_key, turn);
             }
             if let Some(active) = restored.active_turn {
-                turns_by_id.insert(active.turn.request.turn_id.clone(), active.turn);
+                upsert_latest_ui_turn_snapshot(&mut turns_by_logical_key, active.turn);
             }
         }
-        Ok(turns_by_id.into_values().collect())
+        Ok(turns_by_logical_key.into_values().collect())
     }
 
     fn rollback_latest_session_turn_locked(
@@ -621,16 +632,14 @@ impl ReasonPersistence {
             .map(|state| state.cursor.clone())
             .unwrap_or_default();
         let next_seq = current_cursor.last_applied_reason_seq.saturating_add(1);
-        let rollback_logical_turn_key = match &payload {
-            ReasonLedgerPayload::SessionRollback { marker } => {
-                Some(marker.target_logical_turn_key.clone())
-            }
+        let rollback_marker = match &payload {
+            ReasonLedgerPayload::SessionRollback { marker } => Some(marker.clone()),
             _ => None,
         };
         let cursor_after = ReasonPersistenceCursor {
             schema_version: PERSISTENCE_SCHEMA_VERSION,
             last_applied_reason_seq: next_seq,
-            latest_turn_id: if rollback_logical_turn_key.is_some() {
+            latest_turn_id: if rollback_marker.is_some() {
                 latest_turn_id.clone()
             } else {
                 latest_turn_id.clone().or(current_cursor.latest_turn_id)
@@ -649,14 +658,18 @@ impl ReasonPersistence {
             payload,
         };
         self.append_row_only(history.session_id(), &row)?;
+        if let Some(marker) = &rollback_marker {
+            self.append_session_rollback_marker(history.session_id(), marker)?;
+        }
 
         let mut closed_turns = self.load_closed_turns(history.session_id())?;
         if let Some(turn) = closed_turn {
             upsert_closed_turn(&mut closed_turns, turn);
         }
-        if let Some(target_logical_turn_key) = rollback_logical_turn_key {
-            closed_turns
-                .retain(|turn| logical_turn_key(&turn.request.turn_id) != target_logical_turn_key);
+        if let Some(marker) = rollback_marker {
+            closed_turns.retain(|turn| {
+                logical_turn_key(&turn.request.turn_id) != marker.target_logical_turn_key
+            });
         }
 
         let restored = RestoredReasonSession {
@@ -795,7 +808,7 @@ impl ReasonPersistence {
         let mut closed_turns = self.load_closed_turns(session_id)?;
         apply_rollback_markers_to_closed_turns(
             &mut closed_turns,
-            &self.load_reason_ledger(session_id)?,
+            &self.load_session_rollback_markers(session_id)?,
         );
         validate_cursor(&cursor, active_turn.as_ref(), &closed_turns)?;
         Ok(Some(RestoredReasonSession {
@@ -848,6 +861,32 @@ impl ReasonPersistence {
             }
         }
         Ok(turns)
+    }
+
+    fn load_session_rollback_markers(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<SessionRollbackMarker>, ReasonPersistenceError> {
+        let path = self.rollback_markers_path(session_id);
+        if !path.is_file() {
+            return Ok(Vec::new());
+        }
+        read_json_file(&path)
+    }
+
+    fn append_session_rollback_marker(
+        &self,
+        session_id: &SessionId,
+        marker: &SessionRollbackMarker,
+    ) -> Result<(), ReasonPersistenceError> {
+        let mut markers = self.load_session_rollback_markers(session_id)?;
+        if !markers
+            .iter()
+            .any(|existing| existing.rollback_id == marker.rollback_id)
+        {
+            markers.push(marker.clone());
+        }
+        write_json_atomic(&self.rollback_markers_path(session_id), &markers)
     }
 
     fn load_session_index(
@@ -947,6 +986,10 @@ impl ReasonPersistence {
     fn closed_turn_path(&self, session_id: &SessionId, turn_id: &TurnId) -> PathBuf {
         self.turns_dir(session_id)
             .join(format!("{}.json", turn_id.as_str()))
+    }
+
+    fn rollback_markers_path(&self, session_id: &SessionId) -> PathBuf {
+        self.session_dir(session_id).join("rollback-markers.json")
     }
 
     fn reason_ledger_path(&self, session_id: &SessionId) -> PathBuf {
@@ -1236,13 +1279,14 @@ fn apply_ledger_row(
     )
 }
 
-fn apply_rollback_markers_to_closed_turns(turns: &mut Vec<TurnRecord>, rows: &[ReasonLedgerRow]) {
-    for row in rows {
-        if let ReasonLedgerPayload::SessionRollback { marker } = &row.payload {
-            turns.retain(|turn| {
-                logical_turn_key(&turn.request.turn_id) != marker.target_logical_turn_key
-            });
-        }
+fn apply_rollback_markers_to_closed_turns(
+    turns: &mut Vec<TurnRecord>,
+    markers: &[SessionRollbackMarker],
+) {
+    for marker in markers {
+        turns.retain(|turn| {
+            logical_turn_key(&turn.request.turn_id) != marker.target_logical_turn_key
+        });
     }
 }
 
@@ -1253,6 +1297,13 @@ fn logical_turn_key(turn_id: &TurnId) -> String {
     } else {
         raw.to_owned()
     }
+}
+
+fn logical_turn_round(turn_id: &TurnId) -> u64 {
+    let raw = turn_id.as_str();
+    raw.rsplit_once("-r")
+        .and_then(|(_base, round)| round.parse::<u64>().ok())
+        .unwrap_or(0)
 }
 
 fn upsert_closed_turn(turns: &mut Vec<TurnRecord>, candidate: TurnRecord) {
@@ -1270,6 +1321,21 @@ fn upsert_closed_turn(turns: &mut Vec<TurnRecord>, candidate: TurnRecord) {
                 .cmp(right.request.turn_id.as_str())
         });
     }
+}
+
+fn upsert_latest_ui_turn_snapshot(
+    turns_by_logical_key: &mut BTreeMap<String, TurnRecord>,
+    candidate: TurnRecord,
+) {
+    let candidate_key = logical_turn_key(&candidate.request.turn_id);
+    let candidate_round = logical_turn_round(&candidate.request.turn_id);
+    match turns_by_logical_key.get(&candidate_key) {
+        Some(existing) if logical_turn_round(&existing.request.turn_id) > candidate_round => {
+            return;
+        }
+        _ => {}
+    }
+    turns_by_logical_key.insert(candidate_key, candidate);
 }
 
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), ReasonPersistenceError> {
@@ -2203,6 +2269,15 @@ mod tests {
             Some(TurnId::new("runtime-turn-1"))
         );
         assert_eq!(marker.restored_user_text, "persist this");
+        assert!(
+            coordinator
+                .rollback_markers_path(history.session_id())
+                .is_file()
+        );
+        let persisted_markers = coordinator
+            .load_session_rollback_markers(history.session_id())
+            .expect("rollback marker sidecar");
+        assert_eq!(persisted_markers, vec![marker.clone()]);
 
         let restored = coordinator.restore(history.session_id()).expect("restore");
         assert_eq!(restored.closed_turns.len(), 1);
@@ -2232,6 +2307,86 @@ mod tests {
         assert!(
             rows.iter()
                 .any(|row| matches!(row.payload, ReasonLedgerPayload::SessionRollback { .. }))
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn ui_restore_uses_authoritative_snapshots_and_coalesces_logical_rounds() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+
+        let mut first = started_turn_with_id(&mut history, "runtime-turn-1", "trace-1");
+        first.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::Success,
+            summary: "base round should be superseded".to_owned(),
+        });
+        coordinator
+            .record_turn_closed(&history, &first, 0)
+            .expect("persist base round");
+
+        let mut repaired = started_turn_with_id(&mut history, "runtime-turn-1-r2", "trace-1-r2");
+        repaired.semantic_events.push(ReasonResp01SemanticEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1-r2"),
+            trace_id: TraceId::new("trace-1-r2"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            kind: SemanticEventKind::Reasoning,
+            content: "latest repaired round".to_owned(),
+        });
+        repaired.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1-r2"),
+            trace_id: TraceId::new("trace-1-r2"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::Success,
+            summary: "repaired round should remain".to_owned(),
+        });
+        coordinator
+            .record_turn_closed(&history, &repaired, 0)
+            .expect("persist repaired round");
+
+        let mut second = started_turn_with_id(&mut history, "runtime-turn-2", "trace-2");
+        second.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-2"),
+            trace_id: TraceId::new("trace-2"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::Success,
+            summary: "second logical turn".to_owned(),
+        });
+        coordinator
+            .record_turn_closed(&history, &second, 0)
+            .expect("persist second turn");
+
+        fs::write(
+            coordinator.reason_ledger_path(history.session_id()),
+            "{not valid ledger json}\n",
+        )
+        .expect("poison ledger to prove UI restore uses authoritative snapshots");
+
+        let ui_turns = coordinator
+            .restore_turn_snapshots_for_ui(history.session_id())
+            .expect("ui restore from snapshots");
+        assert_eq!(ui_turns.len(), 2);
+        assert_eq!(
+            ui_turns[0].request.turn_id,
+            TurnId::new("runtime-turn-1-r2")
+        );
+        assert_eq!(ui_turns[1].request.turn_id, TurnId::new("runtime-turn-2"));
+        assert_eq!(
+            ui_turns[0].semantic_events[0].content,
+            "latest repaired round"
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");

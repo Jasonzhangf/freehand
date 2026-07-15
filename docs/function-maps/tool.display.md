@@ -13,6 +13,8 @@
   - `parse_file_mutation_tool_display`
   - `parse_search_tool_display`
   - `parse_plan_tool_display`
+  - `parse_task_tool_display`
+  - `parse_timer_tool_display`
   - `parse_shell_tool_display`
   - `parse_generic_tool_display`
 
@@ -31,6 +33,8 @@
 - file-mutation tools project target path plus mutation kind and, when available from arguments, a compact diff-oriented semantic payload.
 - search/list tools project pattern or path target plus match/list status without dumping full output into the main card.
 - plan tools project compact plan status and counts.
+- framework `task` tools project the Task Center operation, task id/title, assignee, status, target cwd, and dispatch mode so UI can show what Worker task was created, assigned, queried, reviewed, approved, rejected, or closed without parsing raw arguments.
+- framework `timer` tools project schedule/cancel/list intent, timer id, delay/absolute/repeat timing, reason, and wakeup prompt so UI can show what was scheduled and why without treating timer state as task truth.
 - shell tools project command intent; command-shaped read/search/list invocations are classified semantically by the parser owner, not by UI code.
 - ordinary shell tools expose a structured `command` display field for UI truncation/display; the special `pwd` projection continues to hide raw `command=pwd` and renders as current-workspace reading.
 - generic tools project low-noise name, key arguments, and status.
@@ -67,14 +71,17 @@
 | 04 | `parse_file_mutation_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse write/edit target and diff-oriented fields | tool arguments | mutation display fields | display projector | mutation parser | bound |
 | 05 | `parse_search_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse search pattern/path fields | tool arguments | search display fields | display projector | search parser | bound |
 | 06 | `parse_plan_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse task/plan fields | tool arguments | plan display fields | display projector | plan parser | bound |
-| 07 | `parse_shell_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse shell command intent without UI guessing | shell arguments | shell display fields | display projector | shell parser | bound |
-| 08 | `parse_generic_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse unknown or miscellaneous tools into low-noise argument summary | tool arguments | generic display fields | display projector | generic parser | bound |
-| 09 | `project_tool_result_display` | `crates/freehand-blocks/src/tool_display.rs` | update display projection with success/failure result state | previous display plus tool result | updated display projection | ui.protocol | result projector | bound |
+| 07 | `parse_task_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse framework Task Center operation, task id/title, assignee, status, cwd, and dispatch mode | task tool arguments | task display fields | display projector | task parser | bound |
+| 08 | `parse_timer_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse framework timer operation, id, timing, reason, and wakeup prompt | timer tool arguments | timer display fields | display projector | timer parser | bound |
+| 09 | `parse_shell_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse shell command intent without UI guessing | shell arguments | shell display fields | display projector | shell parser | bound |
+| 10 | `parse_generic_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse unknown or miscellaneous tools into low-noise argument summary | tool arguments | generic display fields | display projector | generic parser | bound |
+| 11 | `project_tool_result_display` | `crates/freehand-blocks/src/tool_display.rs` | update display projection with success/failure result state | previous display plus tool result | updated display projection | ui.protocol | result projector | bound |
 
 ## Sync Status Against Code
 
 - implementation is bound in `crates/freehand-blocks/src/tool_display.rs`
 - `ui.protocol` consumes `project_tool_call_display` and `project_tool_result_display` when projecting `UiToolActivity.display`
 - WebUI consumes the protocol `display` projection, including `parameter_summary`, and does not classify tools locally
+- framework `task` and `timer` tools are first-class display kinds in `tool.display`; WebUI/Android must render those protocol projections instead of showing generic `Run tool · task/timer` labels or parsing raw tool arguments
 - WebUI consumes ordinary shell `command` display fields for truncated command display while keeping shell classification in `tool.display`
 - generated wiki must be regenerated from `docs/mainline-calls/tool.display.json` when this function-map truth changes

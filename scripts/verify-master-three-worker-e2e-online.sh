@@ -121,6 +121,7 @@ start_master() {
   env HOME="$isolated_home" \
     FREEHAND_PAIR_TOKEN_SHARED="$pair_token" \
     FREEHAND_CC_API_KEY="isolated-bootstrap-only" \
+    FREEHAND_PROVIDER_RETRY_BACKOFF_MS=0 \
     "${fixture_key_name}=${fixture_key_value}" \
     "$daemon_path" serve --agent master --bind "$master_bind" \
     >"$runtime_home/logs/master.stdout.log" \
@@ -146,6 +147,7 @@ start_worker() {
   env HOME="$isolated_home" \
     FREEHAND_PAIR_TOKEN_SHARED="$pair_token" \
     FREEHAND_CC_API_KEY="isolated-bootstrap-only" \
+    FREEHAND_PROVIDER_RETRY_BACKOFF_MS=0 \
     "${fixture_key_name}=${fixture_key_value}" \
     "$daemon_path" serve --agent "$agent_name" \
     >"$runtime_home/logs/${agent_name}.stdout.log" \
@@ -207,6 +209,7 @@ start_launchd_worker() {
     FREEHAND_WORKER_WORKDIR="$runtime_home" \
     FREEHAND_LAUNCHD_LABEL="$label" \
     FREEHAND_PAIR_TOKEN_SHARED="$pair_token" \
+    FREEHAND_PROVIDER_RETRY_BACKOFF_MS=0 \
     FREEHAND_LAUNCHD_SKIP_ENABLE=1 \
     FREEHAND_LAUNCHD_HEALTH_WAIT_SECONDS=90 \
     bash scripts/install-launchd.sh restartWorkerS >/dev/null
@@ -279,6 +282,8 @@ import websockets
     previous_gamma_task,
     previous_gamma_execution,
 ) = sys.argv[1:9]
+previous_gamma_task = previous_gamma_task or None
+previous_gamma_execution = previous_gamma_execution or None
 expected_pids = {
     "worker-alpha": int(alpha_pid),
     "worker-beta": int(beta_pid),
@@ -331,8 +336,14 @@ def validate(message):
             return None, f"fresh Worker not alive: {workers}"
         if any(process.get("restart_count") != 0 for process in processes.values()):
             return None, f"fresh Worker restart_count mismatch: {workers}"
-        if not gamma.get("current_task_id") or not gamma.get("current_execution_id"):
-            return None, f"fresh gamma missing retained task/execution identity: {gamma}"
+        if gamma.get("state") != "idle":
+            return None, f"released gamma is not idle after takeover: {gamma}"
+        if gamma.get("current_task_id") is not None:
+            return None, f"released gamma retained current task after takeover: {gamma}"
+        if gamma.get("current_execution_id") is not None:
+            return None, f"released gamma retained current execution after takeover: {gamma}"
+        if (gamma.get("last_activity") or {}).get("kind") != "interrupted":
+            return None, f"released gamma lost interrupted last activity: {gamma}"
     elif phase == "offline":
         if not workers["worker-alpha"].get("alive") or not workers["worker-beta"].get("alive"):
             return None, f"unaffected Worker became offline: {workers}"
@@ -386,8 +397,8 @@ verify_worker_health_restart() {
   local offline_health restarted_health
   initial_health="$(query_worker_health fresh "$worker_alpha_pid" "$worker_beta_pid" "$worker_gamma_pid")"
   gamma_instance="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["workers"]["worker-gamma"]["process"]["process_instance_id"])' "$initial_health")"
-  gamma_task="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["workers"]["worker-gamma"]["current_task_id"])' "$initial_health")"
-  gamma_execution="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["workers"]["worker-gamma"]["current_execution_id"])' "$initial_health")"
+  gamma_task="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["workers"]["worker-gamma"].get("current_task_id") or "")' "$initial_health")"
+  gamma_execution="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["workers"]["worker-gamma"].get("current_execution_id") or "")' "$initial_health")"
 
   old_gamma_pid="$worker_gamma_pid"
   kill "$old_gamma_pid"
@@ -455,6 +466,7 @@ const port = Number(process.argv[2]);
 const sessions = new Map();
 const rejectedTasks = new Set();
 const workerRuns = new Map();
+const gammaFailureAttempts = new Map();
 let count = 0;
 
 function textResponse(text) {
@@ -500,7 +512,8 @@ function match(body, key) {
 function idsFromBody(body) {
   const taskIdMatch = /task-three-worker-([0-9]+)-(?:alpha|beta|gamma|integration)/.exec(body);
   const stamp = match(body, "FH3_STAMP") || taskIdMatch?.[1] || "missing-stamp";
-  const parentSessionMatch = /"session_id"\s*:\s*"(online-master-three-worker-[^"]+)"/.exec(body);
+  const parentSessionMatch = /"session_id"\s*:\s*"(online-master-three-worker-[^"]+)"/.exec(body)
+    || /(online-master-three-worker-evaluation-[0-9]+)/.exec(body);
   const workerFor = (name) => match(body, `FH3_WORKER_${name.toUpperCase()}`) || `worker-${name}`;
   return {
     stamp,
@@ -555,13 +568,48 @@ function stateFor(ids) {
   return sessions.get(ids.session);
 }
 
+function lifecycleTaskId(body) {
+  const snapshotStart = body.indexOf("Task snapshot:");
+  const triggerStart = body.indexOf("Trigger event:");
+  const scopedBody = snapshotStart >= 0
+    ? body.slice(snapshotStart, triggerStart >= 0 ? triggerStart : undefined)
+    : body;
+  const matches = [...scopedBody.matchAll(/task-three-worker-[0-9]+-(?:alpha|beta|gamma|integration)/g)]
+    .map((match) => match[0]);
+  return matches.length > 0
+    ? matches[matches.length - 1]
+    : null;
+}
+
+function lifecycleEventKind(body) {
+  const triggerStart = body.indexOf("Trigger event:");
+  const scopedBody = triggerStart >= 0 ? body.slice(triggerStart) : body;
+  const quoted = /"kind"\s*:\s*"(review_ready|execution_interrupted|execution_blocked)"/.exec(scopedBody);
+  if (quoted) return quoted[1];
+  const escaped = /\\\"kind\\\"\s*:\s*\\\"(review_ready|execution_interrupted|execution_blocked)\\\"/.exec(scopedBody);
+  return escaped ? escaped[1] : null;
+}
+
 function masterResponse(body) {
-  if (body.includes("production Master lifecycle coordinator")) {
-    const taskMatch = /task-three-worker-[0-9]+-(?:alpha|beta|gamma|integration)/.exec(body);
-    if (!taskMatch) {
+  if (
+    body.includes("production Master lifecycle coordinator")
+    || (body.includes("Task snapshot:") && body.includes("Trigger event:"))
+    || (body.includes("review_ready") && body.includes("Task snapshot"))
+    || (body.includes("execution_interrupted") && body.includes("Task snapshot"))
+  ) {
+    const taskId = lifecycleTaskId(body);
+    if (!taskId) {
       throw new Error("master lifecycle request missing three-worker task_id");
     }
-    const taskId = taskMatch[0];
+    const ids = idsFromBody(body);
+    const eventKind = lifecycleEventKind(body);
+    if (taskId.endsWith("-gamma") && eventKind === "execution_interrupted") {
+      return toolUse(`fh3_lifecycle_takeover_${taskId}`, {
+        op: "assign",
+        task_id: taskId,
+        agent_id: ids.integration.worker,
+      });
+    }
     if (taskId.endsWith("-beta") && !rejectedTasks.has(taskId)) {
       rejectedTasks.add(taskId);
       return toolUse(`fh3_lifecycle_reject_${taskId}`, {
@@ -569,7 +617,7 @@ function masterResponse(body) {
         task_id: taskId,
         reject_reason: "beta draft does not satisfy integration-ready quality",
         next_requirements: [
-          `resubmit exact worker_result_beta=${idsFromBody(body).stamp}`,
+          `resubmit exact worker_result_beta=${ids.stamp}`,
           "provide integration-ready evidence",
         ],
       });
@@ -727,8 +775,32 @@ const server = http.createServer((req, res) => {
     const respond = () => {
       count += 1;
       try {
-        const response = workerRequest ? workerResponse(body) : masterResponse(body);
         const ids = idsFromBody(body);
+        const gammaTask = ids.tasks.find((task) => task.name === "gamma");
+        const gammaExecution = body.includes("exec-worker-worker-gamma-");
+        if (workerRequest && gammaExecution && body.includes(gammaTask.id)) {
+          const failureAttempt = (gammaFailureAttempts.get(gammaTask.id) || 0) + 1;
+          gammaFailureAttempts.set(gammaTask.id, failureAttempt);
+          if (failureAttempt <= 10) {
+            console.log(JSON.stringify({
+              count,
+              url: req.url,
+              role: "worker",
+              session: ids.session,
+              forced_gamma_interruption_attempt: failureAttempt,
+            }));
+            res.writeHead(500, { "content-type": "application/json" });
+            res.end(JSON.stringify({
+              type: "error",
+              error: {
+                type: "fixture_gamma_route_failure",
+                message: "worker-gamma route unavailable; force same-task takeover",
+              },
+            }));
+            return;
+          }
+        }
+        const response = workerRequest ? workerResponse(body) : masterResponse(body);
         console.log(JSON.stringify({
           count,
           url: req.url,
@@ -808,6 +880,12 @@ import websockets
 ) = sys.argv[1:12]
 task_ids = [task_alpha, task_beta, task_gamma, task_integration]
 expected_workers = {
+    task_alpha: worker_alpha,
+    task_beta: worker_beta,
+    task_gamma: worker_alpha,
+    task_integration: worker_integration,
+}
+initial_workers = {
     task_alpha: worker_alpha,
     task_beta: worker_beta,
     task_gamma: worker_gamma,
@@ -951,6 +1029,7 @@ async def main():
         if missing:
             raise RuntimeError(f"{task_id} missing events {missing}: {event_types}")
         expected_worker = expected_workers[task_id]
+        initial_worker = initial_workers[task_id]
         first_assignment = next(
             event for event in events if event.get("event_type") == "TaskAssigned"
         )
@@ -958,28 +1037,38 @@ async def main():
             raise RuntimeError(
                 f"{task_id} first assignment was not authored by master: {first_assignment}"
             )
-        assignment_workers = {
+        assignment_workers = [
             (event.get("payload") or {}).get("agent_id")
             for event in events
             if event.get("event_type") == "TaskAssigned"
-        }
-        if assignment_workers != {expected_worker}:
+        ]
+        if task_id == task_gamma:
+            expected_assignment_workers = [worker_gamma, worker_alpha]
+        elif task_id == task_beta:
+            expected_assignment_workers = [worker_beta, worker_beta]
+        else:
+            expected_assignment_workers = [initial_worker]
+        if assignment_workers != expected_assignment_workers:
             raise RuntimeError(
-                f"{task_id} assignment escaped configured worker {expected_worker}: {assignment_workers}"
+                f"{task_id} assignment history {assignment_workers} "
+                f"expected {expected_assignment_workers}"
             )
+        allowed_execution_workers = set(expected_assignment_workers)
         for event in events:
             event_type = event.get("event_type")
             actor = event.get("actor_agent_id")
             payload = event.get("payload") or {}
             if event_type in {"TaskResumed", "TaskHeartbeat", "TaskReviewSubmitted"}:
-                if actor != expected_worker:
+                if actor not in allowed_execution_workers:
                     raise RuntimeError(
-                        f"{task_id} {event_type} actor {actor} did not match {expected_worker}"
+                        f"{task_id} {event_type} actor {actor} escaped "
+                        f"{sorted(allowed_execution_workers)}"
                     )
                 payload_worker = payload.get("agent_id") or payload.get("claim_agent_id")
-                if payload_worker != expected_worker:
+                if payload_worker not in allowed_execution_workers:
                     raise RuntimeError(
-                        f"{task_id} {event_type} payload worker {payload_worker} did not match {expected_worker}"
+                        f"{task_id} {event_type} payload worker {payload_worker} escaped "
+                        f"{sorted(allowed_execution_workers)}"
                     )
             if event_type in {"TaskReviewRejected", "TaskReviewApproved", "TaskClosed"}:
                 if actor != "master":
@@ -994,10 +1083,14 @@ async def main():
         }
         if not execution_ids:
             raise RuntimeError(f"{task_id} has no worker execution identity")
-        expected_execution_prefix = f"exec-worker-{expected_worker}-"
-        if any(not execution_id.startswith(expected_execution_prefix) for execution_id in execution_ids):
+        expected_execution_prefixes = tuple(
+            f"exec-worker-{assignment_worker}-"
+            for assignment_worker in allowed_execution_workers
+        )
+        if any(not execution_id.startswith(expected_execution_prefixes) for execution_id in execution_ids):
             raise RuntimeError(
-                f"{task_id} execution ids do not belong to {expected_worker}: {sorted(execution_ids)}"
+                f"{task_id} execution ids do not belong to "
+                f"{sorted(allowed_execution_workers)}: {sorted(execution_ids)}"
             )
         execution_histories[task_id] = sorted(execution_ids)
     beta_events = histories[task_beta]
@@ -1008,6 +1101,25 @@ async def main():
     if len(execution_histories[task_beta]) < 2:
         raise RuntimeError(
             f"beta task did not use a new execution for rework: {execution_histories[task_beta]}"
+        )
+    gamma_events = histories[task_gamma]
+    if "TaskInterrupted" not in gamma_events:
+        raise RuntimeError(f"gamma task never entered interrupted truth: {gamma_events}")
+    if len(execution_histories[task_gamma]) < 2:
+        raise RuntimeError(
+            f"gamma task did not use distinct gamma and alpha executions: "
+            f"{execution_histories[task_gamma]}"
+        )
+    if not any(
+        execution_id.startswith(f"exec-worker-{worker_gamma}-")
+        for execution_id in execution_histories[task_gamma]
+    ) or not any(
+        execution_id.startswith(f"exec-worker-{worker_alpha}-")
+        for execution_id in execution_histories[task_gamma]
+    ):
+        raise RuntimeError(
+            f"gamma same-task takeover lacks both worker histories: "
+            f"{execution_histories[task_gamma]}"
         )
     first_round_execution_ids = {
         execution_histories[task_id][0]
@@ -1027,6 +1139,21 @@ async def main():
     if set(worker_agents) != {worker_alpha, worker_beta, worker_gamma}:
         raise RuntimeError(
             f"AgentBoard did not expose all three configured Worker identities: {worker_agents}"
+        )
+    released_gamma = worker_agents[worker_gamma]
+    if released_gamma.get("state") != "idle":
+        raise RuntimeError(f"released gamma is not idle after takeover: {released_gamma}")
+    if released_gamma.get("current_task_id") is not None:
+        raise RuntimeError(
+            f"released gamma retained current task after takeover: {released_gamma}"
+        )
+    if released_gamma.get("current_execution_id") is not None:
+        raise RuntimeError(
+            f"released gamma retained current execution after takeover: {released_gamma}"
+        )
+    if (released_gamma.get("last_activity") or {}).get("kind") != "interrupted":
+        raise RuntimeError(
+            f"released gamma lost interrupted last activity: {released_gamma}"
         )
     result = {
         "ok": True,

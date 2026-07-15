@@ -16,14 +16,12 @@ runtime projections.
    bottom sheet.
 4. Worker sessions render as child rows under their owning Master session using
    TaskBoard `parent_session_id` truth.
-5. The dashboard shows Master evaluation semantics:
-   - total goal / current round
-   - Master phase
-   - Worker task/review/rework/closed state
-   - decision queue / next action
-6. The dashboard must not present Worker results as final aggregation. It must
-   support review, reject/rework, next-round task, blocker, and final completion
-   only after overall goal evaluation.
+5. The compact Header shows current-session running Agent count, delegated task
+   count, and active task title.
+6. The first tap opens only the current session's delegated child-task list;
+   tapping one task selects the protocol-projected Worker session and opens its
+   persisted conversation. Master evaluation/history/control remain in runtime
+   truth and desktop inspector surfaces, not the first mobile task sheet.
 7. Visual system follows the confirmed prototype direction:
    - black / white / gray base
    - minimal blue for active/running/evaluation cues
@@ -85,8 +83,8 @@ Read before implementation:
 2. Mobile layout changes must preserve selected session, transcript, composer
    draft, pending submit, scroll anchor, and lifecycle timers.
 3. The conversation remains the primary surface on phone.
-4. The compact agent strip is summary-only; detailed Agent/Worker review state
-   lives in a bottom sheet.
+4. The compact agent strip is summary-only; the bottom sheet is a current-session
+   delegated-task navigator, and the next level is the selected Worker transcript.
 5. Session drawer and agent sheet are presentation controls. Opening/closing
    them must not mutate ADP/session/task truth.
 6. Internal protocol labels, raw task ids, runtime turn ids, and ADP terms stay
@@ -109,24 +107,21 @@ Read before implementation:
 
 - Add or adapt a mobile-only compact strip below the app bar.
 - Strip content should summarize:
-  - Master phase
-  - open Worker count
-  - rework/review/blocked/complete cue
-  - short next-decision label
+  - current-session running Agent count
+  - current-session delegated task count
+  - active task title
 - Strip opens the agent bottom sheet.
 - Strip must be absent or low-emphasis on desktop if existing desktop lifecycle
   observer already owns the richer display.
 
-### Slice 3: Agent Bottom Sheet
+### Slice 3: Delegated Task Sheet
 
-- Implement a mobile/tablet portrait bottom sheet for AgentBoard + TaskBoard
-  review state.
-- Sheet sections:
-  - goal / round / current phase
-  - Master evaluation card
-  - Worker review cards
-  - decision queue / next action
-- Worker rows should derive from owner-backed task/agent projections.
+- Implement a mobile/tablet portrait bottom sheet containing only the selected
+  session's delegated child tasks.
+- Each task row derives from owner-backed TaskBoard projection and consumes the
+  projected canonical Worker session id.
+- Task tap closes the sheet, selects the Worker session, immediately refreshes
+  `QuerySessionTurns`, and renders its conversation.
 - Missing projection data should render as explicit unavailable/empty rows.
 
 ### Slice 4: Session Drawer Alignment
@@ -203,7 +198,7 @@ Visual evidence:
 | Browser invents task/agent semantics | Use only owner-backed projection fields; render unavailable if missing |
 | Mobile UI becomes dashboard-first | Keep only compact strip on main surface; detailed state goes to sheet |
 | Existing drawer/session logic regresses | Preserve current drawer contract and extend tests before visual polish |
-| Rework/review semantics become final aggregation | Copy corrected Master evaluation wording from prototype and runtime memory |
+| Mobile sheet becomes a dense inspector | Keep it to current-session delegated tasks; task click opens the Worker transcript |
 | Styling breaks current accessibility/readability | Keep high contrast grayscale base and minimal semantic accents |
 | Static prototype proof is mistaken for product proof | Require online daemon-backed WebUI verifier before completion |
 
@@ -213,7 +208,7 @@ Visual evidence:
 2. Map current mobile drawer and lifecycle observer functions/classes.
 3. Add tests or verifier assertions for the mobile Agent Dashboard target shape.
 4. Implement compact mobile agent strip.
-5. Implement Agent bottom sheet backed by existing projections.
+5. Implement delegated-task bottom sheet backed by selected-session TaskBoard projection.
 6. Align mobile session drawer and Worker-child hierarchy with the prototype.
 7. Apply confirmed grayscale visual tokens.
 8. Run local/static checks.
@@ -224,8 +219,12 @@ Visual evidence:
 
 - Production WebUI mobile layout matches the confirmed prototype direction.
 - Phone/tablet portrait are conversation-first with drawer + agent sheet.
-- Agent Dashboard expresses Master evaluation and Worker review/rework/next-task
-  semantics, not final aggregation.
+- Agent Dashboard expresses current-session running/delegated progress and
+  navigates Header -> delegated tasks -> Worker conversation -> exact parent
+  Master, while sibling Worker tasks remain directly switchable.
+- The Agents runtime sheet is navigation/progress only. Configured Worker
+  capacity is mutated only from the system Config surface.
 - Verified online against daemon-backed WebUI with screenshots and service truth.
 - Existing desktop WebUI remains usable and regression-checked.
-- No unapproved runtime/protocol/provider changes are included.
+- Runtime/protocol changes are limited to owner-backed Worker transcript query
+  and canonical Worker session projection required by the navigation contract.

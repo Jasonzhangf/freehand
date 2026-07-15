@@ -171,9 +171,9 @@ fn production_master_request_reuses_task_lifecycle_session_and_isolates_turns_by
     assert_ne!(first.event_id, last.event_id);
 
     let first_request =
-        master_live_request(&runtime_home, "worker", &task, first, 0).expect("first request");
+        master_live_request(&runtime_home, "worker", "{}", &task, first, 0).expect("first request");
     let last_request =
-        master_live_request(&runtime_home, "worker", &task, last, 0).expect("last request");
+        master_live_request(&runtime_home, "worker", "{}", &task, last, 0).expect("last request");
 
     assert_eq!(first_request.session_id, last_request.session_id);
     assert!(
@@ -428,6 +428,140 @@ fn production_master_runner_accepts_persisted_blocked_append_decision() {
 }
 
 #[test]
+fn production_master_runner_requires_interrupted_assignment_decision() {
+    let runtime_home = temp_path("interrupted-missing-decision");
+    bootstrap_runner_with_selected(
+        &runtime_home,
+        selected_master_with_workers(&["worker-alpha"]),
+    );
+    let task_id = seed_interrupted_task(&runtime_home, "worker-alpha");
+    let executor = Arc::new(StubMasterExecutor::new(|request| {
+        assert!(
+            request
+                .prompt
+                .contains("Agent is a reusable execution resource in the pool")
+        );
+        assert!(
+            request
+                .prompt
+                .contains("do not create a duplicate task for the same objective")
+        );
+        Ok("prose without assignment is invalid".to_owned())
+    }));
+    let runner = test_runner_with_selected(
+        runtime_home.clone(),
+        selected_master_with_workers(&["worker-alpha"]),
+        executor.clone(),
+    );
+
+    assert!(matches!(
+        runner
+            .run_once()
+            .expect_err("prose-only interrupted decision must fail"),
+        ProductionMasterRunnerError::MissingInterruptedDecision { .. }
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        TaskRuntime::boot(&runtime_home, AgentId::new("master"))
+            .expect("runtime")
+            .query_task(&task_id)
+            .expect("task")
+            .status,
+        TaskStatus::Interrupted
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_can_take_over_interrupted_task_to_another_worker() {
+    let runtime_home = temp_path("interrupted-takeover");
+    let selected = selected_master_with_workers(&["worker-alpha", "worker-gamma"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    let parent_session_id = SessionId::new("parent-session-takeover");
+    let task_id = seed_interrupted_task_with_parent(
+        &runtime_home,
+        "worker-gamma",
+        Some(parent_session_id.clone()),
+    );
+    let action_task_id = task_id.clone();
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        assert!(
+            request
+                .prompt
+                .contains("Configured Worker ids: worker-alpha, worker-gamma")
+        );
+        assert!(request.prompt.contains("\"agent_id\": \"worker-alpha\""));
+        assert!(request.prompt.contains("\"agent_id\": \"worker-gamma\""));
+        assert!(
+            request
+                .prompt
+                .contains("takeover_to_another_available_configured_worker")
+        );
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .assign_task(freehand_task::TaskAssignRequest {
+                task_id: action_task_id.clone(),
+                agent_id: AgentId::new("worker-alpha"),
+                actor: test_actor("master"),
+                watermark: test_watermark("takeover-alpha"),
+            })
+            .map_err(to_string)?;
+        Ok("takeover_to_worker=worker-alpha".to_owned())
+    }));
+    let runner = test_runner_with_selected(runtime_home.clone(), selected, executor.clone());
+
+    assert!(matches!(
+        runner.run_once().expect("interrupted takeover tick"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            from: TaskStatus::Interrupted,
+            to: TaskStatus::Assigned,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    let task = runtime.query_task(&task_id).expect("task");
+    assert_eq!(task.status, TaskStatus::Assigned);
+    assert_eq!(
+        task.parent.session_id.as_ref().map(SessionId::as_str),
+        Some(parent_session_id.as_str())
+    );
+    assert_eq!(
+        task.assignee.as_ref().expect("assignee").agent_id.as_str(),
+        "worker-alpha"
+    );
+    let history = runtime.task_history(&task_id).expect("history");
+    let parent_tasks = runtime
+        .list_tasks(Default::default())
+        .expect("list tasks")
+        .into_iter()
+        .filter(|candidate| {
+            candidate.parent.session_id.as_ref().map(SessionId::as_str)
+                == Some(parent_session_id.as_str())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(parent_tasks.len(), 1);
+    assert_eq!(parent_tasks[0].task_id, task_id);
+    let assigned_agents: Vec<_> = history
+        .iter()
+        .filter(|event| event.event_type == "TaskAssigned")
+        .filter_map(|event| event.payload["agent_id"].as_str())
+        .collect();
+    assert_eq!(assigned_agents, vec!["worker-gamma", "worker-alpha"]);
+    assert!(
+        history
+            .iter()
+            .any(|event| event.event_type == "TaskInterrupted")
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn production_master_loop_retries_executor_failure_and_closes_same_event() {
     let runtime_home = temp_path("loop-executor-retry");
     bootstrap_runner(&runtime_home);
@@ -565,7 +699,7 @@ fn production_master_loop_stops_on_corrupt_cursor_state() {
 }
 
 #[test]
-fn production_master_runner_fires_due_timer_without_task_truth() {
+fn production_master_runner_fires_source_less_timer_in_internal_new_turn() {
     let runtime_home = temp_path("timer-due");
     bootstrap_runner(&runtime_home);
     let store = TimerStore::new(&runtime_home, &AgentId::new("master"));
@@ -587,10 +721,10 @@ fn production_master_runner_fires_due_timer_without_task_truth() {
         source_trace_id: None,
     };
     store.upsert_schedule(timer).expect("schedule timer");
-    let observed_prompt = Arc::new(Mutex::new(String::new()));
-    let prompt_out = Arc::clone(&observed_prompt);
+    let observed_request = Arc::new(Mutex::new(None));
+    let request_out = Arc::clone(&observed_request);
     let executor = Arc::new(StubMasterExecutor::new(move |request| {
-        *prompt_out.lock().expect("prompt lock") = request.prompt.clone();
+        *request_out.lock().expect("request lock") = Some(request.clone());
         Ok("timer wakeup complete".to_owned())
     }));
     let runner = test_runner(runtime_home.clone(), executor.clone());
@@ -603,11 +737,18 @@ fn production_master_runner_fires_due_timer_without_task_truth() {
         } if timer_id == "timer-due-proof"
     ));
     assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    let request = observed_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("request");
+    assert!(request.session_id.as_str().starts_with("master-timer-"));
+    assert!(request.turn_id.as_str().starts_with("master-timer-"));
+    assert!(request.prompt.contains("Read TaskBoard and continue"));
     assert!(
-        observed_prompt
-            .lock()
-            .expect("prompt lock")
-            .contains("Read TaskBoard and continue")
+        request
+            .prompt
+            .contains("new follow-up turn injected by a due timer")
     );
     let schedules = store.active_schedules().expect("active schedules");
     assert!(schedules.is_empty(), "one-shot timer must complete");
@@ -620,6 +761,140 @@ fn production_master_runner_fires_due_timer_without_task_truth() {
         "timer must not create task truth"
     );
 
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_injects_due_timer_prompt_as_new_source_session_turn() {
+    let runtime_home = temp_path("timer-source-session");
+    bootstrap_runner(&runtime_home);
+    let source_session_id = SessionId::new("visible-user-session");
+    persist_parent_user_objective(
+        &runtime_home,
+        &source_session_id,
+        "Wait for the timer, then inspect current Worker truth.",
+    );
+    let store = TimerStore::new(&runtime_home, &AgentId::new("master"));
+    store
+        .upsert_schedule(TimerSchedule {
+            schema_version: 1,
+            timer_id: "timer-source-session-proof".to_owned(),
+            agent_id: AgentId::new("master"),
+            status: "active".to_owned(),
+            reason: "inject visible session prompt".to_owned(),
+            prompt: "Inspect current truth.".to_owned(),
+            next_due_at: now_unix_seconds().saturating_sub(1),
+            created_at: now_unix_seconds().saturating_sub(10),
+            updated_at: now_unix_seconds().saturating_sub(10),
+            fired_count: 0,
+            max_runs: 1,
+            repeat: None,
+            source_session_id: Some(source_session_id.clone()),
+            source_turn_id: Some(TurnId::new("runtime-turn-1")),
+            source_trace_id: Some(TraceId::new("parent-objective-trace")),
+        })
+        .expect("schedule timer");
+    let observed = Arc::new(Mutex::new(None));
+    let observed_out = Arc::clone(&observed);
+    let runner = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubMasterExecutor::new(move |request| {
+            *observed_out.lock().expect("request lock") = Some(request.clone());
+            Ok("visible wakeup".to_owned())
+        })),
+    );
+
+    runner.run_once().expect("timer tick");
+    let request = observed
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("request");
+    assert_eq!(request.session_id.as_str(), "visible-user-session");
+    assert_eq!(request.turn_id.as_str(), "runtime-turn-2");
+    assert_ne!(request.turn_id.as_str(), "runtime-turn-1");
+    assert!(!request.session_id.as_str().starts_with("master-timer-"));
+    assert!(
+        request
+            .prompt
+            .contains("new follow-up turn injected by a due timer")
+    );
+    assert!(
+        request
+            .prompt
+            .contains("not a resume or reopening of the source turn")
+    );
+    assert!(
+        request
+            .prompt
+            .contains("Injected timer prompt:\nInspect current truth.")
+    );
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_resolves_chained_timer_to_original_session() {
+    let runtime_home = temp_path("timer-source-chain");
+    bootstrap_runner(&runtime_home);
+    let store = TimerStore::new(&runtime_home, &AgentId::new("master"));
+    let base = now_unix_seconds().saturating_sub(10);
+    store
+        .upsert_schedule(TimerSchedule {
+            schema_version: 1,
+            timer_id: "timer-origin".to_owned(),
+            agent_id: AgentId::new("master"),
+            status: "completed".to_owned(),
+            reason: "origin".to_owned(),
+            prompt: "origin".to_owned(),
+            next_due_at: base,
+            created_at: base,
+            updated_at: base,
+            fired_count: 1,
+            max_runs: 1,
+            repeat: None,
+            source_session_id: Some(SessionId::new("original-user-session")),
+            source_turn_id: None,
+            source_trace_id: None,
+        })
+        .expect("origin timer");
+    store
+        .upsert_schedule(TimerSchedule {
+            schema_version: 1,
+            timer_id: "timer-chain".to_owned(),
+            agent_id: AgentId::new("master"),
+            status: "active".to_owned(),
+            reason: "chain".to_owned(),
+            prompt: "chain".to_owned(),
+            next_due_at: now_unix_seconds().saturating_sub(1),
+            created_at: base,
+            updated_at: base,
+            fired_count: 0,
+            max_runs: 1,
+            repeat: None,
+            source_session_id: Some(SessionId::new("master-timer-timer-origin")),
+            source_turn_id: None,
+            source_trace_id: None,
+        })
+        .expect("chained timer");
+    let observed_session = Arc::new(Mutex::new(None));
+    let observed_out = Arc::clone(&observed_session);
+    let runner = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubMasterExecutor::new(move |request| {
+            *observed_out.lock().expect("session lock") = Some(request.session_id.clone());
+            Ok("chain wakeup".to_owned())
+        })),
+    );
+
+    runner.run_once().expect("timer tick");
+    assert_eq!(
+        observed_session
+            .lock()
+            .expect("session lock")
+            .as_ref()
+            .map(SessionId::as_str),
+        Some("original-user-session")
+    );
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }
 
@@ -734,7 +1009,7 @@ fn production_master_runner_prioritizes_task_events_over_due_timer_failure() {
     let executor = Arc::new(StubMasterExecutor::new(move |request| {
         if request
             .prompt
-            .contains("production Master resumed by an internal timer")
+            .contains("new follow-up turn injected by a due timer")
         {
             return Err("timer provider unavailable".to_owned());
         }
@@ -1032,7 +1307,7 @@ fn production_master_runner_parent_evaluation_is_idempotent_on_event_replay() {
 }
 
 #[test]
-fn production_master_runner_parent_evaluation_can_create_next_round_task() {
+fn production_master_runner_closed_loop_requires_next_round_before_final_evaluation() {
     let runtime_home = temp_path("parent-evaluation-next-round");
     bootstrap_runner(&runtime_home);
     let parent_session_id = SessionId::new("parent-session-next-round");
@@ -1049,38 +1324,46 @@ fn production_master_runner_parent_evaluation_can_create_next_round_task() {
     let next_task_id = TaskId::new("task-parent-next-round-integration");
     let action_task_id = next_task_id.clone();
     let action_parent_session_id = parent_session_id.clone();
+    let evaluation_calls = Arc::new(AtomicUsize::new(0));
+    let evaluation_calls_out = Arc::clone(&evaluation_calls);
     let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        let call = evaluation_calls_out.fetch_add(1, Ordering::Relaxed);
         if !request
             .prompt
             .contains("create and assign the next required child tasks")
         {
             return Err("parent evaluation prompt forbids next-round work".to_owned());
         }
-        let runtime =
-            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
-        runtime
-            .create_task(TaskCreateRequest {
-                task_id: Some(action_task_id.clone()),
-                title: "integrate accepted results".to_owned(),
-                content: "integrate alpha and beta into the requested final artifact".to_owned(),
-                goal: "close the remaining overall-goal integration gap".to_owned(),
-                deliverables: vec!["integrated-report.md".to_owned()],
-                acceptance: vec!["report proves alpha and beta are integrated".to_owned()],
-                priority: 95,
-                target_cwd: Some(request.runtime_home.display().to_string()),
-                dispatch: TaskDispatchRequest::Agent {
-                    agent_id: AgentId::new("worker"),
-                },
-                parent: TaskParentRef {
-                    session_id: Some(action_parent_session_id.clone()),
-                    turn_id: Some(request.turn_id.clone()),
-                    trace_id: Some(request.trace_id.clone()),
-                },
-                actor: test_actor("master"),
-                watermark: test_watermark("parent-evaluation-next-round"),
-            })
-            .map_err(to_string)?;
-        Ok("overall goal incomplete; integration task created".to_owned())
+        if call == 0 {
+            let runtime = TaskRuntime::boot(&request.runtime_home, AgentId::new("master"))
+                .map_err(to_string)?;
+            runtime
+                .create_task(TaskCreateRequest {
+                    task_id: Some(action_task_id.clone()),
+                    title: "integrate accepted results".to_owned(),
+                    content: "integrate alpha and beta into the requested final artifact"
+                        .to_owned(),
+                    goal: "close the remaining overall-goal integration gap".to_owned(),
+                    deliverables: vec!["integrated-report.md".to_owned()],
+                    acceptance: vec!["report proves alpha and beta are integrated".to_owned()],
+                    priority: 95,
+                    target_cwd: Some(request.runtime_home.display().to_string()),
+                    dispatch: TaskDispatchRequest::Agent {
+                        agent_id: AgentId::new("worker"),
+                    },
+                    parent: TaskParentRef {
+                        session_id: Some(action_parent_session_id.clone()),
+                        turn_id: Some(request.turn_id.clone()),
+                        trace_id: Some(request.trace_id.clone()),
+                    },
+                    actor: test_actor("master"),
+                    watermark: test_watermark("parent-evaluation-next-round"),
+                })
+                .map_err(to_string)?;
+            Ok("overall goal incomplete; integration task created".to_owned())
+        } else {
+            Ok("overall goal verified only after integration closed".to_owned())
+        }
     }));
     let runner = test_runner(runtime_home.clone(), executor);
 
@@ -1098,6 +1381,63 @@ fn production_master_runner_parent_evaluation_can_create_next_round_task() {
         next_task.parent.session_id.as_ref(),
         Some(&parent_session_id)
     );
+    assert_eq!(evaluation_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        runner.run_once().expect("open next-round task tick"),
+        ProductionMasterTickOutcome::Idle
+    );
+    assert_eq!(evaluation_calls.load(Ordering::Relaxed), 1);
+
+    let execution_id = "exec-parent-integration".to_owned();
+    runtime
+        .claim_next_task(TaskClaimRequest {
+            agent_id: AgentId::new("worker"),
+            execution_id: execution_id.clone(),
+            ttl_seconds: 300,
+            actor: test_actor("worker"),
+            watermark: test_watermark("integration-claim"),
+        })
+        .expect("claim integration");
+    runtime
+        .apply_execution_fact(ExecutionFact {
+            execution_id,
+            task_id: next_task_id.clone(),
+            agent_id: AgentId::new("worker"),
+            turn_id: Some(TurnId::new("worker-turn-integration")),
+            occurred_at: now_unix_seconds(),
+            kind: ExecutionFactKind::ReviewReady {
+                summary: "integration review summary".to_owned(),
+                deliverables: vec!["integrated-report.md".to_owned()],
+                evidence: vec!["integration evidence".to_owned()],
+            },
+            watermark: test_watermark("integration-review-ready"),
+        })
+        .expect("submit integration review");
+    runtime
+        .approve_review(TaskMutationRequest {
+            task_id: next_task_id.clone(),
+            actor: test_actor("master"),
+            watermark: test_watermark("integration-approve"),
+        })
+        .expect("approve integration");
+    runtime
+        .close_task(TaskMutationRequest {
+            task_id: next_task_id,
+            actor: test_actor("master"),
+            watermark: test_watermark("integration-close"),
+        })
+        .expect("close integration");
+
+    let final_outcome = runner.run_once().expect("final parent evaluation");
+    assert!(
+        matches!(
+        final_outcome,
+        ProductionMasterTickOutcome::ParentEvaluated { ref summary, .. }
+            if summary == "overall goal verified only after integration closed"
+        ),
+        "unexpected final outcome: {final_outcome:?}"
+    );
+    assert_eq!(evaluation_calls.load(Ordering::Relaxed), 2);
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }
@@ -1106,19 +1446,27 @@ fn test_runner(
     runtime_home: PathBuf,
     executor: Arc<dyn MasterTurnExecutor>,
 ) -> ProductionMasterRunner {
-    ProductionMasterRunner::from_selected_agent_with_executor(
-        selected_master(),
-        runtime_home,
-        executor,
-    )
-    .expect("master runner")
+    test_runner_with_selected(runtime_home, selected_master(), executor)
+}
+
+fn test_runner_with_selected(
+    runtime_home: PathBuf,
+    selected: SelectedAgentConfig,
+    executor: Arc<dyn MasterTurnExecutor>,
+) -> ProductionMasterRunner {
+    ProductionMasterRunner::from_selected_agent_with_executor(selected, runtime_home, executor)
+        .expect("master runner")
 }
 
 fn bootstrap_runner(runtime_home: &Path) {
+    bootstrap_runner_with_selected(runtime_home, selected_master());
+}
+
+fn bootstrap_runner_with_selected(runtime_home: &Path, selected: SelectedAgentConfig) {
     let executor = Arc::new(StubMasterExecutor::new(|_| {
         Err("bootstrap must not execute".to_owned())
     }));
-    let runner = test_runner(runtime_home.to_path_buf(), executor.clone());
+    let runner = test_runner_with_selected(runtime_home.to_path_buf(), selected, executor.clone());
     assert_eq!(
         runner.run_once().expect("bootstrap tick"),
         ProductionMasterTickOutcome::Idle
@@ -1456,18 +1804,105 @@ fn seed_blocked_task(runtime_home: &Path) -> TaskId {
     task_id
 }
 
+fn seed_interrupted_task(runtime_home: &Path, worker_id: &str) -> TaskId {
+    seed_interrupted_task_with_parent(runtime_home, worker_id, None)
+}
+
+fn seed_interrupted_task_with_parent(
+    runtime_home: &Path,
+    worker_id: &str,
+    parent_session_id: Option<SessionId>,
+) -> TaskId {
+    let runtime = TaskRuntime::boot(runtime_home, AgentId::new("master")).expect("runtime");
+    let mut created_agents = Vec::new();
+    for agent_id in ["worker-alpha", "worker-gamma", worker_id] {
+        if created_agents.contains(&agent_id) {
+            continue;
+        }
+        created_agents.push(agent_id);
+        runtime
+            .create_agent(AgentCreateRequest {
+                agent_id: AgentId::new(agent_id),
+                capabilities: vec!["workspace".to_owned(), "shell".to_owned()],
+                actor: test_actor("master"),
+                watermark: test_watermark("create-takeover-worker"),
+            })
+            .expect("create takeover worker");
+    }
+    let task_id = TaskId::new(format!("task-interrupted-{}", now_unix_nanos()));
+    runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(task_id.clone()),
+            title: "interrupted takeover task".to_owned(),
+            content: "continue the same task after interruption".to_owned(),
+            goal: "complete without duplicate task creation".to_owned(),
+            deliverables: vec!["result.md".to_owned()],
+            acceptance: vec!["same task id is preserved".to_owned()],
+            priority: 90,
+            target_cwd: Some(runtime_home.display().to_string()),
+            dispatch: TaskDispatchRequest::Agent {
+                agent_id: AgentId::new(worker_id),
+            },
+            parent: TaskParentRef {
+                session_id: parent_session_id,
+                turn_id: Some(TurnId::new("runtime-turn-parent")),
+                trace_id: None,
+            },
+            actor: test_actor("master"),
+            watermark: test_watermark("create-interrupted-task"),
+        })
+        .expect("create interrupted task");
+    let execution_id = format!("exec-interrupted-{}", now_unix_nanos());
+    runtime
+        .claim_next_task(TaskClaimRequest {
+            agent_id: AgentId::new(worker_id),
+            execution_id: execution_id.clone(),
+            ttl_seconds: 300,
+            actor: test_actor(worker_id),
+            watermark: test_watermark("claim-interrupted-task"),
+        })
+        .expect("claim interrupted task");
+    runtime
+        .apply_execution_fact(ExecutionFact {
+            execution_id,
+            task_id: task_id.clone(),
+            agent_id: AgentId::new(worker_id),
+            turn_id: Some(TurnId::new("worker-turn-interrupted")),
+            occurred_at: now_unix_seconds(),
+            kind: ExecutionFactKind::Interrupted {
+                reason: "worker route interrupted; task remains schedulable".to_owned(),
+                evidence: vec!["missing_or_expired_lease".to_owned()],
+            },
+            watermark: test_watermark("record-interrupted"),
+        })
+        .expect("record interrupted");
+    task_id
+}
+
 fn selected_master() -> SelectedAgentConfig {
+    selected_master_with_workers(&["worker"])
+}
+
+fn selected_master_with_workers(worker_ids: &[&str]) -> SelectedAgentConfig {
     SelectedAgentConfig {
         name: "master".to_owned(),
         mode: AgentMode::Master,
         node_id: "master-node".to_owned(),
-        paired_agents: vec![SelectedPeerAgentConfig {
-            name: "worker".to_owned(),
-            mode: AgentMode::Slave,
-            node_id: "worker-node".to_owned(),
-            allowed_pair_ip: None,
-            pair_token_env: "FREEHAND_PAIR_TOKEN_WORKER".to_owned(),
-        }],
+        paired_agents: worker_ids
+            .iter()
+            .map(|worker_id| SelectedPeerAgentConfig {
+                name: (*worker_id).to_owned(),
+                mode: AgentMode::Slave,
+                node_id: format!("{worker_id}-node"),
+                allowed_pair_ip: None,
+                pair_token_env: format!(
+                    "FREEHAND_PAIR_TOKEN_{}",
+                    worker_id.replace('-', "_").to_uppercase()
+                ),
+                provider_id: "worker-provider".to_owned(),
+                fallback_provider_id: None,
+            })
+            .collect(),
         allowed_pair_ip: None,
         pair_token_env: "FREEHAND_PAIR_TOKEN_MASTER".to_owned(),
         pair_token: "pair-token".to_owned(),

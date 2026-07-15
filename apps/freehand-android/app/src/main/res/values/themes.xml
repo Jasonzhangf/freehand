@@ -5,10 +5,10 @@
         <item name="colorPrimary">@color/fh_accent</item>
         <item name="colorPrimaryDark">@color/fh_accent_dark</item>
         <item name="colorAccent">@color/fh_accent</item>
-        <item name="android:windowBackground">@color/fh_bg_primary_light</item>
-        <item name="android:statusBarColor">@color/fh_bg_secondary_light</item>
-        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
-        <item name="android:navigationBarColor">@color/fh_bg_primary_light</item>
+        <item name="android:windowBackground">@color/fh_startup_background</item>
+        <item name="android:statusBarColor">@color/fh_startup_background</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+        <item name="android:navigationBarColor">@color/fh_startup_background</item>
     </style>
 
     <!-- 深色主题 -->

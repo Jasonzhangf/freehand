@@ -11,6 +11,8 @@ use serde::Deserialize;
 use thiserror::Error;
 
 pub const CONFIG_FILE_RELATIVE_PATH: &str = ".freehand/config.toml";
+pub const MIN_AGENT_RESOURCE_COUNT: usize = 1;
+pub const MAX_AGENT_RESOURCE_COUNT: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -145,6 +147,12 @@ pub struct ProviderConfigUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentResourceConfigUpdate {
+    pub agent_name: String,
+    pub resource_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedConfig {
     agents: BTreeMap<String, AgentConfig>,
     providers: BTreeMap<String, ProviderConfig>,
@@ -219,6 +227,8 @@ impl LoadedConfig {
                 node_id: paired.node_id.clone(),
                 allowed_pair_ip: paired.allowed_pair_ip,
                 pair_token_env: paired.pair_token_env.clone(),
+                provider_id: paired.provider_id.clone(),
+                fallback_provider_id: paired.fallback_provider_id.clone(),
             });
         }
 
@@ -267,6 +277,8 @@ pub struct SelectedPeerAgentConfig {
     pub node_id: String,
     pub allowed_pair_ip: Option<IpAddr>,
     pub pair_token_env: String,
+    pub provider_id: String,
+    pub fallback_provider_id: Option<String>,
 }
 
 impl SelectedAgentConfig {
@@ -409,6 +421,14 @@ pub enum ConfigError {
     },
     #[error("agent `{agent_name}` not found in config")]
     AgentNotFound { agent_name: String },
+    #[error("agent resource count must be between {min} and {max}, received {resource_count}")]
+    AgentResourceCountOutOfRange {
+        resource_count: usize,
+        min: usize,
+        max: usize,
+    },
+    #[error("agent resource count can be updated only for a master agent, got `{agent_name}`")]
+    AgentResourceUpdateRequiresMaster { agent_name: String },
     #[error("agent `{agent_name}` references missing provider `{provider_id}`")]
     AgentProviderNotFound {
         agent_name: String,
@@ -585,6 +605,54 @@ pub fn update_provider_config_in_path(
         })?;
     let loaded = parse_config(path, &updated)?;
     let selected = loaded.select_agent(&update.agent_name)?;
+    persist_config_atomically(path, &updated)?;
+    Ok(selected)
+}
+
+pub fn update_agent_resource_config_in_path(
+    path: impl AsRef<Path>,
+    update: AgentResourceConfigUpdate,
+) -> Result<SelectedAgentConfig, ConfigError> {
+    if !(MIN_AGENT_RESOURCE_COUNT..=MAX_AGENT_RESOURCE_COUNT).contains(&update.resource_count) {
+        return Err(ConfigError::AgentResourceCountOutOfRange {
+            resource_count: update.resource_count,
+            min: MIN_AGENT_RESOURCE_COUNT,
+            max: MAX_AGENT_RESOURCE_COUNT,
+        });
+    }
+
+    let path = path.as_ref();
+    let raw = fs::read_to_string(path).map_err(|source| ConfigError::ReadConfig {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let loaded = parse_config(path, &raw)?;
+    let selected_agent =
+        loaded
+            .agents()
+            .get(&update.agent_name)
+            .ok_or_else(|| ConfigError::AgentNotFound {
+                agent_name: update.agent_name.clone(),
+            })?;
+    if selected_agent.mode != AgentMode::Master {
+        return Err(ConfigError::AgentResourceUpdateRequiresMaster {
+            agent_name: update.agent_name,
+        });
+    }
+
+    let mut document: toml::Value =
+        toml::from_str(&raw).map_err(|source| ConfigError::ParseConfig {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    apply_agent_resource_config_update(path, &mut document, &update, &loaded)?;
+    let updated =
+        toml::to_string_pretty(&document).map_err(|source| ConfigError::SerializeConfig {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let updated_loaded = parse_config(path, &updated)?;
+    let selected = updated_loaded.select_agent(&update.agent_name)?;
     persist_config_atomically(path, &updated)?;
     Ok(selected)
 }
@@ -821,6 +889,119 @@ fn apply_provider_config_update(
     agent.insert(
         "provider".to_owned(),
         toml::Value::String(update.provider_id.clone()),
+    );
+    Ok(())
+}
+
+fn apply_agent_resource_config_update(
+    path: &Path,
+    document: &mut toml::Value,
+    update: &AgentResourceConfigUpdate,
+    loaded: &LoadedConfig,
+) -> Result<(), ConfigError> {
+    let master_config =
+        loaded
+            .agents()
+            .get(&update.agent_name)
+            .ok_or_else(|| ConfigError::AgentNotFound {
+                agent_name: update.agent_name.clone(),
+            })?;
+    let current_peers = master_config.paired_agent_names.clone();
+    let first_peer = current_peers
+        .first()
+        .expect("validated Master config always has one Worker")
+        .clone();
+    let worker_template_config = loaded
+        .agents()
+        .get(&first_peer)
+        .expect("validated Master peer exists");
+
+    let root = document
+        .as_table_mut()
+        .ok_or_else(|| ConfigError::InvalidConfigRoot {
+            path: path.to_path_buf(),
+        })?;
+    let agents = root
+        .get_mut("agents")
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| ConfigError::MissingConfigTable {
+            path: path.to_path_buf(),
+            table: "agents".to_owned(),
+        })?;
+    let worker_template = agents
+        .get(&first_peer)
+        .and_then(toml::Value::as_table)
+        .cloned()
+        .ok_or_else(|| ConfigError::AgentNotFound {
+            agent_name: first_peer.clone(),
+        })?;
+
+    let mut desired_peers = current_peers
+        .iter()
+        .take(update.resource_count)
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut next_suffix = desired_peers.len() + 1;
+    while desired_peers.len() < update.resource_count {
+        let candidate = format!("{first_peer}-{next_suffix}");
+        next_suffix += 1;
+        if candidate == update.agent_name
+            || agents.contains_key(&candidate)
+            || desired_peers.contains(&candidate)
+        {
+            continue;
+        }
+        desired_peers.push(candidate);
+    }
+
+    for removed_peer in current_peers.iter().skip(update.resource_count) {
+        agents.remove(removed_peer);
+    }
+
+    for peer_name in &desired_peers {
+        if !agents.contains_key(peer_name) {
+            let mut worker = worker_template.clone();
+            worker.insert("name".to_owned(), toml::Value::String(peer_name.clone()));
+            worker.insert(
+                "node_id".to_owned(),
+                toml::Value::String(format!("{peer_name}-node")),
+            );
+            agents.insert(peer_name.clone(), toml::Value::Table(worker));
+        }
+        let worker = agents
+            .get_mut(peer_name)
+            .and_then(toml::Value::as_table_mut)
+            .expect("validated or cloned Worker table");
+        worker.insert(
+            "paired_agents".to_owned(),
+            toml::Value::Array(vec![toml::Value::String(update.agent_name.clone())]),
+        );
+        worker.insert(
+            "provider".to_owned(),
+            toml::Value::String(worker_template_config.provider_id.clone()),
+        );
+        match &worker_template_config.fallback_provider_id {
+            Some(provider_id) => {
+                worker.insert(
+                    "fallback_provider".to_owned(),
+                    toml::Value::String(provider_id.clone()),
+                );
+            }
+            None => {
+                worker.remove("fallback_provider");
+            }
+        }
+    }
+
+    let master = agents
+        .get_mut(&update.agent_name)
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| ConfigError::AgentNotFound {
+            agent_name: update.agent_name.clone(),
+        })?;
+    master.insert(
+        "paired_agents".to_owned(),
+        toml::Value::Array(desired_peers.into_iter().map(toml::Value::String).collect()),
     );
     Ok(())
 }
@@ -2173,6 +2354,187 @@ provider = "old"
         ));
         let after = fs::read_to_string(&path).expect("read config after failed update");
         assert_eq!(after, before);
+
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn update_agent_resource_config_grows_and_shrinks_shared_provider_workers() {
+        let pair_token_env = unique_env_name("FREEHAND_AGENT_RESOURCE_PAIR_TOKEN");
+        let path = write_temp_config(&format!(
+            r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://primary.example.test/v1"
+default_model = "primary-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key = "primary-secret"
+
+[providers.backup]
+id = "backup"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "https://backup.example.test"
+default_model = "backup-model"
+
+[providers.backup.auth]
+type = "apikey"
+api_key = "backup-secret"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "{pair_token_env}"
+provider = "primary"
+fallback_provider = "backup"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "primary"
+fallback_provider = "backup"
+"#,
+        ));
+        // SAFETY: test process owns this unique environment variable.
+        unsafe { env::set_var(&pair_token_env, "pair-token") };
+
+        let grown = update_agent_resource_config_in_path(
+            &path,
+            AgentResourceConfigUpdate {
+                agent_name: "master".to_owned(),
+                resource_count: 5,
+            },
+        )
+        .expect("grow Agent resources");
+        assert_eq!(
+            grown.worker_peer_names(),
+            vec!["worker", "worker-2", "worker-3", "worker-4", "worker-5"]
+        );
+        let grown_config = load_config_from_path(&path).expect("load grown config");
+        assert_eq!(grown_config.agents().len(), 6);
+        for worker_name in grown.worker_peer_names() {
+            let worker = grown_config.agents().get(&worker_name).expect("worker");
+            assert_eq!(worker.paired_agent_names, vec!["master"]);
+            assert_eq!(worker.provider_id, "primary");
+            assert_eq!(worker.fallback_provider_id.as_deref(), Some("backup"));
+        }
+
+        let shrunk = update_agent_resource_config_in_path(
+            &path,
+            AgentResourceConfigUpdate {
+                agent_name: "master".to_owned(),
+                resource_count: 2,
+            },
+        )
+        .expect("shrink Agent resources");
+        assert_eq!(shrunk.worker_peer_names(), vec!["worker", "worker-2"]);
+        let shrunk_config = load_config_from_path(&path).expect("load shrunk config");
+        assert_eq!(shrunk_config.agents().len(), 3);
+        assert!(!shrunk_config.agents().contains_key("worker-3"));
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe { env::remove_var(&pair_token_env) };
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn update_agent_resource_config_rejects_invalid_intent_without_overwrite() {
+        let path = write_temp_config(
+            r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://primary.example.test/v1"
+default_model = "primary-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key = "primary-secret"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_TOKEN"
+provider = "primary"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "primary"
+"#,
+        );
+        let before = fs::read_to_string(&path).expect("read original config");
+
+        for resource_count in [0, 6] {
+            let err = update_agent_resource_config_in_path(
+                &path,
+                AgentResourceConfigUpdate {
+                    agent_name: "master".to_owned(),
+                    resource_count,
+                },
+            )
+            .expect_err("out-of-range resource count must fail");
+            assert!(matches!(
+                err,
+                ConfigError::AgentResourceCountOutOfRange { .. }
+            ));
+            assert_eq!(
+                fs::read_to_string(&path).expect("read unchanged config"),
+                before
+            );
+        }
+
+        let err = update_agent_resource_config_in_path(
+            &path,
+            AgentResourceConfigUpdate {
+                agent_name: "worker".to_owned(),
+                resource_count: 2,
+            },
+        )
+        .expect_err("Worker resource update must fail");
+        assert!(matches!(
+            err,
+            ConfigError::AgentResourceUpdateRequiresMaster { agent_name }
+                if agent_name == "worker"
+        ));
+        assert_eq!(
+            fs::read_to_string(&path).expect("read unchanged config"),
+            before
+        );
+
+        let err = update_agent_resource_config_in_path(
+            &path,
+            AgentResourceConfigUpdate {
+                agent_name: "missing".to_owned(),
+                resource_count: 2,
+            },
+        )
+        .expect_err("unknown agent update must fail");
+        assert!(
+            matches!(err, ConfigError::AgentNotFound { agent_name } if agent_name == "missing")
+        );
+        assert_eq!(
+            fs::read_to_string(&path).expect("read unchanged config"),
+            before
+        );
 
         fs::remove_file(path).expect("cleanup");
     }

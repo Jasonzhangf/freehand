@@ -196,6 +196,18 @@ verify_device_ui() {
     exit 1
   fi
 
+  if ! grep -Fq '"webuiCssApplied":true' "$artifact_dir/webui-layout-logcat.txt"; then
+    write_summary "failed" "webui_stylesheet_not_applied"
+    echo "[freehand-android-device] failed: WebUI stylesheet was not applied; see $artifact_dir" >&2
+    exit 1
+  fi
+
+  if ! grep -Fq '"webuiJsReady":true' "$artifact_dir/webui-layout-logcat.txt"; then
+    write_summary "failed" "webui_javascript_not_ready"
+    echo "[freehand-android-device] failed: WebUI JavaScript was not ready; see $artifact_dir" >&2
+    exit 1
+  fi
+
   if ! grep -Eq '"layoutShape":"(phone_portrait|tall_phone|tablet_portrait)"' "$artifact_dir/webui-layout-logcat.txt"; then
     write_summary "failed" "webui_layout_not_mobile_conversation"
     echo "[freehand-android-device] failed: WebUI did not report a mobile layout shape; see $artifact_dir" >&2

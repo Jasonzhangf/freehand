@@ -141,10 +141,16 @@ pub fn seed_webui_protocol_state() -> UiProtocolState {
     state
 }
 
-async fn handle_root(Query(params): Query<HashMap<String, String>>) -> Html<String> {
-    Html(render_webui_smoke_for_client(
-        params.get("client").map(String::as_str),
-    ))
+async fn handle_root(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    (
+        [(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store, max-age=0"),
+        )],
+        Html(render_webui_smoke_for_client(
+            params.get("client").map(String::as_str),
+        )),
+    )
 }
 
 async fn handle_android_update_manifest() -> Result<impl IntoResponse, StatusCode> {
@@ -1176,6 +1182,10 @@ mod tests {
             .await
             .expect("root response");
         assert_eq!(root.status(), StatusCode::OK);
+        assert_eq!(
+            root.headers().get("cache-control").unwrap(),
+            "no-store, max-age=0"
+        );
         let root_body = root.text().await.expect("root body");
         assert!(root_body.contains("data-webui-shell=\"true\""));
         assert!(!root_body.contains("data-layout-client=\"android-webview\""));
@@ -1212,6 +1222,22 @@ mod tests {
         assert!(root_body.contains("id=\"open-mobile-agent-sheet-button\""));
         assert!(root_body.contains("id=\"mobile-agent-sheet\""));
         assert!(root_body.contains("id=\"close-mobile-agent-sheet-button\""));
+        assert!(root_body.contains("id=\"worker-session-nav\""));
+        assert!(root_body.contains("Back to Master"));
+        assert!(root_body.contains("id=\"settings-agent-resource-count\""));
+        assert!(root_body.contains("id=\"settings-agent-resource-increment\""));
+        assert!(root_body.contains("id=\"settings-agent-resource-decrement\""));
+        assert!(root_body.contains("id=\"settings-agent-resource-save\""));
+        assert!(root_body.contains("Worker capacity"));
+        assert!(!root_body.contains("id=\"mobile-agent-resource-save\""));
+        assert!(!root_body.contains("Agent resources"));
+        assert!(root_body.contains("Delegated tasks"));
+        assert!(root_body.contains("Tap a task to open its Worker conversation"));
+        assert!(!root_body.contains("id=\"mobile-agent-master-card\""));
+        assert!(!root_body.contains("id=\"mobile-agent-agent-list\""));
+        assert!(!root_body.contains("id=\"mobile-agent-history-list\""));
+        assert!(!root_body.contains("id=\"mobile-agent-control-list\""));
+        assert!(!root_body.contains("Master evaluation"));
         assert!(root_body.contains("aria-modal=\"true\""));
         assert!(root_body.contains("Task and Agent Lifecycle"));
         assert!(root_body.contains("lifecycle observer"));
@@ -1357,6 +1383,10 @@ mod tests {
             .await
             .expect("js response");
         assert_eq!(js.status(), StatusCode::OK);
+        assert_eq!(
+            js.headers().get("cache-control").unwrap(),
+            "no-store, max-age=0"
+        );
         assert!(
             js.text()
                 .await
@@ -1377,6 +1407,8 @@ mod tests {
         assert!(js_body.contains("SSE turn refresh received"));
         assert!(js_body.contains("function classifyLayoutShape"));
         assert!(js_body.contains("function applyLayoutShape"));
+        assert!(js_body.contains("function markWebUiJavascriptReady"));
+        assert!(js_body.contains("webuiJsReady"));
         assert!(js_body.contains("function viewportDimensionsForLayout"));
         assert!(js_body.contains("function setMobileDrawer"));
         assert!(js_body.contains("function showInspectorPanel"));
@@ -1395,6 +1427,20 @@ mod tests {
         assert!(js_body.contains("function renderAgentBoardProjection"));
         assert!(js_body.contains("function phase2SortedAgents"));
         assert!(js_body.contains("function openWorkerTaskSession"));
+        assert!(js_body.contains("function returnToParentSession"));
+        assert!(js_body.contains("function renderWorkerSessionNavigation"));
+        assert!(js_body.contains("function switchConversationSession"));
+        assert!(js_body.contains("sessionRefreshInFlight"));
+        assert!(js_body.contains("function selectedSessionIsLoading"));
+        assert!(js_body.contains("function loadingConversationBubble"));
+        assert!(js_body.contains("Loading selected session transcript from runtime truth."));
+        assert!(js_body.contains("function renderSessionRefreshFailure"));
+        assert!(js_body.contains("clearConversationForSessionSwitch"));
+        assert!(js_body.contains("const adpRequestTimeoutMs = 45000"));
+        assert!(js_body.contains("state.adpFailure = message"));
+        assert!(js_body.contains("const requestedSessionId = state.selectedSessionId"));
+        assert!(js_body.contains("state.selectedSessionId !== requestedSessionId"));
+        assert!(js_body.contains("projection.session_id !== state.selectedSessionId"));
         assert!(js_body.contains("waiting lifecycle"));
         assert!(js_body.contains("function renderEventInboxProjection"));
         assert!(js_body.contains("function renderTaskHistoryProjection"));
@@ -1405,7 +1451,9 @@ mod tests {
         assert!(js_body.contains("function currentSessionAgents"));
         assert!(js_body.contains("function currentSessionEvents"));
         assert!(js_body.contains("function currentSessionTaskStatusLabel"));
-        assert!(js_body.contains("task.parent_session_id === parentSessionId"));
+        assert!(js_body.contains("function taskVisibleInSession"));
+        assert!(js_body.contains("task.parent_session_id === sessionId"));
+        assert!(js_body.contains("task.attached_session_ids.includes(sessionId)"));
         assert!(js_body.contains("currentSessionTaskStatusLabel(tasks)"));
         assert!(js_body.contains("currentSessionEvents()"));
         assert!(js_body.contains("currentSessionAgents()"));
@@ -1418,10 +1466,22 @@ mod tests {
         assert!(js_body.contains("function renderMobileAgentSheet"));
         assert!(js_body.contains("function setMobileAgentSheetOpen"));
         assert!(js_body.contains("state.mobileAgentSheetOpen"));
-        assert!(js_body.contains("Awaiting Master evaluation"));
-        assert!(js_body.contains("Master evaluating"));
-        assert!(js_body.contains("Rework required"));
-        assert!(js_body.contains("Goal complete"));
+        assert!(js_body.contains("running agent"));
+        assert!(js_body.contains("delegated task"));
+        assert!(js_body.contains("configured"));
+        assert!(js_body.contains("UpdateAgentResourceConfig"));
+        assert!(js_body.contains("function submitAgentResourceConfigUpdate"));
+        assert!(js_body.contains("function renderSystemAgentResourceConfig"));
+        assert!(js_body.contains("Save Worker capacity"));
+        assert!(js_body.contains("agent_resource_config_saved_restart_required:count="));
+        assert!(js_body.contains("restart and Worker process startup required"));
+        assert!(!js_body.contains("freehand-webui-agent-resource-count"));
+        assert!(!js_body.contains("mobileAgentResourceSave"));
+        assert!(js_body.contains("No delegated task in this session"));
+        assert!(!js_body.contains("Awaiting Master evaluation"));
+        assert!(!js_body.contains("Master evaluating"));
+        assert!(!js_body.contains("Rework required"));
+        assert!(!js_body.contains("Goal complete"));
         assert!(js_body.contains("data-worker-control-op"));
         assert!(js_body.contains("state.taskBoard"));
         assert!(js_body.contains("state.agentBoard"));
@@ -1537,12 +1597,18 @@ mod tests {
         assert!(js_body.contains("selectedSessionIds"));
         assert!(js_body.contains("function workerChildSessionsForParent"));
         assert!(js_body.contains("parent_session_id"));
+        assert!(js_body.contains("task.worker_session_id"));
+        assert!(js_body.contains("card.dataset.taskId"));
+        assert!(js_body.contains("card.dataset.workerSessionId"));
+        assert!(!js_body.contains("model.tasks.slice(0, 8)"));
+        assert!(js_body.contains("worker session unavailable in TaskBoard projection"));
+        assert!(js_body.contains("session refresh failed"));
         assert!(js_body.contains("function renderSessionWithWorkerChildren"));
         assert!(js_body.contains("function renderSessionAgentGroup"));
         assert!(js_body.contains("group.className = \"session-agent-group\""));
         assert!(js_body.contains("sessionNodes.className = \"session-agent-sessions\""));
         assert!(js_body.contains("function renderSessionItem"));
-        assert!(js_body.contains("worker-task-"));
+        assert!(!js_body.contains("return `worker-task-${sanitizeRuntimeIdentifier(taskId)}`"));
         assert!(js_body.contains("session.temporary"));
         assert!(js_body.contains("selectAllSessions"));
         assert!(js_body.contains("draftSessionId: null"));
@@ -1802,7 +1868,7 @@ mod tests {
         assert!(js_body.contains("Cmd/Ctrl+Enter"));
         assert!(js_body.contains("requestSubmit()"));
         assert!(js_body.contains("refreshAllProtocolState"));
-        assert!(js_body.contains("if (command.startsWith(\"/\"))"));
+        assert!(js_body.contains("if (command.startsWith(\"/\")"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("case \"/help\""));
         assert!(js_body.contains("case \"/new\""));

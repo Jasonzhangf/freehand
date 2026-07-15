@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260715-agent-dashboard-2";
 
 initializeThemeToggle(document);
 
@@ -85,9 +85,11 @@ const openMobileAgentSheetButton = document.getElementById("open-mobile-agent-sh
 const closeMobileAgentSheetButton = document.getElementById("close-mobile-agent-sheet-button");
 const mobileAgentSheet = document.getElementById("mobile-agent-sheet");
 const mobileAgentTaskList = document.getElementById("mobile-agent-task-list");
-const mobileAgentAgentList = document.getElementById("mobile-agent-agent-list");
-const mobileAgentHistoryList = document.getElementById("mobile-agent-history-list");
-const mobileAgentControlList = document.getElementById("mobile-agent-control-list");
+const workerSessionNav = document.getElementById("worker-session-nav");
+const workerSessionBackButton = document.getElementById("worker-session-back-button");
+const settingsAgentResourceDecrement = document.getElementById("settings-agent-resource-decrement");
+const settingsAgentResourceIncrement = document.getElementById("settings-agent-resource-increment");
+const settingsAgentResourceSave = document.getElementById("settings-agent-resource-save");
 const settingsShellToggle = document.getElementById("settings-shell-toggle");
 const inspectorEyebrow = document.getElementById("inspector-eyebrow");
 const inspectorTitle = document.getElementById("inspector-title");
@@ -155,7 +157,7 @@ const selectedSessionStorageKey = "freehand-webui-selected-session";
 const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
 const layoutWidthsStorageKey = "freehand-webui-layout-widths-v1";
-const adpRequestTimeoutMs = 8000;
+const adpRequestTimeoutMs = 45000;
 const shortcutHelp =
   "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success · Cmd/Ctrl+2 failure. Slash: /help /new /task /settings /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
@@ -176,6 +178,13 @@ window.__freehandLayout = {
   classifyLayoutShapeForClient,
   applyLayoutShape,
 };
+
+function markWebUiJavascriptReady() {
+  document.body.dataset.webuiJsReady = "true";
+  if (shell) {
+    shell.dataset.webuiJsReady = "true";
+  }
+}
 
 const state = {
   turn: null,
@@ -200,12 +209,18 @@ const state = {
   configStatus: null,
   configStatusError: null,
   configSaveInFlight: false,
+  agentResourceDraftCount: null,
+  agentResourceSaveInFlight: false,
+  agentResourceSaveMessage: null,
+  agentResourceSaveError: null,
   toolTimings: new Map(),
   lifecycleClocks: new Map(),
   pendingUserInput: null,
   pendingSubmitId: null,
   pendingSubmitSessionId: null,
   pendingSubmitError: null,
+  sessionRefreshInFlight: null,
+  sessionRefreshError: null,
   pendingAttachments: [],
   inputHistory: [],
   inputHistoryIndex: null,
@@ -689,6 +704,14 @@ function providerConfigReceiptStatus(receipt) {
     return "Provider config saved. Restart required.";
   }
   throw new Error("Config save returned an unexpected service status.");
+}
+
+function agentResourceConfigReceiptStatus(receipt, expectedCount) {
+  const expected = `agent_resource_config_saved_restart_required:count=${expectedCount}`;
+  if (receipt && receipt.dispatch_status === expected) {
+    return `Agent resources saved: ${expectedCount}. Restart required.`;
+  }
+  throw new Error("Agent resource save returned an unexpected service status.");
 }
 
 function setBackgroundCommandStatus(message) {
@@ -1201,6 +1224,21 @@ function failureChatBubble(message) {
   );
 }
 
+function loadingConversationBubble() {
+  return assistantChatBubble(
+    {
+      turnId: "session-refresh-loading",
+      lifecycle: { className: "running", label: "loading conversation", isLive: true },
+    },
+    [{
+      kind: "system",
+      title: "Conversation",
+      body: ["Loading selected session transcript from runtime truth."],
+      status: "loading",
+    }],
+  );
+}
+
 function turnExecutionCard(renderTurn) {
   const lifecycle = renderTurn.lifecycle;
   const status = { className: lifecycle.className, label: lifecycle.label };
@@ -1657,6 +1695,7 @@ function commandReceiptStatus(receipt) {
     case "reason_live_turn_completed":
       return "request completed";
     case "provider_config_saved_restart_required":
+    case "agent_resource_config_saved_restart_required":
       return "settings saved";
     case "node_direct_message_dispatched":
       return "worker message sent";
@@ -1816,8 +1855,17 @@ function buildConversationRenderModel() {
           error: state.pendingSubmitError,
         }
       : null,
+    sessionLoading: selectedSessionIsLoading(),
     adpFailure: state.adpFailure ? { message: state.adpFailure } : null,
   };
+}
+
+function selectedSessionIsLoading() {
+  return Boolean(
+    state.selectedSessionId &&
+      state.sessionRefreshInFlight === state.selectedSessionId &&
+      (!state.sessionRefreshError || state.sessionRefreshError.session_id !== state.selectedSessionId),
+  );
 }
 
 function successorBaseTurnIds(turns) {
@@ -2481,6 +2529,56 @@ function setSelectedSessionId(sessionId) {
   }
 }
 
+function clearConversationForSessionSwitch(sessionId) {
+  setSelectedSessionId(sessionId);
+  state.sessionTurns = [];
+  state.turn = null;
+  state.publicConversation = [];
+  state.debug = null;
+  state.adpFailure = null;
+  state.sessionRefreshInFlight = sessionId;
+  state.sessionRefreshError = null;
+}
+
+function switchConversationSession(sessionId) {
+  if (!sessionId) {
+    return;
+  }
+  const requestedSessionId = sessionId;
+  clearConversationForSessionSwitch(sessionId);
+  renderAll();
+  refreshSelectedSession().catch((error) => {
+    renderSessionRefreshFailure(error, requestedSessionId);
+  });
+}
+
+function renderSessionRefreshFailure(error, requestedSessionId = state.selectedSessionId) {
+  if (requestedSessionId && state.selectedSessionId !== requestedSessionId) {
+    return;
+  }
+  const message = `session refresh failed: ${error && error.message ? error.message : error}`;
+  state.sessionRefreshInFlight = null;
+  state.sessionRefreshError = {
+    session_id: requestedSessionId || state.selectedSessionId || "",
+    message,
+  };
+  state.adpFailure = message;
+  setCommandStatus(message, { stickyMs: 8000 });
+  renderAll();
+}
+
+function clearSessionRefreshState(sessionId) {
+  if (!sessionId || state.sessionRefreshInFlight === sessionId) {
+    state.sessionRefreshInFlight = null;
+  }
+  if (!sessionId || (state.sessionRefreshError && state.sessionRefreshError.session_id === sessionId)) {
+    state.sessionRefreshError = null;
+    if (`${state.adpFailure || ""}`.startsWith("session refresh failed:")) {
+      state.adpFailure = null;
+    }
+  }
+}
+
 function normalizeCwd(cwd) {
   return `${cwd || ""}`.trim();
 }
@@ -2650,6 +2748,8 @@ function resetLocalConversationState(sessionId) {
   state.publicConversation = [];
   state.debug = null;
   state.adpFailure = null;
+  state.sessionRefreshInFlight = null;
+  state.sessionRefreshError = null;
   state.pendingUserInput = null;
   state.pendingSubmitId = null;
   state.pendingSubmitSessionId = null;
@@ -2860,11 +2960,22 @@ async function rollbackLatestSessionTurn() {
 }
 
 function setSessionTranscript(projection) {
+  if (
+    projection &&
+    projection.session_id &&
+    state.selectedSessionId &&
+    projection.session_id !== state.selectedSessionId
+  ) {
+    return;
+  }
   if (projection && projection.session_id && !sessionTruthAllowsSessionId(projection.session_id)) {
     if (state.selectedSessionId === projection.session_id) {
       clearLocalConversationTruth();
     }
     return;
+  }
+  if (projection && projection.session_id) {
+    clearSessionRefreshState(projection.session_id);
   }
   state.sessionTurns = logicalSessionTurns((projection && projection.turns) || []);
   syncSelectedCwdFromProjection(projection);
@@ -2887,6 +2998,8 @@ function clearLocalConversationTruth(options = {}) {
   state.publicConversation = [];
   state.debug = null;
   state.adpFailure = null;
+  state.sessionRefreshInFlight = null;
+  state.sessionRefreshError = null;
   state.lifecycleClocks.clear();
   state.toolTimings.clear();
 }
@@ -3023,7 +3136,9 @@ function applyAdpQueryResult(result) {
   if (configStatus !== undefined) {
     state.configStatus = configStatus;
     state.configStatusError = null;
+    state.agentResourceDraftCount = Number(configStatus.agent_resource_count) || null;
     renderSettingsShell();
+    renderPhase2Dashboard();
     return;
   }
   if (applyPhase2QueryResult(result)) {
@@ -3146,6 +3261,10 @@ function renderMessages() {
     fragments.push(failureChatBubble(renderModel.adpFailure.message));
   }
 
+  if (fragments.length === 0 && renderModel.sessionLoading) {
+    fragments.push(loadingConversationBubble());
+  }
+
   if (fragments.length === 0) {
     const empty = document.createElement("div");
     empty.className = "chat-empty-state";
@@ -3262,19 +3381,9 @@ function normalizeAgentId(value) {
   return agentId || "master";
 }
 
-function sanitizeRuntimeIdentifier(value) {
-  return `${value || ""}`
-    .split("")
-    .map((character) => (/^[A-Za-z0-9]$/.test(character) ? character : "-"))
-    .join("");
-}
-
 function workerSessionIdForTask(task) {
-  const taskId = `${(task && task.task_id) || ""}`.trim();
-  if (!taskId) {
-    return null;
-  }
-  return `worker-task-${sanitizeRuntimeIdentifier(taskId)}`;
+  const sessionId = `${(task && task.worker_session_id) || ""}`.trim();
+  return sessionId || null;
 }
 
 function workerChildSessionsForParent(parentSessionId) {
@@ -3282,7 +3391,7 @@ function workerChildSessionsForParent(parentSessionId) {
     return [];
   }
   return ((state.taskBoard && state.taskBoard.tasks) || [])
-    .filter((task) => task && task.parent_session_id === parentSessionId)
+    .filter((task) => task && taskVisibleInSession(task, parentSessionId))
     .map((task) => ({
       session_id: workerSessionIdForTask(task),
       title: task.title ? `Worker · ${task.title}` : `Worker · ${task.task_id}`,
@@ -3326,7 +3435,16 @@ function currentSessionTasks() {
   if (!parentSessionId) {
     return tasks;
   }
-  return tasks.filter((task) => task && task.parent_session_id === parentSessionId);
+  return tasks.filter((task) => task && taskVisibleInSession(task, parentSessionId));
+}
+
+function taskVisibleInSession(task, sessionId) {
+  return Boolean(
+    task &&
+      sessionId &&
+      (task.parent_session_id === sessionId ||
+        (Array.isArray(task.attached_session_ids) && task.attached_session_ids.includes(sessionId)))
+  );
 }
 
 function currentSessionTaskCounts(tasks = currentSessionTasks()) {
@@ -3415,11 +3533,8 @@ function renderSessionItem(session) {
   );
 
   button.addEventListener("click", () => {
-    setSelectedSessionId(session.session_id);
     closeMobileDrawer();
-    refreshSelectedSession().catch((error) => {
-      setCommandStatus(`session refresh failed: ${error.message}`);
-    });
+    switchConversationSession(session.session_id);
   });
   if (!session.temporary) {
     item.append(selector);
@@ -3633,117 +3748,36 @@ function applyPhase2QueryResult(result) {
 
 function buildMobileAgentDashboardModel() {
   const taskBoard = state.taskBoard;
-  const agentBoard = state.agentBoard;
-  const taskHistory = state.taskHistory;
-  const workerControl = state.workerControl;
   const tasks = currentSessionTasks();
-  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
-  const taskStatuses = tasks.map((task) => `${task.status || ""}`.toLowerCase());
-  const allClosed = tasks.length > 0 && taskStatuses.every((status) => status === "closed");
-  const openTasks = tasks.filter((task) => `${task.status || ""}`.toLowerCase() !== "closed");
-  const blockedTasks = tasks.filter((task) =>
-    ["blocked", "failed", "cancelled"].includes(`${task.status || ""}`.toLowerCase())
-  );
-  const reviewTasks = tasks.filter((task) =>
-    ["review_ready", "review_submitted"].includes(`${task.status || ""}`.toLowerCase())
-  );
-  const historyEvents = (taskHistory && taskHistory.events) || [];
-  const inboxEvents = (state.eventInbox && state.eventInbox.events) || [];
-  const reworkSeen = [...historyEvents, ...inboxEvents].some((event) => {
-    const eventType = `${event.event_type || event.kind || ""}`.toLowerCase();
-    const status = `${event.to_status || event.payload?.to_status || event.payload?.status || ""}`.toLowerCase();
-    return eventType.includes("rejected") || status.includes("rejected") || status.includes("recovering");
-  });
+  const agents = currentSessionAgents();
   const selectedTurns = logicalSessionTurns(state.sessionTurns || []).filter((turn) =>
     !state.selectedSessionId || turn.session_id === state.selectedSessionId
   );
   const latestSelectedTurn = selectedTurns[selectedTurns.length - 1] || activeTurnForSelectedSession();
   const terminalStatus = `${latestSelectedTurn?.terminal_status || ""}`.toLowerCase();
-  const finalComplete = tasks.length > 0 && allClosed && terminalStatus === "success";
-  const objectiveTurn = selectedWorkerSession
-    ? null
-    : selectedTurns.find((turn) => {
-      const text = `${turn && turn.user_text ? turn.user_text : ""}`.trim();
-      return text &&
-        !isInternalRuntimePrompt(turn) &&
-        !text.startsWith("<freehand_parent_evaluation") &&
-        !text.startsWith("<freehand_parent_aggregation");
-    });
-  const objective = objectiveTurn
-    ? compactSentence(objectiveTurn.user_text, 180)
-    : "Overall goal unavailable from the current projection";
-
-  let phase = "Status unavailable";
-  let decision = "Waiting for owner-backed Task Center and session truth.";
   let tone = "unavailable";
   if (taskBoard) {
-    if (finalComplete) {
-      phase = "Goal complete";
-      decision = "Master verified the overall goal after Worker review.";
-      tone = "accepted";
-    } else if (blockedTasks.length > 0 || terminalStatus === "blocked") {
-      phase = "Blocked";
-      decision = `${blockedTasks.length || 1} blocker(s) require an explicit Master decision.`;
+    if (tasks.some((task) => ["blocked", "failed", "cancelled"].includes(`${task.status || ""}`.toLowerCase()))) {
       tone = "blocked";
-    } else if (allClosed) {
-      phase = "Awaiting Master evaluation";
-      decision = "All current Worker tasks are closed; Master must evaluate the overall goal before completion.";
+    } else if (tasks.some((task) => ["review_ready", "review_submitted"].includes(`${task.status || ""}`.toLowerCase()))) {
       tone = "evaluating";
-    } else if (reworkSeen && openTasks.length > 0) {
-      phase = "Rework required";
-      decision = "Master rejected or reopened work; corrected Worker evidence is still required.";
-      tone = "review";
-    } else if (reviewTasks.length > 0) {
-      phase = "Master evaluating";
-      decision = `${reviewTasks.length} Worker result(s) are ready for quality review.`;
-      tone = "evaluating";
-    } else if (openTasks.length > 0) {
-      phase = "Workers active";
-      decision = `${openTasks.length} Worker task(s) remain open before the next Master decision.`;
+    } else if (tasks.some((task) => !terminalTaskStatus(task.status))) {
       tone = "active";
     } else {
-      phase = "No delegated work";
-      decision = "The selected session has no current Worker task projection.";
       tone = "neutral";
     }
   }
 
-  const agents = currentSessionAgents();
-  const workerTarget = currentWorkerControlTarget();
-  const workerEvents = (workerControl && workerControl.events) || [];
-  const workerTask = (workerControl && workerControl.task) || (workerTarget && workerTarget.task) || null;
-
   return {
-    phase,
-    decision,
     tone,
-    objective,
-    roundLabel: "Current round unavailable",
     terminalStatus,
     taskBoardStatus: taskBoard
       ? currentSessionTaskStatusLabel(tasks)
       : state.phase2StatusError
         ? `status unavailable: ${state.phase2StatusError}`
         : "waiting",
-    agentBoardStatus: agentBoard
-      ? `${agents.length} agent(s) · ${agents.filter((agent) => agent.alive).length} active`
-      : state.phase2StatusError
-        ? `status unavailable: ${state.phase2StatusError}`
-        : "waiting",
-    historyStatus: taskHistory
-      ? `${historyEvents.length} execution event(s)`
-      : taskBoard
-        ? "no task history"
-        : "waiting",
-    controlStatus: workerTarget || workerControl
-      ? `${statusLabel(workerTask && workerTask.status)} · ${workerEvents.length} control event(s)`
-      : "no active execution",
     tasks,
     agents,
-    historyEvents,
-    workerTask,
-    workerTarget,
-    workerEvents,
   };
 }
 
@@ -3752,11 +3786,21 @@ function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel())
     return;
   }
   mobileAgentSummaryStrip.dataset.tone = model.tone;
-  setText("mobile-agent-summary-title", model.phase);
-  const taskSummary = model.taskBoardStatus === "waiting"
-    ? "Waiting for Task Center truth"
-    : model.taskBoardStatus;
-  setText("mobile-agent-summary-copy", taskSummary);
+  const runningAgents = model.agents.filter((agent) => agentIsActive(agent));
+  const delegatedTasks = model.tasks.length;
+  const configuredResources = Number(state.configStatus?.agent_resource_count);
+  const resourceSummary = Number.isFinite(configuredResources) && configuredResources > 0
+    ? ` · ${configuredResources} configured`
+    : "";
+  setText(
+    "mobile-agent-summary-title",
+    `${runningAgents.length} running agent${runningAgents.length === 1 ? "" : "s"} · ${delegatedTasks} delegated task${delegatedTasks === 1 ? "" : "s"}${resourceSummary}`,
+  );
+  const activeTask = model.tasks.find((task) => !terminalTaskStatus(task.status)) || model.tasks[0];
+  setText(
+    "mobile-agent-summary-copy",
+    activeTask ? compactSentence(taskTitle(activeTask), 72) : "No delegated task in this session",
+  );
   setText("mobile-agent-summary-dot", "");
   if (shell) {
     shell.dataset.lifecycleClockCount = `${state.lifecycleClocks.size}`;
@@ -3769,19 +3813,91 @@ function renderMobileAgentSheet(model = buildMobileAgentDashboardModel()) {
     return;
   }
   mobileAgentSheet.dataset.tone = model.tone;
-  setText("mobile-agent-phase", model.phase);
-  setText("mobile-agent-decision", model.decision);
-  setText("mobile-agent-goal", `Overall goal · ${model.objective}`);
-  setText("mobile-agent-round", model.roundLabel);
   setText("mobile-agent-task-status", model.taskBoardStatus);
-  setText("mobile-agent-agent-status", model.agentBoardStatus);
-  setText("mobile-agent-history-status", model.historyStatus);
-  setText("mobile-agent-control-status", model.controlStatus);
   renderMobileAgentTaskList(model);
-  renderMobileAgentAgentList(model);
-  renderMobileAgentHistoryList(model);
-  renderMobileAgentControlList(model);
   applyMobileAgentSheetState();
+}
+
+function renderSystemAgentResourceConfig() {
+  const status = state.configStatus;
+  const isMaster = status?.agent_mode === "master";
+  const count = Number(state.agentResourceDraftCount ?? status?.agent_resource_count ?? 1);
+  const limit = Number(status?.agent_resource_limit || 5);
+  const providerMode = status?.agent_resource_provider_mode || "unavailable";
+  const providerId = status?.agent_resource_provider_id || "unavailable";
+  setText("settings-agent-resource-count", `${count}`);
+  setText("settings-agent-resource-limit", `${limit}`);
+  setText("settings-agent-resource-summary", status ? `${count} of ${limit}` : "loading");
+  setText(
+    "settings-agent-resource-provider",
+    providerMode === "shared" ? `shared · ${providerId}` : providerMode.replaceAll("_", " "),
+  );
+  const disabled = !status || !isMaster || state.agentResourceSaveInFlight;
+  if (settingsAgentResourceDecrement) {
+    settingsAgentResourceDecrement.disabled = disabled || count <= 1;
+  }
+  if (settingsAgentResourceIncrement) {
+    settingsAgentResourceIncrement.disabled = disabled || count >= limit;
+  }
+  if (settingsAgentResourceSave) {
+    settingsAgentResourceSave.disabled = disabled || count === Number(status?.agent_resource_count);
+    settingsAgentResourceSave.textContent = state.agentResourceSaveInFlight ? "Saving..." : "Save Worker capacity";
+  }
+  const statusText = state.agentResourceSaveError
+    ? `Save failed: ${state.agentResourceSaveError}`
+    : state.agentResourceSaveMessage
+      ? state.agentResourceSaveMessage
+      : !status
+        ? "Waiting for config truth."
+        : !isMaster
+          ? "Worker capacity is configurable only from the active Master."
+          : "1–5 Worker resources · restart and Worker process startup required.";
+  setText("settings-agent-resource-status", statusText);
+}
+
+function adjustAgentResourceDraft(delta) {
+  const status = state.configStatus;
+  if (!status || status.agent_mode !== "master" || state.agentResourceSaveInFlight) {
+    return;
+  }
+  const limit = Number(status.agent_resource_limit || 5);
+  const current = Number(state.agentResourceDraftCount ?? status.agent_resource_count ?? 1);
+  state.agentResourceDraftCount = Math.min(limit, Math.max(1, current + delta));
+  state.agentResourceSaveMessage = null;
+  state.agentResourceSaveError = null;
+  renderSettingsShell();
+}
+
+async function submitAgentResourceConfigUpdate() {
+  const status = state.configStatus;
+  if (!status || status.agent_mode !== "master") {
+    state.agentResourceSaveError = "active Master config is unavailable";
+    renderSettingsShell();
+    return;
+  }
+  const resourceCount = Number(state.agentResourceDraftCount ?? status.agent_resource_count);
+  state.agentResourceSaveInFlight = true;
+  state.agentResourceSaveMessage = null;
+  state.agentResourceSaveError = null;
+  renderSettingsShell();
+  try {
+    const receipt = await adpCommand({
+      UpdateAgentResourceConfig: {
+        update: {
+          agent_name: status.agent_name,
+          resource_count: resourceCount,
+        },
+      },
+    });
+    setCommandStatus(agentResourceConfigReceiptStatus(receipt, resourceCount), { stickyMs: 5000 });
+    await refreshConfigStatus();
+    state.agentResourceSaveMessage = "Saved. Restart and start the configured Worker processes to activate.";
+  } catch (error) {
+    state.agentResourceSaveError = error.message;
+  } finally {
+    state.agentResourceSaveInFlight = false;
+    renderSettingsShell();
+  }
 }
 
 function renderMobileAgentTaskList(model) {
@@ -3793,104 +3909,24 @@ function renderMobileAgentTaskList(model) {
     mobileAgentTaskList.appendChild(mobileAgentEmptyCard("No Worker tasks in the current projection."));
     return;
   }
-  model.tasks.slice(0, 8).forEach((task) => {
+  const total = model.tasks.length;
+  model.tasks.forEach((task, index) => {
     const card = mobileAgentCard({
       title: taskTitle(task),
-      meta: [statusLabel(task.status), assigneeLabel(task.assignee_agent_id), freshnessLabel(task.last_progress_at || task.updated_at)]
+      meta: [`${index + 1}/${total}`, statusLabel(task.status), assigneeLabel(task.assignee_agent_id), freshnessLabel(task.last_progress_at || task.updated_at)]
         .filter(Boolean)
         .join(" · "),
       copy: compactSentence(task.goal || "Task goal unavailable", 132),
       tone: phase2StatusClass(task.status),
       interactive: true,
     });
+    card.dataset.taskId = `${task.task_id || ""}`;
+    card.dataset.workerSessionId = `${(task && task.worker_session_id) || ""}`;
     card.addEventListener("click", () => {
       setMobileAgentSheetOpen(false);
       openWorkerTaskSession(task);
     });
     mobileAgentTaskList.appendChild(card);
-  });
-}
-
-function renderMobileAgentAgentList(model) {
-  if (!mobileAgentAgentList) {
-    return;
-  }
-  mobileAgentAgentList.replaceChildren();
-  if (model.agents.length === 0) {
-    mobileAgentAgentList.appendChild(mobileAgentEmptyCard("No Worker activity in the current projection."));
-    return;
-  }
-  model.agents.slice(0, 8).forEach((agent, index) => {
-    const boundTask = taskForAgent(agent);
-    const card = mobileAgentCard({
-      title: phase2AgentLabel(agent.agent_id, index),
-      meta: [statusLabel(agent.state), agent.role || "agent"]
-        .filter(Boolean)
-        .join(" · "),
-      copy: lifecycleActivityLabel(agent) || (boundTask ? taskTitle(boundTask) : "idle"),
-      tone: agentIsActive(agent) ? "phase2-running" : "phase2-muted",
-      interactive: !!boundTask,
-    });
-    if (boundTask) {
-      card.addEventListener("click", () => {
-        setMobileAgentSheetOpen(false);
-        openWorkerTaskSession(boundTask);
-      });
-    }
-    mobileAgentAgentList.appendChild(card);
-  });
-}
-
-function renderMobileAgentHistoryList(model) {
-  if (!mobileAgentHistoryList) {
-    return;
-  }
-  mobileAgentHistoryList.replaceChildren();
-  if (model.historyEvents.length === 0) {
-    mobileAgentHistoryList.appendChild(mobileAgentEmptyCard("Select a Worker task to inspect review history."));
-    return;
-  }
-  model.historyEvents.slice(-8).reverse().forEach((event) => {
-    mobileAgentHistoryList.appendChild(mobileAgentCard({
-      title: eventKindLabel(event.event_type),
-      meta: [statusLabel(event.to_status), freshnessLabel(event.timestamp)]
-        .filter(Boolean)
-        .join(" · "),
-      copy: compactSentence(eventPayloadSummary({ kind: event.event_type, payload: event.payload || {} }), 132),
-      tone: phase2EventClass(event.event_type || event.to_status),
-    }));
-  });
-}
-
-function renderMobileAgentControlList(model) {
-  if (!mobileAgentControlList) {
-    return;
-  }
-  mobileAgentControlList.replaceChildren();
-  if (!model.workerTarget && !state.workerControl) {
-    mobileAgentControlList.appendChild(mobileAgentEmptyCard("Worker control appears when an execution is active."));
-    return;
-  }
-  mobileAgentControlList.appendChild(mobileAgentCard({
-    title: model.workerTask ? taskTitle(model.workerTask) : "Worker execution",
-    meta: [statusLabel(model.workerTask && model.workerTask.status), assigneeLabel(model.workerTask && model.workerTask.assignee_agent_id)]
-      .filter(Boolean)
-      .join(" · "),
-    copy: model.workerTask && model.workerTask.active_execution_id
-      ? "Execution is tracked by the service."
-      : "No active execution.",
-    tone: phase2StatusClass(model.workerTask && model.workerTask.status),
-  }));
-  mobileAgentControlList.appendChild(workerControlActionRow(model.workerTask, model.workerTarget));
-  model.workerEvents.slice(-4).reverse().forEach((event) => {
-    mobileAgentControlList.appendChild(mobileAgentCard({
-      title: workerControlOpLabel(event.op),
-      meta: [statusLabel(event.status), assigneeLabel(event.agent_id), freshnessLabel(event.created_at)]
-        .filter(Boolean)
-        .join(" · "),
-      copy: workerControlPayloadSummary(event),
-      tone: phase2ControlStatusClass(event.status),
-    }));
   });
 }
 
@@ -4271,12 +4307,13 @@ function openWorkerTaskSession(task) {
     return;
   }
   const sessionId = workerSessionIdForTask(task);
-  if (sessionId) {
-    setSelectedSessionId(sessionId);
+  if (!sessionId) {
+    setCommandStatus("worker session unavailable in TaskBoard projection", { stickyMs: 8000 });
+    return;
   }
+  switchConversationSession(sessionId);
   state.taskHistory = null;
   state.workerControl = null;
-  renderAll();
   adpQuery({ QueryTaskHistory: { task_id: task.task_id } })
     .then((result) => applyPhase2QueryResult(result))
     .catch((error) => {
@@ -4296,9 +4333,29 @@ function openWorkerTaskSession(task) {
         renderPhase2Dashboard();
       });
   }
-  refreshSelectedSession().catch((error) => {
-    setCommandStatus(`worker session refresh failed: ${error.message}`);
-  });
+}
+
+function returnToParentSession() {
+  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
+  const parentSessionId = selectedWorkerSession && selectedWorkerSession.parent_session_id;
+  if (!parentSessionId) {
+    setCommandStatus("parent Master session unavailable for selected Worker", { stickyMs: 8000 });
+    return;
+  }
+  switchConversationSession(parentSessionId);
+}
+
+function renderWorkerSessionNavigation() {
+  if (!workerSessionNav) {
+    return;
+  }
+  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
+  if (!selectedWorkerSession) {
+    workerSessionNav.hidden = true;
+    return;
+  }
+  workerSessionNav.hidden = false;
+  setText("worker-session-nav-title", selectedWorkerSession.title || selectedWorkerSession.session_id);
 }
 
 function currentWorkerControlTarget() {
@@ -4608,6 +4665,7 @@ function renderSettingsShell() {
   setText("settings-restart-required", state.configStatus?.restart_required_on_change ? "restart required after changes" : "no restart flag");
   setText("settings-config-error", state.configStatusError || "none");
   syncSettingsProviderForm();
+  renderSystemAgentResourceConfig();
   showInspectorPanel(state.inspectorPanel);
 }
 
@@ -4724,6 +4782,7 @@ function renderAll() {
   renderDebugDetailsToggle();
   renderSessions();
   renderTurnMeta();
+  renderWorkerSessionNavigation();
   renderMessages();
   renderAttachmentTray();
   renderDebug();
@@ -4748,13 +4807,19 @@ async function refreshSessions() {
 async function refreshSelectedSession() {
   if (!state.selectedSessionId) {
     state.sessionTurns = [];
+    clearSessionRefreshState(null);
     setTurnProjection(null, { preserveSessionTurns: true });
     renderAll();
     return;
   }
+  const requestedSessionId = state.selectedSessionId;
   const result = await adpQuery({
-    QuerySessionTurns: { session_id: state.selectedSessionId },
+    QuerySessionTurns: { session_id: requestedSessionId },
   });
+  if (state.selectedSessionId !== requestedSessionId) {
+    return;
+  }
+  clearSessionRefreshState(requestedSessionId);
   applyAdpQueryResult(result);
   if (state.turn) {
     refreshDebug().catch((error) => {
@@ -4787,6 +4852,7 @@ async function refreshConfigStatus() {
     state.configStatus = null;
     state.configStatusError = error.message;
     renderSettingsShell();
+    renderPhase2Dashboard();
   }
 }
 
@@ -5229,6 +5295,24 @@ if (closeMobileAgentSheetButton) {
     setMobileAgentSheetOpen(false);
   });
 }
+if (workerSessionBackButton) {
+  workerSessionBackButton.addEventListener("click", returnToParentSession);
+}
+if (settingsAgentResourceDecrement) {
+  settingsAgentResourceDecrement.addEventListener("click", () => adjustAgentResourceDraft(-1));
+}
+if (settingsAgentResourceIncrement) {
+  settingsAgentResourceIncrement.addEventListener("click", () => adjustAgentResourceDraft(1));
+}
+if (settingsAgentResourceSave) {
+  settingsAgentResourceSave.addEventListener("click", () => {
+    submitAgentResourceConfigUpdate().catch((error) => {
+      state.agentResourceSaveInFlight = false;
+      state.agentResourceSaveError = error.message;
+      renderSettingsShell();
+    });
+  });
+}
 if (openSettingsDrawerButton) {
   openSettingsDrawerButton.addEventListener("click", () => {
     if (state.mobileDrawer === "settings" && state.inspectorPanel === "settings") {
@@ -5376,18 +5460,6 @@ if (workerControlList) {
     });
   });
 }
-if (mobileAgentControlList) {
-  mobileAgentControlList.addEventListener("click", (event) => {
-    const target = event.target instanceof Element ? event.target : null;
-    const button = target ? target.closest("[data-worker-control-op]") : null;
-    if (!button) {
-      return;
-    }
-    sendWorkerControl(button.dataset.workerControlOp).catch((error) => {
-      setCommandStatus(`worker control failed: ${error.message}`, { stickyMs: 9000 });
-    });
-  });
-}
 modelSelector.addEventListener("change", () => {
   modelSelector.value = "runtime";
   setCommandStatus("model selector is read-only; runtime config owns active model", { stickyMs: 6000 });
@@ -5406,6 +5478,7 @@ taskCwdInput.addEventListener("change", () => {
 });
 
 applyLayoutShape();
+markWebUiJavascriptReady();
 syncMobileDrawerForLayout();
 installMobileSessionSwipeGesture();
 installDesktopLayoutResizers();

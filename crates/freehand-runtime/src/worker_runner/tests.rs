@@ -10,9 +10,9 @@ use freehand_config::{
 };
 use freehand_contracts::{AgentId, TerminalStatus, TurnId};
 use freehand_task::{
-    AgentStatus, TaskActor, TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskId,
-    TaskListQuery, TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskRuntime,
-    TaskStatus, TaskWatermark,
+    AgentStatus, TaskActor, TaskAssignRequest, TaskClaimRequest, TaskCreateRequest,
+    TaskDispatchRequest, TaskId, TaskListQuery, TaskMutationRequest, TaskParentRef,
+    TaskReviewRejection, TaskRuntime, TaskStatus, TaskWatermark,
 };
 use serde_json::Value;
 
@@ -252,7 +252,7 @@ fn production_worker_runner_rejects_result_after_external_cancel_without_termina
 }
 
 #[test]
-fn production_worker_runner_provider_error_records_interrupted_and_requeues_same_task() {
+fn production_worker_runner_provider_error_waits_for_master_reassignment() {
     let runtime_home = temp_path("provider-interrupted");
     let workspace = temp_path("provider-interrupted-workspace");
     fs::create_dir_all(&workspace).expect("workspace");
@@ -300,6 +300,28 @@ fn production_worker_runner_provider_error_records_interrupted_and_requeues_same
         turn_id: TurnId::new("worker-turn-provider-recovered"),
     })));
     let retry_runner = test_runner(runtime_home.clone(), retry_executor.clone());
+    assert_eq!(
+        retry_runner.run_once().expect("interrupted idle tick"),
+        ProductionWorkerTickOutcome::Idle
+    );
+    assert_eq!(retry_executor.calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        task_runtime
+            .task_history(&expected_task_id)
+            .expect("history before Master reassignment")
+            .iter()
+            .filter(|event| event.event_type == "TaskAssigned")
+            .count(),
+        1
+    );
+    task_runtime
+        .assign_task(TaskAssignRequest {
+            task_id: expected_task_id.clone(),
+            agent_id: AgentId::new("worker"),
+            actor: test_actor("master"),
+            watermark: test_watermark("master-reassign-after-interruption"),
+        })
+        .expect("Master reassign interrupted task");
     let retry_execution_id = match retry_runner.run_once().expect("interrupted retry tick") {
         ProductionWorkerTickOutcome::ReviewReady {
             task_id,
@@ -311,7 +333,6 @@ fn production_worker_runner_provider_error_records_interrupted_and_requeues_same
         }
         other => panic!("expected same task review after interruption retry, got {other:?}"),
     };
-    assert!(retry_executor.prompts()[0].contains("previous execution was interrupted"));
     assert!(
         task_runtime
             .task_history(&expected_task_id)
@@ -464,7 +485,7 @@ fn production_worker_runner_startup_repairs_legacy_blocked_pause() {
 }
 
 #[test]
-fn production_worker_runner_requeues_interrupted_with_new_execution() {
+fn production_worker_runner_expired_lease_waits_for_master_reassignment() {
     let runtime_home = temp_path("interrupted-retry");
     let workspace = temp_path("interrupted-retry-workspace");
     fs::create_dir_all(&workspace).expect("workspace");
@@ -489,7 +510,35 @@ fn production_worker_runner_requeues_interrupted_with_new_execution() {
     std::thread::sleep(std::time::Duration::from_secs(2));
     drop(runtime);
 
-    let outcome = runner.run_once().expect("recovery tick");
+    assert_eq!(
+        runner.run_once().expect("expired lease recovery tick"),
+        ProductionWorkerTickOutcome::Idle
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+    let interrupted = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("recover");
+    let history = interrupted.task_history(&task_id).expect("history");
+    assert!(
+        history
+            .iter()
+            .any(|event| event.event_type == "TaskInterrupted")
+    );
+    assert_eq!(
+        history
+            .iter()
+            .filter(|event| event.event_type == "TaskAssigned")
+            .count(),
+        1
+    );
+    interrupted
+        .assign_task(TaskAssignRequest {
+            task_id: task_id.clone(),
+            agent_id: AgentId::new("worker"),
+            actor: test_actor("master"),
+            watermark: test_watermark("master-reassign-after-expired-lease"),
+        })
+        .expect("Master reassign expired task");
+
+    let outcome = runner.run_once().expect("Master-directed recovery tick");
     let new_execution_id = match outcome {
         ProductionWorkerTickOutcome::ReviewReady {
             execution_id,
@@ -502,7 +551,6 @@ fn production_worker_runner_requeues_interrupted_with_new_execution() {
         other => panic!("expected review ready, got {other:?}"),
     };
     assert_ne!(new_execution_id, old_execution_id);
-    assert!(executor.prompts()[0].contains("previous execution was interrupted"));
     let recovered = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("recover");
     let history = recovered.task_history(&task_id).expect("history");
     assert!(
@@ -855,6 +903,8 @@ fn selected_worker() -> SelectedAgentConfig {
             node_id: "master-node".to_owned(),
             allowed_pair_ip: None,
             pair_token_env: "FREEHAND_PAIR_TOKEN_MASTER".to_owned(),
+            provider_id: "master-provider".to_owned(),
+            fallback_provider_id: None,
         }],
         allowed_pair_ip: None,
         pair_token_env: "FREEHAND_PAIR_TOKEN_WORKER".to_owned(),

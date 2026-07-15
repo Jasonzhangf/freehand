@@ -9,6 +9,7 @@ cli_path="${FREEHAND_TIMER_VERIFY_CLI:-$HOME/.local/bin/freehand-cliS}"
 port="${FREEHAND_TIMER_VERIFY_FIXTURE_PORT:-18086}"
 fixture_key_name="FREEHAND_TIMER_VERIFY_FIXTURE_KEY"
 fixture_key_value="test-timer-verify-key"
+fixture_provider_id="${FREEHAND_TIMER_VERIFY_PROVIDER:-timer-fixture}"
 verify_mode="${FREEHAND_TIMER_VERIFY_MODE:-due}"
 config_path="$runtime_home/config.toml"
 env_path="$runtime_home/daemonS.env"
@@ -104,7 +105,7 @@ const server = http.createServer((req, res) => {
   req.on("end", () => {
     count += 1;
     const sawToolResult = body.includes("Timer scheduled") && body.includes(timerId);
-    const sawTimerWakeup = body.includes("production Master resumed by an internal timer")
+    const sawTimerWakeup = body.includes("new follow-up turn injected by a due timer")
       && body.includes("scheduled Master timer proof wakeup")
       && body.includes(timerId);
     console.log(JSON.stringify({
@@ -137,7 +138,7 @@ const server = http.createServer((req, res) => {
     } else if (sawToolResult) {
       response = complete("timer online proof completed after receiving scheduled tool result");
     } else if (sawTimerWakeup) {
-      response = complete("timer due wakeup fired and resumed the Master");
+      response = complete("timer due wakeup injected a new prompt turn into the source session");
     } else {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ type: "error", error: { type: "fixture_error", message: "provider request did not match timer proof sequence" } }));
@@ -181,7 +182,7 @@ NODE
   "$cli_path" adp-config-update \
     --url "$adp_url" \
     --agent master \
-    --provider minimax \
+    --provider "$fixture_provider_id" \
     --type anthropic \
     --protocol messages \
     --base-url "http://127.0.0.1:$port" \
@@ -203,6 +204,12 @@ NODE
   if ! grep -q "tool_executions=1" <<<"$sample_output"; then
     echo "$sample_output" >&2
     echo "timer online sample did not record exactly one tool execution" >&2
+    exit 1
+  fi
+  session_id="$(printf '%s\n' "$sample_output" | sed -n 's/.* session=\([^ ]*\) .*/\1/p')"
+  if [[ -z "$session_id" ]]; then
+    echo "$sample_output" >&2
+    echo "timer online sample did not report source session id" >&2
     exit 1
   fi
 
@@ -228,13 +235,16 @@ NODE
     echo "missing timer ledger path: $ledger_path" >&2
     exit 1
   fi
-  node - "$state_path" "$ledger_path" "$timer_id" <<'NODE'
+  node - "$state_path" "$ledger_path" "$timer_id" "$session_id" <<'NODE'
 const fs = require("fs");
-const [statePath, ledgerPath, timerId] = process.argv.slice(2);
+const [statePath, ledgerPath, timerId, sessionId] = process.argv.slice(2);
 const schedules = JSON.parse(fs.readFileSync(statePath, "utf8"));
 const schedule = schedules.find(item => item.timer_id === timerId);
 if (!schedule) throw new Error(`missing schedule ${timerId}`);
 if (schedule.status !== "active") throw new Error(`unexpected status ${schedule.status}`);
+if (schedule.source_session_id !== sessionId) {
+  throw new Error(`timer source session drift before due: ${schedule.source_session_id} !== ${sessionId}`);
+}
 if (schedule.reason !== "Online proof that the Master model can call the independent timer tool.") {
   throw new Error(`unexpected reason ${schedule.reason}`);
 }
@@ -286,6 +296,13 @@ NODE
     echo "timer due wakeup did not fire and complete" >&2
     exit 1
   fi
+  session_output="$("$cli_path" adp-session-query --url "$adp_url" --session "$session_id")"
+  session_turns="$(printf '%s\n' "$session_output" | sed -n 's/.* selected_session=[^ ]* turns=\([0-9][0-9]*\).*/\1/p')"
+  if [[ -z "$session_turns" || "$session_turns" -lt 2 ]]; then
+    echo "$session_output" >&2
+    echo "timer due wakeup did not inject a visible follow-up turn into the original user session" >&2
+    exit 1
+  fi
 
   mock_count="$(grep -c '"url":"/v1/messages"' "$mock_log" || true)"
   if [[ "$mock_count" -lt "3" ]]; then
@@ -295,9 +312,9 @@ NODE
   fi
 
   if [[ "$verify_mode" == "restart-due" ]]; then
-    echo "timer_restart_due_online_ok url=$adp_url timer_id=$timer_id mock_attempts=$mock_count"
+    echo "timer_restart_due_online_ok url=$adp_url session=$session_id timer_id=$timer_id session_turns=$session_turns mock_attempts=$mock_count"
   else
-    echo "timer_tool_online_ok url=$adp_url timer_id=$timer_id mock_attempts=$mock_count"
+    echo "timer_tool_online_ok url=$adp_url session=$session_id timer_id=$timer_id session_turns=$session_turns mock_attempts=$mock_count"
   fi
   echo "$due_verified"
   echo "$sample_output"

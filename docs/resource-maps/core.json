@@ -8,7 +8,7 @@
       "owner_crate": "crates/freehand-config",
       "identity": "agent profile plus config source path",
       "truth_store": "~/.freehand/config.toml",
-      "operations": ["load", "validate", "compile_agent_topology", "project_safe_config", "bootstrap_node_pairing", "compile_instruction_capability"],
+      "operations": ["load", "validate", "compile_agent_topology", "project_safe_config", "mutate_provider_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
       "projections": ["runtime bootstrap config", "ordered configured peer topology", "safe CLI/ADP config query"]
     },
     {
@@ -18,7 +18,7 @@
       "identity": "session_id",
       "truth_store": "~/.freehand/state/turns and ~/.freehand/ledgers/reason",
       "operations": ["create", "append_turn", "append_turn_to_turn", "restore", "list_persisted"],
-      "projections": ["ui_session_list", "ui_session_turns"]
+      "projections": ["ui_session_list", "ui_session_turns", "current-session task attachment view derived through task parent truth"]
     },
     {
       "resource_type": "turn",
@@ -80,17 +80,17 @@
       "owner_crate": "crates/freehand-task",
       "identity": "task_id",
       "truth_store": "~/.freehand/state/tasks and ~/.freehand/ledgers/tasks",
-      "operations": ["create", "assign", "record_execution", "submit_review", "approve_review", "reject_review", "close", "recover_interrupted", "project_to_ui"],
-      "projections": ["TaskBoard", "TaskSpaceSnapshot", "ui_task_snapshot"]
+      "operations": ["create", "attach_session", "assign", "record_execution", "submit_review", "approve_review", "reject_review", "close", "recover_interrupted", "project_to_ui"],
+      "projections": ["TaskBoard", "TaskSpaceSnapshot", "ui_task_snapshot", "current session attachment", "current assignment/lease/execution attachment", "canonical Worker transcript session identity"]
     },
     {
       "resource_type": "agent",
       "owner_feature_id": "agent.lifecycle",
       "owner_crate": "crates/freehand-task",
-      "identity": "agent_id",
+      "identity": "agent_id independent of session; task assignment, lease, and execution are temporary bindings",
       "truth_store": "AgentBoard projection from lifecycle events",
       "operations": ["register", "heartbeat", "claim_task", "release_task"],
-      "projections": ["AgentBoard", "TaskSpaceSnapshot"]
+      "projections": ["AgentBoard reusable resource pool", "TaskSpaceSnapshot", "current task/execution occupancy"]
     },
     {
       "resource_type": "timer",
@@ -99,7 +99,7 @@
       "identity": "timer_id",
       "truth_store": "~/.freehand/state/timers and ~/.freehand/ledgers/timers",
       "operations": ["schedule", "cancel", "list", "fire_due", "fire_master_wakeup", "reschedule_recurring"],
-      "projections": ["timer tool result", "internal master wakeup turn"]
+      "projections": ["timer tool result", "source-session injected prompt turn", "source-less internal master wakeup turn"]
     },
     {
       "resource_type": "error",
@@ -230,6 +230,33 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "task.create",
+      "owner_feature_id": "task.orchestration",
+      "source_resource": "task",
+      "target_resource": "session",
+      "effect": "persist optional parent session identity on the task without making the assigned agent session-owned",
+      "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "task.assign",
+      "owner_feature_id": "task.orchestration",
+      "source_resource": "task",
+      "target_resource": "agent",
+      "effect": "bind one schedulable task to one available agent through a replaceable assignment while preserving task and parent session identity",
+      "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "task.attach_session",
+      "owner_feature_id": "task.orchestration",
+      "source_resource": "task",
+      "target_resource": "session",
+      "effect": "persist an observing user-session attachment without changing the task's immutable creation parent or granting mutation authority",
+      "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "agent.heartbeat",
       "owner_feature_id": "agent.lifecycle",
       "source_resource": "agent",
@@ -243,7 +270,7 @@
       "owner_feature_id": "runtime.master-worker-loop",
       "source_resource": "timer",
       "target_resource": "turn",
-      "effect": "fire due timer as an internal master wakeup turn",
+      "effect": "inject a source-backed due timer's persisted prompt as a new turn in its original session, or execute a source-less timer as an internal wakeup",
       "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
       "binding_status": "bound"
     },
@@ -376,6 +403,39 @@
       "call_table_step": "26",
       "file_path": "crates/freehand-ui-protocol/src/lib.rs",
       "symbol_path": "UiCommand::QueryTaskBoard / UiCommand::QueryAgentBoard / UiCommand::QueryAgentLifecycle",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "task.orchestration#04",
+      "operation_id": "task.create",
+      "source_resource": "task",
+      "target_resource": "session",
+      "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
+      "call_table_step": "04",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "symbol_path": "TaskRuntime::create_task",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "task.orchestration#13",
+      "operation_id": "task.assign",
+      "source_resource": "task",
+      "target_resource": "agent",
+      "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
+      "call_table_step": "13",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "symbol_path": "TaskRuntime::assign_task",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "task.orchestration#27",
+      "operation_id": "task.attach_session",
+      "source_resource": "task",
+      "target_resource": "session",
+      "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
+      "call_table_step": "27",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "symbol_path": "TaskRuntime::attach_task_to_session",
       "binding_status": "bound"
     },
     {
@@ -528,6 +588,30 @@
       "reason": "Task owner truth may be projected into UI protocol without UI owning task state."
     },
     {
+      "rule_id": "task-attaches-parent-session-direct",
+      "source_resource": "task",
+      "target_resource": "session",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "A task may persist one immutable creation parent plus explicit observing-session attachments so current-session progress is visible without assigning the agent to the session."
+    },
+    {
+      "rule_id": "task-assigns-available-agent-direct",
+      "source_resource": "task",
+      "target_resource": "agent",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Task orchestration may create or replace a temporary assignment to an available agent while the agent remains a reusable pool resource."
+    },
+    {
+      "rule_id": "session-agent-attachment-through-task",
+      "source_resource": "session",
+      "target_resource": "agent",
+      "allowed_direct": false,
+      "via_resources": ["task", "agent"],
+      "reason": "Session-to-agent attachment is a derived current-progress projection through task parent and assignment truth; sessions never own agents directly."
+    },
+    {
       "rule_id": "agent-heartbeat-updates-agent-direct",
       "source_resource": "agent",
       "target_resource": "agent",
@@ -541,7 +625,7 @@
       "target_resource": "turn",
       "allowed_direct": true,
       "via_resources": [],
-      "reason": "Due timers resume Master through an internal wakeup turn."
+      "reason": "Due timers inject a persisted wakeup prompt as a new source-session turn when source truth exists, or use an internal wakeup turn when source-less."
     },
     {
       "rule_id": "error-records-metadata-direct",
@@ -666,6 +750,14 @@
   ],
   "forbidden_direct_relations": [
     {
+      "source_resource": "session",
+      "target_resource": "agent",
+      "required_via": ["task", "agent"],
+      "source_gate_status": "checked",
+      "source_gate_reason": "source_shortcut_gates blocks freehand-reason from depending on or importing freehand-task agent truth",
+      "reason": "Session truth must not own or directly attach Agent resources; current attachment is derived through task parent and assignment truth."
+    },
+    {
       "source_resource": "ui_projection",
       "target_resource": "task",
       "required_via": ["runtime_command", "task"],
@@ -723,6 +815,13 @@
     }
   ],
   "source_shortcut_gates": [
+    {
+      "source_resource": "session",
+      "target_resource": "agent",
+      "forbidden_packages": ["freehand-task"],
+      "forbidden_import_tokens": ["freehand_task"],
+      "reason": "Reason persistence session owner must not depend on or import task-owned Agent resource truth."
+    },
     {
       "source_resource": "ui_projection",
       "target_resource": "task",

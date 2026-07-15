@@ -25,10 +25,12 @@
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries route from selected live config to UI-safe projection without becoming config truth writers
   - runtime-backed provider/model update commands route to `config.core` persistence, then expose pending restart-required projection without hot-reloading active runtime config
+  - runtime-backed Agent resource-count commands route to `config.core`, expose pending `1..=5` shared-provider topology projection, and do not fabricate live AgentBoard processes before restart
   - successful task tool mutations publish a runtime-owned task list projection into shared UI protocol state so ADP task subscribers receive owner-backed lifecycle changes
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
   - session rollback dispatch routes `RollbackLatestSessionTurn` to reason persistence, reloads effective turn snapshots, and replaces the shared UI session transcript projection
-  - runtime-backed `QuerySessionTurns` reloads effective turn snapshots from reason persistence and replaces the shared UI session transcript projection so background-written turns are visible without daemon restart
+  - runtime-backed `QuerySessionTurns` reloads effective logical-turn snapshots from the master plus configured Worker reason-persistence namespaces and replaces the shared UI session transcript projection so background-written parent turns and Worker task conversations are visible without daemon restart while repaired `-rN` rounds do not duplicate visible transcript rows and internal parent-evaluation / `worker-task-*` framework prompts are not projected as user-authored text
+  - missing Worker task sessions return explicit target-not-found and never resolve to an empty transcript, another configured agent, or a global session
   - live bootstrap restores persisted turn projection and next runtime turn ordinal from all persisted sessions when recovery truth exists
   - live bootstrap restores multi-round turn snapshots as separate derived UI session transcript cards after daemon restart
   - reason-backed submit/cancel update derived UI state
@@ -44,7 +46,7 @@
 - live provider submit maps completion-schema rejection broadcasts into derived UI state so clients can query `SchemaRetry` plus either missing tag guidance or concrete invalid-schema fields before the model repair completes
 - live provider submit maps bridge-materialized tool execution failure into derived UI state before returning dispatch failure, so query/SSE do not stay waiting
 - live provider/protocol failure before reason persistence starts still creates a failed selected-session turn, persists it, and returns explicit dispatch failure without falling back to non-live submit
-  - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately
+  - live provider submit publishes the user prompt before provider events so blank WebUI streams can render the user side of the conversation immediately, but framework-owned `worker-task-*` live pending/cancelled projections must not expose internal task or continuation prompts as user-authored text
   - live provider submit keeps the selected session id attached to the derived UI truth when one is supplied
   - live provider submit keeps the selected cwd attached to derived UI truth and tool execution workspace when one is supplied
   - live provider multi-round continuation prompts must not replace the public user prompt projection
@@ -63,7 +65,8 @@
   - session rollback dispatch coverage for append-only marker write plus effective transcript refresh
   - runtime query-session-turns coverage for persistence-backed transcript
     refresh, including parent-goal evaluation internal prompt hiding and final
-    assistant decision visibility
+    assistant decision visibility plus Worker task prompt hiding with Worker
+    assistant/tool/final truth and source-agent attribution still visible
   - session metadata negative coverage for unknown session id and empty title rejection before runtime dispatch
   - live tool execution with requested session cwd coverage
   - persisted latest-turn restore coverage
@@ -91,6 +94,7 @@
     projection, base URL host projection, auth source projection, and no API
     key/pair-token leakage
   - provider/model update dispatch coverage, including valid save, invalid no-overwrite, no secret projection, and active runtime model/provider unchanged until restart
+  - Agent resource-count update dispatch coverage, including valid grow/shrink, invalid no-overwrite, pending safe projection refresh, and active runtime peers unchanged until restart
   - task list publication coverage after successful task tool mutation
   - task mutation command dispatch coverage for create/review/approve/close, including task list projection publication and missing task failures
   - Phase 2A task mutation command dispatch coverage for create worker agent, assign task, claim next with execution id, reject review, retry via execution fact, approve, and close
@@ -99,6 +103,7 @@
 - live completion-schema rejection feedback-to-client coverage, including no-schema missing tag feedback, invalid-schema missing field names, and retry index
 - live reason tool-result hook-to-ui-state coverage
   - live reason prompt-first projection coverage
+  - live Worker task prompt projection coverage proves `live_worker_task_projection_hides_internal_user_text` removes internal `worker-task-*` prompt text from `user_text`, while `live_regular_session_projection_keeps_user_text` proves normal sessions still render the real user prompt
   - live reason final projection keeps original user prompt after tool-result continuation
   - live reason projection keeps earlier-round tool activity visible on the earlier round after tool-result continuation
   - live bootstrap projection keeps earlier-round tool activity on its original round after restart
@@ -106,6 +111,7 @@
   - live reason dispatch failure projection coverage proves bridge-materialized failed turns update `UiProtocolState` before the dispatch error is returned
   - early live provider/protocol failure projection coverage proves the selected session keeps the original user prompt and a persisted failed terminal turn even when the provider bridge exits before recovery truth exists
   - runtime query-session-turns projection coverage proves `runtime_query_session_turns_restores_background_parent_evaluation` restores a background parent evaluation turn from reason persistence, hides the `<freehand_parent_evaluation>` synthetic user text, and keeps the Master evaluation decision/final assistant answer visible
+  - runtime query-session-turns projection coverage proves `runtime_query_session_turns_restores_worker_task_namespace` restores Worker-owned `worker-task-*` turns, hides internal task/continuation prompts from `user_text`, keeps Worker source-agent attribution, keeps terminal/final text visible, and still fails missing Worker sessions explicitly
   - node direct-message dispatch coverage
   - unsupported/missing-target dispatch failure coverage
 - module black-box plan:

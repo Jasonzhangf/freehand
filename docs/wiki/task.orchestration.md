@@ -8,6 +8,12 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - generated wiki: `docs/wiki/task.orchestration.md`
 - test design: `docs/testing/task.orchestration.md`
 
+## Resource Operation Backlinks
+
+- task.create
+- task.attach_session
+- task.assign
+
 ## Request Mainline
 
 - runtime receives a provider tool call named `task`
@@ -195,7 +201,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 01 | `reasonix_aligned_builtin_specs` | `crates/freehand-tools/src/lib.rs` | expose one `task` tool schema with op-dispatched arguments | static registry truth | provider tool definition | runtime live bridge | tool registry |  |  |  | bound |
 | 02 | `execute_task_tool` | `crates/freehand-runtime/src/lib.rs` | route task tool calls into task owner with runtime home, session, turn, and trace context | task tool call | tool result text | runtime live bridge | task runtime |  |  |  | bound |
 | 03 | `TaskRuntime::boot` | `crates/freehand-task/src/lib.rs` | load task, agent, and lifecycle snapshots into memory | runtime home and owner agent | ready task runtime | runtime task bridge | task owner |  |  |  | bound |
-| 04 | `TaskRuntime::create_task` | `crates/freehand-task/src/lib.rs` | validate, persist, assign/wait, and update memory state | task create request | task snapshot plus ledger events | runtime task bridge | task owner |  |  |  | bound |
+| 04 | `TaskRuntime::create_task` | `crates/freehand-task/src/lib.rs` | validate, persist, assign/wait, and update memory state | task create request | task snapshot plus ledger events | runtime task bridge | task owner | task | session | task.create | bound |
 | 05 | `TaskRuntime::query_task` | `crates/freehand-task/src/lib.rs` | return one task snapshot truth | task id | task snapshot | runtime task bridge | task owner |  |  |  | bound |
 | 06 | `TaskRuntime::list_tasks` | `crates/freehand-task/src/lib.rs` | return task snapshots filtered by status and assignee for queue and UI projection | task list query | task snapshots | runtime task bridge | task owner |  |  |  | bound |
 | 07 | `TaskRuntime::task_history` | `crates/freehand-task/src/lib.rs` | return ordered persisted task ledger events for timeline and debug projection | task id | task ledger events | runtime task bridge | task owner |  |  |  | bound |
@@ -204,7 +210,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 10 | `TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | close only approved or otherwise closeable tasks and release assignee state | task mutation request | closed task snapshot and event | runtime task bridge | task owner |  |  |  | bound |
 | 11 | `TaskRuntime::heartbeat_task` | `crates/freehand-task/src/lib.rs` | refresh the lease for an assigned running task | task heartbeat request | running task snapshot plus active lease | runtime task bridge | task owner |  |  |  | bound |
 | 12 | `reconcile_running_leases` | `crates/freehand-task/src/lib.rs` | preserve fresh lease-acquisition windows, then interrupt running tasks with missing, mismatched, inactive, or expired leases during boot | persisted task snapshots plus lease snapshot | recovered runtime state | task boot | task owner |  |  |  | bound |
-| 13 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting, created, or interrupted tasks to an available agent | task assignment request | assigned task snapshot plus queued agent state | runtime task bridge | task owner |  |  |  | bound |
+| 13 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting, created, or interrupted tasks to an available agent | task assignment request | assigned task snapshot plus queued agent state | runtime task bridge | task owner | task | agent | task.assign | bound |
 | 17a | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | claim the highest-priority assigned task for an agent and enter lease-backed running state | agent task claim request | claimed running task snapshot or no-task outcome | runtime task bridge | task owner |  |  |  | bound |
 | 15 | `TaskRuntime::record_execution` | `crates/freehand-task/src/lib.rs` | append semantic worker execution progress for a running task | worker execution record request | running task snapshot plus progress event | runtime task bridge | task owner |  |  |  | bound |
 | 16 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal tasks and release assignee state | task mutation request | cancelled task snapshot plus released agent state | runtime task bridge | task owner |  |  |  | bound |
@@ -215,10 +221,11 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 20 | `TaskRuntime::run_scheduler_tick` | `crates/freehand-task/src/lib.rs` | compute elapsed/stale/timeout facts without business decisions | scheduler tick request plus task snapshots | durable scheduler facts | runtime scheduler / CLI sample | task owner |  |  |  | bound |
 | 21 | `TaskRuntime::claim_next_task / TaskRuntime::apply_execution_fact / TaskRuntime::reject_review / TaskRuntime::approve_review / TaskRuntime::close_task` | `crates/freehand-task/src/lib.rs` | execute Phase 2A worker lifecycle from assigned queue through review rejection, retry, approval, and close | worker claim/execution/review commands | ordered task snapshot and ledger truth with stable execution id | runtime ADP command dispatch / CLI sample | task owner |  |  |  | bound |
 | 22 | `TaskStore::write_agent_lifecycle_snapshot / TaskStore::load_agent_lifecycle_snapshots` | `crates/freehand-task/src/lib.rs` | persist and restore typed agent lifecycle projection separately from releasable agent resource state | agent lifecycle snapshot | restart-queryable lifecycle truth | task event projection / boot | lifecycle owner storage |  |  |  | bound |
-| 23 | `TaskRuntime::query_event_inbox` | `crates/freehand-task/src/lib.rs` | project master-visible event inbox entries from ordered task ledger events after a globally unique cursor, with legacy three-part cursor prefix compatibility; omitted limit drains all pending rows | task ledgers plus optional cursor | EventInbox projection and next cursor | runtime query dispatch / CLI sample | task owner |  |  |  | bound |
+| 23 | `TaskRuntime::query_event_inbox` | `crates/freehand-task/src/lib.rs` | project master-visible event inbox entries after a deterministic v2 per-task sequence watermark, with conservative legacy timestamp/task/seq cursor migration; omitted limit drains all pending rows | task ledgers plus optional cursor | EventInbox projection and next cursor | runtime query dispatch / CLI sample | task owner |  |  |  | bound |
 | 24 | `TaskRuntime::run_master_poll` | `crates/freehand-task/src/lib.rs` | load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and persist processed cursor without task business mutations; replay_from_start plus omitted limit drains all pending rows | master poll request plus explicit replay cursor mode or persisted cursor | master poll outcome with classifications and next cursor | runtime ADP command dispatch / CLI sample | task owner |  |  |  | bound |
 | 25 | `write_json_atomic` | `crates/freehand-task/src/lib.rs` | atomically replace JSON persistence files with process/nanos/counter-qualified temp paths | serializable task owner truth | replaced JSON truth without cross-writer temp collisions | TaskStore persistence helpers | filesystem atomic rename |  |  |  | bound |
 | 26 | `TaskStore::with_lease_state_lock` | `crates/freehand-task/src/lib.rs` | serialize shared lease read-modify-write mutation across independent Worker processes | lease create, refresh, or remove mutation | complete leases.json truth without lost updates or stale reintroduction | TaskStore lease helpers | filesystem advisory lock plus atomic rename |  |  |  | bound |
+| 27 | `TaskRuntime::attach_task_to_session` | `crates/freehand-task/src/lib.rs` | persist an idempotent observing-session attachment while preserving the immutable task creation parent, and rehydrate attachment membership from matching TaskSessionAttached ledger rows when later snapshots omit it | existing task id plus visible observing session id | TaskSessionAttached ledger event and hydrated task snapshot attachment projection without status or last-event rewind | runtime task query/history tool owner | TaskStore append_event_and_snapshot | task | session | task.attach_session | bound |
 
 ## Sync Status Against Mainline Call
 

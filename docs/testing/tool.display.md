@@ -10,16 +10,19 @@
   - result update preserves the same display object and changes status/result fields
   - unknown tools route to generic display projection instead of UI-local guessing
 - white-box plan:
-  - classify read-file, file-mutation, search/list, plan, shell, and generic tools
+  - classify read-file, file-mutation, search/list, plan, framework task, framework timer, shell, and generic tools
   - parse each class through its own function
+  - task parser coverage proves `task(op=...)` cards expose operation, task id/title, assignee, target cwd, dispatch mode, and status without UI-local argument parsing
+  - timer parser coverage proves `timer(op=...)` cards expose schedule timing, reason, and wakeup prompt without encoding wait semantics as task truth
   - shell command classification covers common read/search/list command shapes
   - ordinary shell projection carries a structured `command` field for UI display while `pwd` keeps hiding raw `command=pwd`
   - result success and result failure update structured display without changing tool truth
 - module black-box plan:
-- `project_tool_call_display` returns low-noise display fields and parameter summaries for read/search/write/plan/shell/generic samples
+- `project_tool_call_display` returns low-noise display fields and parameter summaries for read/search/write/plan/task/timer/shell/generic samples
   - `project_tool_result_display` preserves category and target while updating outcome summary
 - project black-box impact:
   - WebUI, Android, and CLI can render semantic tool cards from `ui.protocol` without parsing raw tool arguments or result text
+  - public conversation projection tests prove framework `task` and `timer` calls arrive as semantic `UiToolActivity.display` rows such as `Assign Worker task` and `Schedule timer`
   - tool execution failure remains model-visible tool result truth and is not converted into terminal system failure by display logic
 - fixtures / replay inputs / runtime evidence paths:
   - in-memory shared contract fixtures

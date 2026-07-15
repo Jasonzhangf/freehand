@@ -34,9 +34,10 @@ use freehand_blocks::{
 #[cfg(test)]
 use freehand_config::SelectedPeerAgentConfig;
 use freehand_config::{
-    AgentMode, ProviderConfigUpdate, ProviderProtocol as ConfigProviderProtocol, ProviderType,
-    SelectedAgentConfig, SelectedProviderConfig, default_config_path, load_default_config,
-    update_provider_config_in_path,
+    AgentMode, AgentResourceConfigUpdate, MAX_AGENT_RESOURCE_COUNT, ProviderConfigUpdate,
+    ProviderProtocol as ConfigProviderProtocol, ProviderType, SelectedAgentConfig,
+    SelectedProviderConfig, default_config_path, load_default_config,
+    update_agent_resource_config_in_path, update_provider_config_in_path,
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
@@ -101,20 +102,20 @@ use freehand_tools::{
 };
 use freehand_ui_protocol::{
     TurnProjectionInput, UiAgentBoardProjection, UiAgentLifecycleActivityProjection,
-    UiAgentLifecycleProjection, UiAgentProcessProjection, UiAgentSnapshotProjection,
-    UiCheckpointSummary, UiClientKind, UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort,
-    UiCommandDispatchPortError, UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting,
-    UiConfigPeerProjection, UiConfigStatusProjection, UiErrorCenterEventListProjection,
-    UiErrorCenterEventProjection, UiExecutionFactCommand, UiExecutionFactKind,
-    UiMasterPollClassificationProjection, UiMasterPollProjection, UiModelRequestKind,
-    UiModelRequestWaiting, UiProtocolState, UiProviderConfigUpdate, UiQueryResult,
-    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
-    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
-    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
-    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
-    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
-    UiTaskSnapshotProjection, UiTurnProjection, UiWorkerControlCommand,
-    UiWorkerControlEventProjection, UiWorkerControlProjection,
+    UiAgentLifecycleProjection, UiAgentProcessProjection, UiAgentResourceConfigUpdate,
+    UiAgentSnapshotProjection, UiCheckpointSummary, UiClientKind, UiCommand,
+    UiCommandDispatchEnvelope, UiCommandDispatchPort, UiCommandDispatchPortError,
+    UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting, UiConfigPeerProjection,
+    UiConfigStatusProjection, UiErrorCenterEventListProjection, UiErrorCenterEventProjection,
+    UiExecutionFactCommand, UiExecutionFactKind, UiMasterPollClassificationProjection,
+    UiMasterPollProjection, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
+    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
+    UiSessionMetadataProjection, UiTaskAgentCreateCommand, UiTaskAssignCommand,
+    UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
+    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
+    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
+    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTurnProjection,
+    UiWorkerControlCommand, UiWorkerControlEventProjection, UiWorkerControlProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
 };
@@ -1153,7 +1154,7 @@ impl TimerStore {
         Ok(schedule)
     }
 
-    fn load_schedules(&self) -> Result<Vec<TimerSchedule>, TimerStoreError> {
+    pub(crate) fn load_schedules(&self) -> Result<Vec<TimerSchedule>, TimerStoreError> {
         let path = self.state_path();
         if !path.is_file() {
             return Ok(Vec::new());
@@ -3742,20 +3743,22 @@ impl RuntimeCommandDispatcher {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
-                let persistence = ReasonPersistence::new(
-                    live.runtime_home.clone(),
-                    state.config.reason_agent_id.clone(),
-                );
-                let mut turns = match persistence.restore_turn_snapshots_for_ui(session_id) {
-                    Ok(turns) => turns,
-                    Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => return Ok(None),
-                    Err(error) => {
-                        return Err(UiCommandDispatchPortError::DispatchFailed(format!(
-                            "failed to restore session turns from reason persistence: {error}"
+                let Some((source_agent_id, mut turns)) = restore_session_turns_for_ui_query(
+                    &state.config,
+                    &live.runtime_home,
+                    session_id,
+                )?
+                else {
+                    if session_id.as_str().starts_with("worker-task-") {
+                        return Err(UiCommandDispatchPortError::TargetNotFound(format!(
+                            "Worker session `{}` has no persisted transcript",
+                            session_id.as_str()
                         )));
                     }
+                    return Ok(None);
                 };
                 turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
+                let source_node_id = node_id_for_query_agent(&state.config, &source_agent_id)?;
                 let projections = turns
                     .iter()
                     .map(|turn| {
@@ -3764,12 +3767,7 @@ impl RuntimeCommandDispatcher {
                             .get(session_id)
                             .map(|path| path.to_string_lossy().into_owned())
                             .or_else(|| turn.cwd.clone());
-                        project_runtime_turn(
-                            &state.config.reason_agent_id,
-                            &state.config.master_node_id,
-                            turn,
-                            cwd,
-                        )
+                        project_runtime_turn(&source_agent_id, &source_node_id, turn, cwd)
                     })
                     .collect::<Vec<_>>();
                 let mut ui = self.ui_state.lock().expect("lock ui state");
@@ -4511,6 +4509,13 @@ fn session_cwds_from_turns(turns: &[TurnRecord]) -> BTreeMap<SessionId, PathBuf>
 }
 
 fn project_config_status_for_ui(selected: &SelectedAgentConfig) -> UiConfigStatusProjection {
+    let worker_peers = selected.worker_peers().collect::<Vec<_>>();
+    let shared_provider_id = worker_peers.first().and_then(|first| {
+        worker_peers
+            .iter()
+            .all(|peer| peer.provider_id == first.provider_id)
+            .then(|| first.provider_id.clone())
+    });
     UiConfigStatusProjection {
         agent_name: selected.name.clone(),
         agent_mode: selected.mode.as_str().to_owned(),
@@ -4522,8 +4527,21 @@ fn project_config_status_for_ui(selected: &SelectedAgentConfig) -> UiConfigStatu
                 agent_name: peer.name.clone(),
                 agent_mode: peer.mode.as_str().to_owned(),
                 node_id: peer.node_id.clone(),
+                provider_id: peer.provider_id.clone(),
+                fallback_provider_id: peer.fallback_provider_id.clone(),
             })
             .collect(),
+        agent_resource_count: worker_peers.len(),
+        agent_resource_limit: MAX_AGENT_RESOURCE_COUNT,
+        agent_resource_provider_mode: if worker_peers.is_empty() {
+            "not_applicable"
+        } else if shared_provider_id.is_some() {
+            "shared"
+        } else {
+            "per_agent"
+        }
+        .to_owned(),
+        agent_resource_provider_id: shared_provider_id,
         provider_id: selected.provider.id.clone(),
         provider_type: selected.provider.provider_type.as_str().to_owned(),
         provider_protocol: selected.provider.protocol.as_str().to_owned(),
@@ -4877,6 +4895,9 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             }
             UiCommand::UpdateProviderConfig { update } => {
                 self.dispatch_update_provider_config(&mut state, envelope, update)
+            }
+            UiCommand::UpdateAgentResourceConfig { update } => {
+                self.dispatch_update_agent_resource_config(&mut state, envelope, update)
             }
             UiCommand::CreateTask { task } => self.dispatch_create_task(&mut state, envelope, task),
             UiCommand::CreateTaskAgent { agent } => {
@@ -5338,6 +5359,38 @@ impl RuntimeCommandDispatcher {
             dispatch_status: "provider_config_saved_restart_required".to_owned(),
         })
     }
+
+    fn dispatch_update_agent_resource_config(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        update: UiAgentResourceConfigUpdate,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let live = state.config.live.as_ref().ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "Agent resource config update requires a live runtime home".to_owned(),
+            )
+        })?;
+        let config_path = live.runtime_home.join("config.toml");
+        let resource_count = update.resource_count;
+        let selected = update_agent_resource_config_in_path(
+            &config_path,
+            AgentResourceConfigUpdate {
+                agent_name: update.agent_name,
+                resource_count,
+            },
+        )
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        state.pending_config_status = Some(project_config_status_for_ui(&selected));
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!(
+                "agent_resource_config_saved_restart_required:count={resource_count}"
+            ),
+        })
+    }
 }
 
 impl UiRuntimeQueryPort for RuntimeCommandDispatcher {
@@ -5384,6 +5437,68 @@ fn map_session_metadata_dispatch_error(err: ReasonPersistenceError) -> UiCommand
         }
         other => UiCommandDispatchPortError::DispatchFailed(other.to_string()),
     }
+}
+
+fn restore_session_turns_for_ui_query(
+    config: &RuntimeCommandDispatcherConfig,
+    runtime_home: &Path,
+    session_id: &SessionId,
+) -> Result<Option<(AgentId, Vec<TurnRecord>)>, UiCommandDispatchPortError> {
+    for agent_id in queryable_reason_agent_ids(config) {
+        let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+        match persistence.restore_turn_snapshots_for_ui(session_id) {
+            Ok(turns) => return Ok(Some((agent_id, turns))),
+            Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => continue,
+            Err(error) => {
+                return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+                    "failed to restore session turns from reason persistence: {error}"
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn queryable_reason_agent_ids(config: &RuntimeCommandDispatcherConfig) -> Vec<AgentId> {
+    let mut agent_ids = Vec::<AgentId>::new();
+    push_unique_agent_id(&mut agent_ids, config.reason_agent_id.clone());
+    push_unique_agent_id(&mut agent_ids, config.slave_agent_id.clone());
+    if let Some(live) = config.live.as_ref() {
+        for peer in live.selected_agent.worker_peers() {
+            push_unique_agent_id(&mut agent_ids, AgentId::new(peer.name.clone()));
+        }
+    }
+    agent_ids
+}
+
+fn push_unique_agent_id(agent_ids: &mut Vec<AgentId>, agent_id: AgentId) {
+    if !agent_ids.iter().any(|known| known == &agent_id) {
+        agent_ids.push(agent_id);
+    }
+}
+
+fn node_id_for_query_agent(
+    config: &RuntimeCommandDispatcherConfig,
+    agent_id: &AgentId,
+) -> Result<String, UiCommandDispatchPortError> {
+    if agent_id == &config.reason_agent_id {
+        return Ok(config.master_node_id.clone());
+    }
+    if agent_id == &config.slave_agent_id {
+        return Ok(config.slave_node_id.clone());
+    }
+    if let Some(live) = config.live.as_ref()
+        && let Some(peer) = live
+            .selected_agent
+            .worker_peers()
+            .find(|peer| peer.name == agent_id.as_str())
+    {
+        return Ok(peer.node_id.clone());
+    }
+    Err(UiCommandDispatchPortError::TargetNotFound(format!(
+        "query agent `{}` has no configured node",
+        agent_id.as_str()
+    )))
 }
 
 fn session_metadata_to_ui(entry: PersistedSessionMetadataEntry) -> UiSessionMetadataProjection {
@@ -5675,6 +5790,7 @@ fn ui_execution_fact_to_task_fact(fact: UiExecutionFactCommand) -> ExecutionFact
 }
 
 fn project_task_snapshot_for_ui(task: TaskSnapshot) -> UiTaskSnapshotProjection {
+    let worker_session_id = worker_session_id_for_task(&task.task_id);
     UiTaskSnapshotProjection {
         task_id: task.task_id.as_str().to_owned(),
         status: task_status_label(&task.status).to_owned(),
@@ -5683,12 +5799,34 @@ fn project_task_snapshot_for_ui(task: TaskSnapshot) -> UiTaskSnapshotProjection 
         priority: task.priority,
         target_cwd: task.target_cwd,
         parent_session_id: task.parent.session_id,
+        attached_session_ids: task.attached_session_ids,
+        worker_session_id: Some(worker_session_id),
         assignee_agent_id: task.assignee.map(|assignee| assignee.agent_id),
         active_execution_id: task.active_execution_id,
         updated_at: task.updated_at,
         last_progress_at: task.last_progress_at,
         last_event_seq: task.last_event_seq,
     }
+}
+
+fn worker_session_id_for_task(task_id: &TaskId) -> SessionId {
+    SessionId::new(format!(
+        "worker-task-{}",
+        sanitize_session_component(task_id.as_str())
+    ))
+}
+
+fn sanitize_session_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 fn project_task_history_for_ui(
@@ -7891,9 +8029,8 @@ fn execute_task_tool(
         }
         "query" => {
             let task_id = TaskId::new(required_json_string(&args, "task_id")?);
-            let task = task_runtime
-                .query_task(&task_id)
-                .map_err(|err| err.to_string())?;
+            let task =
+                query_task_and_attach_visible_session(&task_runtime, turn, &task_id, tool_call)?;
             Ok(serde_json::to_string(&task).unwrap_or_else(|_| {
                 format!(
                     "Task query: task_id={} status={:?}",
@@ -7916,6 +8053,7 @@ fn execute_task_tool(
         }
         "history" => {
             let task_id = TaskId::new(required_json_string(&args, "task_id")?);
+            query_task_and_attach_visible_session(&task_runtime, turn, &task_id, tool_call)?;
             let events = task_runtime
                 .task_history(&task_id)
                 .map_err(|err| err.to_string())?;
@@ -8237,6 +8375,31 @@ fn configured_worker_task_boundary_failure(
     }
 }
 
+fn query_task_and_attach_visible_session(
+    task_runtime: &TaskRuntime,
+    turn: &TurnRecord,
+    task_id: &TaskId,
+    tool_call: &ReasonReq04ToolCall,
+) -> Result<TaskSnapshot, String> {
+    let session_id = &turn.request.session_id;
+    if session_id.as_str().starts_with("master-lifecycle-")
+        || session_id.as_str().starts_with("master-timer-")
+        || session_id.as_str().starts_with("worker-task-")
+    {
+        return task_runtime
+            .query_task(task_id)
+            .map_err(|err| err.to_string());
+    }
+    task_runtime
+        .attach_task_to_session(
+            task_id,
+            session_id,
+            task_actor(turn),
+            task_watermark(tool_call),
+        )
+        .map_err(|err| err.to_string())
+}
+
 fn task_tool_call_mutates_truth(tool_call: &ReasonReq04ToolCall) -> bool {
     let args = tool_arguments_object(&tool_call.tool_call.arguments);
     let Some(Value::String(op)) = args.get("op") else {
@@ -8244,7 +8407,9 @@ fn task_tool_call_mutates_truth(tool_call: &ReasonReq04ToolCall) -> bool {
     };
     matches!(
         op.as_str(),
-        "create"
+        "query"
+            | "history"
+            | "create"
             | "append"
             | "pause"
             | "resume"
@@ -8777,7 +8942,7 @@ fn publish_live_pending_user_projection(
                 session_id: session_id.clone(),
                 turn_id: derived_turn_id(base_turn_id, 1),
                 cwd: Some(cwd.to_string_lossy().into_owned()),
-                user_text: Some(user_text.to_owned()),
+                user_text: ui_user_text_projection_for_session_user_text(session_id, user_text),
                 semantic_events: Vec::new(),
                 tool_calls: Vec::new(),
                 tool_results: Vec::new(),
@@ -8806,7 +8971,10 @@ fn publish_live_cancelled_projection(
                 session_id: active.session_id.clone(),
                 turn_id: active.turn_id.clone(),
                 cwd: Some(active.cwd.to_string_lossy().into_owned()),
-                user_text: Some(active.user_text.clone()),
+                user_text: ui_user_text_projection_for_session_user_text(
+                    &active.session_id,
+                    &active.user_text,
+                ),
                 semantic_events: Vec::new(),
                 tool_calls: Vec::new(),
                 tool_results: Vec::new(),
@@ -9018,11 +9186,30 @@ fn ui_user_text_for_turn(turn: &TurnRecord) -> String {
 }
 
 fn ui_user_text_projection_for_turn(turn: &TurnRecord) -> Option<String> {
-    if turn.request.user_text.contains("<freehand_parent_") {
+    if ui_should_hide_user_text(&turn.request.session_id, &turn.request.user_text) {
         None
     } else {
         Some(ui_user_text_for_turn(turn))
     }
+}
+
+fn ui_user_text_projection_for_session_user_text(
+    session_id: &SessionId,
+    user_text: &str,
+) -> Option<String> {
+    if ui_should_hide_user_text(session_id, user_text) {
+        None
+    } else {
+        Some(user_text.to_owned())
+    }
+}
+
+fn ui_should_hide_user_text(session_id: &SessionId, user_text: &str) -> bool {
+    user_text.contains("<freehand_parent_") || is_framework_worker_task_session(session_id)
+}
+
+fn is_framework_worker_task_session(session_id: &SessionId) -> bool {
+    session_id.as_str().starts_with("worker-task-")
 }
 
 fn rebuild_session_history_from_effective_turns(
@@ -9164,7 +9351,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -9984,6 +10171,171 @@ mod tests {
         fs::remove_dir_all(runtime_home).expect("cleanup");
     }
 
+    #[test]
+    fn runtime_query_session_turns_restores_worker_task_namespace() {
+        let runtime_home = temp_runtime_home();
+        let selected = live_selected_agent(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        );
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &selected,
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+        let worker_agent_id = AgentId::new(selected.worker_peer_names()[0].clone());
+        let session_id = SessionId::new("worker-task-task-ui-proof");
+        let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("history");
+        let engine = ReasonTurnEngine::new();
+        let mut turn = engine
+            .start_turn(
+                &mut history,
+                TurnStartInput {
+                    session_id: session_id.clone(),
+                    turn_id: TurnId::new("worker-turn-ui-proof"),
+                    trace_id: TraceId::new("worker-trace-ui-proof"),
+                    feature_id: FeatureId::new("runtime.master-worker-loop"),
+                    agent_id: worker_agent_id.clone(),
+                    user_text:
+                        "The tool result has been returned. Use it to continue the task."
+                            .to_owned(),
+                    planned_context_segments: vec![original_task_segment(
+                        "Execute the assigned Task Center task.\nTask ID: task-ui-proof\nTitle: internal task prompt must not render as a User message",
+                    )],
+                    tool_schema_fingerprint: None,
+                    model: "worker-model".to_owned(),
+                },
+            )
+            .expect("start worker turn");
+        let worker_persistence =
+            ReasonPersistence::new(runtime_home.clone(), worker_agent_id.clone());
+        worker_persistence
+            .record_turn_started(&history, &turn, 0)
+            .expect("persist worker start");
+        turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: FeatureId::new("runtime.master-worker-loop"),
+            agent_id: worker_agent_id.clone(),
+            status: TerminalStatus::Success,
+            summary: "worker task transcript restored".to_owned(),
+        });
+        worker_persistence
+            .record_turn_closed(&history, &turn, 0)
+            .expect("persist worker close");
+
+        match runtime
+            .query_runtime(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("runtime query")
+            .expect("runtime-owned session query")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.session_id, session_id);
+                assert_eq!(transcript.turns.len(), 1);
+                assert_eq!(transcript.turns[0].user_text, None);
+                assert_eq!(
+                    transcript.turns[0].source.source_agent_id.as_str(),
+                    worker_agent_id.as_str()
+                );
+                assert!(
+                    transcript.turns[0]
+                        .terminal_text
+                        .as_deref()
+                        .is_some_and(|text| text.contains("worker task transcript restored"))
+                );
+            }
+            other => panic!("unexpected session query result: {other:?}"),
+        }
+
+        assert_eq!(
+            runtime
+                .query_runtime(&UiCommand::QuerySessionTurns {
+                    session_id: SessionId::new("worker-task-missing"),
+                })
+                .expect_err("missing Worker session must fail explicitly"),
+            UiCommandDispatchPortError::TargetNotFound(
+                "Worker session `worker-task-missing` has no persisted transcript".to_owned()
+            )
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn live_worker_task_projection_hides_internal_user_text() {
+        let ui_state = Arc::new(Mutex::new(UiProtocolState::new()));
+        let session_id = SessionId::new("worker-task-task-live-proof");
+        publish_live_pending_user_projection(
+            &ui_state,
+            &AgentId::new("worker"),
+            "worker-node",
+            &session_id,
+            Path::new("/tmp"),
+            &TurnId::new("worker-turn-live-proof"),
+            "Execute the assigned Task Center task.\nTask ID: task-live-proof",
+        );
+
+        match ui_state
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("query worker transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                assert_eq!(transcript.turns[0].session_id, session_id);
+                assert_eq!(transcript.turns[0].user_text, None);
+                assert!(
+                    transcript.turns[0]
+                        .source
+                        .source_agent_id
+                        .as_str()
+                        .contains("worker")
+                );
+            }
+            other => panic!("unexpected query result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn live_regular_session_projection_keeps_user_text() {
+        let ui_state = Arc::new(Mutex::new(UiProtocolState::new()));
+        let session_id = SessionId::new("regular-live-session-proof");
+        publish_live_pending_user_projection(
+            &ui_state,
+            &AgentId::new("master"),
+            "master-node",
+            &session_id,
+            Path::new("/tmp"),
+            &TurnId::new("runtime-turn-live-proof"),
+            "visible user prompt",
+        );
+
+        match ui_state
+            .lock()
+            .expect("lock ui")
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("query regular transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                assert_eq!(
+                    transcript.turns[0].user_text.as_deref(),
+                    Some("visible user prompt")
+                );
+            }
+            other => panic!("unexpected query result: {other:?}"),
+        }
+    }
+
     fn closed_turn_for_context(
         history: &mut SessionHistory,
         session_id: &SessionId,
@@ -10398,6 +10750,130 @@ provider = "old"
             std::env::remove_var("FREEHAND_RUNTIME_PROVIDER_OLD_INVALID");
             std::env::remove_var("FREEHAND_RUNTIME_MASTER_TOKEN_INVALID");
             std::env::remove_var("FREEHAND_RUNTIME_WORKER_TOKEN_INVALID");
+        }
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+    }
+
+    #[test]
+    fn runtime_dispatch_updates_agent_resource_count_without_fabricating_live_agents() {
+        let runtime_home = temp_runtime_home();
+        fs::create_dir_all(&runtime_home).expect("create runtime home");
+        let config_path = runtime_home.join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://primary.example.test/v1"
+default_model = "primary-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key = "primary-secret"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "FREEHAND_RUNTIME_RESOURCE_MASTER_TOKEN"
+provider = "primary"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_RUNTIME_RESOURCE_WORKER_TOKEN"
+provider = "primary"
+"#,
+        )
+        .expect("write config");
+        // SAFETY: this test owns these unique environment variables.
+        unsafe {
+            std::env::set_var("FREEHAND_RUNTIME_RESOURCE_MASTER_TOKEN", "pair-token");
+            std::env::set_var("FREEHAND_RUNTIME_RESOURCE_WORKER_TOKEN", "pair-token");
+        }
+        let selected = freehand_config::load_config_from_path(&config_path)
+            .expect("load config")
+            .select_agent("master")
+            .expect("select master");
+        let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+            &selected,
+            runtime_home.clone(),
+            false,
+        )
+        .expect("runtime bootstrap");
+
+        let receipt = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::UpdateAgentResourceConfig {
+                    update: UiAgentResourceConfigUpdate {
+                        agent_name: "master".to_owned(),
+                        resource_count: 3,
+                    },
+                })
+                .expect("resource update envelope"),
+            )
+            .expect("resource update dispatch");
+        assert_eq!(
+            receipt.dispatch_status,
+            "agent_resource_config_saved_restart_required:count=3"
+        );
+        match runtime
+            .query_runtime(&UiCommand::QueryConfigStatus)
+            .expect("config status")
+            .expect("config projection")
+        {
+            UiQueryResult::ConfigStatus(status) => {
+                assert_eq!(status.agent_resource_count, 3);
+                assert_eq!(status.agent_resource_limit, 5);
+                assert_eq!(status.agent_resource_provider_mode, "shared");
+                assert_eq!(
+                    status.agent_resource_provider_id.as_deref(),
+                    Some("primary")
+                );
+                assert_eq!(status.paired_agents.len(), 3);
+            }
+            other => panic!("unexpected config status: {other:?}"),
+        }
+        let persisted =
+            freehand_config::load_config_from_path(&config_path).expect("load updated config");
+        assert_eq!(
+            persisted
+                .agents()
+                .get("master")
+                .expect("master")
+                .paired_agent_names
+                .len(),
+            3
+        );
+
+        let before_invalid = fs::read_to_string(&config_path).expect("read before invalid");
+        let err = runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::UpdateAgentResourceConfig {
+                    update: UiAgentResourceConfigUpdate {
+                        agent_name: "worker".to_owned(),
+                        resource_count: 2,
+                    },
+                })
+                .expect("invalid owner envelope"),
+            )
+            .expect_err("non-Master resource update must fail");
+        assert!(err.to_string().contains("only for a master agent"));
+        assert_eq!(
+            fs::read_to_string(&config_path).expect("read after invalid"),
+            before_invalid
+        );
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe {
+            std::env::remove_var("FREEHAND_RUNTIME_RESOURCE_MASTER_TOKEN");
+            std::env::remove_var("FREEHAND_RUNTIME_RESOURCE_WORKER_TOKEN");
         }
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     }
@@ -11831,6 +12307,8 @@ provider = "old"
                 node_id: "worker-node".to_owned(),
                 allowed_pair_ip: Some("127.0.0.1".parse().expect("ip")),
                 pair_token_env: "FREEHAND_PAIR_TOKEN_WORKER".to_owned(),
+                provider_id: "provider-worker".to_owned(),
+                fallback_provider_id: None,
             }],
             allowed_pair_ip: None,
             pair_token_env: "FREEHAND_PAIR_TOKEN_MASTER".to_owned(),
@@ -11868,6 +12346,8 @@ provider = "old"
                 node_id: "agent-live-worker-node".to_owned(),
                 allowed_pair_ip: None,
                 pair_token_env: "FREEHAND_WORKER_TOKEN".to_owned(),
+                provider_id: "provider-live".to_owned(),
+                fallback_provider_id: None,
             }],
             allowed_pair_ip: None,
             pair_token_env: "FREEHAND_MASTER_TOKEN".to_owned(),
@@ -11899,6 +12379,8 @@ provider = "old"
             node_id: node_id.into(),
             allowed_pair_ip: None,
             pair_token_env: pair_token_env.into(),
+            provider_id: "worker-provider".to_owned(),
+            fallback_provider_id: None,
         }
     }
 
@@ -13324,6 +13806,90 @@ provider = "old"
             execute_task_tool(&runtime_home, &turn, &agents_call).expect("list agents");
 
         assert!(agents_output.contains("\"agent_id\":\"agent-task\""));
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_tool_query_attaches_existing_task_to_current_visible_session() {
+        let runtime_home = temp_runtime_home();
+        let engine = ReasonTurnEngine::new();
+        let mut origin_history =
+            SessionHistory::new(SessionId::new("origin-session"), Vec::new()).expect("history");
+        let origin_turn = engine
+            .start_turn(
+                &mut origin_history,
+                TurnStartInput {
+                    session_id: SessionId::new("origin-session"),
+                    turn_id: TurnId::new("runtime-turn-1"),
+                    trace_id: TraceId::new("runtime-trace-1"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("master"),
+                    user_text: "create".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("origin turn");
+        execute_task_tool(
+            &runtime_home,
+            &origin_turn,
+            &task_tool_call(vec![
+                ("op", json!("create")),
+                ("task_id", json!("task-attach-proof")),
+                ("title", json!("Attachment proof")),
+                ("content", json!("Keep original parent")),
+                ("goal", json!("Expose in observing session")),
+                ("deliverables", json!(["visible task projection"])),
+                ("acceptance", json!(["original parent remains unchanged"])),
+                ("dispatch", json!({"mode":"self"})),
+            ]),
+        )
+        .expect("create task");
+
+        let mut observer_history =
+            SessionHistory::new(SessionId::new("observer-session"), Vec::new()).expect("history");
+        let observer_turn = engine
+            .start_turn(
+                &mut observer_history,
+                TurnStartInput {
+                    session_id: SessionId::new("observer-session"),
+                    turn_id: TurnId::new("runtime-turn-1"),
+                    trace_id: TraceId::new("observer-trace-1"),
+                    feature_id: FeatureId::new("provider.reason-live-bridge"),
+                    agent_id: AgentId::new("master"),
+                    user_text: "inspect existing task".to_owned(),
+                    planned_context_segments: Vec::new(),
+                    tool_schema_fingerprint: None,
+                    model: "model".to_owned(),
+                },
+            )
+            .expect("observer turn");
+        execute_task_tool(
+            &runtime_home,
+            &observer_turn,
+            &task_tool_call(vec![
+                ("op", json!("query")),
+                ("task_id", json!("task-attach-proof")),
+            ]),
+        )
+        .expect("query and attach");
+
+        let task = TaskRuntime::boot(&runtime_home, AgentId::new("master"))
+            .expect("runtime")
+            .query_task(&TaskId::new("task-attach-proof"))
+            .expect("task");
+        assert_eq!(
+            task.parent.session_id.as_ref().map(SessionId::as_str),
+            Some("origin-session")
+        );
+        assert_eq!(
+            task.attached_session_ids
+                .iter()
+                .map(SessionId::as_str)
+                .collect::<Vec<_>>(),
+            vec!["observer-session"]
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 
@@ -17073,6 +17639,13 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                 assert_eq!(list.tasks[0].task_id, "runtime-query-task-1");
                 assert_eq!(list.tasks[0].status, "waiting_agent");
                 assert_eq!(list.tasks[0].priority, 90);
+                assert_eq!(
+                    list.tasks[0]
+                        .worker_session_id
+                        .as_ref()
+                        .map(SessionId::as_str),
+                    Some("worker-task-runtime-query-task-1")
+                );
             }
             other => panic!("unexpected task list result: {other:?}"),
         }
