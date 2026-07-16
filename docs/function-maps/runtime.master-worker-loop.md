@@ -19,12 +19,17 @@
 - resource operations:
   - `timer.fire_master_wakeup`
   - `master_work.resolve_attention`
+  - `master_work.admit_resolution_context`
   - `agent.heartbeat`
 - owner entry symbols:
   - `ProductionWorkerRunner::from_default_config`
   - `ProductionWorkerRunner::run_once`
   - `ProductionWorkerRunner::run`
   - `run_worker_live_reason_turn`
+  - `take_master_attention_resolution_if_current`
+  - `admit_master_attention_resolution_for_next_round`
+  - `pair_master_attention_invalidated_tool_calls`
+  - `enter_master_terminal_persistence`
 
 ## Resource Map Binding
 
@@ -34,11 +39,13 @@
   - `master_work`
 - touched resources:
   - `turn`
+  - `request_context`
   - `task`
   - `agent`
 - resource operations:
   - `timer.fire_master_wakeup`
   - `master_work.resolve_attention`
+  - `master_work.admit_resolution_context`
   - `agent.heartbeat`
 - forbidden shortcuts:
   - Timer schedules must not be encoded as task lifecycle state.
@@ -67,6 +74,15 @@
   `SuspendedByAttention` only at a declared safe point. The persisted
   resolution contains typed changed-task identity and exact return identity,
   never raw Worker/control transcripts or provider payloads
+- after a high-priority attention resolution is restored, the original
+  foreground live turn consumes that typed resolution exactly once, refreshes
+  TaskSpaceSnapshot, admits `AttentionResolution` as volatile/no-cache
+  developer context, and continues the same logical turn instead of starting a
+  synthetic user prompt
+- stale provider tool calls produced before the attention resolution are paired
+  with failed tool results and are not executed; stale terminal candidates are
+  discarded before terminal persistence, so neither stale tool side effects nor
+  stale closed-turn truth can survive the changed Task Center state
 - Task Center lifecycle attention has priority over due internal timers; due
   timers are claimed only when the durable attention queue is empty, so a
   failed timer wakeup cannot starve pending review/blocked/interrupted
@@ -145,6 +161,10 @@ continue other ready work rather than dead-waiting in the current turn
 - stale or already-satisfied attention items are removed and dequeue continues
   in the same runner tick; a stale high-weight event cannot hide a later
   actionable parent/task event
+- a resumed foreground Master provider request contains the refreshed
+  TaskSpaceSnapshot plus the typed `AttentionResolution`, preserves original
+  session/logical-turn/trace identity, and requires the model to re-evaluate
+  the original objective before any new tool call or terminal claim
 - approved review-ready truth remains retryable until the Master closes it
 - parent evaluation truth is durable-idempotent by parent session plus closed child task set, so EventInbox replay or daemon restart cannot repeat the same evaluation decision or duplicate next-round task creation; successful, waiting, and blocked terminal evaluation turns are durable decisions, while failed/interrupted/cancelled turns remain retryable
 - parent evaluation reads the original first-round persisted user objective
@@ -254,6 +274,12 @@ continue other ready work rather than dead-waiting in the current turn
   - allowed callers: runtime live bridge and tool-registry tests
   - related tests: Worker schema inclusion/exclusion tests and shell rejection test
   - why shared: Worker capability and write-boundary policy must have one registry owner
+- `admit_master_attention_resolution_for_next_round`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: convert one validated master-work attention resolution plus a refreshed TaskSpaceSnapshot into request-context candidates for the original foreground turn
+  - allowed callers: live Master safe-point continuation paths and runtime tests
+  - related tests: `live_master_attention_invalidates_stale_tool_without_side_effect`, `live_master_attention_rejects_stale_terminal_persistence`, and `production_master_resume_consumes_resolution_once`
+  - why shared: stale tool invalidation, stale terminal invalidation, and before-provider continuation must use the same typed context admission semantics
 
 ## Function Call Table
 
@@ -275,6 +301,7 @@ continue other ready work rather than dead-waiting in the current turn
 | 11c | `register_master_active_work` / `clear_master_active_work_if_current` | `crates/freehand-runtime/src/master_runner.rs` | persist and clear foreground Master work identity under the master-work lock | live Master submit identity | active-work checkpoint or explicit concurrent-work rejection | runtime live submit dispatcher | active-work JSON + lock file | bound |
 | 11d | `ProductionMasterRunner::apply_busy_attention_policy` | `crates/freehand-runtime/src/master_runner.rs` | compare pending attention score with foreground work priority, defer lower-priority attention, and request/suspend higher-priority attention only at declared safe points | pending attention + master_work checkpoint | deferred attention, suspend request, or suspended active work | `ProductionMasterRunner::run_once` | active-work store + weighted attention score | bound |
 | 11e | `ProductionMasterRunner::restore_active_work_after_attention` | `crates/freehand-runtime/src/master_runner.rs` | persist typed attention resolution and restore the exact foreground work identity after the isolated attention decision | suspended master_work + Task Center decision outcome | running active work with typed resolution and original work/session/turn/trace identity | `ProductionMasterRunner::run_once` | active-work store | bound |
+| 11f | `admit_master_attention_resolution_for_next_round` | `crates/freehand-runtime/src/lib.rs` | consume one validated resolution, refresh TaskSpaceSnapshot, and admit volatile/no-cache AttentionResolution before the original foreground work continues | running master_work typed resolution + current task truth | next-round request-context candidates without stale task/terminal semantics | Master live safe-point continuation paths | context planner candidate admission | bound |
 | 12 | `ProductionMasterRunner::handle_due_timer` | `crates/freehand-runtime/src/master_runner.rs` | execute a due independent timer wakeup and complete/reschedule/release timer truth | due timer schedule | timer-fired outcome or retryable execution error | `run_once` | timer store + live reason turn | bound |
 | 13 | `TimerStore::claim_due` / `TimerStore::complete_due` / `TimerStore::fail_due` | `crates/freehand-runtime/src/lib.rs` | persist independent timer schedule state and timer ledger events outside Task Center truth | timer state json + timer ledger | running/completed/active timer truth | Master timer tool + Master runner | timer store owner | bound |
 | 14 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke Master decision for current review-ready, blocked, interrupted, or all-children-closed parent evaluation truth; interrupted decisions receive AgentBoard resource truth and may replace the existing task assignment | task snapshot + trigger event + AgentBoard | same task advanced, blocked observed, parent evaluated, no-op, or explicit error | `run_once` | Master live reason turn + task owner | bound |
@@ -301,4 +328,11 @@ continue other ready work rather than dead-waiting in the current turn
   per Worker without cross-claim, forces reject/rework plus a next-round
   integration task, and persists JSON proof before explicit PID cleanup
 - deterministic positive/negative tests cover idle, review-ready, blocked, missing workspace, role mismatch, and Worker tool capability boundaries
+- busy-Master live continuation is focused-test bound for one-shot resolution
+  consumption, stale tool no-side-effect invalidation, stale terminal
+  non-persistence, raw transcript rejection, mismatched return-identity
+  rejection, and cooperative no-mid-effect suspension
+- online daemon/WebUI/Android proof for busy-Master live preemption remains a
+  separate verification gap; do not treat focused runtime tests as full product
+  closure
 - generated wiki must be regenerated whenever this mainline changes

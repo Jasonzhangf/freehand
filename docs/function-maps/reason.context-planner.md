@@ -30,6 +30,9 @@
 - upstream restore/context rebuild callers may pre-prune superseded repaired-failure rounds before passing session-memory segments to the planner; raw failure truth remains outside request content in ledgers/UI projections
 - it asks the planner owner path to classify context into stable and volatile segments
 - task contract segments are session-stable/cacheable and task-space snapshots are turn-volatile/no-cache, so task state can be visible without poisoning the stable cache prefix
+- attention resolution segments are turn-volatile/no-cache developer context,
+  ordered after the refreshed task-space snapshot, and carry only typed changed
+  truth plus resume identity for the original foreground turn
 - the planner admits additional context only through typed segment rules
 - instruction capability content enters only as `ContextSegmentKind::InstructionCapability`, with instruction owner provenance and session-stable cacheable semantics
 - preferred context expansion path is subagent search final report -> `SubagentConclusion`
@@ -49,6 +52,8 @@
 - metadata/request mixing is rejected as an architecture error
 - unbounded or over-budget context segment admission is rejected
 - task-space snapshots are rejected from rewrite-base gates because they are volatile turn state
+- attention resolutions are rejected from rewrite-base gates because they are
+  one-turn changed-truth signals, not stable session memory
 - prefix rewrite without explicit rewrite gate is rejected
 
 ## Shared Multi-Reference Functions
@@ -103,6 +108,8 @@
 - current `freehand-reason` baseline now routes turn startup through `plan_context`
 - current baseline enforces segment ordering, segment-contract validation, token-budget rejection, user-turn append ownership, raw-subagent-transcript rejection by provenance, and rewrite-base validation for session history
 - current baseline includes first-class `TaskContract` and `TaskSpaceSnapshot` segment kinds with cache-shape coverage
+- current baseline includes first-class `AttentionResolution` segment kind with
+  turn-volatile/no-cache ordering and rewrite-base rejection coverage
 - current baseline includes first-class `InstructionCapability` segment kind for instruction owner output admitted into request context
 - current baseline emits cache diagnostics separated from request content for both ordinary turns and explicit rewrite ledger events
 - rewrite-mode and rewrite-version are now sourced from persistent `SessionHistory` truth instead of turn-local constants

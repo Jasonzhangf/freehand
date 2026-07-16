@@ -17,6 +17,7 @@
     "it asks the planner owner path to classify context into stable and volatile segments",
     "instruction capability segments are session-stable/cacheable typed context and carry instruction owner provenance",
     "task contract segments are session-stable/cacheable and task-space snapshots are turn-volatile/no-cache, so task state can be visible without poisoning the stable cache prefix",
+    "attention resolution segments are turn-volatile/no-cache developer context, ordered after refreshed task-space snapshots, and carry only typed changed truth plus resume identity for the original foreground turn",
     "the planner admits additional context only through typed segment rules",
     "preferred context expansion path is subagent search final report -> `SubagentConclusion`",
     "the planner returns request-content-only output; metadata/cache/debug stay outside this mainline"
@@ -33,6 +34,7 @@
     "metadata/request mixing is rejected as an architecture error",
     "unbounded or over-budget context segment admission is rejected",
     "task-space snapshots are rejected from rewrite-base gates because they are volatile turn state",
+    "attention resolutions are rejected from rewrite-base gates because they are one-turn changed-truth signals, not stable session memory",
     "prefix rewrite without explicit rewrite gate is rejected"
   ],
   "shared_functions": [
@@ -169,7 +171,7 @@
     "planner baseline is landed in `freehand-blocks`",
     "current `freehand-reason` baseline now routes turn startup through `plan_context`",
     "current baseline enforces segment ordering, segment-contract validation, token-budget rejection, user-turn append ownership, raw-subagent-transcript rejection by provenance, and rewrite-base validation for session history",
-    "current baseline includes first-class `TaskContract` and `TaskSpaceSnapshot` segment kinds with cache-shape coverage",
+    "current baseline includes first-class `TaskContract`, `TaskSpaceSnapshot`, and `AttentionResolution` segment kinds with cache-shape, ordering, and rewrite-base coverage",
     "current baseline emits cache diagnostics separated from request content for both ordinary turns and explicit rewrite ledger events",
     "runtime-owned dynamic input segments such as operator task and previous visible output use content-derived admission budgets before planner validation",
     "rewrite-mode and rewrite-version are now sourced from persistent `SessionHistory` truth instead of turn-local constants",

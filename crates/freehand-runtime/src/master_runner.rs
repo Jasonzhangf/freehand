@@ -84,6 +84,7 @@ pub(crate) enum MasterWorkSafePoint {
     BeforeToolExecution,
     ToolEffectInFlight,
     BeforeTerminalPersistence,
+    TerminalPersistenceInFlight,
     BetweenRounds,
 }
 
@@ -521,17 +522,92 @@ pub(crate) fn record_master_active_work_safe_point_if_current(
             return Ok(None);
         };
         if checkpoint.session_id != *session_id || checkpoint.logical_turn_id != *logical_turn_id {
-            return Err(format!(
-                "active Master work `{}` does not match live turn `{}/{}`",
-                checkpoint.work_id,
-                session_id.as_str(),
-                logical_turn_id.as_str()
-            ));
+            return Ok(None);
         }
         checkpoint.safe_point = safe_point;
+        if checkpoint.state == MasterActiveWorkState::SuspendRequested
+            && checkpoint.safe_point.is_interruptible()
+        {
+            checkpoint.state = MasterActiveWorkState::SuspendedByAttention;
+        }
         checkpoint.updated_at = now_unix_seconds();
         write_master_active_work_unlocked(runtime_home, &checkpoint)?;
         Ok(Some(checkpoint))
+    })
+}
+
+pub(crate) fn inspect_master_active_work_if_current(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+    session_id: &SessionId,
+    logical_turn_id: &TurnId,
+    trace_id: &TraceId,
+) -> Result<Option<MasterActiveWorkCheckpoint>, String> {
+    with_master_active_work_lock(runtime_home, master_agent_id, || {
+        let Some(checkpoint) = load_master_active_work_unlocked(runtime_home, master_agent_id)?
+        else {
+            return Ok(None);
+        };
+        if checkpoint.session_id != *session_id
+            || checkpoint.logical_turn_id != *logical_turn_id
+            || checkpoint.trace_id != *trace_id
+        {
+            return Err(format!(
+                "active Master work `{}` does not match live turn `{}/{}/{}`",
+                checkpoint.work_id,
+                session_id.as_str(),
+                logical_turn_id.as_str(),
+                trace_id.as_str()
+            ));
+        }
+        Ok(Some(checkpoint))
+    })
+}
+
+pub(crate) fn take_master_attention_resolution_if_current(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+    session_id: &SessionId,
+    logical_turn_id: &TurnId,
+    trace_id: &TraceId,
+) -> Result<Option<MasterAttentionResolution>, String> {
+    with_master_active_work_lock(runtime_home, master_agent_id, || {
+        let Some(mut checkpoint) = load_master_active_work_unlocked(runtime_home, master_agent_id)?
+        else {
+            return Ok(None);
+        };
+        if checkpoint.session_id != *session_id
+            || checkpoint.logical_turn_id != *logical_turn_id
+            || checkpoint.trace_id != *trace_id
+        {
+            return Err(format!(
+                "active Master work `{}` does not match live turn `{}/{}/{}`",
+                checkpoint.work_id,
+                session_id.as_str(),
+                logical_turn_id.as_str(),
+                trace_id.as_str()
+            ));
+        }
+        if checkpoint.state != MasterActiveWorkState::Running {
+            return Ok(None);
+        }
+        let Some(resolution) = checkpoint.attention_resolution.take() else {
+            return Ok(None);
+        };
+        validate_master_attention_resolution(&resolution)?;
+        if resolution.resume_from.work_id != checkpoint.work_id
+            || resolution.resume_from.session_id != checkpoint.session_id
+            || resolution.resume_from.logical_turn_id != checkpoint.logical_turn_id
+            || resolution.resume_from.trace_id != checkpoint.trace_id
+        {
+            return Err(format!(
+                "Master attention resolution return identity mismatch for active work `{}`",
+                checkpoint.work_id
+            ));
+        }
+        checkpoint.updated_at = now_unix_seconds();
+        write_master_active_work_unlocked(runtime_home, &checkpoint)?;
+        Ok(Some(resolution))
     })
 }
 

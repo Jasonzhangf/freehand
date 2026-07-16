@@ -1688,24 +1688,98 @@ where
 
 fn record_master_live_safe_point(
     role: LiveReasonExecutionRole,
+    request: &LiveReasonTurnRequest,
+    agent_id: &AgentId,
+    safe_point: master_runner::MasterWorkSafePoint,
+) -> Result<Option<master_runner::MasterAttentionResolution>, RuntimeLiveBridgeError> {
+    if role != LiveReasonExecutionRole::Master {
+        return Ok(None);
+    }
+    let checkpoint = master_runner::record_master_active_work_safe_point_if_current(
+        &request.runtime_home,
+        agent_id,
+        &request.session_id,
+        &request.turn_id,
+        safe_point,
+    )
+    .map_err(RuntimeLiveBridgeError::MasterWorkStateFailed)?;
+    if checkpoint.is_none() {
+        return Ok(None);
+    }
+    await_master_attention_resolution_if_needed(
+        request,
+        &request.runtime_home,
+        agent_id,
+        &request.session_id,
+        &request.turn_id,
+        &request.trace_id,
+    )
+}
+
+fn await_master_attention_resolution_if_needed(
+    request: &LiveReasonTurnRequest,
     runtime_home: &Path,
     agent_id: &AgentId,
     session_id: &SessionId,
     turn_id: &TurnId,
-    safe_point: master_runner::MasterWorkSafePoint,
-) -> Result<(), RuntimeLiveBridgeError> {
-    if role != LiveReasonExecutionRole::Master {
-        return Ok(());
+    trace_id: &TraceId,
+) -> Result<Option<master_runner::MasterAttentionResolution>, RuntimeLiveBridgeError> {
+    loop {
+        ensure_live_not_cancelled(request)?;
+        if let Some(resolution) = master_runner::take_master_attention_resolution_if_current(
+            runtime_home,
+            agent_id,
+            session_id,
+            turn_id,
+            trace_id,
+        )
+        .map_err(RuntimeLiveBridgeError::MasterWorkStateFailed)?
+        {
+            return Ok(Some(resolution));
+        }
+        let Some(checkpoint) = master_runner::inspect_master_active_work_if_current(
+            runtime_home,
+            agent_id,
+            session_id,
+            turn_id,
+            trace_id,
+        )
+        .map_err(RuntimeLiveBridgeError::MasterWorkStateFailed)?
+        else {
+            return Err(RuntimeLiveBridgeError::MasterWorkStateFailed(
+                "active Master work disappeared while waiting for attention resolution".to_owned(),
+            ));
+        };
+        match checkpoint.state {
+            master_runner::MasterActiveWorkState::SuspendedByAttention
+            | master_runner::MasterActiveWorkState::Restoring => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            master_runner::MasterActiveWorkState::Running
+            | master_runner::MasterActiveWorkState::SuspendRequested => return Ok(None),
+        }
     }
-    master_runner::record_master_active_work_safe_point_if_current(
-        runtime_home,
+}
+
+fn enter_master_terminal_persistence(
+    role: LiveReasonExecutionRole,
+    request: &LiveReasonTurnRequest,
+    agent_id: &AgentId,
+) -> Result<Option<master_runner::MasterAttentionResolution>, RuntimeLiveBridgeError> {
+    if let Some(resolution) = record_master_live_safe_point(
+        role,
+        request,
         agent_id,
-        session_id,
-        turn_id,
-        safe_point,
+        master_runner::MasterWorkSafePoint::BeforeTerminalPersistence,
+    )? {
+        return Ok(Some(resolution));
+    }
+    record_master_live_safe_point(
+        role,
+        request,
+        agent_id,
+        master_runner::MasterWorkSafePoint::TerminalPersistenceInFlight,
     )
-    .map(|_| ())
-    .map_err(RuntimeLiveBridgeError::MasterWorkStateFailed)
 }
 
 fn run_live_reason_turn_with_policy<FB, FD, FT>(
@@ -1927,8 +2001,46 @@ where
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
     let tool_schema_fingerprint = role.tool_schema_fingerprint(&tool_registry);
 
-    loop {
+    'reason_loop: loop {
         ensure_live_not_cancelled(&request)?;
+        if let Some(resolution) = record_master_live_safe_point(
+            role,
+            &request,
+            &agent_id,
+            master_runner::MasterWorkSafePoint::BeforeProviderRequest,
+        )? {
+            admit_master_attention_resolution_for_next_round(
+                &mut carryover_segments,
+                &resolution,
+                LiveRoundContext {
+                    role,
+                    configured_worker_set,
+                    runtime_home: &request.runtime_home,
+                    cwd: request.cwd.as_deref(),
+                    agent_id: &agent_id,
+                },
+            )?;
+            next_prompt = master_attention_continuation_prompt();
+        }
+        if let Some(resolution) = record_master_live_safe_point(
+            role,
+            &request,
+            &agent_id,
+            master_runner::MasterWorkSafePoint::ProviderInFlight,
+        )? {
+            admit_master_attention_resolution_for_next_round(
+                &mut carryover_segments,
+                &resolution,
+                LiveRoundContext {
+                    role,
+                    configured_worker_set,
+                    runtime_home: &request.runtime_home,
+                    cwd: request.cwd.as_deref(),
+                    agent_id: &agent_id,
+                },
+            )?;
+            next_prompt = master_attention_continuation_prompt();
+        }
         round = round.saturating_add(1);
         let turn_id = derived_turn_id(&request.turn_id, round);
         let trace_id = derived_trace_id(&request.trace_id, round);
@@ -2070,25 +2182,15 @@ where
         );
         drain_debug_events(&debug_receiver, &mut on_debug);
 
-        record_master_live_safe_point(
-            role,
-            &request.runtime_home,
-            &agent_id,
-            &request.session_id,
-            &request.turn_id,
-            master_runner::MasterWorkSafePoint::BeforeProviderRequest,
-        )?;
         if request.stream {
             let stream_persistence_error = RefCell::new(None::<RuntimeLiveBridgeError>);
             let raw_session_id = turn.request.session_id.clone();
             let raw_turn_id = turn.request.turn_id.clone();
             let raw_trace_id = turn.request.trace_id.clone();
-            record_master_live_safe_point(
+            let _ = record_master_live_safe_point(
                 role,
-                &request.runtime_home,
+                &request,
                 &agent_id,
-                &request.session_id,
-                &request.turn_id,
                 master_runner::MasterWorkSafePoint::ProviderInFlight,
             )?;
             let stream_result = executor.execute_stream_with_raw(
@@ -2183,12 +2285,10 @@ where
             let outputs = loop {
                 retry_index = retry_index.saturating_add(1);
                 let single_raw_error = RefCell::new(None::<RuntimeLiveBridgeError>);
-                record_master_live_safe_point(
+                let _ = record_master_live_safe_point(
                     role,
-                    &request.runtime_home,
+                    &request,
                     &agent_id,
-                    &request.session_id,
-                    &request.turn_id,
                     master_runner::MasterWorkSafePoint::ProviderInFlight,
                 )?;
                 let execute_result = executor.execute_once_with_raw(
@@ -2401,36 +2501,134 @@ where
         ensure_live_not_cancelled(&request)?;
         drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
 
-        record_master_live_safe_point(
+        let mut attention_resolution_after_provider = record_master_live_safe_point(
             role,
-            &request.runtime_home,
+            &request,
             &agent_id,
-            &request.session_id,
-            &request.turn_id,
             master_runner::MasterWorkSafePoint::BeforeToolExecution,
         )?;
         let pending_tool_calls = pending_tool_calls_for_execution(&turn, &executed_tool_call_ids);
+        if !pending_tool_calls.is_empty()
+            && let Some(resolution) = attention_resolution_after_provider.take()
+        {
+            let mut apply_ctx = LiveApplyContext {
+                engine: &engine,
+                persistence: &persistence,
+                history: &history,
+                receiver: &receiver,
+                debug_receiver: &debug_receiver,
+                broadcasts: &mut broadcasts,
+                on_broadcast: &mut on_broadcast,
+                on_debug: &mut on_debug,
+            };
+            prepare_master_attention_tool_invalidation(
+                &mut apply_ctx,
+                &mut turn,
+                &pending_tool_calls,
+                &resolution,
+                schema_rejections.len() as u32,
+                &mut tool_exchanges,
+                &mut executed_tool_call_ids,
+                &mut tool_executions,
+                &mut next_prompt,
+                &mut carryover_segments,
+                &request.prompt,
+                LiveRoundContext {
+                    role,
+                    configured_worker_set,
+                    runtime_home: &request.runtime_home,
+                    cwd: request.cwd.as_deref(),
+                    agent_id: &agent_id,
+                },
+            )?;
+            turns.push(turn);
+            continue 'reason_loop;
+        }
         if !pending_tool_calls.is_empty() {
             consecutive_schema_rejections = 0;
             let mut reached_task_decision = None;
-            for tool_call in pending_tool_calls {
+            for (tool_index, tool_call) in pending_tool_calls.iter().enumerate() {
                 ensure_live_not_cancelled(&request)?;
-                record_master_live_safe_point(
+                if let Some(resolution) = record_master_live_safe_point(
                     role,
-                    &request.runtime_home,
+                    &request,
                     &agent_id,
-                    &request.session_id,
-                    &request.turn_id,
                     master_runner::MasterWorkSafePoint::BeforeToolExecution,
-                )?;
-                record_master_live_safe_point(
+                )? {
+                    let remaining_tool_calls = pending_tool_calls[tool_index..].to_vec();
+                    let mut apply_ctx = LiveApplyContext {
+                        engine: &engine,
+                        persistence: &persistence,
+                        history: &history,
+                        receiver: &receiver,
+                        debug_receiver: &debug_receiver,
+                        broadcasts: &mut broadcasts,
+                        on_broadcast: &mut on_broadcast,
+                        on_debug: &mut on_debug,
+                    };
+                    prepare_master_attention_tool_invalidation(
+                        &mut apply_ctx,
+                        &mut turn,
+                        &remaining_tool_calls,
+                        &resolution,
+                        schema_rejections.len() as u32,
+                        &mut tool_exchanges,
+                        &mut executed_tool_call_ids,
+                        &mut tool_executions,
+                        &mut next_prompt,
+                        &mut carryover_segments,
+                        &request.prompt,
+                        LiveRoundContext {
+                            role,
+                            configured_worker_set,
+                            runtime_home: &request.runtime_home,
+                            cwd: request.cwd.as_deref(),
+                            agent_id: &agent_id,
+                        },
+                    )?;
+                    turns.push(turn);
+                    continue 'reason_loop;
+                }
+                if let Some(resolution) = record_master_live_safe_point(
                     role,
-                    &request.runtime_home,
+                    &request,
                     &agent_id,
-                    &request.session_id,
-                    &request.turn_id,
                     master_runner::MasterWorkSafePoint::ToolEffectInFlight,
-                )?;
+                )? {
+                    let remaining_tool_calls = pending_tool_calls[tool_index..].to_vec();
+                    let mut apply_ctx = LiveApplyContext {
+                        engine: &engine,
+                        persistence: &persistence,
+                        history: &history,
+                        receiver: &receiver,
+                        debug_receiver: &debug_receiver,
+                        broadcasts: &mut broadcasts,
+                        on_broadcast: &mut on_broadcast,
+                        on_debug: &mut on_debug,
+                    };
+                    prepare_master_attention_tool_invalidation(
+                        &mut apply_ctx,
+                        &mut turn,
+                        &remaining_tool_calls,
+                        &resolution,
+                        schema_rejections.len() as u32,
+                        &mut tool_exchanges,
+                        &mut executed_tool_call_ids,
+                        &mut tool_executions,
+                        &mut next_prompt,
+                        &mut carryover_segments,
+                        &request.prompt,
+                        LiveRoundContext {
+                            role,
+                            configured_worker_set,
+                            runtime_home: &request.runtime_home,
+                            cwd: request.cwd.as_deref(),
+                            agent_id: &agent_id,
+                        },
+                    )?;
+                    turns.push(turn);
+                    continue 'reason_loop;
+                }
                 let executed_tool_result = execute_registry_tool_call(
                     &tool_registry,
                     &request.runtime_home,
@@ -2438,7 +2636,7 @@ where
                     role,
                     configured_worker_set,
                     &turn,
-                    &tool_call,
+                    tool_call,
                 )?;
                 let tool_result = executed_tool_result.result.clone();
                 if tool_result.tool_result.status == ToolResultStatus::Failed {
@@ -2593,7 +2791,7 @@ where
                 }
                 executed_tool_call_ids.push(tool_call.tool_call.tool_call_id.as_str().to_owned());
                 tool_exchanges.push(ProviderToolExchange {
-                    tool_call,
+                    tool_call: tool_call.clone(),
                     tool_result,
                 });
                 tool_executions = tool_executions.saturating_add(1);
@@ -2730,6 +2928,24 @@ where
         let provider_text = collect_turn_text(&turn);
         let public_provider_text =
             strip_control_status_block(&strip_completion_submission_block(&provider_text));
+        if let Some(resolution) = attention_resolution_after_provider.take() {
+            prepare_master_attention_reasoning_continuation(
+                &resolution,
+                &mut next_prompt,
+                &mut carryover_segments,
+                &request.prompt,
+                &public_provider_text,
+                LiveRoundContext {
+                    role,
+                    configured_worker_set,
+                    runtime_home: &request.runtime_home,
+                    cwd: request.cwd.as_deref(),
+                    agent_id: &agent_id,
+                },
+            )?;
+            turns.push(turn);
+            continue 'reason_loop;
+        }
         let status_decision = match run_control_status_stop_hook(
             &metadata_center,
             &agent_id,
@@ -2862,6 +3078,26 @@ where
                         next_step: None,
                         blocked_reason: None,
                     };
+                    if let Some(resolution) =
+                        enter_master_terminal_persistence(role, &request, &agent_id)?
+                    {
+                        prepare_master_attention_reasoning_continuation(
+                            &resolution,
+                            &mut next_prompt,
+                            &mut carryover_segments,
+                            &request.prompt,
+                            &public_provider_text,
+                            LiveRoundContext {
+                                role,
+                                configured_worker_set,
+                                runtime_home: &request.runtime_home,
+                                cwd: request.cwd.as_deref(),
+                                agent_id: &agent_id,
+                            },
+                        )?;
+                        turns.push(turn);
+                        continue 'reason_loop;
+                    }
                     let _ = engine
                         .submit_completion(&mut turn, &submission)
                         .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
@@ -2960,6 +3196,26 @@ where
                     });
                 }
                 ControlRhythmDecision::StopBlocked(blocked_reason) => {
+                    if let Some(resolution) =
+                        enter_master_terminal_persistence(role, &request, &agent_id)?
+                    {
+                        prepare_master_attention_reasoning_continuation(
+                            &resolution,
+                            &mut next_prompt,
+                            &mut carryover_segments,
+                            &request.prompt,
+                            &public_provider_text,
+                            LiveRoundContext {
+                                role,
+                                configured_worker_set,
+                                runtime_home: &request.runtime_home,
+                                cwd: request.cwd.as_deref(),
+                                agent_id: &agent_id,
+                            },
+                        )?;
+                        turns.push(turn);
+                        continue 'reason_loop;
+                    }
                     engine.block_turn(&mut turn, blocked_reason);
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                     drain_debug_events(&debug_receiver, &mut on_debug);
@@ -3080,6 +3336,26 @@ where
                 | CompletionDecision::Waiting { .. }
                 | CompletionDecision::Blocked { .. } => {
                     ensure_live_not_cancelled(&request)?;
+                    if let Some(resolution) =
+                        enter_master_terminal_persistence(role, &request, &agent_id)?
+                    {
+                        prepare_master_attention_reasoning_continuation(
+                            &resolution,
+                            &mut next_prompt,
+                            &mut carryover_segments,
+                            &request.prompt,
+                            &visible_text,
+                            LiveRoundContext {
+                                role,
+                                configured_worker_set,
+                                runtime_home: &request.runtime_home,
+                                cwd: request.cwd.as_deref(),
+                                agent_id: &agent_id,
+                            },
+                        )?;
+                        turns.push(turn);
+                        continue 'reason_loop;
+                    }
                     let _ = engine
                         .submit_completion(&mut turn, &submission)
                         .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
@@ -7657,6 +7933,58 @@ fn next_round_segments(
     Ok(segments)
 }
 
+fn attention_resolution_segment(
+    resolution: &master_runner::MasterAttentionResolution,
+) -> Result<ContextSegment, RuntimeLiveBridgeError> {
+    let resolution_json = serde_json::to_string_pretty(resolution)
+        .map_err(|err| RuntimeLiveBridgeError::MasterWorkStateFailed(err.to_string()))?;
+    let content = format!(
+        "Master attention resolution for the original foreground work. Re-evaluate the original objective against the refreshed TaskSpaceSnapshot. Do not reuse any provider tool call or terminal candidate created before this resolution.\n<freehand_attention_resolution>\n{resolution_json}\n</freehand_attention_resolution>"
+    );
+    Ok(ContextSegment {
+        segment_id: ContextSegmentId::new(format!(
+            "attention-resolution:{}",
+            sanitize_identifier(&resolution.attention_event_id)
+        )),
+        kind: ContextSegmentKind::AttentionResolution,
+        stability: ContextStability::TurnVolatile,
+        cache_policy: ContextCachePolicy::NoCache,
+        role: ContextRole::Developer,
+        token_budget: runtime_prompt_segment_token_budget(&content),
+        content,
+        provenance: ContextProvenance {
+            source: "master_work.attention_resolution".to_owned(),
+            reference: Some(resolution.attention_event_id.clone()),
+        },
+    })
+}
+
+fn admit_master_attention_resolution_for_next_round(
+    segments: &mut Vec<ContextSegment>,
+    resolution: &master_runner::MasterAttentionResolution,
+    context: LiveRoundContext<'_>,
+) -> Result<(), RuntimeLiveBridgeError> {
+    segments.retain(|segment| {
+        segment.kind != ContextSegmentKind::TaskSpaceSnapshot
+            && segment.kind != ContextSegmentKind::AttentionResolution
+    });
+    if let Some(snapshot) = task_space_snapshot_segment(
+        context.runtime_home,
+        context.agent_id,
+        context.role,
+        context.configured_worker_set,
+    )? {
+        segments.push(snapshot);
+    }
+    segments.push(attention_resolution_segment(resolution)?);
+    Ok(())
+}
+
+fn master_attention_continuation_prompt() -> String {
+    "Master attention changed authoritative task truth. Continue the original foreground objective using the typed AttentionResolution and refreshed TaskSpaceSnapshot. Re-evaluate before choosing any tool or terminal completion."
+        .to_owned()
+}
+
 fn collect_turn_text(turn: &TurnRecord) -> String {
     turn.semantic_events
         .iter()
@@ -8707,6 +9035,98 @@ fn tool_result_reentry(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn pair_master_attention_invalidated_tool_calls<FB>(
+    ctx: &mut LiveApplyContext<'_, FB>,
+    turn: &mut TurnRecord,
+    tool_calls: &[ReasonReq04ToolCall],
+    resolution: &master_runner::MasterAttentionResolution,
+    schema_rejection_count: u32,
+    tool_exchanges: &mut Vec<ProviderToolExchange>,
+    executed_tool_call_ids: &mut Vec<String>,
+) -> Result<usize, RuntimeLiveBridgeError>
+where
+    FB: FnMut(&ReasonBroadcastEvent),
+{
+    for tool_call in tool_calls {
+        let tool_result = tool_result_reentry(
+            turn,
+            tool_call,
+            ToolResultStatus::Failed,
+            format!(
+                "invalidated_before_execution_by_master_attention: attention_event_id={} decision_kind={}",
+                resolution.attention_event_id, resolution.decision_kind
+            ),
+        );
+        let output = ProviderSemanticOutput::ToolResultReentry(tool_result.clone());
+        ctx.engine
+            .apply_provider_output(turn, output.clone())
+            .map_err(|err| RuntimeLiveBridgeError::ProviderOutputApplyFailed(err.to_string()))?;
+        ctx.persistence
+            .record_provider_output_applied(ctx.history, turn, &output, schema_rejection_count)
+            .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
+        executed_tool_call_ids.push(tool_call.tool_call.tool_call_id.as_str().to_owned());
+        tool_exchanges.push(ProviderToolExchange {
+            tool_call: tool_call.clone(),
+            tool_result,
+        });
+    }
+    drain_broadcasts(ctx.receiver, ctx.broadcasts, ctx.on_broadcast);
+    drain_debug_events(ctx.debug_receiver, ctx.on_debug);
+    Ok(tool_calls.len())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_master_attention_tool_invalidation<FB>(
+    ctx: &mut LiveApplyContext<'_, FB>,
+    turn: &mut TurnRecord,
+    tool_calls: &[ReasonReq04ToolCall],
+    resolution: &master_runner::MasterAttentionResolution,
+    schema_rejection_count: u32,
+    tool_exchanges: &mut Vec<ProviderToolExchange>,
+    executed_tool_call_ids: &mut Vec<String>,
+    tool_executions: &mut usize,
+    next_prompt: &mut String,
+    carryover_segments: &mut Vec<ContextSegment>,
+    original_prompt: &str,
+    round_context: LiveRoundContext<'_>,
+) -> Result<(), RuntimeLiveBridgeError>
+where
+    FB: FnMut(&ReasonBroadcastEvent),
+{
+    let invalidated_count = pair_master_attention_invalidated_tool_calls(
+        ctx,
+        turn,
+        tool_calls,
+        resolution,
+        schema_rejection_count,
+        tool_exchanges,
+        executed_tool_call_ids,
+    )?;
+    *tool_executions = (*tool_executions).saturating_add(invalidated_count);
+    *next_prompt = master_attention_continuation_prompt();
+    *carryover_segments = next_round_segments(
+        original_prompt,
+        &collect_turn_text(turn),
+        None,
+        round_context,
+    )?;
+    admit_master_attention_resolution_for_next_round(carryover_segments, resolution, round_context)
+}
+
+fn prepare_master_attention_reasoning_continuation(
+    resolution: &master_runner::MasterAttentionResolution,
+    next_prompt: &mut String,
+    carryover_segments: &mut Vec<ContextSegment>,
+    original_prompt: &str,
+    visible_text: &str,
+    round_context: LiveRoundContext<'_>,
+) -> Result<(), RuntimeLiveBridgeError> {
+    *next_prompt = master_attention_continuation_prompt();
+    *carryover_segments = next_round_segments(original_prompt, visible_text, None, round_context)?;
+    admit_master_attention_resolution_for_next_round(carryover_segments, resolution, round_context)
+}
+
 fn is_checkpointable_file_mutation_tool(tool_name: &str) -> bool {
     matches!(tool_name, "write_file" | "edit_file" | "multi_edit")
 }
@@ -9449,7 +9869,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::mpsc;
     use std::sync::{Arc, Mutex, OnceLock};
     use std::thread;
@@ -12593,6 +13013,44 @@ provider = "primary"
             stream: false,
             cancel_token: None,
         }
+    }
+
+    fn inject_live_master_attention_resolution(
+        runtime_home: &Path,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        trace_id: &TraceId,
+        attention_event_id: &str,
+    ) {
+        let agent_id = AgentId::new("agent-live");
+        let mut active = master_runner::load_master_active_work(runtime_home, &agent_id)
+            .expect("load active work")
+            .expect("active work");
+        assert_eq!(&active.session_id, session_id);
+        assert_eq!(&active.logical_turn_id, turn_id);
+        assert_eq!(&active.trace_id, trace_id);
+        active.state = master_runner::MasterActiveWorkState::Running;
+        active.attention_resolution = Some(master_runner::MasterAttentionResolution {
+            attention_event_id: attention_event_id.to_owned(),
+            decision_kind: "task_advanced".to_owned(),
+            changed_task_ids: vec![TaskId::new("task-attention-changed")],
+            changed_constraints: vec!["acceptance changed".to_owned()],
+            resume_from: master_runner::MasterWorkReference {
+                work_id: active.work_id.clone(),
+                session_id: active.session_id.clone(),
+                logical_turn_id: active.logical_turn_id.clone(),
+                trace_id: active.trace_id.clone(),
+            },
+        });
+        let path = runtime_home
+            .join("state")
+            .join("master-loop")
+            .join("agent-live.active-work.json");
+        fs::write(
+            path,
+            serde_json::to_string_pretty(&active).expect("serialize active work"),
+        )
+        .expect("write active work resolution");
     }
 
     fn lifecycle_live_request(runtime_home: &Path, event_id: &str) -> LiveReasonTurnRequest {
@@ -17664,6 +18122,199 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             .join()
             .expect("submit join")
             .expect("first submit success");
+    }
+
+    #[test]
+    fn live_master_attention_invalidates_stale_tool_without_side_effect() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let stale_task_id = "task-stale-tool-side-effect";
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                task_tool_use_response(
+                    "toolu_stale_create",
+                    json!({
+                        "op": "create",
+                        "task_id": stale_task_id,
+                        "title": "stale task",
+                        "content": "must not be created after attention",
+                        "goal": "prove stale side effect is blocked",
+                        "deliverables": ["none"],
+                        "acceptance": ["no task is created"],
+                        "priority": 90,
+                        "target_cwd": runtime_home,
+                        "dispatch": {"mode": "none"}
+                    }),
+                ),
+                complete_single_response("continued after attention"),
+            ],
+        );
+        let selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        let request = live_request_for(&runtime_home, "session-stale-tool", 1);
+        master_runner::register_master_active_work(
+            &runtime_home,
+            &AgentId::new("agent-live"),
+            &request.session_id,
+            &request.turn_id,
+            &request.trace_id,
+        )
+        .expect("register active work");
+        let injected = Arc::new(AtomicBool::new(false));
+        let injected_flag = Arc::clone(&injected);
+        let request_ids = (
+            request.session_id.clone(),
+            request.turn_id.clone(),
+            request.trace_id.clone(),
+        );
+        let callback_runtime_home = runtime_home.clone();
+        let outcome = run_live_reason_turn_with_hooks(
+            &selected,
+            request.clone(),
+            move |event| {
+                if matches!(event, ReasonBroadcastEvent::Tool(_))
+                    && !injected_flag.swap(true, Ordering::SeqCst)
+                {
+                    inject_live_master_attention_resolution(
+                        &callback_runtime_home,
+                        &request_ids.0,
+                        &request_ids.1,
+                        &request_ids.2,
+                        "attention-stale-tool",
+                    );
+                }
+            },
+            |_| {},
+            |_| {},
+        )
+        .expect("stale tool is paired and re-reasoned");
+        let first_request = rx.recv().expect("first provider request");
+        let second_request = rx.recv().expect("second provider request");
+        handle.join().expect("join provider");
+
+        assert!(!first_request.contains("toolu_stale_create"));
+        assert!(!first_request.contains("invalidated_before_execution_by_master_attention"));
+        assert!(!first_request.contains("kind=\\\"attention_resolution\\\""));
+        assert!(second_request.contains("\"type\":\"tool_result\""));
+        assert!(second_request.contains("toolu_stale_create"));
+        assert!(second_request.contains("invalidated_before_execution_by_master_attention"));
+        assert!(second_request.contains("kind=\\\"attention_resolution\\\""));
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(outcome.tool_executions, 1);
+        assert!(outcome.turns.iter().any(|turn| {
+            turn.tool_results.iter().any(|result| {
+                result.tool_result.tool_call_id.as_str() == "toolu_stale_create"
+                    && result.tool_result.status == ToolResultStatus::Failed
+                    && result
+                        .tool_result
+                        .output
+                        .contains("invalidated_before_execution_by_master_attention")
+            })
+        }));
+        let task_runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("agent-live")).expect("runtime");
+        assert!(
+            task_runtime
+                .query_task(&TaskId::new(stale_task_id))
+                .is_err(),
+            "stale task tool call must not mutate Task Center truth"
+        );
+    }
+
+    #[test]
+    fn live_master_attention_rejects_stale_terminal_persistence() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime_home = temp_runtime_home();
+        let (base_url, rx, handle) = spawn_sequence_server(
+            "application/json",
+            vec![
+                complete_single_response("stale terminal candidate"),
+                complete_single_response("fresh terminal after attention"),
+            ],
+        );
+        let selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+        let request = live_request_for(&runtime_home, "session-stale-terminal", 1);
+        master_runner::register_master_active_work(
+            &runtime_home,
+            &AgentId::new("agent-live"),
+            &request.session_id,
+            &request.turn_id,
+            &request.trace_id,
+        )
+        .expect("register active work");
+        let injected = Arc::new(AtomicBool::new(false));
+        let injected_flag = Arc::clone(&injected);
+        let request_ids = (
+            request.session_id.clone(),
+            request.turn_id.clone(),
+            request.trace_id.clone(),
+        );
+        let callback_runtime_home = runtime_home.clone();
+        let outcome = run_live_reason_turn_with_hooks(
+            &selected,
+            request.clone(),
+            move |event| {
+                if matches!(event, ReasonBroadcastEvent::Semantic(_))
+                    && !injected_flag.swap(true, Ordering::SeqCst)
+                {
+                    inject_live_master_attention_resolution(
+                        &callback_runtime_home,
+                        &request_ids.0,
+                        &request_ids.1,
+                        &request_ids.2,
+                        "attention-stale-terminal",
+                    );
+                }
+            },
+            |_| {},
+            |_| {},
+        )
+        .expect("stale terminal is discarded and re-reasoned");
+        assert!(
+            injected.load(Ordering::SeqCst),
+            "provider semantic output must trigger the attention fixture"
+        );
+        let _first_request = rx.recv().expect("first provider request");
+        let second_request = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("second provider request");
+        handle.join().expect("join provider");
+
+        assert!(second_request.contains("kind=\\\"attention_resolution\\\""));
+        assert_eq!(outcome.rounds, 2);
+        assert_eq!(
+            outcome
+                .turns
+                .first()
+                .and_then(|turn| turn.terminal_event.as_ref()),
+            None,
+            "stale terminal candidate must not be persisted"
+        );
+        assert!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .is_some_and(|terminal| terminal
+                    .summary
+                    .contains("fresh terminal after attention"))
+        );
+        let restored = ReasonPersistence::new(&request.runtime_home, AgentId::new("agent-live"))
+            .restore(&request.session_id)
+            .expect("restore session");
+        assert!(
+            restored.closed_turns.iter().all(|turn| {
+                !turn
+                    .terminal_event
+                    .as_ref()
+                    .is_some_and(|terminal| terminal.summary.contains("stale terminal candidate"))
+            }),
+            "stale terminal must not enter durable closed-turn truth"
+        );
     }
 
     #[test]

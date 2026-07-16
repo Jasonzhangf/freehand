@@ -297,10 +297,9 @@
         "from": "master.restoring",
         "to": "master.busy",
         "trigger": "resume original work with typed changed-truth summary only",
-        "binding_status": "pending",
-        "pending_reason": "active-work return identity is persisted, but typed resolution is not yet injected into the original foreground reasoning continuation on the live bridge",
-        "positive_test": "production_master_resume_injects_typed_resolution_only",
-        "negative_test": "production_master_resume_rejects_raw_worker_or_control_transcript"
+        "binding_status": "bound",
+        "positive_test": "production_master_resume_consumes_resolution_once; live_master_attention_invalidates_stale_tool_without_side_effect; live_master_attention_rejects_stale_terminal_persistence",
+        "negative_test": "production_master_resume_rejects_raw_worker_or_control_transcript; production_master_resume_rejects_mismatched_return_identity; production_master_foreground_never_suspends_mid_effect"
       }
     ],
     "checkpoint_contract": {

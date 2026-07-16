@@ -9,6 +9,7 @@
 - resource operation coverage:
   - `timer.fire_master_wakeup`
   - `master_work.resolve_attention`
+  - `master_work.admit_resolution_context`
   - `agent.heartbeat`
 
 ## Resource Operation Test Coverage
@@ -17,6 +18,7 @@
 | --- | --- | --- | --- | --- |
 | `timer.fire_master_wakeup` | bound | `cargo test -p freehand-runtime timer -- --nocapture` covers durable timer due-claim, one-shot, recurring, local-time cron/daily/weekly, wakeup prompt, failure release, and Master runner tests | `cargo test -p freehand-runtime production_master -- --nocapture` covers production Master runner smokes where due timers create internal Master wakeup turns without task-state mutation | `scripts/verify-timer-tool-online.sh` covers S-profile timer online proof and restart-due proof showing persisted timer wakeup fires after due time and completes timer truth |
 | `master_work.resolve_attention` | bound | `cargo test -p freehand-runtime production_master_busy -- --nocapture` and `cargo test -p freehand-runtime production_master_attention -- --nocapture` cover lower-priority deferral, safe-point high-priority interruption, mid-provider/tool no-interrupt, and exact identity restoration | `cargo test -p freehand-runtime runtime_live_submit -- --nocapture` covers live dispatcher active-work register/clear plus concurrent-work rejection without ordinal gaps | `cargo test -p freehand-runtime production_master_attention -- --nocapture` covers checkpoint-missing failure and exact-identity restoration at the runtime owner boundary |
+| `master_work.admit_resolution_context` | bound | `cargo test -p freehand-runtime production_master_resume -- --nocapture` and `cargo test -p freehand-blocks attention_resolution_segment -- --nocapture` cover one-shot typed resolution consumption, return-identity rejection, raw transcript rejection, segment ordering, and rewrite-base rejection | `cargo test -p freehand-runtime live_master_attention -- --nocapture` covers refreshed TaskSpaceSnapshot plus typed AttentionResolution admission, stale tool paired failure/no side effect, and stale terminal non-persistence | `cargo test -p freehand-runtime live_master_attention -- --nocapture` is the focused project proof; daemon/WebUI/Android online preemption remains explicitly unclaimed |
 | `agent.heartbeat` | bound | `cargo test -p freehand-task agent_process -- --nocapture` locks typed start/heartbeat validation, restart identity, TTL health, and no task-activity fallback | `cargo test -p freehand-runtime production_worker_runner -- --nocapture` proves constructor start, idle tick heartbeat, same-agent restart, and active-loop wiring | `scripts/verify-master-three-worker-e2e-online.sh` proves isolated three-process fresh/offline/restart AgentBoard truth |
 
 
@@ -64,6 +66,15 @@
     weighted aging: blocked showstoppers and critical/high-priority work carry
     large weight, while admission sequence aging prevents low-priority
     starvation without wall-clock timing.
+18. Busy-Master continuation is cooperative and identity-bound. A foreground
+    `SuspendRequested` becomes `SuspendedByAttention` only when the exact
+    foreground session/turn reaches an interruptible safe point. Provider,
+    tool-effect, and terminal-persistence in-flight phases remain
+    `SuspendRequested`; an isolated lifecycle/control turn cannot mutate the
+    foreground safe point. A returned typed resolution is consumed once,
+    refreshes TaskSpaceSnapshot, invalidates stale tools/terminal candidates,
+    and enters the next provider request without raw transcript/provider
+    payload admission.
 
 ## Current-Configuration Closure Matrix
 
@@ -344,6 +355,22 @@ Task Center truth before another execution starts.
   - open-sibling closed event no-op
   - parent evaluation idempotency across repeated runner ticks/restart,
     including a persisted waiting evaluation that already created next work
+- active-work handshake tests drive:
+  - `production_master_foreground_acknowledges_suspend_at_safe_point`
+    through `SuspendRequested -> SuspendedByAttention` at the exact foreground
+    safe point while an isolated control turn remains unable to mutate it
+  - `production_master_foreground_never_suspends_mid_effect` through provider,
+    tool-effect, and terminal-persistence in-flight phases that must remain
+    `SuspendRequested`
+  - `production_master_resume_consumes_resolution_once` and
+    `production_master_resume_rejects_mismatched_return_identity`
+- live bridge attention continuation tests drive:
+  - `live_master_attention_invalidates_stale_tool_without_side_effect`, proving
+    the stale tool is paired with one failed tool result, not executed, and the
+    next request contains typed AttentionResolution plus refreshed task truth
+  - `live_master_attention_rejects_stale_terminal_persistence`, proving a
+    terminal candidate produced before attention never enters durable
+    closed-turn truth and the next request re-reasons with typed resolution
 - runtime/query projection coverage proves `QuerySessionTurns` can see a
   background-persisted parent evaluation turn by restoring
   `ReasonPersistence` owner truth into UI projection.

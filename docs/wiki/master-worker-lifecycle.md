@@ -70,10 +70,13 @@ forbidden from the original user context.
   identity, review/blocked/interrupted decisions, overall-goal evaluation
   turns, busy lower-priority deferral, active-work checkpointing, safe-point
   high-priority suspension state, typed attention resolution, and exact return
-  identity.
-- Pending Master edge: live bridge injection of the typed resolution back into
-  the original foreground reasoning continuation. Until that is online-proven,
-  busy-Master live preemption is not closed.
+  identity, plus focused-test-bound injection of typed resolution into the
+  original foreground reasoning continuation with stale tool/terminal
+  invalidation.
+- Pending Master edge: isolated-control-turn proof for a suspended active user
+  turn remains pending. Until daemon/WebUI online evidence proves the full
+  suspend → decision → typed continuation path, busy-Master live preemption is
+  not product-closed.
 
 ## Integration Checklist
 

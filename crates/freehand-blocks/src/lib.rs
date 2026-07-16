@@ -611,6 +611,7 @@ fn context_segment_kind_label(kind: ContextSegmentKind) -> &'static str {
         ContextSegmentKind::InstructionCapability => "instruction_capability",
         ContextSegmentKind::TaskContract => "task_contract",
         ContextSegmentKind::TaskSpaceSnapshot => "task_space_snapshot",
+        ContextSegmentKind::AttentionResolution => "attention_resolution",
         ContextSegmentKind::SubagentConclusion => "subagent_conclusion",
         ContextSegmentKind::ToolResultEvidence => "tool_result_evidence",
         ContextSegmentKind::UserTurnInput => "user_turn_input",
@@ -756,6 +757,11 @@ fn expected_segment_contract(
             ContextCachePolicy::NoCache,
             Some(ContextRole::Developer),
         ),
+        ContextSegmentKind::AttentionResolution => (
+            ContextStability::TurnVolatile,
+            ContextCachePolicy::NoCache,
+            Some(ContextRole::Developer),
+        ),
         ContextSegmentKind::SubagentConclusion => (
             ContextStability::TurnVolatile,
             ContextCachePolicy::NoCache,
@@ -860,9 +866,10 @@ fn segment_order_key(kind: ContextSegmentKind) -> u8 {
         ContextSegmentKind::SessionMemory => 5,
         ContextSegmentKind::SessionSummary => 6,
         ContextSegmentKind::TaskSpaceSnapshot => 7,
-        ContextSegmentKind::SubagentConclusion => 8,
-        ContextSegmentKind::ToolResultEvidence => 9,
-        ContextSegmentKind::UserTurnInput => 10,
+        ContextSegmentKind::AttentionResolution => 8,
+        ContextSegmentKind::SubagentConclusion => 9,
+        ContextSegmentKind::ToolResultEvidence => 10,
+        ContextSegmentKind::UserTurnInput => 11,
     }
 }
 
@@ -1136,6 +1143,11 @@ mod tests {
                 ContextRole::Developer,
             ),
             ContextSegmentKind::TaskSpaceSnapshot => (
+                ContextStability::TurnVolatile,
+                ContextCachePolicy::NoCache,
+                ContextRole::Developer,
+            ),
+            ContextSegmentKind::AttentionResolution => (
                 ContextStability::TurnVolatile,
                 ContextCachePolicy::NoCache,
                 ContextRole::Developer,
@@ -1414,6 +1426,81 @@ mod tests {
             planned_a.diagnostics.stable_prefix_hash,
             planned_b.diagnostics.stable_prefix_hash
         );
+    }
+
+    #[test]
+    fn attention_resolution_segment_is_turn_volatile_typed_context() {
+        let planned = plan_context(ContextPlannerInput {
+            candidate_segments: vec![
+                segment(
+                    "task-snapshot",
+                    ContextSegmentKind::TaskSpaceSnapshot,
+                    "phase: attention resolved",
+                    16,
+                    "task_space",
+                ),
+                segment(
+                    "attention-resolution:event-1",
+                    ContextSegmentKind::AttentionResolution,
+                    r#"{"attention_event_id":"event-1","decision_kind":"task_advanced","changed_task_ids":["task-1"],"changed_constraints":[],"resume_from":{"work_id":"work-1","session_id":"session-1","logical_turn_id":"runtime-turn-1","trace_id":"runtime-trace-1"}}"#,
+                    128,
+                    "master_work.attention_resolution",
+                ),
+            ],
+            current_user_text: "continue original work".to_owned(),
+            user_segment_id: ContextSegmentId::new("turn-user"),
+            user_provenance: ContextProvenance {
+                source: "turn_input".to_owned(),
+                reference: None,
+            },
+            rewrite_mode: ContextRewriteMode::OrdinaryTurn,
+            rewrite_version: 0,
+            tool_schema_fingerprint: None,
+        })
+        .expect("attention resolution planned");
+
+        let resolution = planned
+            .ordered_segments
+            .iter()
+            .find(|segment| segment.kind == ContextSegmentKind::AttentionResolution)
+            .expect("attention resolution segment");
+        assert_eq!(resolution.stability, ContextStability::TurnVolatile);
+        assert_eq!(resolution.cache_policy, ContextCachePolicy::NoCache);
+        assert_eq!(resolution.role, ContextRole::Developer);
+        assert!(
+            render_context_segments_as_text(&planned.ordered_segments)
+                .contains("kind=\"attention_resolution\"")
+        );
+        assert!(
+            planned
+                .ordered_segments
+                .iter()
+                .position(|segment| segment.kind == ContextSegmentKind::TaskSpaceSnapshot)
+                < planned
+                    .ordered_segments
+                    .iter()
+                    .position(|segment| segment.kind == ContextSegmentKind::AttentionResolution)
+        );
+    }
+
+    #[test]
+    fn attention_resolution_segment_is_rejected_from_rewrite_base() {
+        let error = validate_rewrite_base_segments(&[segment(
+            "attention-resolution:event-1",
+            ContextSegmentKind::AttentionResolution,
+            r#"{"attention_event_id":"event-1"}"#,
+            16,
+            "master_work.attention_resolution",
+        )])
+        .expect_err("attention resolution must remain turn volatile");
+
+        assert!(matches!(
+            error,
+            ContextPlannerError::InvalidRewriteSegmentKind {
+                segment_id,
+                kind
+            } if segment_id == "attention-resolution:event-1" && kind == "attention_resolution"
+        ));
     }
 
     #[test]

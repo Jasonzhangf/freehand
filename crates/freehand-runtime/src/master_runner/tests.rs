@@ -971,6 +971,113 @@ fn production_master_busy_never_interrupts_mid_provider_or_mid_tool_effect() {
 }
 
 #[test]
+fn production_master_foreground_acknowledges_suspend_at_safe_point() {
+    let runtime_home = temp_path("foreground-ack-suspend-safe-point");
+    register_test_active_master_work(&runtime_home, "foreground-session", "runtime-turn-90");
+    let master_agent_id = AgentId::new("master");
+    let mut active = load_master_active_work(&runtime_home, &master_agent_id)
+        .expect("load active")
+        .expect("active work");
+    active.state = MasterActiveWorkState::SuspendRequested;
+    active.safe_point = MasterWorkSafePoint::ProviderInFlight;
+    active.suspend_requested_by = Some(MasterAttentionReference {
+        event_id: "attention-safe-point".to_owned(),
+        task_id: TaskId::new("task-safe-point"),
+        kind: "task_blocked".to_owned(),
+        severity_rank: 5,
+        task_priority: 95,
+    });
+    write_master_active_work_unlocked(&runtime_home, &active).expect("write suspend request");
+
+    let checkpoint = record_master_active_work_safe_point_if_current(
+        &runtime_home,
+        &master_agent_id,
+        &SessionId::new("foreground-session"),
+        &TurnId::new("runtime-turn-90"),
+        MasterWorkSafePoint::BeforeToolExecution,
+    )
+    .expect("record safe point")
+    .expect("current foreground work");
+    assert_eq!(
+        checkpoint.state,
+        MasterActiveWorkState::SuspendedByAttention
+    );
+    assert_eq!(
+        checkpoint.safe_point,
+        MasterWorkSafePoint::BeforeToolExecution
+    );
+
+    let isolated = record_master_active_work_safe_point_if_current(
+        &runtime_home,
+        &master_agent_id,
+        &SessionId::new("master-lifecycle-task-safe-point"),
+        &TurnId::new("master-lifecycle-task-safe-point-decision"),
+        MasterWorkSafePoint::BeforeProviderRequest,
+    )
+    .expect("isolated control turn must be ignored");
+    assert!(isolated.is_none());
+    let after_isolated = load_master_active_work(&runtime_home, &master_agent_id)
+        .expect("load after isolated")
+        .expect("active work");
+    assert_eq!(after_isolated.session_id, checkpoint.session_id);
+    assert_eq!(after_isolated.logical_turn_id, checkpoint.logical_turn_id);
+    assert_eq!(
+        after_isolated.state,
+        MasterActiveWorkState::SuspendedByAttention
+    );
+    assert_eq!(
+        after_isolated.safe_point,
+        MasterWorkSafePoint::BeforeToolExecution
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_foreground_never_suspends_mid_effect() {
+    let in_flight_points = [
+        MasterWorkSafePoint::ProviderInFlight,
+        MasterWorkSafePoint::ToolEffectInFlight,
+        MasterWorkSafePoint::TerminalPersistenceInFlight,
+    ];
+
+    for (index, safe_point) in in_flight_points.into_iter().enumerate() {
+        let runtime_home = temp_path(&format!("foreground-no-mid-effect-suspend-{index}"));
+        let session_id = format!("foreground-mid-effect-{index}");
+        let turn_id = format!("runtime-turn-9{index}");
+        register_test_active_master_work(&runtime_home, &session_id, &turn_id);
+        let master_agent_id = AgentId::new("master");
+        let mut active = load_master_active_work(&runtime_home, &master_agent_id)
+            .expect("load active")
+            .expect("active work");
+        active.state = MasterActiveWorkState::SuspendRequested;
+        active.suspend_requested_by = Some(MasterAttentionReference {
+            event_id: format!("attention-mid-effect-{index}"),
+            task_id: TaskId::new(format!("task-mid-effect-{index}")),
+            kind: "task_blocked".to_owned(),
+            severity_rank: 5,
+            task_priority: 95,
+        });
+        write_master_active_work_unlocked(&runtime_home, &active).expect("write suspend request");
+
+        let checkpoint = record_master_active_work_safe_point_if_current(
+            &runtime_home,
+            &master_agent_id,
+            &SessionId::new(session_id),
+            &TurnId::new(turn_id),
+            safe_point,
+        )
+        .expect("record in-flight safe point")
+        .expect("current foreground work");
+        assert_eq!(checkpoint.state, MasterActiveWorkState::SuspendRequested);
+        assert_eq!(checkpoint.safe_point, safe_point);
+        assert!(checkpoint.attention_resolution.is_none());
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+}
+
+#[test]
 fn production_master_busy_high_priority_interrupts_at_safe_point() {
     let runtime_home = temp_path("busy-high-priority-safe-point");
     let selected = selected_master_with_workers(&["worker-alpha"]);
@@ -1187,6 +1294,90 @@ fn production_master_resume_rejects_raw_worker_or_control_transcript() {
     let error = validate_master_attention_resolution(&provider_payload_resolution)
         .expect_err("provider payload must be rejected");
     assert!(error.contains("forbidden raw transcript/provider payload"));
+}
+
+#[test]
+fn production_master_resume_consumes_resolution_once() {
+    let runtime_home = temp_path("resume-consumes-resolution-once");
+    register_test_active_master_work(&runtime_home, "resume-once-session", "runtime-turn-88");
+    let master_agent_id = AgentId::new("master");
+    let mut active = load_master_active_work(&runtime_home, &master_agent_id)
+        .expect("load active")
+        .expect("active work");
+    let resolution = MasterAttentionResolution {
+        attention_event_id: "attention-once".to_owned(),
+        decision_kind: "task_advanced".to_owned(),
+        changed_task_ids: vec![TaskId::new("task-once")],
+        changed_constraints: vec!["acceptance updated".to_owned()],
+        resume_from: MasterWorkReference {
+            work_id: active.work_id.clone(),
+            session_id: active.session_id.clone(),
+            logical_turn_id: active.logical_turn_id.clone(),
+            trace_id: active.trace_id.clone(),
+        },
+    };
+    active.attention_resolution = Some(resolution.clone());
+    write_master_active_work_unlocked(&runtime_home, &active).expect("write resolution");
+
+    let consumed = take_master_attention_resolution_if_current(
+        &runtime_home,
+        &master_agent_id,
+        &SessionId::new("resume-once-session"),
+        &TurnId::new("runtime-turn-88"),
+        &TraceId::new("trace-runtime-turn-88"),
+    )
+    .expect("take resolution")
+    .expect("resolution");
+    assert_eq!(consumed, resolution);
+    assert!(
+        take_master_attention_resolution_if_current(
+            &runtime_home,
+            &master_agent_id,
+            &SessionId::new("resume-once-session"),
+            &TurnId::new("runtime-turn-88"),
+            &TraceId::new("trace-runtime-turn-88"),
+        )
+        .expect("second take")
+        .is_none(),
+        "typed attention resolution must be consumed exactly once"
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_resume_rejects_mismatched_return_identity() {
+    let runtime_home = temp_path("resume-rejects-mismatched-return");
+    register_test_active_master_work(&runtime_home, "resume-mismatch-session", "runtime-turn-89");
+    let master_agent_id = AgentId::new("master");
+    let mut active = load_master_active_work(&runtime_home, &master_agent_id)
+        .expect("load active")
+        .expect("active work");
+    active.attention_resolution = Some(MasterAttentionResolution {
+        attention_event_id: "attention-mismatch".to_owned(),
+        decision_kind: "task_advanced".to_owned(),
+        changed_task_ids: vec![TaskId::new("task-mismatch")],
+        changed_constraints: Vec::new(),
+        resume_from: MasterWorkReference {
+            work_id: active.work_id.clone(),
+            session_id: active.session_id.clone(),
+            logical_turn_id: TurnId::new("runtime-turn-other"),
+            trace_id: active.trace_id.clone(),
+        },
+    });
+    write_master_active_work_unlocked(&runtime_home, &active).expect("write mismatched resolution");
+
+    let error = take_master_attention_resolution_if_current(
+        &runtime_home,
+        &master_agent_id,
+        &SessionId::new("resume-mismatch-session"),
+        &TurnId::new("runtime-turn-89"),
+        &TraceId::new("trace-runtime-turn-89"),
+    )
+    .expect_err("mismatched return identity must fail");
+    assert!(error.contains("return identity mismatch"));
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
 }
 
 #[test]

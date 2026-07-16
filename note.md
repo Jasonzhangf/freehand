@@ -6243,3 +6243,43 @@ Current real root cause split:
   - typed attention resolution is persisted but not yet injected into the original foreground reasoning continuation.
   - no online daemon/WebUI/Android proof for busy-Master live preemption yet.
   - evidence wrapper must not run in parallel because seconds-stamped logs collide.
+
+# 2026-07-16 Busy Master attention continuation closeout
+
+- corrected remaining gap from the prior busy-active-work slice:
+  - live bridge now consumes `master_work.attention_resolution` exactly once in
+    the original foreground Master turn.
+  - the continuation refreshes TaskSpaceSnapshot and admits typed
+    `AttentionResolution` as turn-volatile/no-cache developer context.
+  - stale provider tool calls produced before attention resolution receive
+    paired failed tool results and are not executed.
+  - stale terminal candidates are discarded before terminal persistence and do
+    not become durable closed-turn truth.
+- root-cause bug fixed during verification:
+  - the no-pending-tool branch previously used a Rust let-chain with
+    `attention_resolution_after_provider.take()` before checking
+    `pending_tool_calls`, which consumed and lost the resolution when no tool
+    calls existed.
+  - condition order is now `!pending_tool_calls.is_empty() && let Some(...)`,
+    so terminal continuation can still consume the resolution.
+- evidence:
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_master_resume -- --nocapture`: 3 passed after the final safe-point signature cleanup.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime live_master_attention -- --nocapture`: 2 passed after the final cleanup.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_master_foreground -- --nocapture`: 2 passed after the final cleanup.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime master_runner::tests:: -- --nocapture`: 42 passed before final signature cleanup.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime runtime_live_submit -- --nocapture`: 2 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-blocks -- --nocapture`: 52 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-contracts -- --nocapture`: 10 passed.
+  - `cargo clippy -p freehand-runtime --all-targets -- -D warnings`, `cargo clippy -p freehand-blocks --all-targets -- -D warnings`, `cargo clippy -p freehand-contracts --all-targets -- -D warnings`, `cargo fmt --check`, `cargo run -p xtask -- mainlines generate/check`, `cargo run -p xtask -- gates check`, and `git diff --check`: passed.
+- docs synced:
+  - `master_work.admit_resolution_context` added to resource map, function map,
+    mainline JSON, and test design.
+  - `reason.context-planner` and `contracts.core` now document
+    `AttentionResolution` segment coverage.
+  - lifecycle manifest marks `master.edge.continue_original` bound by focused
+    tests, while the wiki keeps isolated-control-turn and online product proof
+    gaps explicit.
+- remaining:
+  - no daemon/WebUI/Android online proof for full busy-Master preemption yet.
+  - `master.edge.handle_attention` remains pending until an isolated control
+    turn is bound to a suspended active user turn with positive/negative tests.

@@ -38,6 +38,7 @@ pub enum ContextSegmentKind {
     InstructionCapability,
     TaskContract,
     TaskSpaceSnapshot,
+    AttentionResolution,
     SubagentConclusion,
     ToolResultEvidence,
     UserTurnInput,

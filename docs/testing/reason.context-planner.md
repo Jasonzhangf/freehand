@@ -10,7 +10,7 @@
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
-| `turn.plan_request_context` | bound | `cargo test -p freehand-blocks -- --nocapture` covers segment ordering, cache shape, rewrite-version, subagent conclusion, instruction capability, task contract, and task-space snapshot planner tests | `cargo test -p freehand-runtime live_bridge_admits_instruction_capability_manifest_as_typed_context -- --nocapture` and `cargo test -p freehand-runtime live_bridge_admits_long_operator_task_without_semantic_truncation -- --nocapture` cover provider-neutral request content build, typed instruction admission, metadata isolation, and cache diagnostics boundary tests | `cargo test -p freehand-runtime effective_context_uses_last_repaired_round_without_raw_failed_attempt -- --nocapture` covers reason-to-provider stable cache head, repaired-failure context economy, and subagent final-report admission smokes |
+| `turn.plan_request_context` | bound | `cargo test -p freehand-blocks -- --nocapture` covers segment ordering, cache shape, rewrite-version, subagent conclusion, instruction capability, task contract, task-space snapshot, and turn-volatile AttentionResolution planner tests | `cargo test -p freehand-runtime live_bridge_admits_instruction_capability_manifest_as_typed_context -- --nocapture`, `cargo test -p freehand-runtime live_bridge_admits_long_operator_task_without_semantic_truncation -- --nocapture`, and `cargo test -p freehand-runtime live_master_attention -- --nocapture` cover provider-neutral request content build, typed instruction/attention admission, metadata isolation, and cache diagnostics boundary tests | `cargo test -p freehand-runtime effective_context_uses_last_repaired_round_without_raw_failed_attempt -- --nocapture` and `cargo test -p freehand-runtime live_master_attention -- --nocapture` cover reason-to-provider stable cache head, repaired-failure context economy, and stale-output-free attention continuation |
 
 - lifecycle path under test:
   - stable prefix is classified and held stable
@@ -20,12 +20,15 @@
   - explicit rewrite events are the only path that changes rewrite version and rewrite mode in planner diagnostics
   - restored same-session context supplied by runtime restore has already excluded superseded repaired-failure rounds from default prompt context
   - task contracts are stable/cacheable context while task-space snapshots are volatile/no-cache context
+  - attention resolutions are volatile/no-cache typed developer context ordered
+    after the refreshed task-space snapshot and rejected from rewrite base
   - instruction capability content is session-stable/cacheable typed context and must enter through instruction owner output, not provider payload patching
 - white-box plan:
   - segment classification tests
   - segment ordering tests
   - task contract and task-space snapshot cache-shape tests
   - instruction capability typed segment admission tests
+  - attention resolution typed segment admission and rewrite-base rejection tests
   - segment token-cap rejection tests
   - subagent conclusion admission tests
   - raw subagent transcript rejection tests
@@ -37,6 +40,8 @@
   - planner builds provider-neutral request content from stable + volatile inputs
   - planner keeps task-space snapshots out of stable-prefix diagnostics while task contract changes drift the stable prefix
   - planner admits instruction capability segments into stable-prefix diagnostics with explicit `instruction_capability` kind
+  - planner admits AttentionResolution only as volatile/no-cache context after
+    TaskSpaceSnapshot
   - planner rejects metadata/request mixed inputs
   - planner emits cache diagnostics without changing request content
 - project black-box impact:
@@ -59,4 +64,6 @@
   - repaired-failure context economy is locked at the runtime restore boundary before segments enter planner admission
   - task contract and task-space snapshot segment contracts are locked in planner admission
   - instruction capability segment contract is locked in planner admission
+  - attention resolution segment contract is locked in planner admission and
+    live Master continuation tests
   - migrated mainline-call source and generated wiki are kept in sync with this test design

@@ -107,7 +107,7 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "master_agent_id plus work_id",
       "truth_store": "~/.freehand/state/master-loop/<master-agent>.active-work.json guarded by the sibling active-work lock",
-      "operations": ["register", "update_safe_point", "request_suspend", "resolve_attention", "clear"],
+      "operations": ["register", "update_safe_point", "request_suspend", "resolve_attention", "admit_resolution_context", "clear"],
       "projections": ["active Master work identity", "safe-point suspension state", "typed attention resolution and exact return identity"]
     },
     {
@@ -289,6 +289,15 @@
       "source_resource": "master_work",
       "target_resource": "task",
       "effect": "persist typed attention resolution after an isolated Task Center decision while preserving the exact foreground Master return identity",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "master_work.admit_resolution_context",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "source_resource": "master_work",
+      "target_resource": "request_context",
+      "effect": "admit one consumed typed attention resolution plus refreshed TaskSpaceSnapshot into the next foreground Master request context without raw transcript or provider payload leakage",
       "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
       "binding_status": "bound"
     },
@@ -490,6 +499,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "runtime.master-worker-loop#11f",
+      "operation_id": "master_work.admit_resolution_context",
+      "source_resource": "master_work",
+      "target_resource": "request_context",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "call_table_step": "11f",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "admit_master_attention_resolution_for_next_round",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "error.center#04",
       "operation_id": "error.record_metadata",
       "source_resource": "error",
@@ -663,6 +683,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "The Master lifecycle owner may persist only typed changed-task identity and decision kind from an isolated Task Center attention outcome into the active-work return contract."
+    },
+    {
+      "rule_id": "master-work-admits-resolution-context-direct",
+      "source_resource": "master_work",
+      "target_resource": "request_context",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The runtime Master lifecycle owner may convert one validated typed attention resolution into a volatile no-cache context segment; final ordering and provider request construction still pass through the request-context planner."
     },
     {
       "rule_id": "error-records-metadata-direct",
