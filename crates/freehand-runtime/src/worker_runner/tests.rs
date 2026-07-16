@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use freehand_config::{
     AgentMode, ProviderAuthSourceKind, ProviderAuthType, ProviderProtocol, ProviderType,
@@ -676,6 +677,50 @@ fn production_worker_runner_requeues_rejected_with_review_requirements() {
 }
 
 #[test]
+fn production_worker_runner_pause_stops_before_submission() {
+    let runtime_home = temp_path("pause-stops-before-submission");
+    let workspace = temp_path("pause-stops-before-submission-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let executor = Arc::new(PauseAwareExecutor::new(runtime_home.clone()));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+    executor.set_task_id(task_id.clone());
+
+    assert_eq!(
+        runner.run_once().expect("in-flight paused tick"),
+        ProductionWorkerTickOutcome::Idle
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    assert!(
+        executor.pause_token_observed.load(Ordering::Relaxed),
+        "runner must wire Worker pause truth into the live cancel token"
+    );
+    let recovered = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    assert_eq!(
+        recovered.query_task(&task_id).expect("task").status,
+        TaskStatus::Paused
+    );
+    let event_types = recovered
+        .task_history(&task_id)
+        .expect("history")
+        .into_iter()
+        .map(|event| event.event_type)
+        .collect::<Vec<_>>();
+    assert!(event_types.contains(&"TaskPaused".to_owned()));
+    assert!(
+        !event_types.contains(&"TaskBlocked".to_owned()),
+        "pause acknowledgement must not be materialized as task blockage"
+    );
+    assert!(
+        !event_types.contains(&"TaskReviewSubmitted".to_owned()),
+        "pause safe point must stop before review submission"
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
 fn production_worker_runner_paused_without_resume_stays_idle() {
     let runtime_home = temp_path("paused-without-resume");
     let workspace = temp_path("paused-without-resume-workspace");
@@ -804,10 +849,10 @@ fn production_worker_runner_paused_execution_cannot_publish_stale_success() {
     let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
     executor.set_task_id(task_id.clone());
 
-    let error = runner
-        .run_once()
-        .expect_err("stale success after pause must fail explicitly");
-    assert!(matches!(error, ProductionWorkerRunnerError::TaskCenter(_)));
+    assert_eq!(
+        runner.run_once().expect("stale paused success tick"),
+        ProductionWorkerTickOutcome::Idle
+    );
     let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
     let task = runtime.query_task(&task_id).expect("task");
     assert_eq!(task.status, TaskStatus::Paused);
@@ -816,11 +861,80 @@ fn production_worker_runner_paused_execution_cannot_publish_stale_success() {
     assert!(
         !history
             .iter()
+            .any(|event| event.event_type == "TaskBlocked")
+    );
+    assert!(
+        !history
+            .iter()
             .any(|event| event.event_type == "TaskReviewSubmitted")
     );
 
     fs::remove_dir_all(runtime_home).expect("cleanup runtime");
     fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[derive(Clone)]
+struct PauseAwareExecutor {
+    runtime_home: PathBuf,
+    task_id: Arc<Mutex<Option<TaskId>>>,
+    calls: Arc<AtomicUsize>,
+    pause_token_observed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl PauseAwareExecutor {
+    fn new(runtime_home: PathBuf) -> Self {
+        Self {
+            runtime_home,
+            task_id: Arc::new(Mutex::new(None)),
+            calls: Arc::new(AtomicUsize::new(0)),
+            pause_token_observed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    fn set_task_id(&self, task_id: TaskId) {
+        *self.task_id.lock().expect("lock task id") = Some(task_id);
+    }
+}
+
+impl WorkerTurnExecutor for PauseAwareExecutor {
+    fn execute(
+        &self,
+        _selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+    ) -> Result<WorkerTurnExecution, String> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        let task_id = self
+            .task_id
+            .lock()
+            .expect("lock task id")
+            .clone()
+            .expect("task id set");
+        let runtime =
+            TaskRuntime::boot(&self.runtime_home, AgentId::new("master")).expect("task runtime");
+        runtime
+            .apply_worker_control(worker_control_request(
+                &task_id,
+                request
+                    .turn_id
+                    .as_str()
+                    .strip_prefix("worker-turn-")
+                    .expect("worker turn id carries execution id"),
+                WorkerControlOp::Pause,
+                "pause-during-live-execution",
+            ))
+            .expect("pause during execution");
+        let cancel_token = request
+            .cancel_token
+            .expect("Worker runner must pass a live cancel token");
+        for _ in 0..80 {
+            if cancel_token.load(Ordering::SeqCst) {
+                self.pause_token_observed.store(true, Ordering::Relaxed);
+                return Err("live turn cancelled".to_owned());
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        Err("pause token was not set before safe point timeout".to_owned())
+    }
 }
 
 #[test]

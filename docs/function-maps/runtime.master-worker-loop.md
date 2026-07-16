@@ -25,6 +25,8 @@
   - `ProductionWorkerRunner::from_default_config`
   - `ProductionWorkerRunner::run_once`
   - `ProductionWorkerRunner::run`
+  - `WorkerPauseMonitor::start`
+  - `worker_pause_requested`
   - `run_worker_live_reason_turn`
   - `take_master_attention_resolution_if_current`
   - `admit_master_attention_resolution_for_next_round`
@@ -107,6 +109,7 @@
 - a selected task is claimed with one execution id and lease heartbeat
 - the task target cwd expands a leading `~`, canonicalizes through symlinks, and becomes the worker's locked execution root
 - worker live reasoning receives task goal, content, deliverables, acceptance criteria, the requested `target_cwd`, the canonical locked workspace, and path-preflight instructions
+- while a Worker execution is active, the runner monitors persisted `WorkerControlOp::Pause` truth for the same task/execution and wires it into `LiveReasonCancelToken`; the live bridge may only stop at its existing provider/tool/terminal safe points
 - worker provider requests expose governed workspace tools but exclude recursive `task` and unrestricted shell tools
 - Master provider guidance binds dispatch to the ordered configured Worker id set,
   rejects historical AgentBoard entries as production dispatch targets, and
@@ -192,6 +195,8 @@ continue other ready work rather than dead-waiting in the current turn
   takeover and reassigns the same task
 - Worker ticks requeue only `Rejected` tasks previously bound to that Worker,
   because Master already made the explicit review/rework decision
+- paused Worker executions stop as `Idle` after the live bridge observes the pause cancel token at a safe point; stale success, stale block, and heartbeat errors after pause do not overwrite `TaskPaused` truth
+- persisted resume control lets the runner select the existing `Running` task/execution and re-enter Worker reasoning without allocating a replacement task or losing the execution identity
 - claim persists `TaskResumed` and `TaskHeartbeat` before provider execution
 - successful worker completion writes one `ExecutionFactKind::ReviewReady`
 - provider/network system failure after internal provider retry exhaustion writes one
@@ -293,9 +298,10 @@ continue other ready work rather than dead-waiting in the current turn
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `ProductionWorkerRunner::from_default_config` | `crates/freehand-runtime/src/worker_runner.rs` | load selected Slave config and bind paired Master Task Center namespace | configured agent name | Worker runner | daemon Slave startup | config + runtime owner | bound |
 | 02 | `ProductionWorkerRunner::run` | `crates/freehand-runtime/src/worker_runner.rs` | run periodic Worker ticks with explicit cadence | runner + interval | long-running Worker service | daemon Slave mode | `run_once` | bound |
-| 03 | `ProductionWorkerRunner::run_once` | `crates/freehand-runtime/src/worker_runner.rs` | claim one Assigned task, canonicalize target cwd with `~` expansion and symlink resolution, heartbeat, execute, and report | Task Center + Worker identity | idle/review-ready/blocked outcome | Worker service loop/tests | task owner + live bridge | bound |
+| 03 | `ProductionWorkerRunner::run_once` | `crates/freehand-runtime/src/worker_runner.rs` | claim one Assigned task or resumed controlled task, canonicalize target cwd with `~` expansion and symlink resolution, heartbeat, monitor pause truth, execute, and report | Task Center + Worker identity + WorkerControl truth | idle/review-ready/interrupted/blocked outcome without stale paused overwrite | Worker service loop/tests | task owner + live bridge | bound |
 | 04 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | choose and claim highest-priority Assigned task for Worker | worker id + execution id + lease TTL | claimed task + TaskResumed/heartbeat truth | Worker runner | task owner | bound |
 | 05 | `WorkerHeartbeat::start` | `crates/freehand-runtime/src/worker_runner/heartbeat.rs` | renew the claimed task lease and same process-instance heartbeat while provider execution remains active | claimed task/execution/worker/process identity | periodic TaskHeartbeat plus agent heartbeat truth or explicit heartbeat error | `ProductionWorkerRunner::run_once` | task owner + agent.lifecycle owner | bound |
+| 05a | `WorkerPauseMonitor::start` / `worker_pause_requested` | `crates/freehand-runtime/src/worker_runner.rs` | poll same-task/same-execution WorkerControl ledger truth and set the live cancel token when latest task-state control is applied pause; after execution, suppress stale review/block/heartbeat overwrite while `TaskPaused` remains truth | task id + execution id + persisted WorkerControl events | cooperative live pause at safe point plus idle runner outcome | `ProductionWorkerRunner::run_once` | task owner + live bridge cancel token | bound |
 | 06 | `run_worker_live_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one worker task in canonical task cwd with Worker tool policy and path-preflight prompt contract | selected Worker config + live request | closed live reason outcome | Worker runner | provider/reason live bridge | bound |
 | 07 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | persist review-ready, interrupted, or blocked result for same execution | typed execution fact | terminal task mutation | Worker runner | task owner | bound |
 | 08 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | select Slave host path without constructing Master UI dispatcher | daemon agent selection | Worker service process | daemon CLI | runtime Worker runner | bound |
@@ -322,7 +328,7 @@ continue other ready work rather than dead-waiting in the current turn
 
 - Task Center claim, heartbeat, execution fact, persistence, and recovery APIs are already bound
 - Master framework-only tool boundary, external-cwd delegation, and path/symlink dispatch guidance are already bound; Master delegates external repo read/search/write/report work to Worker tasks instead of directly using file/search/write tools
-- production Worker runner, Worker-specific live tool policy, periodic task
+- production Worker runner, Worker-specific live tool policy, pause monitor cancel-token safe-point handling, resumed controlled task selection, periodic task
   lease heartbeat, process heartbeat, and Slave daemon startup are code-bound
 - config-selected Master guidance, TaskSpaceSnapshot, and task mutation boundary
   consume the full ordered Worker peer set; singular configured-Worker fields

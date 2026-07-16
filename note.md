@@ -6319,3 +6319,29 @@ Current real root cause split:
     continuation is still required before product closure.
   - production Worker safe-point pause/resume remains the next standalone
     lifecycle implementation gap.
+
+# 2026-07-16 Worker pause/resume safe-point focused closeout
+
+- objective slice: close the standalone Worker pause/resume lifecycle gap before broader multi-agent integration proof.
+- root source truth checked first: goal prompt file, Freehand skill, CACHE/MEMORY/note, MemoryPalace, resource map, function map, mainline JSON, lifecycle manifest, and worker-control test design.
+- implementation:
+  - `ProductionWorkerRunner::run_once` now starts a `WorkerPauseMonitor` for the selected task/execution before calling the Worker live executor.
+  - the monitor polls persisted `TaskRuntime::query_worker_control_events` and sets the `LiveReasonCancelToken` when latest task-state control is applied `pause`.
+  - after executor return, runner re-queries pause truth; if pause is active, it returns `Idle` and does not write `TaskReviewSubmitted`, `TaskBlocked`, or heartbeat failure over `TaskPaused` truth.
+  - persisted `resume` path still selects the same `Running` task/execution through `resumed_controlled_running_task`.
+- regression repair:
+  - `production_worker_runner_pause_stops_before_submission` now applies pause while executor is in flight and proves the runner-wired cancel token is observed.
+  - stale success after pause now returns `Idle` and is ignored; previous expectation of explicit TaskCenter error was too coarse because pause is a valid cooperative stop, not a runner failure.
+- evidence:
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_worker_runner_pause_stops_before_submission -- --nocapture`: 1 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_worker_runner -- --nocapture`: 19 passed.
+  - `cargo run -p xtask -- mainlines generate`: passed.
+  - `cargo run -p xtask -- mainlines check`: passed.
+  - `cargo run -p xtask -- gates check`: passed.
+- docs synced so far:
+  - `worker.edge.pause` and `worker.edge.resume` moved to bound in `docs/lifecycles/master-worker-lifecycle.json`.
+  - `docs/testing/worker.control.md`, `docs/function-maps/worker.control.md`, `docs/function-maps/runtime.master-worker-loop.md`, `docs/mainline-calls/runtime.master-worker-loop.json`, `docs/testing/runtime.master-worker-loop.md`, `docs/goals/multi-agent-final-convergence-plan.md`, and generated `docs/wiki/runtime.master-worker-loop.md` updated.
+  - `docs/wiki/master-worker-lifecycle.md` manually updated because it is the human lifecycle review surface.
+- remaining:
+  - full S-profile multi-Worker/WebUI convergence proof is still not run for this slice.
+  - busy-Master live preemption online proof remains separate.

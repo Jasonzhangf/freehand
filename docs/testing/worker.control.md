@@ -44,6 +44,17 @@
 - `freehand-runtime`
   - `runtime_dispatches_worker_control_to_task_owner`
   - `runtime_worker_control_invalid_target_returns_explicit_failure`
+  - `production_worker_runner_pause_stops_before_submission` starts a real
+    Worker runner execution, applies `pause` while the executor is in flight,
+    observes the runner-wired live cancel token, and verifies the task remains
+    `Paused` without `TaskReviewSubmitted` or `TaskBlocked`
+  - `production_worker_runner_paused_execution_cannot_publish_stale_success`
+    verifies a stale success returned after pause is ignored and cannot publish
+    review or blocked truth
+  - `production_worker_runner_resume_reenters_reasoning_and_submits_review`
+    verifies `resume` re-enters the same task/execution and submits review
+  - `production_worker_runner_paused_without_resume_stays_idle` verifies paused
+    work remains idle until a persisted resume control exists
 - `freehand-cli`
   - `worker-control-foundation-sample` mock ADP test creates a worker execution, sends query/safe-point/pause/resume/cancel commands, and verifies explicit output
   - verify mode mock test checks same task/execution/agent/control ids after restart
@@ -66,6 +77,7 @@
 cargo test -p freehand-task worker_control -- --nocapture
 cargo test -p freehand-ui-protocol worker_control -- --nocapture
 cargo test -p freehand-runtime worker_control -- --nocapture
+cargo test -p freehand-runtime production_worker_runner -- --nocapture
 cargo test -p freehand-cli -- --nocapture
 cargo fmt --check
 cargo run -p xtask -- mainlines generate
@@ -77,15 +89,11 @@ git diff --check
 ## Known Gaps
 
 - WebUI/Android task dashboard and rich worker-control rendering are Phase 2D.
-- The production Worker runner does not yet acknowledge an in-flight pause at a
-  safe point, stop provider/tool progress, or deterministically re-enter
-  reasoning after `resume`; Task Center pause/resume mutation alone is not a
-  closed execution lifecycle.
-- Required paired red tests are
-  `production_worker_runner_pause_stops_before_submission`,
-  `production_worker_runner_paused_execution_cannot_publish_stale_success`,
-  `production_worker_runner_resume_reenters_reasoning_and_submits_review`, and
-  `production_worker_runner_paused_without_resume_stays_idle`.
+- Production Worker pause/resume is focused-test bound: the runner monitors
+  persisted pause control truth, wires it into `LiveReasonCancelToken`, stops at
+  live bridge safe points without review/block publication, leaves paused work
+  idle without resume, and re-enters the same execution after persisted resume.
+  Product closure still requires a full online multi-Worker convergence proof.
 - Worker execution does not yet consume safe-point queued questions,
   constraints, checkpoint requests, or submission requests in a real model
   loop; Phase 2C only persists and exposes the queue.

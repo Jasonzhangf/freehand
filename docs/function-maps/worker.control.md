@@ -86,6 +86,10 @@
 ## Sync Status Against Code
 
 - `worker.control` owner is code-bound for Phase 2C safe-point runtime control.
+- `runtime.master-worker-loop` now consumes persisted pause/resume truth in the
+  production Worker runner: pause drives a live cancel token and stops at safe
+  points without stale review/block publication, while resume re-enters the
+  same task/execution.
 - CLI mock ADP coverage is implemented for create+control sample mode and verify-only mode.
 - S-profile online same-id restart proof is required before declaring Phase 2C fully closed.
 - Phase 2C excludes WebUI/Android dashboard projection, rich safe-point UI, worker autoscaling, multi BigTask context switching, and cross-machine workers.

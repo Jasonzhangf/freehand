@@ -1,11 +1,18 @@
 # CACHE
 
+- Current Worker pause/resume safe-point closeout:
+  - Marker: `worker-pause-resume-safe-point-focused-20260716`.
+  - Production Worker runner now monitors persisted same-task/same-execution `WorkerControlOp::Pause` truth while execution is in flight and wires it to `LiveReasonCancelToken`; the live bridge can stop at existing provider/tool/terminal safe points.
+  - After pause truth exists, runner returns `Idle` and does not publish stale `TaskReviewSubmitted`, `TaskBlocked`, or heartbeat failure over `TaskPaused` truth. Persisted resume selects the existing `Running` task/execution and re-enters reasoning without a replacement task.
+  - Proof: `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_worker_runner_pause_stops_before_submission -- --nocapture` passed 1/1; `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_worker_runner -- --nocapture` passed 19/19; `cargo run -p xtask -- mainlines generate`, `mainlines check`, and `gates check` passed after docs sync.
+  - Remaining product gaps: full S-profile multi-Worker/WebUI convergence proof and busy-Master live preemption proof.
+
 - Current Master isolated-attention control-turn closeout:
   - Marker: `master-isolated-attention-control-turn-bound-20260716`.
   - `master.edge.handle_attention` is now focused-test bound. While the exact foreground checkpoint is `SuspendedByAttention`, the selected Task Center attention executes through a task-scoped `master-lifecycle-*` request with event/attempt-isolated session, turn, and trace ids. The decision remains distinct from the foreground user session and returns only typed `AttentionResolution` identity.
   - Regression `production_master_attention_raw_transcript_never_enters_user_session` injects a raw control/provider sentinel through the executor summary and proves it does not enter foreground ReasonPersistence, `master_work`, or typed resolution constraints.
   - Proof: `production_master_attention` 4/4, `production_master_resume` 3/3, `live_master_attention` 2/2, `production_master_foreground` 2/2, `production_master_busy` 4/4, full `master_runner::tests::` 44/44, targeted runtime clippy, fmt, mainlines check, gates check, and diff check passed.
-  - Remaining product gaps: full S-profile daemon/WebUI proof for suspend -> isolated decision -> typed continuation, and production Worker safe-point pause/resume.
+  - Remaining product gaps: full S-profile daemon/WebUI proof for suspend -> isolated decision -> typed continuation.
 
 - Current provider retry + Worker task recovery closeout:
   - Marker: `provider-retry-worker-interrupted-closeout-1783761041`.

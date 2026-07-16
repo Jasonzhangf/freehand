@@ -102,8 +102,7 @@
         "from": "worker.running",
         "to": "worker.paused",
         "trigger": "accepted pause control at a Worker safe point",
-        "binding_status": "pending",
-        "pending_reason": "Task Center mutation exists but the production Worker runner does not acknowledge or stop at a safe point",
+        "binding_status": "bound",
         "positive_test": "production_worker_runner_pause_stops_before_submission",
         "negative_test": "production_worker_runner_paused_execution_cannot_publish_stale_success"
       },
@@ -112,8 +111,7 @@
         "from": "worker.paused",
         "to": "worker.running",
         "trigger": "Master resumes the same execution from persisted continuation truth",
-        "binding_status": "pending",
-        "pending_reason": "resume currently writes Running truth but the production Worker runner only claims Assigned tasks",
+        "binding_status": "bound",
         "positive_test": "production_worker_runner_resume_reenters_reasoning_and_submits_review",
         "negative_test": "production_worker_runner_paused_without_resume_stays_idle"
       },

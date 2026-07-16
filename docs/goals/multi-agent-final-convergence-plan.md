@@ -86,8 +86,10 @@ rework or more tasks before user-visible completion.
   turn invokes an event/attempt-scoped isolated control turn, and raw control
   transcript/provider payload text does not enter the foreground session or
   typed resolution.
-- Worker production pause/resume remains pending until the runner acknowledges
-  safe points and resumes deterministic reasoning.
+- Worker production pause/resume is focused-test bound: the runner monitors
+  persisted pause control truth, wires it into the live cancel token, stops at
+  existing live-bridge safe points without stale review/block publication, and
+  re-enters the same task/execution after persisted resume.
 - Full daemon/WebUI/Android online proof for busy-Master preemption remains
   unclaimed.
 
@@ -141,7 +143,7 @@ Remaining boundary:
   suspend → isolated decision → typed continuation sequence before product
   closure is claimed.
 
-### 2. Close Worker pause/resume lifecycle
+### 2. Close Worker pause/resume lifecycle — focused-test complete
 
 Target docs:
 
@@ -150,20 +152,21 @@ Target docs:
 - `docs/lifecycles/master-worker-lifecycle.json`
 - `docs/wiki/master-worker-lifecycle.md`
 
-Implementation direction:
+Bound evidence:
 
-- Define Worker safe points for pause acknowledgement.
-- Pause must stop before stale review submission or stale side effects.
-- Resume must re-enter deterministic reasoning for the same task/execution or
-  explicitly allocate the correct new execution according to the task truth.
-- `ProductionWorkerRunner::run_once` must not ignore paused/running continuation truth.
+- `production_worker_runner_pause_stops_before_submission` now applies pause
+  while Worker execution is in flight, observes the live cancel token, and
+  verifies no review/block truth is written.
+- `production_worker_runner_resume_reenters_reasoning_and_submits_review`
+  proves persisted resume re-enters the same task/execution.
+- `production_worker_runner_paused_execution_cannot_publish_stale_success` and
+  `production_worker_runner_paused_without_resume_stays_idle` lock the negative
+  stale-success and no-resume paths.
 
-Expected tests:
+Remaining boundary:
 
-- positive: pause stops running work at a safe point before submission
-- positive: resume re-enters reasoning and submits review
-- negative: paused execution cannot publish stale success
-- negative: paused task without resume stays idle
+- Product closure still requires the full S-profile multi-Worker/WebUI online
+  convergence proof.
 
 ### 3. Close blocked/interrupted/rejected same-task recovery policy
 

@@ -481,9 +481,10 @@ Task Center truth before another execution starts.
   attention resolution, isolated control-turn identity, exact return identity,
   and raw transcript/provider payload rejection are now unit-bound by
   `master_work.resolve_attention`.
-- Live bridge safe-point phase publication and cooperative pause/resume are not
-  yet online-proven. Do not claim live Master busy-preemption closure until the
-  real daemon shows foreground Master work pausing at a declared safe point,
+- Worker pause/resume is focused-test bound through the runner pause monitor,
+  live cancel token, stale-output suppression, and resumed controlled task
+  selection. Do not claim live Master busy-preemption closure until the real
+  daemon shows foreground Master work pausing at a declared safe point,
   isolated attention decision completing, and the original foreground work
   continuing with typed resolution only.
 - Existing three-Worker E2E evidence does not close busy-Master preemption.

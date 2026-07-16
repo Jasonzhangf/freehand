@@ -62,9 +62,8 @@ forbidden from the original user context.
 ## Current Binding Status
 
 - Bound Worker edges: assignment/claim, review submission, rejection/reasoning
-  retry, blocked truth, typed major-change attention, review approval/close,
+  retry, focused-test-bound safe-point pause/resume, blocked truth, typed major-change attention, review approval/close,
   and interrupted reassign.
-- Pending Worker edges: production safe-point pause/resume.
 - Bound Master edges: source-ordered EventInbox admission into durable
   `pending_attention`, weighted-aging idle dequeue, retry-preserved attention
   identity, review/blocked/interrupted decisions, overall-goal evaluation

@@ -1,8 +1,8 @@
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -16,8 +16,8 @@ use freehand_task::{
 use thiserror::Error;
 
 use super::{
-    LiveReasonTurnRequest, RuntimeAgentBootstrapError, load_default_runtime_agent,
-    run_worker_live_reason_turn,
+    LiveReasonCancelToken, LiveReasonTurnRequest, RuntimeAgentBootstrapError,
+    load_default_runtime_agent, run_worker_live_reason_turn,
 };
 
 mod heartbeat;
@@ -28,6 +28,7 @@ use heartbeat::WorkerHeartbeat;
 
 const DEFAULT_LEASE_TTL_SECONDS: u64 = 30;
 const DEFAULT_POLL_INTERVAL_MILLIS: u64 = 1_000;
+const WORKER_CONTROL_MONITOR_INTERVAL_MILLIS: u64 = 25;
 
 static EXECUTION_COUNTER: AtomicU64 = AtomicU64::new(0);
 static PROCESS_INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -247,15 +248,29 @@ impl ProductionWorkerRunner {
             execution_id.clone(),
             self.process_identity.clone(),
         );
+        let pause_token = Arc::new(AtomicBool::new(false));
+        let pause_monitor = WorkerPauseMonitor::start(
+            Arc::clone(&task_runtime),
+            task.task_id.clone(),
+            execution_id.clone(),
+            Arc::clone(&pause_token),
+        );
         let request = worker_live_request(
             &self.runtime_home,
             &task,
             &execution_id,
             workspace,
             retry_kind,
+            Some(Arc::clone(&pause_token)),
         );
         let execution = self.executor.execute(&self.selected, request);
+        let pause_monitor_result = pause_monitor.stop();
+        let pause_requested = worker_pause_requested(&task_runtime, &task.task_id, &execution_id)?;
+        pause_monitor_result?;
         if let Err(error) = heartbeat.stop() {
+            if pause_requested {
+                return Ok(ProductionWorkerTickOutcome::Idle);
+            }
             return self.report_blocked(
                 &task_runtime,
                 &task,
@@ -263,6 +278,9 @@ impl ProductionWorkerRunner {
                 None,
                 error.to_string(),
             );
+        }
+        if pause_requested {
+            return Ok(ProductionWorkerTickOutcome::Idle);
         }
 
         match execution {
@@ -624,6 +642,86 @@ fn worker_execution_error_is_retryable_system_failure(reason: &str) -> bool {
         || reason.contains("openai_http_status_5")
 }
 
+struct WorkerPauseMonitor {
+    stop: mpsc::Sender<()>,
+    error: Arc<Mutex<Option<String>>>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl WorkerPauseMonitor {
+    fn start(
+        task_runtime: Arc<TaskRuntime>,
+        task_id: TaskId,
+        execution_id: String,
+        pause_token: LiveReasonCancelToken,
+    ) -> Self {
+        let (stop, receiver) = mpsc::channel();
+        let error = Arc::new(Mutex::new(None));
+        let thread_error = Arc::clone(&error);
+        let interval = Duration::from_millis(WORKER_CONTROL_MONITOR_INTERVAL_MILLIS);
+        let handle = thread::spawn(move || {
+            loop {
+                match task_runtime.query_worker_control_events(&task_id, &execution_id) {
+                    Ok(events) => {
+                        if latest_task_state_worker_control(&events).is_some_and(|event| {
+                            event.op == WorkerControlOp::Pause && event.status == "applied"
+                        }) {
+                            pause_token.store(true, Ordering::SeqCst);
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        *thread_error
+                            .lock()
+                            .expect("lock worker pause monitor error") = Some(error.to_string());
+                        break;
+                    }
+                }
+                match receiver.recv_timeout(interval) {
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            }
+        });
+        Self {
+            stop,
+            error,
+            handle: Some(handle),
+        }
+    }
+
+    fn stop(mut self) -> Result<(), ProductionWorkerRunnerError> {
+        let _ = self.stop.send(());
+        if let Some(handle) = self.handle.take() {
+            handle.join().map_err(|_| {
+                ProductionWorkerRunnerError::TaskCenter(
+                    "worker pause monitor thread panicked".to_owned(),
+                )
+            })?;
+        }
+        if let Some(error) = self
+            .error
+            .lock()
+            .expect("lock worker pause monitor error")
+            .take()
+        {
+            return Err(ProductionWorkerRunnerError::TaskCenter(format!(
+                "worker pause monitor failed: {error}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for WorkerPauseMonitor {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 fn latest_task_state_worker_control(events: &[WorkerControlEvent]) -> Option<&WorkerControlEvent> {
     events.iter().rev().find(|event| {
         matches!(
@@ -633,12 +731,25 @@ fn latest_task_state_worker_control(events: &[WorkerControlEvent]) -> Option<&Wo
     })
 }
 
+fn worker_pause_requested(
+    task_runtime: &TaskRuntime,
+    task_id: &TaskId,
+    execution_id: &str,
+) -> Result<bool, ProductionWorkerRunnerError> {
+    let controls = task_runtime
+        .query_worker_control_events(task_id, execution_id)
+        .map_err(task_center_error)?;
+    Ok(latest_task_state_worker_control(&controls)
+        .is_some_and(|event| event.op == WorkerControlOp::Pause && event.status == "applied"))
+}
+
 fn worker_live_request(
     runtime_home: &Path,
     task: &TaskSnapshot,
     execution_id: &str,
     workspace: PathBuf,
     retry_kind: Option<WorkerRetryKind>,
+    cancel_token: Option<LiveReasonCancelToken>,
 ) -> LiveReasonTurnRequest {
     let task_key = sanitize_identifier(task.task_id.as_str());
     let execution_key = sanitize_identifier(execution_id);
@@ -651,7 +762,7 @@ fn worker_live_request(
         prompt,
         cwd: Some(workspace),
         stream: false,
-        cancel_token: None,
+        cancel_token,
     }
 }
 
