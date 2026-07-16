@@ -6220,3 +6220,26 @@ Current real root cause split:
   - busy-Master safe-point suspension/checkpoint/resolution/return path remains
     pending; idle weighted attention does not close that lifecycle.
   - MemoryPalace re-mine/search still required.
+
+# 2026-07-16 Master busy active-work state-machine slice
+
+- implementation:
+  - added `master_work` active-work truth under `~/.freehand/state/master-loop/<master>.active-work.json` with a sibling lock file.
+  - live Master submit registers active work before committing the next turn ordinal and clears it on terminal/error/cancel completion.
+  - concurrent foreground Master submit now fails explicitly and does not consume a turn ordinal.
+  - live bridge publishes provider/tool safe-point phases into `master_work` using the original logical turn id, not repaired round ids.
+  - Master lifecycle runner defers lower-priority attention, requests suspend during provider/tool effect in-flight, suspends only at declared safe points, resolves isolated attention into typed changed-task identity, and restores exact work/session/turn/trace identity.
+  - active-work resolution rejects raw Worker/control transcripts and provider request/response payload markers.
+- evidence:
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime runtime_live_submit -- --nocapture`: 2 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_master_busy -- --nocapture`: 4 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_master_attention -- --nocapture`: 2 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_master_resume -- --nocapture`: 1 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime master_runner::tests:: -- --nocapture`: 38 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime live_bridge_cancel_token -- --nocapture`: 3 passed.
+  - `scripts/run-cargo-test-with-evidence.sh -- -p freehand-runtime production_worker_runner -- --nocapture`: 18 passed.
+  - `cargo clippy -p freehand-runtime --all-targets -- -D warnings`, `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check`: passed.
+- remaining:
+  - typed attention resolution is persisted but not yet injected into the original foreground reasoning continuation.
+  - no online daemon/WebUI/Android proof for busy-Master live preemption yet.
+  - evidence wrapper must not run in parallel because seconds-stamped logs collide.

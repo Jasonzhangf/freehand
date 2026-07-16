@@ -18,6 +18,7 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `timer.fire_master_wakeup`
+  - `master_work.resolve_attention`
   - `agent.heartbeat`
 - owner entry symbols:
   - `ProductionWorkerRunner::from_default_config`
@@ -30,12 +31,14 @@
 - resource map: `docs/resource-maps/core.json`
 - owned resources:
   - `timer`
+  - `master_work`
 - touched resources:
   - `turn`
   - `task`
   - `agent`
 - resource operations:
   - `timer.fire_master_wakeup`
+  - `master_work.resolve_attention`
   - `agent.heartbeat`
 - forbidden shortcuts:
   - Timer schedules must not be encoded as task lifecycle state.
@@ -58,6 +61,12 @@
   admission-sequence aging select the next item. Critical major changes,
   blocked showstoppers, and high-priority work carry large weight; aging keeps
   old low-priority work from permanent starvation without wall-clock timing
+- foreground Master user work is persisted separately as `master_work`.
+  Lower-priority attention stays queued; higher-priority attention may request
+  suspension while provider or tool effects are in flight and may enter
+  `SuspendedByAttention` only at a declared safe point. The persisted
+  resolution contains typed changed-task identity and exact return identity,
+  never raw Worker/control transcripts or provider payloads
 - Task Center lifecycle attention has priority over due internal timers; due
   timers are claimed only when the durable attention queue is empty, so a
   failed timer wakeup cannot starve pending review/blocked/interrupted
@@ -263,6 +272,9 @@ continue other ready work rather than dead-waiting in the current turn
 | 11 | `ProductionMasterRunner::run_once` | `crates/freehand-runtime/src/master_runner.rs` | admit EventInbox source order into durable attention, dequeue by deterministic weighted aging, preserve retry identity, drain stale no-ops, then consider due timers | Task Center cursor + pending attention + timer store | task decision, timer-fired, or idle outcome | Master lifecycle service/tests | `admit_attention_events` + `highest_priority_attention_index` + `handle_event` + `handle_due_timer` | bound |
 | 11a | `ProductionMasterRunner::admit_attention_events` | `crates/freehand-runtime/src/master_runner.rs` | persist attention in EventInbox order and advance the cursor without priority reordering | ordered EventInbox rows + Master loop state | durable pending attention + monotonic admission sequence | `ProductionMasterRunner::run_once` | TaskRuntime query + Master loop state | bound |
 | 11b | `highest_priority_attention_index` | `crates/freehand-runtime/src/master_runner.rs` | select by severity, bounded task priority, deterministic admission aging, and stable tie-breaks | durable pending attention + next admission sequence | selected pending index | `ProductionMasterRunner::run_once` | pure score comparator | bound |
+| 11c | `register_master_active_work` / `clear_master_active_work_if_current` | `crates/freehand-runtime/src/master_runner.rs` | persist and clear foreground Master work identity under the master-work lock | live Master submit identity | active-work checkpoint or explicit concurrent-work rejection | runtime live submit dispatcher | active-work JSON + lock file | bound |
+| 11d | `ProductionMasterRunner::apply_busy_attention_policy` | `crates/freehand-runtime/src/master_runner.rs` | compare pending attention score with foreground work priority, defer lower-priority attention, and request/suspend higher-priority attention only at declared safe points | pending attention + master_work checkpoint | deferred attention, suspend request, or suspended active work | `ProductionMasterRunner::run_once` | active-work store + weighted attention score | bound |
+| 11e | `ProductionMasterRunner::restore_active_work_after_attention` | `crates/freehand-runtime/src/master_runner.rs` | persist typed attention resolution and restore the exact foreground work identity after the isolated attention decision | suspended master_work + Task Center decision outcome | running active work with typed resolution and original work/session/turn/trace identity | `ProductionMasterRunner::run_once` | active-work store | bound |
 | 12 | `ProductionMasterRunner::handle_due_timer` | `crates/freehand-runtime/src/master_runner.rs` | execute a due independent timer wakeup and complete/reschedule/release timer truth | due timer schedule | timer-fired outcome or retryable execution error | `run_once` | timer store + live reason turn | bound |
 | 13 | `TimerStore::claim_due` / `TimerStore::complete_due` / `TimerStore::fail_due` | `crates/freehand-runtime/src/lib.rs` | persist independent timer schedule state and timer ledger events outside Task Center truth | timer state json + timer ledger | running/completed/active timer truth | Master timer tool + Master runner | timer store owner | bound |
 | 14 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke Master decision for current review-ready, blocked, interrupted, or all-children-closed parent evaluation truth; interrupted decisions receive AgentBoard resource truth and may replace the existing task assignment | task snapshot + trigger event + AgentBoard | same task advanced, blocked observed, parent evaluated, no-op, or explicit error | `run_once` | Master live reason turn + task owner | bound |

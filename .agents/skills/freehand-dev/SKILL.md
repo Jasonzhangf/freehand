@@ -308,6 +308,7 @@ Use this skill for any non-trivial work in this repo.
   - module white-box tests
   - module black-box tests
   - project black-box tests
+- Do not parallel-run `scripts/run-cargo-test-with-evidence.sh`; its stdout/stderr evidence paths use a seconds stamp and parallel invocations can collide, producing mixed or misleading logs. Run evidence-wrapped cargo tests sequentially.
 - Do not parallel-run multiple `cargo test` processes that rely on timestamp-based temp runtime helpers inside the same owner area; cross-process temp-path collisions can create false persistence/runtime failures during spot checks.
 - If a focused `cargo test` appears to hang or emits no output during compile, rerun it through `scripts/run-cargo-test-with-evidence.sh -- <cargo test args...>`. This wraps cargo with a bounded timeout, writes stdout/stderr logs, and prints the exit code. Do not conclude "no cargo process" from a narrow `ps | rg cargo` check alone because the local command wrapper may appear as `rtk cargo` and the active child may be `rustc`.
 - Canonical full local gate is `make ci`.
@@ -356,6 +357,7 @@ Use this skill for any non-trivial work in this repo.
   admitted sequence, and cursor; stale no-op events are removed and selection
   continues in the same runner tick.
 - For multi-task Phase 2C worker-control proof, stateful task consequences such as pause, resume, and cancel must route through Task Center first and persist `applied` worker-control events only after the Task Center consequence succeeds. Safe-point requests persist `queued`; status queries persist `observed`. Restart proof must verify the same task, execution, agent, and control ids after `restartS`; a fresh sample is not recovery evidence.
+- For Master busy attention work, foreground work state is the `master_work` resource, not task/session/timer truth. Persist active identity, priority, safe point, suspension state, and typed attention resolution under the active-work lock; never store raw Worker/control transcripts, provider payloads, or placeholder plan prose in that checkpoint. Live preemption is not closed until typed resolution is injected back into the original foreground reasoning continuation and online-proven.
 - For parent-session Master/Worker evaluation, use `task_closed` as the resume
   signal only after every current Task Center child sharing the same
   `parent_session_id` is `Closed`. Build the follow-up from original user

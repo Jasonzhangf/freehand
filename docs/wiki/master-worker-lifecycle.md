@@ -67,10 +67,13 @@ forbidden from the original user context.
 - Pending Worker edges: production safe-point pause/resume.
 - Bound Master edges: source-ordered EventInbox admission into durable
   `pending_attention`, weighted-aging idle dequeue, retry-preserved attention
-  identity, review/blocked/interrupted decisions, and overall-goal evaluation
-  turns.
-- Pending Master edges: busy preemption, active-work checkpoint, typed
-  resolution, and exact return path.
+  identity, review/blocked/interrupted decisions, overall-goal evaluation
+  turns, busy lower-priority deferral, active-work checkpointing, safe-point
+  high-priority suspension state, typed attention resolution, and exact return
+  identity.
+- Pending Master edge: live bridge injection of the typed resolution back into
+  the original foreground reasoning continuation. Until that is online-proven,
+  busy-Master live preemption is not closed.
 
 ## Integration Checklist
 

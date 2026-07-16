@@ -197,6 +197,8 @@ pub enum RuntimeLiveBridgeError {
     ToolExecutionFailed(String),
     #[error("task projection failed: {0}")]
     TaskProjectionFailed(String),
+    #[error("master active-work state failed: {0}")]
+    MasterWorkStateFailed(String),
     #[error("instruction capability admission failed: {0}")]
     InstructionCapabilityFailed(String),
     #[error("live bridge role `{expected}` requires matching agent mode, got `{actual}`")]
@@ -1684,6 +1686,28 @@ where
     )
 }
 
+fn record_master_live_safe_point(
+    role: LiveReasonExecutionRole,
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    safe_point: master_runner::MasterWorkSafePoint,
+) -> Result<(), RuntimeLiveBridgeError> {
+    if role != LiveReasonExecutionRole::Master {
+        return Ok(());
+    }
+    master_runner::record_master_active_work_safe_point_if_current(
+        runtime_home,
+        agent_id,
+        session_id,
+        turn_id,
+        safe_point,
+    )
+    .map(|_| ())
+    .map_err(RuntimeLiveBridgeError::MasterWorkStateFailed)
+}
+
 fn run_live_reason_turn_with_policy<FB, FD, FT>(
     selected: &SelectedAgentConfig,
     request: LiveReasonTurnRequest,
@@ -2046,11 +2070,27 @@ where
         );
         drain_debug_events(&debug_receiver, &mut on_debug);
 
+        record_master_live_safe_point(
+            role,
+            &request.runtime_home,
+            &agent_id,
+            &request.session_id,
+            &request.turn_id,
+            master_runner::MasterWorkSafePoint::BeforeProviderRequest,
+        )?;
         if request.stream {
             let stream_persistence_error = RefCell::new(None::<RuntimeLiveBridgeError>);
             let raw_session_id = turn.request.session_id.clone();
             let raw_turn_id = turn.request.turn_id.clone();
             let raw_trace_id = turn.request.trace_id.clone();
+            record_master_live_safe_point(
+                role,
+                &request.runtime_home,
+                &agent_id,
+                &request.session_id,
+                &request.turn_id,
+                master_runner::MasterWorkSafePoint::ProviderInFlight,
+            )?;
             let stream_result = executor.execute_stream_with_raw(
                 &provider_ctx(&turn),
                 &semantic_request,
@@ -2143,6 +2183,14 @@ where
             let outputs = loop {
                 retry_index = retry_index.saturating_add(1);
                 let single_raw_error = RefCell::new(None::<RuntimeLiveBridgeError>);
+                record_master_live_safe_point(
+                    role,
+                    &request.runtime_home,
+                    &agent_id,
+                    &request.session_id,
+                    &request.turn_id,
+                    master_runner::MasterWorkSafePoint::ProviderInFlight,
+                )?;
                 let execute_result = executor.execute_once_with_raw(
                     &provider_ctx(&turn),
                     &semantic_request,
@@ -2353,12 +2401,36 @@ where
         ensure_live_not_cancelled(&request)?;
         drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
 
+        record_master_live_safe_point(
+            role,
+            &request.runtime_home,
+            &agent_id,
+            &request.session_id,
+            &request.turn_id,
+            master_runner::MasterWorkSafePoint::BeforeToolExecution,
+        )?;
         let pending_tool_calls = pending_tool_calls_for_execution(&turn, &executed_tool_call_ids);
         if !pending_tool_calls.is_empty() {
             consecutive_schema_rejections = 0;
             let mut reached_task_decision = None;
             for tool_call in pending_tool_calls {
                 ensure_live_not_cancelled(&request)?;
+                record_master_live_safe_point(
+                    role,
+                    &request.runtime_home,
+                    &agent_id,
+                    &request.session_id,
+                    &request.turn_id,
+                    master_runner::MasterWorkSafePoint::BeforeToolExecution,
+                )?;
+                record_master_live_safe_point(
+                    role,
+                    &request.runtime_home,
+                    &agent_id,
+                    &request.session_id,
+                    &request.turn_id,
+                    master_runner::MasterWorkSafePoint::ToolEffectInFlight,
+                )?;
                 let executed_tool_result = execute_registry_tool_call(
                     &tool_registry,
                     &request.runtime_home,
@@ -4056,10 +4128,19 @@ impl RuntimeCommandDispatcher {
         };
         let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
         let cwd = resolve_session_cwd(state, &session_id, requested_cwd, Some(&live.runtime_home))?;
-        state.next_turn_ordinal += 1;
-        let turn_id = TurnId::new(format!("runtime-turn-{}", state.next_turn_ordinal));
-        let trace_id = TraceId::new(format!("runtime-trace-{}", state.next_turn_ordinal));
+        let next_turn_ordinal = state.next_turn_ordinal.saturating_add(1);
+        let turn_id = TurnId::new(format!("runtime-turn-{next_turn_ordinal}"));
+        let trace_id = TraceId::new(format!("runtime-trace-{next_turn_ordinal}"));
         let cancel_token = Arc::new(AtomicBool::new(false));
+        master_runner::register_master_active_work(
+            &live.runtime_home,
+            &state.config.reason_agent_id,
+            &session_id,
+            &turn_id,
+            &trace_id,
+        )
+        .map_err(UiCommandDispatchPortError::DispatchFailed)?;
+        state.next_turn_ordinal = next_turn_ordinal;
         state.active_turns.push(ActiveRuntimeTurn {
             turn_id: turn_id.clone(),
             session_id: session_id.clone(),
@@ -4165,6 +4246,25 @@ impl RuntimeCommandDispatcher {
             .as_ref()
             .is_some_and(|turn| turn.cancel_token.load(Ordering::SeqCst))
             || prepared.cancel_token.load(Ordering::SeqCst);
+        if let Err(error) = master_runner::clear_master_active_work_if_current(
+            &prepared.live.runtime_home,
+            &prepared.reason_agent_id,
+            &prepared.turn_id,
+        ) {
+            let current_turn =
+                restore_or_materialize_failed_live_submit(&mut state, prepared, &error)?;
+            let projection = project_runtime_turn_history(
+                &state.config.reason_agent_id,
+                &state.config.master_node_id,
+                std::slice::from_ref(&current_turn),
+                Some(prepared.cwd.to_string_lossy().into_owned()),
+            );
+            self.ui_state
+                .lock()
+                .expect("lock ui state")
+                .apply_turn_projection(projection);
+            return Err(UiCommandDispatchPortError::DispatchFailed(error));
+        }
         if was_cancelled {
             return Err(UiCommandDispatchPortError::DispatchFailed(
                 RuntimeLiveBridgeError::Cancelled.to_string(),
@@ -17407,6 +17507,163 @@ data: {{\"type\":\"message_stop\"}}\n\n"
             }
             other => panic!("unexpected final cancelled latest turn: {other:?}"),
         }
+    }
+
+    #[test]
+    fn runtime_live_submit_registers_and_clears_master_active_work() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let first_chunk = concat!(
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"working\"}}\n\n"
+        )
+        .to_owned();
+        let remaining_chunks = complete_stream_response("active work done");
+        let (base_url, _rx, released_rx, continue_tx, handle) =
+            spawn_incremental_stream_server(first_chunk, remaining_chunks);
+        let runtime_home = temp_runtime_home();
+        let runtime = Arc::new(
+            RuntimeCommandDispatcher::from_selected_agent_with_live(
+                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+                runtime_home.clone(),
+                true,
+            )
+            .expect("runtime"),
+        );
+        let submit_runtime = Arc::clone(&runtime);
+        let submit_handle = thread::spawn(move || {
+            submit_runtime.dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "hold active work".to_owned(),
+                    session_id: None,
+                    cwd: None,
+                })
+                .expect("submit envelope"),
+            )
+        });
+
+        loop {
+            let active =
+                master_runner::load_master_active_work(&runtime_home, &AgentId::new("agent-live"))
+                    .expect("load active work");
+            if active.as_ref().is_some_and(|checkpoint| {
+                checkpoint.safe_point == master_runner::MasterWorkSafePoint::ProviderInFlight
+            }) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let active =
+            master_runner::load_master_active_work(&runtime_home, &AgentId::new("agent-live"))
+                .expect("load active work")
+                .expect("active work");
+        assert_eq!(
+            active.session_id,
+            SessionId::new("runtime-session-agent-live")
+        );
+        assert_eq!(active.logical_turn_id, TurnId::new("runtime-turn-1"));
+        assert_eq!(active.trace_id, TraceId::new("runtime-trace-1"));
+        assert_eq!(active.state, master_runner::MasterActiveWorkState::Running);
+        assert_eq!(
+            active.safe_point,
+            master_runner::MasterWorkSafePoint::ProviderInFlight
+        );
+
+        continue_tx.send(()).expect("release provider");
+        assert!(released_rx.recv().expect("released"));
+        handle.join().expect("join provider");
+        submit_handle
+            .join()
+            .expect("submit join")
+            .expect("submit success");
+        assert!(
+            master_runner::load_master_active_work(&runtime_home, &AgentId::new("agent-live"))
+                .expect("load active work")
+                .is_none(),
+            "terminal live submit must clear its active-work checkpoint"
+        );
+    }
+
+    #[test]
+    fn runtime_live_submit_rejects_concurrent_master_active_work_without_ordinal_gap() {
+        let _cwd_lock = cwd_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let first_chunk = concat!(
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"working\"}}\n\n"
+        )
+        .to_owned();
+        let remaining_chunks = complete_stream_response("first done");
+        let (base_url, _rx, released_rx, continue_tx, handle) =
+            spawn_incremental_stream_server(first_chunk, remaining_chunks);
+        let runtime_home = temp_runtime_home();
+        let runtime = Arc::new(
+            RuntimeCommandDispatcher::from_selected_agent_with_live(
+                &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+                runtime_home.clone(),
+                true,
+            )
+            .expect("runtime"),
+        );
+        let submit_runtime = Arc::clone(&runtime);
+        let submit_handle = thread::spawn(move || {
+            submit_runtime.dispatch(
+                build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                    text: "first active work".to_owned(),
+                    session_id: None,
+                    cwd: None,
+                })
+                .expect("first submit envelope"),
+            )
+        });
+
+        loop {
+            let active =
+                master_runner::load_master_active_work(&runtime_home, &AgentId::new("agent-live"))
+                    .expect("load active work");
+            if active.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let second = runtime.dispatch(
+            build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                text: "second active work".to_owned(),
+                session_id: None,
+                cwd: None,
+            })
+            .expect("second submit envelope"),
+        );
+        let error = second.expect_err("concurrent Master work must fail");
+        match error {
+            UiCommandDispatchPortError::DispatchFailed(message) => {
+                assert!(message.contains("Master active work"));
+                assert!(message.contains("runtime-turn-2"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        {
+            let state = runtime.state.lock().expect("lock runtime state");
+            assert_eq!(state.next_turn_ordinal, 1);
+            assert_eq!(state.active_turns.len(), 1);
+        }
+        let active =
+            master_runner::load_master_active_work(&runtime_home, &AgentId::new("agent-live"))
+                .expect("load active work")
+                .expect("active work");
+        assert_eq!(active.logical_turn_id, TurnId::new("runtime-turn-1"));
+
+        continue_tx.send(()).expect("release provider");
+        assert!(released_rx.recv().expect("released"));
+        handle.join().expect("join provider");
+        submit_handle
+            .join()
+            .expect("submit join")
+            .expect("first submit success");
     }
 
     #[test]

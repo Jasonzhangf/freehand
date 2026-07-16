@@ -88,7 +88,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `tool.registry` | `tool_call`, `workspace_path` | `docs/resource-maps/core.json` |
 | `task.orchestration` | `task` | `docs/resource-maps/core.json` |
 | `agent.lifecycle` | `agent` | `docs/resource-maps/core.json` |
-| `runtime.master-worker-loop` | `timer` | `docs/resource-maps/core.json` |
+| `runtime.master-worker-loop` | `timer`, `master_work` | `docs/resource-maps/core.json` |
 | `error.center` | `error` | `docs/resource-maps/core.json` |
 | `metadata.core` | `metadata` | `docs/resource-maps/core.json` |
 | `debug.core` | `debug_trace` | `docs/resource-maps/core.json` |
@@ -1537,6 +1537,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - required_checks:
   - `cargo test -p freehand-tools worker_implemented -- --nocapture`
   - `cargo test -p freehand-runtime production_worker_runner -- --nocapture`
+  - `cargo test -p freehand-runtime production_master_busy -- --nocapture`
+  - `cargo test -p freehand-runtime runtime_live_submit -- --nocapture`
   - `cargo test -p freehand-daemon worker_mode -- --nocapture`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`

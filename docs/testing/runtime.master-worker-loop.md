@@ -8,6 +8,7 @@
 - lifecycle review: `docs/wiki/master-worker-lifecycle.md`
 - resource operation coverage:
   - `timer.fire_master_wakeup`
+  - `master_work.resolve_attention`
   - `agent.heartbeat`
 
 ## Resource Operation Test Coverage
@@ -15,6 +16,7 @@
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `timer.fire_master_wakeup` | bound | `cargo test -p freehand-runtime timer -- --nocapture` covers durable timer due-claim, one-shot, recurring, local-time cron/daily/weekly, wakeup prompt, failure release, and Master runner tests | `cargo test -p freehand-runtime production_master -- --nocapture` covers production Master runner smokes where due timers create internal Master wakeup turns without task-state mutation | `scripts/verify-timer-tool-online.sh` covers S-profile timer online proof and restart-due proof showing persisted timer wakeup fires after due time and completes timer truth |
+| `master_work.resolve_attention` | bound | `cargo test -p freehand-runtime production_master_busy -- --nocapture` and `cargo test -p freehand-runtime production_master_attention -- --nocapture` cover lower-priority deferral, safe-point high-priority interruption, mid-provider/tool no-interrupt, and exact identity restoration | `cargo test -p freehand-runtime runtime_live_submit -- --nocapture` covers live dispatcher active-work register/clear plus concurrent-work rejection without ordinal gaps | `cargo test -p freehand-runtime production_master_attention -- --nocapture` covers checkpoint-missing failure and exact-identity restoration at the runtime owner boundary |
 | `agent.heartbeat` | bound | `cargo test -p freehand-task agent_process -- --nocapture` locks typed start/heartbeat validation, restart identity, TTL health, and no task-activity fallback | `cargo test -p freehand-runtime production_worker_runner -- --nocapture` proves constructor start, idle tick heartbeat, same-agent restart, and active-loop wiring | `scripts/verify-master-three-worker-e2e-online.sh` proves isolated three-process fresh/offline/restart AgentBoard truth |
 
 
@@ -441,16 +443,15 @@ Task Center truth before another execution starts.
 - Master idle attention admission/dequeue is now code-bound for source-ordered
   admission, weighted severity/task-priority dequeue, deterministic aging,
   retry preservation, and stale no-op removal.
-- A busy Master has no persisted active-work identity, safe-point checkpoint,
-  suspended state, isolated attention resolution, or exact return path.
-- Required paired red tests are
-  `production_master_busy_defers_lower_priority_attention`,
-  `production_master_busy_high_priority_interrupts_at_safe_point`,
-  `production_master_attention_restores_exact_original_work_identity`, and
-  `production_master_resume_rejects_raw_worker_or_control_transcript`.
-- These gaps block Master standalone closure and therefore block Master–Worker
-  integration acceptance. Existing three-Worker E2E evidence does not close
-  them.
+- Busy-Master active-work identity, priority comparison, safe-point state, typed
+  attention resolution, exact return identity, and raw transcript/provider
+  payload rejection are now unit-bound by `master_work.resolve_attention`.
+- Live bridge safe-point phase publication and cooperative pause/resume are not
+  yet online-proven. Do not claim live Master busy-preemption closure until the
+  real daemon shows foreground Master work pausing at a declared safe point,
+  isolated attention decision completing, and the original foreground work
+  continuing with typed resolution only.
+- Existing three-Worker E2E evidence does not close busy-Master preemption.
 
 ## Definition Of Done
 

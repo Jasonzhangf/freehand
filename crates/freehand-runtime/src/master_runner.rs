@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -13,6 +13,7 @@ use freehand_task::{
     TaskActor, TaskAppendRequest, TaskBoardQuery, TaskEventInboxEntry, TaskEventInboxQuery, TaskId,
     TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark,
 };
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -38,6 +39,9 @@ const MASTER_ATTENTION_TASK_PRIORITY_WEIGHT: i128 = 100;
 const MASTER_ATTENTION_ADMISSION_AGE_WEIGHT: i128 = 5_000;
 const MASTER_ATTENTION_TASK_PRIORITY_MIN: i64 = -100;
 const MASTER_ATTENTION_TASK_PRIORITY_MAX: i64 = 100;
+pub(crate) const MASTER_ACTIVE_WORK_DEFAULT_PRIORITY: i64 = 90;
+const MASTER_ACTIVE_WORK_SCORE_WEIGHT: i128 = MASTER_ATTENTION_KIND_WEIGHT;
+static MASTER_ACTIVE_WORK_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProductionMasterTickOutcome {
@@ -61,6 +65,85 @@ pub enum ProductionMasterTickOutcome {
         evaluated_child_task_ids: Vec<TaskId>,
         summary: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MasterActiveWorkState {
+    Running,
+    SuspendRequested,
+    SuspendedByAttention,
+    Restoring,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MasterWorkSafePoint {
+    BeforeProviderRequest,
+    ProviderInFlight,
+    BeforeToolExecution,
+    ToolEffectInFlight,
+    BeforeTerminalPersistence,
+    BetweenRounds,
+}
+
+impl MasterWorkSafePoint {
+    fn is_interruptible(self) -> bool {
+        matches!(
+            self,
+            Self::BeforeProviderRequest
+                | Self::BeforeToolExecution
+                | Self::BeforeTerminalPersistence
+                | Self::BetweenRounds
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct MasterWorkReference {
+    pub work_id: String,
+    pub session_id: SessionId,
+    pub logical_turn_id: TurnId,
+    pub trace_id: TraceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct MasterAttentionReference {
+    pub event_id: String,
+    pub task_id: TaskId,
+    pub kind: String,
+    pub severity_rank: u8,
+    pub task_priority: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct MasterAttentionResolution {
+    pub attention_event_id: String,
+    pub decision_kind: String,
+    pub changed_task_ids: Vec<TaskId>,
+    pub changed_constraints: Vec<String>,
+    pub resume_from: MasterWorkReference,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct MasterActiveWorkCheckpoint {
+    pub schema_version: u32,
+    pub master_agent_id: AgentId,
+    pub session_id: SessionId,
+    pub logical_turn_id: TurnId,
+    pub trace_id: TraceId,
+    pub work_id: String,
+    pub priority: i64,
+    pub state: MasterActiveWorkState,
+    pub safe_point: MasterWorkSafePoint,
+    pub parent_objective_reference: String,
+    pub active_task_or_event_cursor: Option<String>,
+    pub permitted_resume_context: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspend_requested_by: Option<MasterAttentionReference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention_resolution: Option<MasterAttentionResolution>,
+    pub updated_at: u64,
 }
 
 #[derive(Debug, Error)]
@@ -218,6 +301,262 @@ struct MasterAttentionItem {
     admitted_sequence: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MasterBusyAttentionDecision {
+    Proceed,
+    Deferred,
+    SuspendRequested,
+    Suspended,
+}
+
+pub(crate) fn register_master_active_work(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+    session_id: &SessionId,
+    logical_turn_id: &TurnId,
+    trace_id: &TraceId,
+) -> Result<(), String> {
+    with_master_active_work_lock(runtime_home, master_agent_id, || {
+        if let Some(existing) = load_master_active_work_unlocked(runtime_home, master_agent_id)? {
+            if existing.logical_turn_id == *logical_turn_id
+                && existing.session_id == *session_id
+                && existing.trace_id == *trace_id
+            {
+                return Ok(());
+            }
+            return Err(format!(
+                "Master active work `{}` is still open; cannot register concurrent turn `{}`",
+                existing.work_id,
+                logical_turn_id.as_str()
+            ));
+        }
+        let work_id = format!(
+            "{}:{}:{}",
+            master_agent_id.as_str(),
+            session_id.as_str(),
+            logical_turn_id.as_str()
+        );
+        let checkpoint = MasterActiveWorkCheckpoint {
+            schema_version: 1,
+            master_agent_id: master_agent_id.clone(),
+            session_id: session_id.clone(),
+            logical_turn_id: logical_turn_id.clone(),
+            trace_id: trace_id.clone(),
+            work_id,
+            priority: MASTER_ACTIVE_WORK_DEFAULT_PRIORITY,
+            state: MasterActiveWorkState::Running,
+            safe_point: MasterWorkSafePoint::BeforeProviderRequest,
+            parent_objective_reference: format!(
+                "reason://{}/{}",
+                session_id.as_str(),
+                logical_turn_id.as_str()
+            ),
+            active_task_or_event_cursor: None,
+            permitted_resume_context: vec![
+                "attention_event_id".to_owned(),
+                "changed_task_ids".to_owned(),
+                "decision_kind".to_owned(),
+                "changed_constraints".to_owned(),
+                "resume_from".to_owned(),
+            ],
+            suspend_requested_by: None,
+            attention_resolution: None,
+            updated_at: now_unix_seconds(),
+        };
+        write_master_active_work_unlocked(runtime_home, &checkpoint)
+    })
+}
+
+pub(crate) fn clear_master_active_work_if_current(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+    logical_turn_id: &TurnId,
+) -> Result<(), String> {
+    with_master_active_work_lock(runtime_home, master_agent_id, || {
+        let Some(checkpoint) = load_master_active_work_unlocked(runtime_home, master_agent_id)?
+        else {
+            return Ok(());
+        };
+        if checkpoint.logical_turn_id != *logical_turn_id {
+            return Ok(());
+        }
+        let path = master_active_work_path(runtime_home, master_agent_id);
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    })
+}
+
+fn master_active_work_path(runtime_home: &Path, master_agent_id: &AgentId) -> PathBuf {
+    runtime_home
+        .join("state")
+        .join("master-loop")
+        .join(format!("{}.active-work.json", master_agent_id.as_str()))
+}
+
+fn master_active_work_lock_path(runtime_home: &Path, master_agent_id: &AgentId) -> PathBuf {
+    runtime_home
+        .join("state")
+        .join("master-loop")
+        .join(format!("{}.active-work.lock", master_agent_id.as_str()))
+}
+
+fn with_master_active_work_lock<T>(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+    action: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let lock_path = master_active_work_lock_path(runtime_home, master_agent_id);
+    let parent = lock_path
+        .parent()
+        .ok_or_else(|| "active Master work lock path has no parent".to_owned())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|error| error.to_string())?;
+    FileExt::lock_exclusive(&lock_file).map_err(|error| error.to_string())?;
+    let result = action();
+    let unlock_result = FileExt::unlock(&lock_file).map_err(|error| error.to_string());
+    match (result, unlock_result) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(unlock_error)) => Err(format!(
+            "{error}; additionally failed to unlock active Master work: {unlock_error}"
+        )),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn load_master_active_work(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+) -> Result<Option<MasterActiveWorkCheckpoint>, String> {
+    with_master_active_work_lock(runtime_home, master_agent_id, || {
+        load_master_active_work_unlocked(runtime_home, master_agent_id)
+    })
+}
+
+fn load_master_active_work_unlocked(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+) -> Result<Option<MasterActiveWorkCheckpoint>, String> {
+    let path = master_active_work_path(runtime_home, master_agent_id);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let checkpoint: MasterActiveWorkCheckpoint =
+        serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+    if checkpoint.master_agent_id != *master_agent_id {
+        return Err(format!(
+            "active Master work owner mismatch: expected `{}`, got `{}`",
+            master_agent_id.as_str(),
+            checkpoint.master_agent_id.as_str()
+        ));
+    }
+    Ok(Some(checkpoint))
+}
+
+fn write_master_active_work_unlocked(
+    runtime_home: &Path,
+    checkpoint: &MasterActiveWorkCheckpoint,
+) -> Result<(), String> {
+    let path = master_active_work_path(runtime_home, &checkpoint.master_agent_id);
+    let parent = path
+        .parent()
+        .ok_or_else(|| "active Master work path has no parent".to_owned())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let unique = MASTER_ACTIVE_WORK_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp = path.with_extension(format!("active-work.tmp-{}-{unique}", std::process::id()));
+    let raw = serde_json::to_string_pretty(checkpoint).map_err(|error| error.to_string())?;
+    fs::write(&temp, raw).map_err(|error| error.to_string())?;
+    if let Err(rename_error) = fs::rename(&temp, &path) {
+        let cleanup_result = fs::remove_file(&temp);
+        return match cleanup_result {
+            Ok(()) => Err(rename_error.to_string()),
+            Err(cleanup_error) => Err(format!(
+                "{}; additionally failed to remove temp active-work file `{}`: {}",
+                rename_error,
+                temp.display(),
+                cleanup_error
+            )),
+        };
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn update_master_active_work_safe_point(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+    safe_point: MasterWorkSafePoint,
+) -> Result<MasterActiveWorkCheckpoint, String> {
+    with_master_active_work_lock(runtime_home, master_agent_id, || {
+        let mut checkpoint = load_master_active_work_unlocked(runtime_home, master_agent_id)?
+            .ok_or_else(|| "active Master work is missing".to_owned())?;
+        checkpoint.safe_point = safe_point;
+        checkpoint.updated_at = now_unix_seconds();
+        write_master_active_work_unlocked(runtime_home, &checkpoint)?;
+        Ok(checkpoint)
+    })
+}
+
+pub(crate) fn record_master_active_work_safe_point_if_current(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+    session_id: &SessionId,
+    logical_turn_id: &TurnId,
+    safe_point: MasterWorkSafePoint,
+) -> Result<Option<MasterActiveWorkCheckpoint>, String> {
+    with_master_active_work_lock(runtime_home, master_agent_id, || {
+        let Some(mut checkpoint) = load_master_active_work_unlocked(runtime_home, master_agent_id)?
+        else {
+            return Ok(None);
+        };
+        if checkpoint.session_id != *session_id || checkpoint.logical_turn_id != *logical_turn_id {
+            return Err(format!(
+                "active Master work `{}` does not match live turn `{}/{}`",
+                checkpoint.work_id,
+                session_id.as_str(),
+                logical_turn_id.as_str()
+            ));
+        }
+        checkpoint.safe_point = safe_point;
+        checkpoint.updated_at = now_unix_seconds();
+        write_master_active_work_unlocked(runtime_home, &checkpoint)?;
+        Ok(Some(checkpoint))
+    })
+}
+
+fn validate_master_attention_resolution(
+    resolution: &MasterAttentionResolution,
+) -> Result<(), String> {
+    const FORBIDDEN_FIELDS: [&str; 4] = [
+        "raw_worker_transcript",
+        "raw_control_turn_transcript",
+        "provider_request_payload",
+        "provider_response_payload",
+    ];
+    if resolution
+        .changed_constraints
+        .iter()
+        .any(|value| FORBIDDEN_FIELDS.iter().any(|field| value.contains(field)))
+    {
+        return Err(
+            "Master attention resolution contains forbidden raw transcript/provider payload"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
 pub struct ProductionMasterRunner {
     selected: SelectedAgentConfig,
     runtime_home: PathBuf,
@@ -301,7 +640,17 @@ impl ProductionMasterRunner {
                 state.next_attention_sequence,
             )
             .expect("pending attention is non-empty");
-            let event = state.pending_attention[attention_index].event.clone();
+            let attention = state.pending_attention[attention_index].clone();
+            let busy_decision = self.apply_busy_attention_policy(&attention)?;
+            if matches!(
+                busy_decision,
+                MasterBusyAttentionDecision::Deferred
+                    | MasterBusyAttentionDecision::SuspendRequested
+            ) {
+                self.write_state(&state)?;
+                return Ok(ProductionMasterTickOutcome::Idle);
+            }
+            let event = attention.event.clone();
             let attempt = if state.retry_event_id.as_deref() == Some(event.event_id.as_str()) {
                 state.retry_attempt
             } else {
@@ -318,6 +667,9 @@ impl ProductionMasterRunner {
                     return Err(error);
                 }
             };
+            if matches!(busy_decision, MasterBusyAttentionDecision::Suspended) {
+                self.restore_active_work_after_attention(&attention, outcome.as_ref())?;
+            }
             state.pending_attention.remove(attention_index);
             state.retry_event_id = None;
             state.retry_attempt = 0;
@@ -362,6 +714,119 @@ impl ProductionMasterRunner {
             self.write_state(state)?;
         }
         Ok(())
+    }
+
+    fn apply_busy_attention_policy(
+        &self,
+        attention: &MasterAttentionItem,
+    ) -> Result<MasterBusyAttentionDecision, ProductionMasterRunnerError> {
+        with_master_active_work_lock(&self.runtime_home, &self.master_agent_id, || {
+            let Some(mut active_work) =
+                load_master_active_work_unlocked(&self.runtime_home, &self.master_agent_id)?
+            else {
+                return Ok(MasterBusyAttentionDecision::Proceed);
+            };
+            let attention_reference = MasterAttentionReference {
+                event_id: attention.event.event_id.clone(),
+                task_id: attention.event.task_id.clone(),
+                kind: attention.event.kind.clone(),
+                severity_rank: attention.severity_rank,
+                task_priority: attention.task_priority,
+            };
+            if active_work.state == MasterActiveWorkState::SuspendedByAttention
+                && active_work.suspend_requested_by.as_ref() == Some(&attention_reference)
+            {
+                return Ok(MasterBusyAttentionDecision::Suspended);
+            }
+            let attention_score = master_attention_preemption_score(attention);
+            let active_score =
+                i128::from(active_work.priority.clamp(0, 100)) * MASTER_ACTIVE_WORK_SCORE_WEIGHT;
+            if attention_score <= active_score {
+                return Ok(MasterBusyAttentionDecision::Deferred);
+            }
+            active_work.suspend_requested_by = Some(attention_reference);
+            active_work.attention_resolution = None;
+            active_work.updated_at = now_unix_seconds();
+            if !active_work.safe_point.is_interruptible() {
+                active_work.state = MasterActiveWorkState::SuspendRequested;
+                write_master_active_work_unlocked(&self.runtime_home, &active_work)?;
+                return Ok(MasterBusyAttentionDecision::SuspendRequested);
+            }
+            active_work.state = MasterActiveWorkState::SuspendedByAttention;
+            write_master_active_work_unlocked(&self.runtime_home, &active_work)?;
+            Ok(MasterBusyAttentionDecision::Suspended)
+        })
+        .map_err(ProductionMasterRunnerError::State)
+    }
+
+    fn restore_active_work_after_attention(
+        &self,
+        attention: &MasterAttentionItem,
+        outcome: Option<&ProductionMasterTickOutcome>,
+    ) -> Result<(), ProductionMasterRunnerError> {
+        with_master_active_work_lock(&self.runtime_home, &self.master_agent_id, || {
+            let Some(mut active_work) =
+                load_master_active_work_unlocked(&self.runtime_home, &self.master_agent_id)?
+            else {
+                return Err(
+                    "cannot restore Master work without an active-work checkpoint".to_owned(),
+                );
+            };
+            let reference = active_work.suspend_requested_by.as_ref().ok_or_else(|| {
+                "cannot restore Master work without suspended attention identity".to_owned()
+            })?;
+            if reference.event_id != attention.event.event_id {
+                return Err(format!(
+                    "active Master work is suspended by `{}`, not `{}`",
+                    reference.event_id, attention.event.event_id
+                ));
+            }
+            let (decision_kind, changed_task_ids) = match outcome {
+                Some(ProductionMasterTickOutcome::TaskAdvanced { task_id, .. }) => {
+                    ("task_advanced".to_owned(), vec![task_id.clone()])
+                }
+                Some(ProductionMasterTickOutcome::BlockedObserved { task_id, .. }) => (
+                    "blocked_decision_recorded".to_owned(),
+                    vec![task_id.clone()],
+                ),
+                Some(ProductionMasterTickOutcome::ParentEvaluated {
+                    evaluated_child_task_ids,
+                    ..
+                }) => (
+                    "parent_goal_evaluated".to_owned(),
+                    evaluated_child_task_ids.clone(),
+                ),
+                Some(ProductionMasterTickOutcome::TimerFired { .. }) => {
+                    return Err("timer outcome cannot resolve Task Center attention".to_owned());
+                }
+                Some(ProductionMasterTickOutcome::Idle) | None => {
+                    ("attention_noop".to_owned(), Vec::new())
+                }
+            };
+            let resolution = MasterAttentionResolution {
+                attention_event_id: attention.event.event_id.clone(),
+                decision_kind,
+                changed_task_ids,
+                changed_constraints: Vec::new(),
+                resume_from: MasterWorkReference {
+                    work_id: active_work.work_id.clone(),
+                    session_id: active_work.session_id.clone(),
+                    logical_turn_id: active_work.logical_turn_id.clone(),
+                    trace_id: active_work.trace_id.clone(),
+                },
+            };
+            validate_master_attention_resolution(&resolution)?;
+            active_work.state = MasterActiveWorkState::Restoring;
+            active_work.attention_resolution = Some(resolution);
+            active_work.updated_at = now_unix_seconds();
+            write_master_active_work_unlocked(&self.runtime_home, &active_work)?;
+            active_work.state = MasterActiveWorkState::Running;
+            active_work.safe_point = MasterWorkSafePoint::BetweenRounds;
+            active_work.suspend_requested_by = None;
+            active_work.updated_at = now_unix_seconds();
+            write_master_active_work_unlocked(&self.runtime_home, &active_work)
+        })
+        .map_err(ProductionMasterRunnerError::State)
     }
 
     fn handle_due_timer(
@@ -1103,10 +1568,14 @@ fn bounded_attention_task_priority(priority: i64) -> i64 {
 
 fn master_attention_effective_score(item: &MasterAttentionItem, next_sequence: u64) -> i128 {
     let age = next_sequence.saturating_sub(item.admitted_sequence);
+    master_attention_preemption_score(item)
+        + i128::from(age) * MASTER_ATTENTION_ADMISSION_AGE_WEIGHT
+}
+
+fn master_attention_preemption_score(item: &MasterAttentionItem) -> i128 {
     i128::from(item.severity_rank) * MASTER_ATTENTION_KIND_WEIGHT
         + i128::from(bounded_attention_task_priority(item.task_priority))
             * MASTER_ATTENTION_TASK_PRIORITY_WEIGHT
-        + i128::from(age) * MASTER_ATTENTION_ADMISSION_AGE_WEIGHT
 }
 
 fn highest_priority_attention_index(

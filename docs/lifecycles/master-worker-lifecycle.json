@@ -260,8 +260,7 @@
         "from": "master.busy",
         "to": "master.attention_queued",
         "trigger": "incoming attention priority does not exceed active work priority",
-        "binding_status": "pending",
-        "pending_reason": "active Master work has no persisted priority/checkpoint contract",
+        "binding_status": "bound",
         "positive_test": "production_master_busy_defers_lower_priority_attention",
         "negative_test": "production_master_busy_low_priority_never_cancels_active_work"
       },
@@ -270,8 +269,7 @@
         "from": "master.busy",
         "to": "master.suspended",
         "trigger": "higher-priority attention is admitted and the active turn reaches a safe point",
-        "binding_status": "pending",
-        "pending_reason": "no Master safe-point pause acknowledgement or durable active-work checkpoint",
+        "binding_status": "bound",
         "positive_test": "production_master_busy_high_priority_interrupts_at_safe_point",
         "negative_test": "production_master_busy_never_interrupts_mid_provider_or_mid_tool_effect"
       },
@@ -290,8 +288,7 @@
         "from": "master.deciding",
         "to": "master.restoring",
         "trigger": "persist the Task Center decision and typed AttentionResolution",
-        "binding_status": "pending",
-        "pending_reason": "no checkpoint stack or typed resolution injection exists",
+        "binding_status": "bound",
         "positive_test": "production_master_attention_restores_exact_original_work_identity",
         "negative_test": "production_master_attention_cannot_restore_without_checkpoint"
       },
@@ -301,7 +298,7 @@
         "to": "master.busy",
         "trigger": "resume original work with typed changed-truth summary only",
         "binding_status": "pending",
-        "pending_reason": "no persisted return path exists",
+        "pending_reason": "active-work return identity is persisted, but typed resolution is not yet injected into the original foreground reasoning continuation on the live bridge",
         "positive_test": "production_master_resume_injects_typed_resolution_only",
         "negative_test": "production_master_resume_rejects_raw_worker_or_control_transcript"
       }
@@ -314,11 +311,13 @@
         "work_id",
         "priority",
         "parent_objective_reference",
-        "current_plan",
-        "next_step",
         "active_task_or_event_cursor",
         "safe_point",
         "permitted_resume_context"
+      ],
+      "pending_fields": [
+        "typed current-plan reference",
+        "typed next-step reference"
       ],
       "restore_payload": [
         "attention_id",

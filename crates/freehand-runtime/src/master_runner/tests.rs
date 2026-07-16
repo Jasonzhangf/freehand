@@ -856,6 +856,340 @@ fn master_attention_retry_keeps_same_pending_item() {
 }
 
 #[test]
+fn production_master_busy_defers_lower_priority_attention() {
+    let runtime_home = temp_path("busy-defers-low-priority");
+    bootstrap_runner(&runtime_home);
+    seed_review_ready_task(&runtime_home);
+    register_test_active_master_work(&runtime_home, "busy-parent", "runtime-turn-42");
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("review attention must not interrupt foreground work".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+
+    assert_eq!(
+        runner.run_once().expect("busy tick"),
+        ProductionMasterTickOutcome::Idle
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+    let state = runner.load_state().expect("state");
+    assert_eq!(
+        state.pending_attention.len(),
+        1,
+        "deferred attention must remain durable for later dequeue"
+    );
+    let active = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load active")
+        .expect("active work");
+    assert_eq!(active.state, MasterActiveWorkState::Running);
+    assert!(active.suspend_requested_by.is_none());
+    assert!(active.attention_resolution.is_none());
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_busy_low_priority_never_cancels_active_work() {
+    let runtime_home = temp_path("busy-low-priority-no-cancel");
+    bootstrap_runner(&runtime_home);
+    seed_review_ready_task(&runtime_home);
+    register_test_active_master_work(&runtime_home, "busy-parent", "runtime-turn-43");
+    let original = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load active")
+        .expect("active work");
+    let runner = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubMasterExecutor::new(|_| {
+            Err("executor must not run".to_owned())
+        })),
+    );
+
+    runner.run_once().expect("busy tick");
+    let active = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load active")
+        .expect("active work");
+    assert_eq!(active.work_id, original.work_id);
+    assert_eq!(active.session_id, original.session_id);
+    assert_eq!(active.logical_turn_id, original.logical_turn_id);
+    assert_eq!(active.trace_id, original.trace_id);
+    assert_eq!(active.state, MasterActiveWorkState::Running);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_busy_never_interrupts_mid_provider_or_mid_tool_effect() {
+    let runtime_home = temp_path("busy-mid-effect-no-interrupt");
+    let selected = selected_master_with_workers(&["worker-alpha"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    seed_attention_required_task(&runtime_home, "worker-alpha");
+    register_test_active_master_work(&runtime_home, "busy-parent", "runtime-turn-44");
+    update_master_active_work_safe_point(
+        &runtime_home,
+        &AgentId::new("master"),
+        MasterWorkSafePoint::ProviderInFlight,
+    )
+    .expect("mark provider in-flight");
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("executor must not run before a safe point".to_owned())
+    }));
+    let runner = test_runner_with_selected(runtime_home.clone(), selected, executor.clone());
+
+    assert_eq!(
+        runner.run_once().expect("provider in-flight tick"),
+        ProductionMasterTickOutcome::Idle
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+    let active = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load active")
+        .expect("active work");
+    assert_eq!(active.state, MasterActiveWorkState::SuspendRequested);
+    assert_eq!(active.safe_point, MasterWorkSafePoint::ProviderInFlight);
+    assert!(active.suspend_requested_by.is_some());
+    assert_eq!(
+        runner.load_state().expect("state").pending_attention.len(),
+        1
+    );
+
+    update_master_active_work_safe_point(
+        &runtime_home,
+        &AgentId::new("master"),
+        MasterWorkSafePoint::ToolEffectInFlight,
+    )
+    .expect("mark tool-effect in-flight");
+    assert_eq!(
+        runner.run_once().expect("tool effect tick"),
+        ProductionMasterTickOutcome::Idle
+    );
+    let active = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load active")
+        .expect("active work");
+    assert_eq!(active.state, MasterActiveWorkState::SuspendRequested);
+    assert_eq!(active.safe_point, MasterWorkSafePoint::ToolEffectInFlight);
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_busy_high_priority_interrupts_at_safe_point() {
+    let runtime_home = temp_path("busy-high-priority-safe-point");
+    let selected = selected_master_with_workers(&["worker-alpha"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    let task_id = seed_attention_required_task(&runtime_home, "worker-alpha");
+    register_test_active_master_work(&runtime_home, "busy-parent", "runtime-turn-45");
+    update_master_active_work_safe_point(
+        &runtime_home,
+        &AgentId::new("master"),
+        MasterWorkSafePoint::BeforeToolExecution,
+    )
+    .expect("mark safe point");
+    let action_task_id = task_id.clone();
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        let active = load_master_active_work(&request.runtime_home, &AgentId::new("master"))
+            .map_err(to_string)?
+            .expect("active work");
+        assert_eq!(active.state, MasterActiveWorkState::SuspendedByAttention);
+        assert_eq!(active.logical_turn_id.as_str(), "runtime-turn-45");
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .append_task(TaskAppendRequest {
+                task_id: action_task_id.clone(),
+                note: "attention_resolution: safe-point interruption handled".to_owned(),
+                actor: test_actor("master"),
+                watermark: test_watermark("busy-attention-append"),
+            })
+            .map_err(to_string)?;
+        runtime
+            .assign_task(freehand_task::TaskAssignRequest {
+                task_id: action_task_id.clone(),
+                agent_id: AgentId::new("worker-alpha"),
+                actor: test_actor("master"),
+                watermark: test_watermark("busy-attention-reassign"),
+            })
+            .map_err(to_string)?;
+        Ok("safe-point attention handled".to_owned())
+    }));
+    let runner = test_runner_with_selected(runtime_home.clone(), selected, executor.clone());
+
+    assert!(matches!(
+        runner.run_once().expect("safe-point interrupt tick"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            from: TaskStatus::Interrupted,
+            to: TaskStatus::Assigned,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    let active = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load active")
+        .expect("active work");
+    assert_eq!(active.state, MasterActiveWorkState::Running);
+    assert_eq!(active.safe_point, MasterWorkSafePoint::BetweenRounds);
+    assert!(active.suspend_requested_by.is_none());
+    assert_eq!(
+        active
+            .attention_resolution
+            .as_ref()
+            .expect("resolution")
+            .decision_kind,
+        "task_advanced"
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_attention_restores_exact_original_work_identity() {
+    let runtime_home = temp_path("busy-restore-identity");
+    let selected = selected_master_with_workers(&["worker-alpha"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    let task_id = seed_attention_required_task(&runtime_home, "worker-alpha");
+    register_test_active_master_work(&runtime_home, "busy-parent-identity", "runtime-turn-46");
+    update_master_active_work_safe_point(
+        &runtime_home,
+        &AgentId::new("master"),
+        MasterWorkSafePoint::BeforeTerminalPersistence,
+    )
+    .expect("mark terminal safe point");
+    let original = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load active")
+        .expect("active work");
+    let action_task_id = task_id.clone();
+    let runner = test_runner_with_selected(
+        runtime_home.clone(),
+        selected,
+        Arc::new(StubMasterExecutor::new(move |request| {
+            let runtime = TaskRuntime::boot(&request.runtime_home, AgentId::new("master"))
+                .map_err(to_string)?;
+            runtime
+                .append_task(TaskAppendRequest {
+                    task_id: action_task_id.clone(),
+                    note: "attention_resolution: identity preserved".to_owned(),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("busy-identity-append"),
+                })
+                .map_err(to_string)?;
+            runtime
+                .assign_task(freehand_task::TaskAssignRequest {
+                    task_id: action_task_id.clone(),
+                    agent_id: AgentId::new("worker-alpha"),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("busy-identity-reassign"),
+                })
+                .map_err(to_string)?;
+            Ok("identity restored".to_owned())
+        })),
+    );
+
+    runner.run_once().expect("safe-point interrupt");
+    let active = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load active")
+        .expect("active work");
+    assert_eq!(active.work_id, original.work_id);
+    assert_eq!(active.session_id, original.session_id);
+    assert_eq!(active.logical_turn_id, original.logical_turn_id);
+    assert_eq!(active.trace_id, original.trace_id);
+    let resolution = active.attention_resolution.expect("resolution");
+    assert_eq!(resolution.resume_from.work_id, original.work_id);
+    assert_eq!(resolution.resume_from.session_id, original.session_id);
+    assert_eq!(
+        resolution.resume_from.logical_turn_id,
+        original.logical_turn_id
+    );
+    assert_eq!(resolution.resume_from.trace_id, original.trace_id);
+    assert_eq!(resolution.changed_task_ids, vec![task_id]);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_attention_cannot_restore_without_checkpoint() {
+    let runtime_home = temp_path("busy-restore-missing-checkpoint");
+    let selected = selected_master_with_workers(&["worker-alpha"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    let task_id = seed_attention_required_task(&runtime_home, "worker-alpha");
+    register_test_active_master_work(&runtime_home, "busy-parent-missing", "runtime-turn-47");
+    update_master_active_work_safe_point(
+        &runtime_home,
+        &AgentId::new("master"),
+        MasterWorkSafePoint::BeforeTerminalPersistence,
+    )
+    .expect("mark terminal safe point");
+    let action_task_id = task_id.clone();
+    let runner = test_runner_with_selected(
+        runtime_home.clone(),
+        selected,
+        Arc::new(StubMasterExecutor::new(move |request| {
+            clear_master_active_work_if_current(
+                &request.runtime_home,
+                &AgentId::new("master"),
+                &TurnId::new("runtime-turn-47"),
+            )
+            .map_err(to_string)?;
+            let runtime = TaskRuntime::boot(&request.runtime_home, AgentId::new("master"))
+                .map_err(to_string)?;
+            runtime
+                .append_task(TaskAppendRequest {
+                    task_id: action_task_id.clone(),
+                    note: "attention_resolution: checkpoint removed".to_owned(),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("busy-missing-checkpoint-append"),
+                })
+                .map_err(to_string)?;
+            runtime
+                .assign_task(freehand_task::TaskAssignRequest {
+                    task_id: action_task_id.clone(),
+                    agent_id: AgentId::new("worker-alpha"),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("busy-missing-checkpoint-reassign"),
+                })
+                .map_err(to_string)?;
+            Ok("checkpoint missing".to_owned())
+        })),
+    );
+
+    let error = runner
+        .run_once()
+        .expect_err("missing active-work checkpoint must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("cannot restore Master work without an active-work checkpoint")
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_resume_rejects_raw_worker_or_control_transcript() {
+    let resolution = MasterAttentionResolution {
+        attention_event_id: "attention-1".to_owned(),
+        decision_kind: "task_advanced".to_owned(),
+        changed_task_ids: vec![TaskId::new("task-1")],
+        changed_constraints: vec!["raw_worker_transcript: hidden worker text".to_owned()],
+        resume_from: MasterWorkReference {
+            work_id: "work-1".to_owned(),
+            session_id: SessionId::new("session-1"),
+            logical_turn_id: TurnId::new("runtime-turn-1"),
+            trace_id: TraceId::new("runtime-trace-1"),
+        },
+    };
+    let error = validate_master_attention_resolution(&resolution)
+        .expect_err("raw worker transcript must be rejected");
+    assert!(error.contains("forbidden raw transcript/provider payload"));
+
+    let provider_payload_resolution = MasterAttentionResolution {
+        changed_constraints: vec!["provider_request_payload={...}".to_owned()],
+        ..resolution
+    };
+    let error = validate_master_attention_resolution(&provider_payload_resolution)
+        .expect_err("provider payload must be rejected");
+    assert!(error.contains("forbidden raw transcript/provider payload"));
+}
+
+#[test]
 fn production_master_loop_retries_executor_failure_and_closes_same_event() {
     let runtime_home = temp_path("loop-executor-retry");
     bootstrap_runner(&runtime_home);
@@ -1766,6 +2100,17 @@ fn bootstrap_runner_with_selected(runtime_home: &Path, selected: SelectedAgentCo
         ProductionMasterTickOutcome::Idle
     );
     assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+}
+
+fn register_test_active_master_work(runtime_home: &Path, session_id: &str, turn_id: &str) {
+    register_master_active_work(
+        runtime_home,
+        &AgentId::new("master"),
+        &SessionId::new(session_id),
+        &TurnId::new(turn_id),
+        &TraceId::new(format!("trace-{turn_id}")),
+    )
+    .expect("register active Master work");
 }
 
 fn seed_parent_children(

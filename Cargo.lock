@@ -425,6 +425,7 @@ dependencies = [
  "freehand-task",
  "freehand-tools",
  "freehand-ui-protocol",
+ "fs2",
  "serde",
  "serde_json",
  "thiserror",

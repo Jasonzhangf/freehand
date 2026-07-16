@@ -102,6 +102,15 @@
       "projections": ["timer tool result", "source-session injected prompt turn", "source-less internal master wakeup turn"]
     },
     {
+      "resource_type": "master_work",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "owner_crate": "crates/freehand-runtime",
+      "identity": "master_agent_id plus work_id",
+      "truth_store": "~/.freehand/state/master-loop/<master-agent>.active-work.json guarded by the sibling active-work lock",
+      "operations": ["register", "update_safe_point", "request_suspend", "resolve_attention", "clear"],
+      "projections": ["active Master work identity", "safe-point suspension state", "typed attention resolution and exact return identity"]
+    },
+    {
       "resource_type": "error",
       "owner_feature_id": "error.center",
       "owner_crate": "crates/freehand-control",
@@ -271,6 +280,15 @@
       "source_resource": "timer",
       "target_resource": "turn",
       "effect": "inject a source-backed due timer's persisted prompt as a new turn in its original session, or execute a source-less timer as an internal wakeup",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "master_work.resolve_attention",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "source_resource": "master_work",
+      "target_resource": "task",
+      "effect": "persist typed attention resolution after an isolated Task Center decision while preserving the exact foreground Master return identity",
       "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
       "binding_status": "bound"
     },
@@ -461,6 +479,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "runtime.master-worker-loop#11e",
+      "operation_id": "master_work.resolve_attention",
+      "source_resource": "master_work",
+      "target_resource": "task",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "call_table_step": "11e",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "symbol_path": "ProductionMasterRunner::restore_active_work_after_attention",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "error.center#04",
       "operation_id": "error.record_metadata",
       "source_resource": "error",
@@ -626,6 +655,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Due timers inject a persisted wakeup prompt as a new source-session turn when source truth exists, or use an internal wakeup turn when source-less."
+    },
+    {
+      "rule_id": "master-work-resolves-task-attention-direct",
+      "source_resource": "master_work",
+      "target_resource": "task",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The Master lifecycle owner may persist only typed changed-task identity and decision kind from an isolated Task Center attention outcome into the active-work return contract."
     },
     {
       "rule_id": "error-records-metadata-direct",
