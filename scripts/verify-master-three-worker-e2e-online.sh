@@ -739,12 +739,9 @@ function masterResponse(body) {
   }
 
   if (!allHaveEvent(body, ids, "TaskReviewSubmitted")) {
-    const task = tasks[state.historyPolls % tasks.length];
-    state.historyPolls += 1;
-    if (state.historyPolls > 45) {
-      throw new Error("worker reviews did not appear within fixture poll budget");
-    }
-    return historyTask(task);
+    return textResponse(waiting(
+      "The first three Worker tasks have been dispatched. Wait for the production Worker and Master lifecycle runners to execute, review, and close them before parent-goal evaluation.",
+    ));
   }
 
   for (const task of tasks) {
@@ -935,6 +932,25 @@ async def main():
             "SubmitUserInput": {"text": prompt, "session_id": session_id}
         })))
         receipt = await recv_until(ws, "three-worker-submit", 420)
+    def collect_dispatch_status(value):
+        statuses = []
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key == "dispatch_status" and isinstance(nested, str):
+                    statuses.append(nested)
+                else:
+                    statuses.extend(collect_dispatch_status(nested))
+        elif isinstance(value, list):
+            for nested in value:
+                statuses.extend(collect_dispatch_status(nested))
+        return statuses
+    receipt_statuses = collect_dispatch_status(receipt)
+    if receipt.get("error"):
+        raise RuntimeError(f"SubmitUserInput receipt failed: {receipt}")
+    if not any(status.startswith("reason_live_turn_completed") for status in receipt_statuses):
+        raise RuntimeError(
+            f"SubmitUserInput receipt did not complete the foreground waiting turn: {receipt}"
+        )
     required_results = [
         "worker_result_alpha",
         "worker_result_beta",

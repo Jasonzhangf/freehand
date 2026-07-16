@@ -100,10 +100,16 @@ rework or more tasks before user-visible completion.
   both reached beta reject/rework, gamma interrupted same-task takeover,
   first evaluation next-round integration, second evaluation final Success,
   and restart-idempotent `final_evaluation_count=1`.
-- The verifier still records an initial foreground `SubmitUserInput` receipt
-  poll-budget failure before background lifecycle completion. Current proof
-  treats that as a verifier/status-projection gap to audit, not hidden product
-  success evidence.
+- The controlled three-Worker verifier now treats initial dispatch as a
+  foreground waiting turn: after the three initial tasks are created/assigned,
+  `SubmitUserInput` must return a completed waiting receipt and the script then
+  observes background Worker/Master lifecycle through ADP truth. The verifier
+  fails if the foreground receipt is an error. Current launchd proof
+  `online-launchd-three-worker-evaluation-1784190586-60111` returned
+  `reason_live_turn_completed`, then reached beta reject/rework, gamma
+  interrupted same-task takeover by worker-alpha, integration next-round
+  closure, final `runtime-turn-3` Success, and restart-idempotent
+  `final_evaluation_count=1`.
 - Full daemon/WebUI/Android online proof for busy-Master preemption remains
   unclaimed.
 

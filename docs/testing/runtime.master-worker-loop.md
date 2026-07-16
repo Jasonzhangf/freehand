@@ -443,6 +443,17 @@ Task Center truth before another execution starts.
   replace the same gamma task assignment with alpha, forces beta reject/rework
   and an integration next round, rejects premature parent success, and checks
   final-evaluation restart idempotency
+- the controlled three-Worker verifier must treat initial dispatch as a
+  foreground waiting turn, not as a busy-polling aggregation turn. After the
+  three initial child tasks are created and assigned, the fixture returns
+  `claim="waiting"`; the script then observes Worker execution, lifecycle
+  review, parent evaluation, and final completion through ADP
+  TaskBoard/TaskHistory/SessionTurns truth. The script fails if the foreground
+  SubmitUserInput receipt is an error or lacks `reason_live_turn_completed`.
+  Current launchd proof session
+  `online-launchd-three-worker-evaluation-1784190586-60111` locked this path
+  with beta reject/rework, gamma same-task takeover, next-round integration,
+  final `runtime-turn-3` Success, and `final_evaluation_count=1`.
 - launchd-managed online proof is landed in
   `scripts/verify-launchd-three-worker-services-online.sh`: it reuses the same
   three-Worker parent-evaluation verifier with Worker start mode set to

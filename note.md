@@ -6392,11 +6392,64 @@ Current real root cause split:
     cleanup residue for label prefix
     `com.freehand.verify.three-worker.1784187532-2390`.
 - remaining:
-  - The verifier still records an initial foreground `SubmitUserInput` receipt
-    poll-budget failure before the background lifecycle finishes; audit whether
-    this is only verifier foreground waiting/status projection or a product
-    observability gap.
+  - The foreground receipt gap was resolved in the next verifier slice: the
+    initial parent turn now returns a completed waiting receipt after dispatch,
+    and background lifecycle completion is observed through ADP truth.
   - Full goal still requires S-profile daemon/WebUI current-session proof,
     busy-Master live preemption proof, real-provider non-fixture
     crash/recovery/takeover proof, and Android true-device proof if native or
     packaged assets change.
+
+# 2026-07-16 Three-Worker foreground waiting verifier closeout
+
+- objective slice:
+  - Align the controlled three-Worker online verifier with production
+    lifecycle semantics: the foreground parent turn acknowledges dispatch and
+    waits; it does not busy-poll child Worker history until a fixture budget
+    fails.
+- implementation:
+  - `scripts/verify-master-three-worker-e2e-online.sh` fixture now returns a
+    `claim="waiting"` response once alpha/beta/gamma are created and assigned
+    but not all review-submitted.
+  - The Python verifier recursively checks the `SubmitUserInput` receipt and
+    fails if it contains `error` or lacks `reason_live_turn_completed`.
+  - Worker review, Master review, next-round integration, final completion,
+    AgentBoard restart, and idempotency remain verified through ADP
+    TaskBoard/TaskHistory/SessionTurns/AgentBoard truth after foreground
+    dispatch.
+- online evidence:
+  - `scripts/verify-launchd-three-worker-services-online.sh` passed.
+  - Session: `online-launchd-three-worker-evaluation-1784190586-60111`.
+  - Evidence dir:
+    `/tmp/freehand-three-worker-home.9OpUCD/.freehand/tmp/three-worker-e2e-20260716T162946-60118`.
+  - Foreground receipt:
+    `reason_live_turn_completed rounds=7 schema_rejections=0 tool_executions=6 restored_closed_turns=0`.
+  - Beta task `task-three-worker-1781784190586-beta` had
+    `TaskReviewRejected` and then a second execution
+    `exec-worker-worker-beta-1784190613898933000-9` before approval/close.
+  - Gamma task `task-three-worker-1781784190586-gamma` had provider 500,
+    `TaskInterrupted`, and same-task takeover by worker-alpha with execution
+    `exec-worker-worker-alpha-1784190719830844000-104`.
+  - Next-round integration task
+    `task-three-worker-1781784190586-integration` closed under worker-alpha.
+  - Parent final turn `runtime-turn-3` reached `Success`.
+  - Restart idempotency: `final_evaluation_count=1`.
+  - Gamma KeepAlive restart: old PID `60815`, new PID `72469`,
+    `restart_count=1`.
+  - Cleanup check for `com.freehand.verify.three-worker.1784190586-60111`
+    returned no launchctl matches.
+- local evidence after the verifier change:
+  - `bash -n scripts/verify-launchd-three-worker-services-online.sh` passed.
+  - `bash -n scripts/verify-master-three-worker-e2e-online.sh` passed.
+  - `cargo fmt --check` passed.
+  - `cargo test -p freehand-runtime master_runner::tests:: -- --nocapture`
+    passed 45/45.
+  - `cargo run -p xtask -- mainlines generate` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining:
+  - This slice closes the verifier foreground receipt gap only. Full goal still
+    requires S-profile daemon/WebUI current-session proof, busy-Master live
+    preemption proof, real-provider non-fixture crash/recovery/takeover proof,
+    and Android true-device proof if native/package assets change.

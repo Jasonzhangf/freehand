@@ -428,6 +428,12 @@ Use this skill for any non-trivial work in this repo.
   a green unit test does not refresh a separately launched executable. Fixture
   decisions must match accepted `review_summary`/TaskHistory truth, not expected
   tokens embedded in task goals, acceptance text, or tool-call arguments.
+- Three-Worker convergence verifier foreground behavior must match product
+  semantics: the initial `SubmitUserInput` turn creates/assigns the first child
+  tasks and returns `claim="waiting"`. It must not busy-poll child review
+  history inside the same foreground turn until a fixture poll budget fails;
+  lifecycle progress is observed afterward through ADP TaskBoard/TaskHistory
+  and parent-evaluation SessionTurns truth.
 - For WebUI multi-round rendering, never collapse `runtime-turn-N` / `runtime-turn-N-rM` into one all-in summary card. Render chronological per-round lifecycle cards, hide duplicate/internal continuation prompts after the first round, mark superseded rounds as continued, and keep the final summary at the bottom terminal row.
 - For WebUI submit/history regressions, composer clearing is not proof of success. Verify the submitted text is immediately visible in the conversation stream, historical cards remain present, the latest card is appended in session order, a live turn with no public rows renders an explicit observable waiting row instead of a blank transcript, and at least two consecutive submits remain visible after later ADP refresh/timer updates.
 - For same-session continuation regressions, UI transcript continuity is not enough. Add a provider-request black-box test proving the follow-up request contains prior user/assistant history from effective persisted turns, then run a real WebUI same-session follow-up prompt on S profile and verify the second answer can use first-turn-only context plus ADP reports both turn ids.

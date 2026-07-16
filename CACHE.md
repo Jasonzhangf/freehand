@@ -1,5 +1,11 @@
 # CACHE
 
+- Current three-Worker foreground waiting verifier closeout:
+  - Marker: `three-worker-foreground-waiting-receipt-closeout-20260716`.
+  - The controlled three-Worker verifier now treats the initial `SubmitUserInput` turn as dispatch acknowledgement only: after the first three child tasks are created/assigned, the fixture returns `claim="waiting"` and the script observes Worker execution, Master review, next-round evaluation, and final completion through ADP TaskBoard/TaskHistory/SessionTurns truth.
+  - Current launchd proof passed for session `online-launchd-three-worker-evaluation-1784190586-60111`: foreground receipt contained `reason_live_turn_completed rounds=7`, beta had `TaskReviewRejected` then a second execution, gamma had provider 500 -> `TaskInterrupted` then same-task takeover by worker-alpha, integration next-round task closed, final `runtime-turn-3` was `Success`, and restart idempotency kept `final_evaluation_count=1`.
+  - Evidence dir: `/tmp/freehand-three-worker-home.9OpUCD/.freehand/tmp/three-worker-e2e-20260716T162946-60118`. Cleanup check for `com.freehand.verify.three-worker.1784190586-60111` returned no launchctl matches.
+
 - Current parent-goal turn-start ledger closeout:
   - Marker: `parent-goal-turn-start-ledger-online-closeout-20260716`.
   - Parent evaluation now recovers the original first-round operator objective through `ReasonPersistence::restore_turn_start_snapshots`, which reads authoritative reason-ledger `TurnStarted` truth and honors rollback markers. UI/effective repaired-round snapshots are no longer parent-goal truth.
