@@ -316,6 +316,13 @@ pub enum ExecutionFactKind {
         reason: String,
         evidence: Vec<String>,
     },
+    AttentionRequired {
+        severity: String,
+        change_kind: String,
+        reason: String,
+        evidence: Vec<String>,
+        proposed_adjustment: String,
+    },
     ReviewReady {
         summary: String,
         deliverables: Vec<String>,
@@ -1553,6 +1560,30 @@ impl TaskRuntime {
                     "occurred_at": fact.occurred_at,
                     "reason": reason,
                     "evidence": evidence
+                }),
+            ),
+            ExecutionFactKind::AttentionRequired {
+                severity,
+                change_kind,
+                reason,
+                evidence,
+                proposed_adjustment,
+            } => self.mutate_task(
+                &fact.task_id,
+                "TaskAttentionRequired",
+                Some(TaskStatus::Interrupted),
+                &actor,
+                &fact.watermark,
+                json!({
+                    "execution_id": fact.execution_id,
+                    "agent_id": fact.agent_id.as_str(),
+                    "turn_id": fact.turn_id.as_ref().map(TurnId::as_str),
+                    "occurred_at": fact.occurred_at,
+                    "severity": severity,
+                    "change_kind": change_kind,
+                    "reason": reason,
+                    "evidence": evidence,
+                    "proposed_adjustment": proposed_adjustment
                 }),
             ),
             ExecutionFactKind::ReviewReady {
@@ -3277,6 +3308,7 @@ fn master_visible_event_kind(event_type: &str) -> Option<&'static str> {
         "TaskExecutionRecorded" => Some("progress_reported"),
         "TaskExecutionRecovering" => Some("execution_recovering"),
         "TaskBlocked" => Some("execution_blocked"),
+        "TaskAttentionRequired" => Some("execution_attention_required"),
         "TaskSchedulerTick" => Some("scheduler_tick"),
         "TaskReviewSubmitted" => Some("review_ready"),
         "TaskReviewRejected" => Some("review_rejected"),
@@ -3318,6 +3350,21 @@ fn master_poll_classifications(
                     "inspect_blocker".to_owned(),
                     "split_unblock_task".to_owned(),
                     "ask_user".to_owned(),
+                ],
+            }),
+            "execution_attention_required" => classifications.push(MasterPollClassification {
+                kind: "attention_required".to_owned(),
+                summary: format!(
+                    "task {} requires Master attention for a major change",
+                    event.task_id.as_str()
+                ),
+                task_id: Some(event.task_id.clone()),
+                execution_id: event.execution_id.clone(),
+                agent_id: event.agent_id.clone(),
+                recommended_actions: vec![
+                    "inspect_scope_change".to_owned(),
+                    "adjust_same_task".to_owned(),
+                    "reassign_execution".to_owned(),
                 ],
             }),
             "scheduler_tick" => {
@@ -3608,6 +3655,16 @@ fn project_task_event_to_lifecycle(
                 .get("reason")
                 .and_then(Value::as_str)
                 .unwrap_or("blocked")
+                .to_owned(),
+            None,
+        ),
+        "TaskAttentionRequired" => (
+            AgentLifecycleState::Blocked,
+            "attention_required",
+            payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("major task change requires Master attention")
                 .to_owned(),
             None,
         ),
@@ -4014,6 +4071,19 @@ fn validate_execution_fact(fact: &ExecutionFact) -> Result<(), TaskError> {
             require_text(reason, "reason")?;
             require_non_empty(evidence, "evidence")
         }
+        ExecutionFactKind::AttentionRequired {
+            severity,
+            change_kind,
+            reason,
+            evidence,
+            proposed_adjustment,
+        } => {
+            require_text(severity, "severity")?;
+            require_text(change_kind, "change_kind")?;
+            require_text(reason, "reason")?;
+            require_non_empty(evidence, "evidence")?;
+            require_text(proposed_adjustment, "proposed_adjustment")
+        }
         ExecutionFactKind::ReviewReady {
             summary,
             deliverables,
@@ -4123,6 +4193,7 @@ fn validate_transition(
         ),
         "TaskHeartbeat" => matches!(from, TaskStatus::Running),
         "TaskInterrupted" => matches!(from, TaskStatus::Running),
+        "TaskAttentionRequired" => matches!(from, TaskStatus::Running),
         _ => false,
     };
     if valid {
@@ -6404,6 +6475,115 @@ mod tests {
 
         assert_eq!(board.stale.len(), 1);
         assert_eq!(board.stale[0].task_id, task.task_id);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn execution_fact_attention_required_enters_master_event_inbox_without_blocked_or_review() {
+        let runtime_home = temp_runtime_home("execution-fact-attention-required");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-attention");
+        let execution_id = "exec-worker-attention";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-attention",
+            execution_id,
+            90,
+        );
+
+        let attention = runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-attention")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::AttentionRequired {
+                    severity: "critical".to_owned(),
+                    change_kind: "task_contract_invalidated".to_owned(),
+                    reason: "requested implementation target changed while Worker was executing"
+                        .to_owned(),
+                    evidence: vec![
+                        "new acceptance criteria conflict with current patch".to_owned(),
+                    ],
+                    proposed_adjustment: "ask Master to revise deliverables before continuing"
+                        .to_owned(),
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("attention fact");
+        assert_eq!(attention.task.status, TaskStatus::Interrupted);
+        assert_eq!(attention.event.event_type, "TaskAttentionRequired");
+        assert_eq!(
+            attention.event.payload["severity"],
+            Value::String("critical".to_owned())
+        );
+        assert_eq!(
+            attention.event.payload["change_kind"],
+            Value::String("task_contract_invalidated".to_owned())
+        );
+
+        let history = runtime.task_history(&task.task_id).expect("history");
+        assert!(
+            history
+                .iter()
+                .any(|event| event.event_type == "TaskAttentionRequired")
+        );
+        assert!(
+            !history
+                .iter()
+                .any(|event| event.event_type == "TaskBlocked")
+        );
+        assert!(
+            !history
+                .iter()
+                .any(|event| event.event_type == "TaskReviewSubmitted")
+        );
+
+        let inbox = runtime
+            .query_event_inbox(TaskEventInboxQuery {
+                after_cursor: None,
+                limit: usize::MAX,
+            })
+            .expect("event inbox");
+        let attention_event = inbox
+            .events
+            .iter()
+            .find(|event| event.kind == "execution_attention_required")
+            .expect("attention event");
+        assert_eq!(attention_event.task_id, task.task_id);
+        assert_eq!(attention_event.execution_id.as_deref(), Some(execution_id));
+        assert_eq!(attention_event.agent_id.as_ref(), Some(&worker_id));
+        assert_eq!(
+            attention_event
+                .payload
+                .get("proposed_adjustment")
+                .and_then(Value::as_str),
+            Some("ask Master to revise deliverables before continuing")
+        );
+
+        let poll = runtime
+            .run_master_poll(MasterPollRequest {
+                after_cursor: None,
+                replay_from_start: true,
+                limit: usize::MAX,
+                include_terminal: false,
+                actor: sample_actor(owner_id),
+                watermark: sample_watermark(),
+            })
+            .expect("master poll");
+        assert!(poll.classifications.iter().any(|classification| {
+            classification.kind == "attention_required"
+                && classification.task_id.as_ref() == Some(&task.task_id)
+                && classification
+                    .recommended_actions
+                    .contains(&"adjust_same_task".to_owned())
+        }));
+
         let _ = fs::remove_dir_all(runtime_home);
     }
 

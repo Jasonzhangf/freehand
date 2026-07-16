@@ -343,6 +343,18 @@ Use this skill for any non-trivial work in this repo.
 - For multi-task Phase 1 headless proof, use the S-profile `phase1-foundation-sample` create path first, then restart `com.freehand.daemonS` and run verify mode against the same blocked task, review task, execution, and agent ids. A fresh sample after restart is not recovery proof.
 - For multi-task Phase 2A headless proof, use the S-profile `master-worker-foundation-sample` create path first, then restart `com.freehand.daemonS` and run verify mode against the same task, execution, and worker agent ids. A fresh sample after restart is not recovery proof, and model prose is not task-loop evidence.
 - For multi-task Phase 2B EventInbox/MasterPoll proof, require four-part event cursors that include `event_id`, legacy three-part cursor compatibility tests, `replay_from_start=true` plus omitted limits for full drain, a final owner-backed non-replay cursor reread, and same-cursor verify after `restartS` returning zero events after cursor. Finite page limits or fresh post-restart samples are not cursor recovery proof.
+- For Master lifecycle attention, keep admission and dequeue as separate
+  contracts. Admission must consume EventInbox source order and advance the
+  cursor only after durable `pending_attention` admission or explicit
+  non-attention classification. Dequeue may use severity/priority weighting,
+  but it must be deterministic from persisted admission sequence, not
+  wall-clock timing.
+- Treat `TaskBlocked` as showstopper attention and give bounded task priority a
+  large score contribution, while preserving deterministic aging so continuous
+  high-weight arrivals cannot permanently starve an older lower-priority item.
+  Retryable provider/model failures keep the same pending attention id,
+  admitted sequence, and cursor; stale no-op events are removed and selection
+  continues in the same runner tick.
 - For multi-task Phase 2C worker-control proof, stateful task consequences such as pause, resume, and cancel must route through Task Center first and persist `applied` worker-control events only after the Task Center consequence succeeds. Safe-point requests persist `queued`; status queries persist `observed`. Restart proof must verify the same task, execution, agent, and control ids after `restartS`; a fresh sample is not recovery evidence.
 - For parent-session Master/Worker evaluation, use `task_closed` as the resume
   signal only after every current Task Center child sharing the same
@@ -350,6 +362,10 @@ Use this skill for any non-trivial work in this repo.
   objective history, decomposed task goal/deliverables/acceptance, and accepted
   `TaskReviewSubmitted` truth; persist it in the original parent reason session
   and never expose raw Worker transcripts.
+- Parent-session Master/Worker evaluation must read the original user objective
+  from authoritative reason truth, not UI-coalesced transcript projection.
+  Only the first user turn's first round is parent-goal truth; repair rounds,
+  timer/control prompts, and UI projection coalescing must not replace the goal.
 - Parent evaluation idempotency must consult terminal reason persistence
   carrying a deterministic evaluation marker, not only the Master event cursor
   or loop-state cache. Successful, waiting, and blocked evaluation turns are

@@ -77,5 +77,16 @@ git diff --check
 ## Known Gaps
 
 - WebUI/Android task dashboard and rich worker-control rendering are Phase 2D.
-- Worker execution does not yet consume safe-point queued questions in a real model loop; Phase 2C only persists and exposes the queue.
+- The production Worker runner does not yet acknowledge an in-flight pause at a
+  safe point, stop provider/tool progress, or deterministically re-enter
+  reasoning after `resume`; Task Center pause/resume mutation alone is not a
+  closed execution lifecycle.
+- Required paired red tests are
+  `production_worker_runner_pause_stops_before_submission`,
+  `production_worker_runner_paused_execution_cannot_publish_stale_success`,
+  `production_worker_runner_resume_reenters_reasoning_and_submits_review`, and
+  `production_worker_runner_paused_without_resume_stays_idle`.
+- Worker execution does not yet consume safe-point queued questions,
+  constraints, checkpoint requests, or submission requests in a real model
+  loop; Phase 2C only persists and exposes the queue.
 - Cross-machine worker control is out of scope until node transport is expanded.

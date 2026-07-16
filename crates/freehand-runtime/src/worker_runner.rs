@@ -11,7 +11,7 @@ use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_task::{
     AgentCreateRequest, AgentLifecycleEvent, ExecutionFact, ExecutionFactKind, TaskActor,
     TaskAssignRequest, TaskClaimOutcome, TaskClaimRequest, TaskError, TaskId, TaskListQuery,
-    TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark,
+    TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark, WorkerControlEvent, WorkerControlOp,
 };
 use thiserror::Error;
 
@@ -42,6 +42,12 @@ pub enum ProductionWorkerTickOutcome {
         summary: String,
     },
     Blocked {
+        task_id: TaskId,
+        execution_id: String,
+        turn_id: Option<TurnId>,
+        reason: String,
+    },
+    AttentionRequired {
         task_id: TaskId,
         execution_id: String,
         turn_id: Option<TurnId>,
@@ -131,6 +137,13 @@ pub struct ProductionWorkerRunner {
     executor: Arc<dyn WorkerTurnExecutor>,
 }
 
+#[derive(Debug, Clone)]
+struct SelectedWorkerTask {
+    task: TaskSnapshot,
+    execution_id: String,
+    retry_kind: Option<WorkerRetryKind>,
+}
+
 impl ProductionWorkerRunner {
     pub fn from_default_config(agent_name: &str) -> Result<Self, ProductionWorkerRunnerError> {
         let bootstrap = load_default_runtime_agent(agent_name)?;
@@ -198,23 +211,12 @@ impl ProductionWorkerRunner {
         let task_runtime = Arc::new(self.open_task_center()?);
         self.ensure_worker_registered_in(&task_runtime)?;
         self.record_process_heartbeat_in(&task_runtime)?;
-        let execution_id = next_execution_id(&self.worker_agent_id);
-        let mut retry_kind = None;
-        let mut claim = self.claim_assigned_task(&task_runtime, &execution_id)?;
-        if claim.task.is_none() {
-            retry_kind = self.requeue_retryable_task(&task_runtime)?;
-            if retry_kind.is_some() {
-                claim = self.claim_assigned_task(&task_runtime, &execution_id)?;
-            }
-        }
-        let Some(task) = claim.task else {
+        let Some(selected_task) = self.select_worker_task(&task_runtime)? else {
             return Ok(ProductionWorkerTickOutcome::Idle);
         };
-        let execution_id = claim.execution_id.ok_or_else(|| {
-            ProductionWorkerRunnerError::TaskCenter(
-                "claimed task did not return an execution id".to_owned(),
-            )
-        })?;
+        let task = selected_task.task;
+        let execution_id = selected_task.execution_id;
+        let retry_kind = selected_task.retry_kind;
 
         let Some(target_cwd) = task.target_cwd.as_deref() else {
             return self.report_blocked(
@@ -291,6 +293,14 @@ impl ProductionWorkerRunner {
                     summary,
                 })
             }
+            Ok(execution) if execution.status == TerminalStatus::Interrupted => self
+                .report_attention_required(
+                    &task_runtime,
+                    &task,
+                    &execution_id,
+                    Some(execution.turn_id),
+                    execution.summary,
+                ),
             Ok(execution) => self.report_blocked(
                 &task_runtime,
                 &task,
@@ -347,6 +357,63 @@ impl ProductionWorkerRunner {
                 watermark: worker_watermark(execution_id, "claim"),
             })
             .map_err(task_center_error)
+    }
+
+    fn select_worker_task(
+        &self,
+        task_runtime: &TaskRuntime,
+    ) -> Result<Option<SelectedWorkerTask>, ProductionWorkerRunnerError> {
+        let execution_id = next_execution_id(&self.worker_agent_id);
+        let mut retry_kind = None;
+        let mut claim = self.claim_assigned_task(task_runtime, &execution_id)?;
+        if claim.task.is_none() {
+            retry_kind = self.requeue_retryable_task(task_runtime)?;
+            if retry_kind.is_some() {
+                claim = self.claim_assigned_task(task_runtime, &execution_id)?;
+            }
+        }
+        if let Some(task) = claim.task {
+            let execution_id = claim.execution_id.ok_or_else(|| {
+                ProductionWorkerRunnerError::TaskCenter(
+                    "claimed task did not return an execution id".to_owned(),
+                )
+            })?;
+            return Ok(Some(SelectedWorkerTask {
+                task,
+                execution_id,
+                retry_kind,
+            }));
+        }
+        self.resumed_controlled_running_task(task_runtime)
+    }
+
+    fn resumed_controlled_running_task(
+        &self,
+        task_runtime: &TaskRuntime,
+    ) -> Result<Option<SelectedWorkerTask>, ProductionWorkerRunnerError> {
+        let resumed = task_runtime
+            .list_tasks(TaskListQuery {
+                status: Some(TaskStatus::Running),
+                assignee: Some(self.worker_agent_id.clone()),
+            })
+            .map_err(task_center_error)?
+            .into_iter()
+            .find_map(|task| {
+                let execution_id = task.active_execution_id.clone()?;
+                let controls = task_runtime
+                    .query_worker_control_events(&task.task_id, &execution_id)
+                    .ok()?;
+                latest_task_state_worker_control(&controls)
+                    .is_some_and(|event| {
+                        event.op == WorkerControlOp::Resume && event.status == "applied"
+                    })
+                    .then_some((task, execution_id))
+            });
+        Ok(resumed.map(|(task, execution_id)| SelectedWorkerTask {
+            task,
+            execution_id,
+            retry_kind: None,
+        }))
     }
 
     fn requeue_retryable_task(
@@ -497,6 +564,39 @@ impl ProductionWorkerRunner {
             reason,
         })
     }
+
+    fn report_attention_required(
+        &self,
+        task_runtime: &TaskRuntime,
+        task: &TaskSnapshot,
+        execution_id: &str,
+        turn_id: Option<TurnId>,
+        reason: String,
+    ) -> Result<ProductionWorkerTickOutcome, ProductionWorkerRunnerError> {
+        task_runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: self.worker_agent_id.clone(),
+                turn_id: turn_id.clone(),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::AttentionRequired {
+                    severity: "critical".to_owned(),
+                    change_kind: "task_contract_invalidated".to_owned(),
+                    reason: reason.clone(),
+                    evidence: vec![reason.clone()],
+                    proposed_adjustment: "Master must review the changed task contract and adjust, reassign, or replace the current work before the Worker continues".to_owned(),
+                },
+                watermark: worker_watermark(execution_id, "attention_required"),
+            })
+            .map_err(task_center_error)?;
+        Ok(ProductionWorkerTickOutcome::AttentionRequired {
+            task_id: task.task_id.clone(),
+            execution_id: execution_id.to_owned(),
+            turn_id,
+            reason,
+        })
+    }
 }
 
 fn worker_execution_error_is_retryable_system_failure(reason: &str) -> bool {
@@ -522,6 +622,15 @@ fn worker_execution_error_is_retryable_system_failure(reason: &str) -> bool {
         || reason.contains("openai_http_status_503")
         || reason.contains("openai_http_status_504")
         || reason.contains("openai_http_status_5")
+}
+
+fn latest_task_state_worker_control(events: &[WorkerControlEvent]) -> Option<&WorkerControlEvent> {
+    events.iter().rev().find(|event| {
+        matches!(
+            event.op,
+            WorkerControlOp::Pause | WorkerControlOp::Resume | WorkerControlOp::Cancel
+        )
+    })
 }
 
 fn worker_live_request(

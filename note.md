@@ -6165,3 +6165,58 @@ Current real root cause split:
   - there was no current persisted `timer` tool activity available for a WebUI screenshot. Unit/protocol semantics are green, but timer-card browser-visible proof is not claimed.
   - `verify-timer-tool-online.sh` created and completed timer `timer-online-proof-1784133281-65729`, but its mock did not observe the due-turn provider request before the script timed out; the due turn later appeared in the source session and timer state was completed/fired once. Treat this as a verifier timing/route gap, not a green timer online closeout.
   - Android device `100.104.163.65:5555` was online but locked/dozing; `FREEHAND_ANDROID_SKIP_INSTALL=1 verify-device-ui.sh` was blocked at `artifacts/android-device/20260715T164610Z-100.104.163.65_5555-52926`. No current true-device claim.
+# 2026-07-16 Master/Worker standalone lifecycle correction
+
+- Jason corrected the acceptance order: Worker lifecycle and Master lifecycle
+  must each close independently before integration; one three-Worker E2E cannot
+  stand in for two state-machine proofs.
+- Source trace confirmed Worker reject/reason-again, blocked-without-auto-retry,
+  interrupted/reassign, review submit, approve, and close are bound.
+- Confirmed Worker pause/resume gap: `WorkerControl::Resume` writes
+  `TaskStatus::Running`, while `ProductionWorkerRunner::run_once` only claims
+  `Assigned`; no production safe-point acknowledgement or deterministic
+  reasoning re-entry exists.
+- Confirmed major-change gap: `ExecutionFactKind` has no distinct typed
+  attention/scope-change fact, so Master cannot distinguish task-contract
+  invalidation from generic interruption/blockage.
+- Confirmed Master busy gap: EventInbox is source-ordered and synchronous;
+  there is no durable priority queue, active-work checkpoint, safe-point
+  preemption, typed resolution, or exact context return path.
+- Added the code-independent contract and review surface at
+  `docs/lifecycles/master-worker-lifecycle.json` and
+  `docs/wiki/master-worker-lifecycle.md`; pending edges remain explicitly
+  pending and are not implementation claims.
+
+# 2026-07-16 Master idle attention admission/dequeue contract
+
+- Jason corrected the queue contract:
+  - EventInbox admission and attention dequeue are different operations.
+  - Admission remains strict source order and advances the durable cursor only
+    after admission/classification.
+  - Dequeue gives large weight to blocked showstoppers, critical/high semantic
+    changes, and bounded task priority.
+  - Admission-sequence aging, not wall-clock time, prevents low-priority
+    starvation.
+- Implementation:
+  - `MasterLoopState` persists `pending_attention` and
+    `next_attention_sequence`.
+  - dequeue score is `severity_rank * 10000 +
+    clamp(task_priority,-100,100) * 100 + admission_age * 5000`.
+  - retryable failure keeps the same pending event/cursor/admission identity.
+  - stale no-op attention is removed and selection continues in the same tick.
+  - parent evaluation now reads only the first round of the first persisted
+    user turn from authoritative reason truth; UI-coalesced repair/control
+    rounds cannot replace the overall goal.
+- Evidence so far:
+  - `cargo test -p freehand-runtime master_attention -- --nocapture`: 4 passed.
+  - `cargo test -p freehand-runtime master_runner::tests:: -- --nocapture`: 31 passed.
+  - `cargo test -p freehand-runtime production_worker_runner -- --nocapture`: 18 passed.
+  - `cargo test -p freehand-task attention_required -- --nocapture`: 1 passed.
+  - `cargo test -p freehand-task master_poll -- --nocapture`: 2 passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate/check`,
+    `cargo run -p xtask -- gates check`, JSON parse checks, and
+    `git diff --check`: passed.
+- Remaining:
+  - busy-Master safe-point suspension/checkpoint/resolution/return path remains
+    pending; idle weighted attention does not close that lifecycle.
+  - MemoryPalace re-mine/search still required.

@@ -4,6 +4,8 @@
 - owner: `crates/freehand-runtime`
 - host: `apps/freehand-daemon`
 - resource map: `docs/resource-maps/core.json`
+- lifecycle manifest: `docs/lifecycles/master-worker-lifecycle.json`
+- lifecycle review: `docs/wiki/master-worker-lifecycle.md`
 - resource operation coverage:
   - `timer.fire_master_wakeup`
   - `agent.heartbeat`
@@ -54,6 +56,12 @@
 16. Retryable Master decision failures keep the same durable event cursor,
     back off, and retry without terminating the daemon. Task Center/state
     persistence failures remain fatal because owner truth is unavailable.
+17. Master attention processing is two-phase. Admission consumes EventInbox in
+    source order and advances the cursor only after durable admission or
+    explicit non-attention classification. Dequeue then uses deterministic
+    weighted aging: blocked showstoppers and critical/high-priority work carry
+    large weight, while admission sequence aging prevents low-priority
+    starvation without wall-clock timing.
 
 ## Current-Configuration Closure Matrix
 
@@ -174,6 +182,19 @@ Task Center truth before another execution starts.
   `Rejected` or `Approved -> Closed`.
 - Master lifecycle cursor advances only after the matching task decision is
   accepted.
+- Master attention admission preserves EventInbox source order even when the
+  next processed item is selected by higher severity/task priority.
+- Master attention dequeue gives large weight to critical major-change
+  attention, `TaskBlocked` showstoppers, and bounded task priority.
+- Master attention dequeue uses admission-sequence aging so an old
+  low-priority item eventually beats fresh high-weight arrivals without using
+  time or sleeps.
+- Retryable Master lifecycle failure preserves the same pending attention item,
+  admitted sequence, and cursor; stale no-op events are removed and selection
+  continues in the same runner tick.
+- Parent overall-goal evaluation reads the original persisted first user turn
+  from reason truth, not the UI coalesced transcript projection; repair rounds
+  and control text cannot replace the user objective.
 - review-ready decision boundary closes only after the target task reaches
   `Rejected` or `Closed`; `Approved` alone remains incomplete and retryable.
 - blocked decision boundary closes after the target task records a new
@@ -304,6 +325,11 @@ Task Center truth before another execution starts.
   including Anthropic and OpenAI-compatible request/stream/status provider
   errors mapping to retryable `TaskInterrupted`
 - deterministic Master executor drives:
+  - attention admission/dequeue contract:
+    `master_attention_admission_preserves_event_inbox_order`,
+    `master_attention_dequeue_gives_blocked_and_task_priority_large_weight`,
+    `master_attention_dequeue_ages_old_low_priority_item_without_starvation`,
+    and `master_attention_retry_keeps_same_pending_item`
   - review approve and close
   - review rejection with persisted requirements
   - blocked decision persisted through `task(op="append")`
@@ -409,6 +435,22 @@ Task Center truth before another execution starts.
 - UI projection changes
 - remote node transport; first production slice uses the shared local Task Center runtime home
 - real-provider recovery remains outside the controlled fixture proof
+
+## Standalone Lifecycle Gaps
+
+- Master idle attention admission/dequeue is now code-bound for source-ordered
+  admission, weighted severity/task-priority dequeue, deterministic aging,
+  retry preservation, and stale no-op removal.
+- A busy Master has no persisted active-work identity, safe-point checkpoint,
+  suspended state, isolated attention resolution, or exact return path.
+- Required paired red tests are
+  `production_master_busy_defers_lower_priority_attention`,
+  `production_master_busy_high_priority_interrupts_at_safe_point`,
+  `production_master_attention_restores_exact_original_work_identity`, and
+  `production_master_resume_rejects_raw_worker_or_control_transcript`.
+- These gaps block Master standalone closure and therefore block Master–Worker
+  integration acceptance. Existing three-Worker E2E evidence does not close
+  them.
 
 ## Definition Of Done
 

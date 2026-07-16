@@ -562,6 +562,300 @@ fn production_master_runner_can_take_over_interrupted_task_to_another_worker() {
 }
 
 #[test]
+fn production_master_runner_handles_worker_attention_as_same_task_adjustment() {
+    let runtime_home = temp_path("worker-attention-adjustment");
+    let selected = selected_master_with_workers(&["worker-alpha"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    let task_id = seed_attention_required_task(&runtime_home, "worker-alpha");
+    let action_task_id = task_id.clone();
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        assert!(request.prompt.contains("execution_attention_required"));
+        assert!(request.prompt.contains("\"severity\": \"critical\""));
+        assert!(
+            request
+                .prompt
+                .contains("\"change_kind\": \"task_contract_invalidated\"")
+        );
+        assert!(
+            request
+                .prompt
+                .contains("do not bury it as a generic blocker")
+        );
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .append_task(TaskAppendRequest {
+                task_id: action_task_id.clone(),
+                note: "attention_resolution: revise acceptance before continuing".to_owned(),
+                actor: test_actor("master"),
+                watermark: test_watermark("attention-adjustment"),
+            })
+            .map_err(to_string)?;
+        runtime
+            .assign_task(freehand_task::TaskAssignRequest {
+                task_id: action_task_id.clone(),
+                agent_id: AgentId::new("worker-alpha"),
+                actor: test_actor("master"),
+                watermark: test_watermark("attention-reassign"),
+            })
+            .map_err(to_string)?;
+        Ok("adjusted and reassigned the same task".to_owned())
+    }));
+    let runner = test_runner_with_selected(runtime_home.clone(), selected, executor);
+
+    assert!(matches!(
+        runner.run_once().expect("attention decision"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            from: TaskStatus::Interrupted,
+            to: TaskStatus::Assigned,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    let history = runtime.task_history(&task_id).expect("history");
+    assert!(
+        history
+            .iter()
+            .any(|event| event.event_type == "TaskAttentionRequired")
+    );
+    assert!(history.iter().any(|event| {
+        event.event_type == "TaskProgressed"
+            && event.payload["note"]
+                .as_str()
+                .is_some_and(|note| note.starts_with("attention_resolution:"))
+    }));
+    assert_eq!(
+        history
+            .iter()
+            .filter(|event| event.event_type == "TaskCreated")
+            .count(),
+        1
+    );
+    assert!(
+        !history
+            .iter()
+            .any(|event| event.event_type == "TaskBlocked")
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_idle_consumes_highest_priority_attention() {
+    let runtime_home = temp_path("idle-priority-attention");
+    let selected = selected_master_with_workers(&["worker", "worker-alpha"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    let review_task_id = seed_review_ready_task(&runtime_home);
+    let attention_task_id = seed_attention_required_task(&runtime_home, "worker-alpha");
+    let action_attention_task_id = attention_task_id.clone();
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        assert!(request.prompt.contains("execution_attention_required"));
+        assert!(request.prompt.contains(action_attention_task_id.as_str()));
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .append_task(TaskAppendRequest {
+                task_id: action_attention_task_id.clone(),
+                note: "attention_resolution: prioritized before review".to_owned(),
+                actor: test_actor("master"),
+                watermark: test_watermark("idle-priority-attention"),
+            })
+            .map_err(to_string)?;
+        runtime
+            .assign_task(freehand_task::TaskAssignRequest {
+                task_id: action_attention_task_id.clone(),
+                agent_id: AgentId::new("worker-alpha"),
+                actor: test_actor("master"),
+                watermark: test_watermark("idle-priority-reassign"),
+            })
+            .map_err(to_string)?;
+        Ok("priority attention handled".to_owned())
+    }));
+    let runner = test_runner_with_selected(runtime_home.clone(), selected, executor);
+
+    assert!(matches!(
+        runner.run_once().expect("priority attention tick"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            from: TaskStatus::Interrupted,
+            to: TaskStatus::Assigned,
+            ..
+        } if outcome_task_id == &attention_task_id
+    ));
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    assert_eq!(
+        runtime
+            .query_task(&review_task_id)
+            .expect("review task")
+            .status,
+        TaskStatus::ReviewSubmitted
+    );
+    assert_eq!(
+        runtime
+            .query_task(&attention_task_id)
+            .expect("attention task")
+            .status,
+        TaskStatus::Assigned
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn master_attention_dequeue_gives_blocked_and_task_priority_large_weight() {
+    let ordinary_review = test_attention_item("review", "review_ready", None, 100, 0);
+    let fresh_critical_attention = test_attention_item(
+        "critical",
+        "execution_attention_required",
+        Some("critical"),
+        0,
+        1,
+    );
+    assert_eq!(
+        highest_priority_attention_index(&[ordinary_review, fresh_critical_attention], 2),
+        Some(1),
+        "fresh critical attention must outrank ordinary review work"
+    );
+
+    let high_priority_review = test_attention_item("review-high", "review_ready", None, 100, 0);
+    let ordinary_blocked = test_attention_item("blocked", "execution_blocked", None, 0, 1);
+    assert_eq!(
+        highest_priority_attention_index(&[high_priority_review, ordinary_blocked], 2),
+        Some(1),
+        "a fresh blocked showstopper must outrank an ordinary review even when the review task priority is high"
+    );
+
+    let low_priority_blocked =
+        test_attention_item("blocked-low", "execution_blocked", None, -100, 0);
+    let high_priority_blocked =
+        test_attention_item("blocked-high", "execution_blocked", None, 100, 1);
+    assert_eq!(
+        highest_priority_attention_index(&[low_priority_blocked, high_priority_blocked], 2),
+        Some(1),
+        "task priority must materially order otherwise-equivalent showstopper attention"
+    );
+}
+
+#[test]
+fn master_attention_dequeue_ages_old_low_priority_item_without_starvation() {
+    let old_low_priority_review = test_attention_item("review-old", "review_ready", None, -100, 0);
+    let fresh_critical_attention = test_attention_item(
+        "critical-fresh",
+        "execution_attention_required",
+        Some("critical"),
+        100,
+        110,
+    );
+
+    assert_eq!(
+        highest_priority_attention_index(&[old_low_priority_review, fresh_critical_attention], 111,),
+        Some(0),
+        "deterministic admission aging must eventually surface old low-priority work even under fresh critical arrivals"
+    );
+}
+
+#[test]
+fn master_attention_admission_preserves_event_inbox_order() {
+    let runtime_home = temp_path("attention-admission-order");
+    let selected = selected_master_with_workers(&["worker", "worker-alpha"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    seed_review_ready_task(&runtime_home);
+    seed_attention_required_task(&runtime_home, "worker-alpha");
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("hold selected attention for state inspection".to_owned())
+    }));
+    let runner = test_runner_with_selected(runtime_home.clone(), selected, executor);
+    let task_runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    let before = runner.load_state().expect("state before admission");
+    let inbox = task_runtime
+        .query_event_inbox(freehand_task::TaskEventInboxQuery {
+            after_cursor: before.cursor,
+            limit: usize::MAX,
+        })
+        .expect("event inbox");
+    let expected_event_ids = inbox
+        .events
+        .iter()
+        .filter(|event| master_event_requires_attention(&event.kind))
+        .map(|event| event.event_id.clone())
+        .collect::<Vec<_>>();
+
+    assert!(matches!(
+        runner
+            .run_once()
+            .expect_err("selected attention is intentionally held"),
+        ProductionMasterRunnerError::Execution(_)
+    ));
+    let admitted = runner.load_state().expect("admitted state");
+    assert_eq!(
+        admitted
+            .pending_attention
+            .iter()
+            .map(|item| item.event.event_id.clone())
+            .collect::<Vec<_>>(),
+        expected_event_ids,
+        "priority selection must not reorder durable EventInbox admission"
+    );
+    assert_eq!(
+        admitted
+            .pending_attention
+            .iter()
+            .map(|item| item.admitted_sequence)
+            .collect::<Vec<_>>(),
+        (0..admitted.pending_attention.len() as u64).collect::<Vec<_>>()
+    );
+    assert_eq!(admitted.cursor, inbox.next_cursor);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn master_attention_retry_keeps_same_pending_item() {
+    let runtime_home = temp_path("attention-retry-same-item");
+    bootstrap_runner(&runtime_home);
+    seed_review_ready_task(&runtime_home);
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("retryable provider failure".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor);
+
+    assert!(matches!(
+        runner.run_once().expect_err("first retryable failure"),
+        ProductionMasterRunnerError::Execution(_)
+    ));
+    let after_first = runner.load_state().expect("state after first failure");
+    assert_eq!(after_first.pending_attention.len(), 1);
+    let first_event_id = after_first.pending_attention[0].event.event_id.clone();
+    let first_admitted_sequence = after_first.pending_attention[0].admitted_sequence;
+    let first_cursor = after_first.cursor.clone();
+    let first_next_sequence = after_first.next_attention_sequence;
+
+    assert!(matches!(
+        runner.run_once().expect_err("second retryable failure"),
+        ProductionMasterRunnerError::Execution(_)
+    ));
+    let after_second = runner.load_state().expect("state after second failure");
+    assert_eq!(after_second.pending_attention.len(), 1);
+    assert_eq!(
+        after_second.pending_attention[0].event.event_id,
+        first_event_id
+    );
+    assert_eq!(
+        after_second.pending_attention[0].admitted_sequence,
+        first_admitted_sequence
+    );
+    assert_eq!(after_second.cursor, first_cursor);
+    assert_eq!(
+        after_second.next_attention_sequence, first_next_sequence,
+        "retry must not re-admit or age the same event by duplication"
+    );
+    assert_eq!(after_second.retry_attempt, 2);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn production_master_loop_retries_executor_failure_and_closes_same_event() {
     let runtime_home = temp_path("loop-executor-retry");
     bootstrap_runner(&runtime_home);
@@ -1879,6 +2173,69 @@ fn seed_interrupted_task_with_parent(
     task_id
 }
 
+fn seed_attention_required_task(runtime_home: &Path, worker_id: &str) -> TaskId {
+    let runtime = TaskRuntime::boot(runtime_home, AgentId::new("master")).expect("runtime");
+    runtime
+        .create_agent(AgentCreateRequest {
+            agent_id: AgentId::new(worker_id),
+            capabilities: vec!["workspace".to_owned(), "shell".to_owned()],
+            actor: test_actor("master"),
+            watermark: test_watermark("create-attention-worker"),
+        })
+        .expect("create attention worker");
+    let task_id = TaskId::new(format!("task-attention-{}", now_unix_nanos()));
+    runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(task_id.clone()),
+            title: "attention required task".to_owned(),
+            content: "continue only if the task contract remains valid".to_owned(),
+            goal: "complete after Master validates changed requirements".to_owned(),
+            deliverables: vec!["result.md".to_owned()],
+            acceptance: vec!["same task id is preserved".to_owned()],
+            priority: 95,
+            target_cwd: Some(runtime_home.display().to_string()),
+            dispatch: TaskDispatchRequest::Agent {
+                agent_id: AgentId::new(worker_id),
+            },
+            parent: TaskParentRef {
+                session_id: None,
+                turn_id: Some(TurnId::new("runtime-turn-attention")),
+                trace_id: None,
+            },
+            actor: test_actor("master"),
+            watermark: test_watermark("create-attention-task"),
+        })
+        .expect("create attention task");
+    let execution_id = format!("exec-attention-{}", now_unix_nanos());
+    runtime
+        .claim_next_task(TaskClaimRequest {
+            agent_id: AgentId::new(worker_id),
+            execution_id: execution_id.clone(),
+            ttl_seconds: 300,
+            actor: test_actor(worker_id),
+            watermark: test_watermark("claim-attention-task"),
+        })
+        .expect("claim attention task");
+    runtime
+        .apply_execution_fact(ExecutionFact {
+            execution_id,
+            task_id: task_id.clone(),
+            agent_id: AgentId::new(worker_id),
+            turn_id: Some(TurnId::new("worker-turn-attention")),
+            occurred_at: now_unix_seconds(),
+            kind: ExecutionFactKind::AttentionRequired {
+                severity: "critical".to_owned(),
+                change_kind: "task_contract_invalidated".to_owned(),
+                reason: "new acceptance criteria conflict with current Worker plan".to_owned(),
+                evidence: vec!["acceptance changed after execution started".to_owned()],
+                proposed_adjustment: "revise acceptance and continue same task".to_owned(),
+            },
+            watermark: test_watermark("record-attention"),
+        })
+        .expect("record attention");
+    task_id
+}
+
 fn selected_master() -> SelectedAgentConfig {
     selected_master_with_workers(&["worker"])
 }
@@ -1936,6 +2293,45 @@ fn test_watermark(hook: &str) -> TaskWatermark {
         metadata_id: None,
         hook: Some(hook.to_owned()),
         action_tool_call_id: None,
+    }
+}
+
+fn test_attention_item(
+    event_id: &str,
+    kind: &str,
+    severity: Option<&str>,
+    task_priority: i64,
+    admitted_sequence: u64,
+) -> MasterAttentionItem {
+    MasterAttentionItem {
+        severity_rank: master_attention_severity_rank(&TaskEventInboxEntry {
+            schema_version: 1,
+            cursor: format!("cursor-{event_id}"),
+            event_id: event_id.to_owned(),
+            kind: kind.to_owned(),
+            task_id: TaskId::new(format!("task-{event_id}")),
+            execution_id: None,
+            agent_id: None,
+            created_at: admitted_sequence,
+            payload: severity
+                .map(|severity| serde_json::json!({ "severity": severity }))
+                .unwrap_or(serde_json::Value::Null),
+        }),
+        task_priority,
+        admitted_sequence,
+        event: TaskEventInboxEntry {
+            schema_version: 1,
+            cursor: format!("cursor-{event_id}"),
+            event_id: event_id.to_owned(),
+            kind: kind.to_owned(),
+            task_id: TaskId::new(format!("task-{event_id}")),
+            execution_id: None,
+            agent_id: None,
+            created_at: admitted_sequence,
+            payload: severity
+                .map(|severity| serde_json::json!({ "severity": severity }))
+                .unwrap_or(serde_json::Value::Null),
+        },
     }
 }
 

@@ -1,0 +1,345 @@
+{
+  "schema_version": 1,
+  "lifecycle_id": "freehand.master-worker-lifecycle.v1",
+  "owner_features": [
+    "task.orchestration",
+    "worker.control",
+    "runtime.master-worker-loop"
+  ],
+  "canonical_docs": [
+    "docs/design/master-worker-task-state-machine-phase1.md",
+    "docs/function-maps/task.orchestration.md",
+    "docs/function-maps/worker.control.md",
+    "docs/function-maps/runtime.master-worker-loop.md",
+    "docs/testing/task.orchestration.md",
+    "docs/testing/worker.control.md",
+    "docs/testing/runtime.master-worker-loop.md",
+    "docs/wiki/master-worker-lifecycle.md"
+  ],
+  "worker": {
+    "initial_node": "worker.assigned",
+    "nodes": [
+      {
+        "node_id": "worker.assigned",
+        "owner_feature": "task.orchestration",
+        "truth": "TaskStatus::Assigned"
+      },
+      {
+        "node_id": "worker.running",
+        "owner_feature": "task.orchestration",
+        "truth": "TaskStatus::Running plus active execution and lease"
+      },
+      {
+        "node_id": "worker.paused",
+        "owner_feature": "worker.control",
+        "truth": "TaskStatus::Paused plus persisted pause control event"
+      },
+      {
+        "node_id": "worker.blocked",
+        "owner_feature": "task.orchestration",
+        "truth": "TaskStatus::Blocked plus blocker evidence"
+      },
+      {
+        "node_id": "worker.attention_required",
+        "owner_feature": "task.orchestration",
+        "truth": "typed major-change execution fact and Master-visible task event"
+      },
+      {
+        "node_id": "worker.waiting_review",
+        "owner_feature": "task.orchestration",
+        "truth": "TaskStatus::ReviewSubmitted plus review summary, deliverables, and evidence"
+      },
+      {
+        "node_id": "worker.rejected",
+        "owner_feature": "task.orchestration",
+        "truth": "TaskStatus::Rejected plus reject reason and next requirements"
+      },
+      {
+        "node_id": "worker.closed",
+        "owner_feature": "task.orchestration",
+        "truth": "TaskStatus::Closed after Master approval and close"
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "worker.edge.assign_claim",
+        "from": "worker.assigned",
+        "to": "worker.running",
+        "trigger": "ProductionWorkerRunner claims the assigned task",
+        "binding_status": "bound",
+        "positive_test": "production_worker_runner_success_claims_heartbeats_and_submits_review",
+        "negative_test": "production_worker_runner_idle_does_not_create_task_truth"
+      },
+      {
+        "edge_id": "worker.edge.submit_review",
+        "from": "worker.running",
+        "to": "worker.waiting_review",
+        "trigger": "successful Worker execution emits ReviewReady",
+        "binding_status": "bound",
+        "positive_test": "production_worker_runner_success_claims_heartbeats_and_submits_review",
+        "negative_test": "production_worker_runner_non_provider_execution_error_records_blocked_not_retryable"
+      },
+      {
+        "edge_id": "worker.edge.review_reject",
+        "from": "worker.waiting_review",
+        "to": "worker.rejected",
+        "trigger": "Master persists review rejection and concrete next requirements",
+        "binding_status": "bound",
+        "positive_test": "production_worker_runner_requeues_rejected_with_review_requirements",
+        "negative_test": "production_master_runner_retries_unresolved_review_event"
+      },
+      {
+        "edge_id": "worker.edge.reject_retry",
+        "from": "worker.rejected",
+        "to": "worker.running",
+        "trigger": "Worker allocates a new execution and reasons again with review feedback",
+        "binding_status": "bound",
+        "positive_test": "production_worker_runner_requeues_rejected_with_review_requirements",
+        "negative_test": "production_worker_runner_provider_error_waits_for_master_reassignment"
+      },
+      {
+        "edge_id": "worker.edge.pause",
+        "from": "worker.running",
+        "to": "worker.paused",
+        "trigger": "accepted pause control at a Worker safe point",
+        "binding_status": "pending",
+        "pending_reason": "Task Center mutation exists but the production Worker runner does not acknowledge or stop at a safe point",
+        "positive_test": "production_worker_runner_pause_stops_before_submission",
+        "negative_test": "production_worker_runner_paused_execution_cannot_publish_stale_success"
+      },
+      {
+        "edge_id": "worker.edge.resume",
+        "from": "worker.paused",
+        "to": "worker.running",
+        "trigger": "Master resumes the same execution from persisted continuation truth",
+        "binding_status": "pending",
+        "pending_reason": "resume currently writes Running truth but the production Worker runner only claims Assigned tasks",
+        "positive_test": "production_worker_runner_resume_reenters_reasoning_and_submits_review",
+        "negative_test": "production_worker_runner_paused_without_resume_stays_idle"
+      },
+      {
+        "edge_id": "worker.edge.block",
+        "from": "worker.running",
+        "to": "worker.blocked",
+        "trigger": "non-local blocker is persisted with evidence",
+        "binding_status": "bound",
+        "positive_test": "production_worker_runner_non_provider_execution_error_records_blocked_not_retryable",
+        "negative_test": "production_worker_runner_provider_error_waits_for_master_reassignment"
+      },
+      {
+        "edge_id": "worker.edge.block_recovery",
+        "from": "worker.blocked",
+        "to": "worker.running",
+        "trigger": "Master adjusts or reassigns the same task; Worker starts a new execution",
+        "binding_status": "bound",
+        "positive_test": "production_master_runner_accepts_persisted_blocked_append_decision",
+        "negative_test": "production_master_runner_requires_persisted_blocked_decision"
+      },
+      {
+        "edge_id": "worker.edge.major_change",
+        "from": "worker.running",
+        "to": "worker.attention_required",
+        "trigger": "Worker emits a typed major-change signal with severity, reason, evidence, and proposed adjustment",
+        "binding_status": "bound",
+        "positive_test": "production_worker_runner_interrupted_terminal_emits_attention_required",
+        "negative_test": "execution_fact_attention_required_enters_master_event_inbox_without_blocked_or_review"
+      },
+      {
+        "edge_id": "worker.edge.approve_close",
+        "from": "worker.waiting_review",
+        "to": "worker.closed",
+        "trigger": "Master approves and closes in one review decision",
+        "binding_status": "bound",
+        "positive_test": "production_master_runner_approves_and_closes_review_ready_task",
+        "negative_test": "production_master_runner_retries_approved_but_unclosed_review"
+      }
+    ]
+  },
+  "master": {
+    "initial_node": "master.idle",
+    "nodes": [
+      {
+        "node_id": "master.idle",
+        "owner_feature": "runtime.master-worker-loop",
+        "truth": "no active user/control work; durable EventInbox cursor available"
+      },
+      {
+        "node_id": "master.busy",
+        "owner_feature": "runtime.master-worker-loop",
+        "truth": "active Master work identity and priority"
+      },
+      {
+        "node_id": "master.attention_queued",
+        "owner_feature": "runtime.master-worker-loop",
+        "truth": "durable typed attention admitted in EventInbox source order and selected by weighted severity, bounded task priority, and deterministic admission aging"
+      },
+      {
+        "node_id": "master.suspended",
+        "owner_feature": "runtime.master-worker-loop",
+        "truth": "active work checkpoint plus SuspendedByAttention reason"
+      },
+      {
+        "node_id": "master.deciding",
+        "owner_feature": "runtime.master-worker-loop",
+        "truth": "event-scoped control turn with one target decision boundary"
+      },
+      {
+        "node_id": "master.restoring",
+        "owner_feature": "runtime.master-worker-loop",
+        "truth": "typed AttentionResolution plus original work checkpoint"
+      }
+    ],
+    "attention_policy": {
+      "admission": {
+        "order": "EventInbox source order",
+        "cursor_rule": "advance only after each source event is durably represented by pending_attention or classified as not requiring attention",
+        "sequence": "monotonic next_attention_sequence; no wall-clock time"
+      },
+      "dequeue": {
+        "effective_score": "severity_rank * 10000 + clamp(task_priority,-100,100) * 100 + admission_age * 5000",
+        "admission_age": "next_attention_sequence - admitted_sequence",
+        "severity_rank": {
+          "critical_major_change": 100,
+          "high_major_change": 98,
+          "execution_blocked": 96,
+          "execution_interrupted": 94,
+          "other_major_change": 92,
+          "review_ready": 50,
+          "task_closed": 30
+        },
+        "tie_break": [
+          "effective_score descending",
+          "severity_rank descending",
+          "bounded task_priority descending",
+          "admitted_sequence ascending",
+          "event_id ascending"
+        ],
+        "fairness": "aging is unbounded by wall-clock time, so continuous high-weight arrivals cannot permanently starve an older low-priority item",
+        "retry": "retryable failure preserves the same pending item, admission sequence, and EventInbox cursor",
+        "noop": "stale or already-satisfied items are removed and selection continues in the same runner tick"
+      }
+    },
+    "priority_order": [
+      "critical major-change attention",
+      "blocked showstopper and high-priority interrupted execution",
+      "review-ready decision",
+      "all-current-children-closed overall-goal evaluation",
+      "normal progress or timer wakeup",
+      "deterministic aging may eventually promote any older lower-priority item"
+    ],
+    "edges": [
+      {
+        "edge_id": "master.edge.ordered_admission",
+        "from": "master.idle",
+        "to": "master.attention_queued",
+        "trigger": "admit EventInbox events in source order before advancing the durable cursor",
+        "binding_status": "bound",
+        "positive_test": "master_attention_admission_preserves_event_inbox_order",
+        "negative_test": "master_attention_retry_keeps_same_pending_item"
+      },
+      {
+        "edge_id": "master.edge.idle_consume",
+        "from": "master.attention_queued",
+        "to": "master.deciding",
+        "trigger": "select one durable item by weighted severity, bounded task priority, and deterministic admission aging",
+        "binding_status": "bound",
+        "positive_test": "production_master_idle_consumes_highest_priority_attention",
+        "negative_test": "master_attention_dequeue_ages_old_low_priority_item_without_starvation"
+      },
+      {
+        "edge_id": "master.edge.retry_preserve",
+        "from": "master.deciding",
+        "to": "master.attention_queued",
+        "trigger": "retryable lifecycle failure preserves the same durable attention identity",
+        "binding_status": "bound",
+        "positive_test": "production_master_loop_retries_executor_failure_and_closes_same_event",
+        "negative_test": "master_attention_retry_keeps_same_pending_item"
+      },
+      {
+        "edge_id": "master.edge.low_priority_defer",
+        "from": "master.busy",
+        "to": "master.attention_queued",
+        "trigger": "incoming attention priority does not exceed active work priority",
+        "binding_status": "pending",
+        "pending_reason": "active Master work has no persisted priority/checkpoint contract",
+        "positive_test": "production_master_busy_defers_lower_priority_attention",
+        "negative_test": "production_master_busy_low_priority_never_cancels_active_work"
+      },
+      {
+        "edge_id": "master.edge.high_priority_preempt",
+        "from": "master.busy",
+        "to": "master.suspended",
+        "trigger": "higher-priority attention is admitted and the active turn reaches a safe point",
+        "binding_status": "pending",
+        "pending_reason": "no Master safe-point pause acknowledgement or durable active-work checkpoint",
+        "positive_test": "production_master_busy_high_priority_interrupts_at_safe_point",
+        "negative_test": "production_master_busy_never_interrupts_mid_provider_or_mid_tool_effect"
+      },
+      {
+        "edge_id": "master.edge.handle_attention",
+        "from": "master.suspended",
+        "to": "master.deciding",
+        "trigger": "start an isolated event-scoped control turn",
+        "binding_status": "pending",
+        "pending_reason": "current lifecycle turns are isolated per task but are not linked to a suspended active user turn",
+        "positive_test": "production_master_attention_uses_isolated_control_turn",
+        "negative_test": "production_master_attention_raw_transcript_never_enters_user_session"
+      },
+      {
+        "edge_id": "master.edge.restore",
+        "from": "master.deciding",
+        "to": "master.restoring",
+        "trigger": "persist the Task Center decision and typed AttentionResolution",
+        "binding_status": "pending",
+        "pending_reason": "no checkpoint stack or typed resolution injection exists",
+        "positive_test": "production_master_attention_restores_exact_original_work_identity",
+        "negative_test": "production_master_attention_cannot_restore_without_checkpoint"
+      },
+      {
+        "edge_id": "master.edge.continue_original",
+        "from": "master.restoring",
+        "to": "master.busy",
+        "trigger": "resume original work with typed changed-truth summary only",
+        "binding_status": "pending",
+        "pending_reason": "no persisted return path exists",
+        "positive_test": "production_master_resume_injects_typed_resolution_only",
+        "negative_test": "production_master_resume_rejects_raw_worker_or_control_transcript"
+      }
+    ],
+    "checkpoint_contract": {
+      "required_fields": [
+        "master_agent_id",
+        "session_id",
+        "logical_turn_id",
+        "work_id",
+        "priority",
+        "parent_objective_reference",
+        "current_plan",
+        "next_step",
+        "active_task_or_event_cursor",
+        "safe_point",
+        "permitted_resume_context"
+      ],
+      "restore_payload": [
+        "attention_id",
+        "changed_task_ids",
+        "decision_kind",
+        "changed_constraints",
+        "resume_from"
+      ],
+      "forbidden_restore_payload": [
+        "raw_worker_transcript",
+        "raw_control_turn_transcript",
+        "provider_request_payload",
+        "provider_response_payload"
+      ]
+    }
+  },
+  "integration_gate": {
+    "enabled_only_after": [
+      "all worker edges marked bound have positive and negative tests passing",
+      "all master edges marked bound have positive and negative tests passing"
+    ],
+    "webui_before_android": true
+  }
+}

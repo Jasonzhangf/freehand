@@ -33,6 +33,11 @@ const MASTER_RETRY_MAX_BACKOFF_MILLIS: u64 = 30_000;
 const MASTER_LIFECYCLE_DECISION_MAX_ROUNDS: usize = 8;
 const MASTER_BLOCKED_DECISION_AUTO_APPEND_ATTEMPTS: u32 = 16;
 const CANCEL_POLL_MILLIS: u64 = 100;
+const MASTER_ATTENTION_KIND_WEIGHT: i128 = 10_000;
+const MASTER_ATTENTION_TASK_PRIORITY_WEIGHT: i128 = 100;
+const MASTER_ATTENTION_ADMISSION_AGE_WEIGHT: i128 = 5_000;
+const MASTER_ATTENTION_TASK_PRIORITY_MIN: i64 = -100;
+const MASTER_ATTENTION_TASK_PRIORITY_MAX: i64 = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProductionMasterTickOutcome {
@@ -199,6 +204,18 @@ struct MasterLoopState {
     retry_attempt: u32,
     #[serde(default)]
     completed_parent_evaluations: BTreeSet<String>,
+    #[serde(default)]
+    pending_attention: Vec<MasterAttentionItem>,
+    #[serde(default)]
+    next_attention_sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MasterAttentionItem {
+    event: TaskEventInboxEntry,
+    severity_rank: u8,
+    task_priority: i64,
+    admitted_sequence: u64,
 }
 
 pub struct ProductionMasterRunner {
@@ -268,23 +285,30 @@ impl ProductionMasterRunner {
                 limit: usize::MAX,
             })
             .map_err(task_center_error)?;
-        if inbox.events.is_empty() {
-            if let Some(outcome) = self.handle_due_timer()? {
-                return Ok(outcome);
-            }
-            return Ok(ProductionMasterTickOutcome::Idle);
-        }
+        self.admit_attention_events(&task_runtime, &mut state, inbox.events)?;
 
-        let mut latest_outcome = ProductionMasterTickOutcome::Idle;
-        for event in inbox.events {
+        loop {
+            if state.pending_attention.is_empty() {
+                self.write_state(&state)?;
+                if let Some(outcome) = self.handle_due_timer()? {
+                    return Ok(outcome);
+                }
+                return Ok(ProductionMasterTickOutcome::Idle);
+            }
+
+            let attention_index = highest_priority_attention_index(
+                &state.pending_attention,
+                state.next_attention_sequence,
+            )
+            .expect("pending attention is non-empty");
+            let event = state.pending_attention[attention_index].event.clone();
             let attempt = if state.retry_event_id.as_deref() == Some(event.event_id.as_str()) {
                 state.retry_attempt
             } else {
                 0
             };
-            match self.handle_event(&task_runtime, &event, attempt, &mut state) {
-                Ok(Some(outcome)) => latest_outcome = outcome,
-                Ok(None) => {}
+            let outcome = match self.handle_event(&task_runtime, &event, attempt, &mut state) {
+                Ok(outcome) => outcome,
                 Err(error) => {
                     if error.is_retryable_lifecycle_failure() {
                         state.retry_event_id = Some(event.event_id.clone());
@@ -293,19 +317,51 @@ impl ProductionMasterRunner {
                     }
                     return Err(error);
                 }
-            }
+            };
+            state.pending_attention.remove(attention_index);
             state.retry_event_id = None;
             state.retry_attempt = 0;
-            state.cursor = Some(event.cursor);
             self.write_state(&state)?;
+            if let Some(outcome) = outcome {
+                return Ok(outcome);
+            }
         }
-        if latest_outcome != ProductionMasterTickOutcome::Idle {
-            return Ok(latest_outcome);
+    }
+
+    fn admit_attention_events(
+        &self,
+        task_runtime: &TaskRuntime,
+        state: &mut MasterLoopState,
+        events: Vec<TaskEventInboxEntry>,
+    ) -> Result<(), ProductionMasterRunnerError> {
+        let mut admitted_any = false;
+        for event in events {
+            state.cursor = Some(event.cursor.clone());
+            if !master_event_requires_attention(&event.kind)
+                || state
+                    .pending_attention
+                    .iter()
+                    .any(|item| item.event.event_id == event.event_id)
+            {
+                continue;
+            }
+            let task = task_runtime
+                .query_task(&event.task_id)
+                .map_err(task_center_error)?;
+            let admitted_sequence = state.next_attention_sequence;
+            state.next_attention_sequence = state.next_attention_sequence.saturating_add(1);
+            state.pending_attention.push(MasterAttentionItem {
+                severity_rank: master_attention_severity_rank(&event),
+                task_priority: task.priority,
+                event,
+                admitted_sequence,
+            });
+            admitted_any = true;
         }
-        if let Some(outcome) = self.handle_due_timer()? {
-            return Ok(outcome);
+        if admitted_any || state.cursor.is_some() {
+            self.write_state(state)?;
         }
-        Ok(latest_outcome)
+        Ok(())
     }
 
     fn handle_due_timer(
@@ -404,6 +460,7 @@ impl ProductionMasterRunner {
             ),
             "execution_blocked" => task.status == TaskStatus::Blocked,
             "execution_interrupted" => task.status == TaskStatus::Interrupted,
+            "execution_attention_required" => task.status == TaskStatus::Interrupted,
             _ => false,
         };
         if !actionable {
@@ -671,6 +728,7 @@ Rules:\n\
 - review_ready: query/history, then reject with concrete requirements or approve and close. Approved is not terminal; close it in the same lifecycle decision.\n\
 - execution_blocked: inspect the blocker. Reassign only when retry is justified; otherwise call task(op=\"append\", task_id=<task-id>, note=\"blocked_decision: <required external action>\") to persist why it remains blocked.\n\
 - execution_interrupted: treat the task as schedulable work, not as session-owned Worker failure. Use TaskHistory plus AgentBoard to choose retry_same_worker or takeover_to_another_available_configured_worker. Reassign the same task_id; do not create a duplicate task for the same objective.\n\
+- execution_attention_required: inspect severity, change_kind, reason, evidence, and proposed_adjustment. Compare the changed Worker report against the original task goal, deliverables, acceptance, and current parent objective. Persist the adjustment on the same task with task(op=\"append\") and/or reassign the same task_id after changing requirements; do not mark success, do not create a duplicate task, and do not bury it as a generic blocker.\n\
 - one trigger event owns one decision turn. After the required Task Center mutation is persisted, stop; never wait inside this turn for a future Worker event.\n\
 - never fabricate completion, approval, evidence, or task state.\n\
 \n\
@@ -880,15 +938,24 @@ fn parent_user_objectives(
     parent_session_id: &SessionId,
 ) -> Result<Vec<String>, ProductionMasterRunnerError> {
     let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
-    let turns = match persistence.restore_turn_snapshots_for_ui(parent_session_id) {
-        Ok(turns) => turns,
+    let turns = match persistence.restore(parent_session_id) {
+        Ok(restored) => {
+            let mut turns = restored.closed_turns;
+            if let Some(active) = restored.active_turn {
+                turns.push(active.turn);
+            }
+            turns
+        }
         Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => Vec::new(),
         Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
     };
     let mut seen = BTreeSet::new();
     let objectives = turns
         .into_iter()
-        .filter(|turn| runtime_turn_position(&turn.request.turn_id).1 == 1)
+        .filter(|turn| {
+            let (ordinal, round, _) = runtime_turn_position(&turn.request.turn_id);
+            ordinal == 1 && round == 1
+        })
         .map(|turn| ui_user_text_for_turn(&turn))
         .filter(|text| !text.trim().is_empty())
         .filter(|text| !text.contains("<freehand_parent_"))
@@ -995,6 +1062,72 @@ fn master_decision_boundary(task: &TaskSnapshot) -> LiveReasonTaskDecisionBounda
         mode,
         max_rounds: MASTER_LIFECYCLE_DECISION_MAX_ROUNDS,
     }
+}
+
+fn master_event_requires_attention(kind: &str) -> bool {
+    matches!(
+        kind,
+        "review_ready"
+            | "execution_blocked"
+            | "execution_interrupted"
+            | "execution_attention_required"
+            | "task_closed"
+    )
+}
+
+fn master_attention_severity_rank(event: &TaskEventInboxEntry) -> u8 {
+    match event.kind.as_str() {
+        "execution_attention_required" => match event
+            .payload
+            .get("severity")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("critical") => 100,
+            Some("high") => 98,
+            _ => 92,
+        },
+        "execution_blocked" => 96,
+        "execution_interrupted" => 94,
+        "review_ready" => 50,
+        "task_closed" => 30,
+        _ => 0,
+    }
+}
+
+fn bounded_attention_task_priority(priority: i64) -> i64 {
+    priority.clamp(
+        MASTER_ATTENTION_TASK_PRIORITY_MIN,
+        MASTER_ATTENTION_TASK_PRIORITY_MAX,
+    )
+}
+
+fn master_attention_effective_score(item: &MasterAttentionItem, next_sequence: u64) -> i128 {
+    let age = next_sequence.saturating_sub(item.admitted_sequence);
+    i128::from(item.severity_rank) * MASTER_ATTENTION_KIND_WEIGHT
+        + i128::from(bounded_attention_task_priority(item.task_priority))
+            * MASTER_ATTENTION_TASK_PRIORITY_WEIGHT
+        + i128::from(age) * MASTER_ATTENTION_ADMISSION_AGE_WEIGHT
+}
+
+fn highest_priority_attention_index(
+    items: &[MasterAttentionItem],
+    next_sequence: u64,
+) -> Option<usize> {
+    items
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| {
+            master_attention_effective_score(left, next_sequence)
+                .cmp(&master_attention_effective_score(right, next_sequence))
+                .then_with(|| left.severity_rank.cmp(&right.severity_rank))
+                .then_with(|| {
+                    bounded_attention_task_priority(left.task_priority)
+                        .cmp(&bounded_attention_task_priority(right.task_priority))
+                })
+                .then_with(|| right.admitted_sequence.cmp(&left.admitted_sequence))
+                .then_with(|| right.event.event_id.cmp(&left.event.event_id))
+        })
+        .map(|(index, _)| index)
 }
 
 fn task_center_error(error: freehand_task::TaskError) -> ProductionMasterRunnerError {
