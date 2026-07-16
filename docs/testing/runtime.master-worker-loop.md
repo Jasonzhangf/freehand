@@ -17,7 +17,7 @@
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `timer.fire_master_wakeup` | bound | `cargo test -p freehand-runtime timer -- --nocapture` covers durable timer due-claim, one-shot, recurring, local-time cron/daily/weekly, wakeup prompt, failure release, and Master runner tests | `cargo test -p freehand-runtime production_master -- --nocapture` covers production Master runner smokes where due timers create internal Master wakeup turns without task-state mutation | `scripts/verify-timer-tool-online.sh` covers S-profile timer online proof and restart-due proof showing persisted timer wakeup fires after due time and completes timer truth |
-| `master_work.resolve_attention` | bound | `cargo test -p freehand-runtime production_master_busy -- --nocapture` and `cargo test -p freehand-runtime production_master_attention -- --nocapture` cover lower-priority deferral, safe-point high-priority interruption, mid-provider/tool no-interrupt, and exact identity restoration | `cargo test -p freehand-runtime runtime_live_submit -- --nocapture` covers live dispatcher active-work register/clear plus concurrent-work rejection without ordinal gaps | `cargo test -p freehand-runtime production_master_attention -- --nocapture` covers checkpoint-missing failure and exact-identity restoration at the runtime owner boundary |
+| `master_work.resolve_attention` | bound | `cargo test -p freehand-runtime production_master_busy -- --nocapture` and `cargo test -p freehand-runtime production_master_attention -- --nocapture` cover lower-priority deferral, safe-point high-priority interruption, isolated control-turn identity, raw-control-transcript exclusion, mid-provider/tool no-interrupt, and exact identity restoration | `cargo test -p freehand-runtime runtime_live_submit -- --nocapture` covers live dispatcher active-work register/clear plus concurrent-work rejection without ordinal gaps | `cargo test -p freehand-runtime production_master_attention -- --nocapture` covers suspended-foreground linkage, isolated lifecycle request identity, raw-control-transcript exclusion, checkpoint-missing failure, and exact-identity restoration at the runtime owner boundary |
 | `master_work.admit_resolution_context` | bound | `cargo test -p freehand-runtime production_master_resume -- --nocapture` and `cargo test -p freehand-blocks attention_resolution_segment -- --nocapture` cover one-shot typed resolution consumption, return-identity rejection, raw transcript rejection, segment ordering, and rewrite-base rejection | `cargo test -p freehand-runtime live_master_attention -- --nocapture` covers refreshed TaskSpaceSnapshot plus typed AttentionResolution admission, stale tool paired failure/no side effect, and stale terminal non-persistence | `cargo test -p freehand-runtime live_master_attention -- --nocapture` is the focused project proof; daemon/WebUI/Android online preemption remains explicitly unclaimed |
 | `agent.heartbeat` | bound | `cargo test -p freehand-task agent_process -- --nocapture` locks typed start/heartbeat validation, restart identity, TTL health, and no task-activity fallback | `cargo test -p freehand-runtime production_worker_runner -- --nocapture` proves constructor start, idle tick heartbeat, same-agent restart, and active-loop wiring | `scripts/verify-master-three-worker-e2e-online.sh` proves isolated three-process fresh/offline/restart AgentBoard truth |
 
@@ -362,6 +362,13 @@ Task Center truth before another execution starts.
   - `production_master_foreground_never_suspends_mid_effect` through provider,
     tool-effect, and terminal-persistence in-flight phases that must remain
     `SuspendRequested`
+  - `production_master_attention_uses_isolated_control_turn` proves the
+    lifecycle decision request is event/attempt scoped, has a session, turn,
+    and trace distinct from the suspended foreground work, and runs while the
+    exact foreground checkpoint remains `SuspendedByAttention`
+  - `production_master_attention_raw_transcript_never_enters_user_session`
+    proves even an executor summary containing a raw-control sentinel cannot
+    enter the foreground reason session or the typed `AttentionResolution`
   - `production_master_resume_consumes_resolution_once` and
     `production_master_resume_rejects_mismatched_return_identity`
 - live bridge attention continuation tests drive:
@@ -471,8 +478,9 @@ Task Center truth before another execution starts.
   admission, weighted severity/task-priority dequeue, deterministic aging,
   retry preservation, and stale no-op removal.
 - Busy-Master active-work identity, priority comparison, safe-point state, typed
-  attention resolution, exact return identity, and raw transcript/provider
-  payload rejection are now unit-bound by `master_work.resolve_attention`.
+  attention resolution, isolated control-turn identity, exact return identity,
+  and raw transcript/provider payload rejection are now unit-bound by
+  `master_work.resolve_attention`.
 - Live bridge safe-point phase publication and cooperative pause/resume are not
   yet online-proven. Do not claim live Master busy-preemption closure until the
   real daemon shows foreground Master work pausing at a declared safe point,

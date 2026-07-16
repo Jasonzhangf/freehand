@@ -278,8 +278,7 @@
         "from": "master.suspended",
         "to": "master.deciding",
         "trigger": "start an isolated event-scoped control turn",
-        "binding_status": "pending",
-        "pending_reason": "current lifecycle turns are isolated per task but are not linked to a suspended active user turn",
+        "binding_status": "bound",
         "positive_test": "production_master_attention_uses_isolated_control_turn",
         "negative_test": "production_master_attention_raw_transcript_never_enters_user_session"
       },

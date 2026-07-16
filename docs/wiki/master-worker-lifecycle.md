@@ -69,14 +69,14 @@ forbidden from the original user context.
   `pending_attention`, weighted-aging idle dequeue, retry-preserved attention
   identity, review/blocked/interrupted decisions, overall-goal evaluation
   turns, busy lower-priority deferral, active-work checkpointing, safe-point
-  high-priority suspension state, typed attention resolution, and exact return
+  high-priority suspension state, isolated event-scoped control turns linked to
+  suspended foreground work, typed attention resolution, and exact return
   identity, plus focused-test-bound injection of typed resolution into the
   original foreground reasoning continuation with stale tool/terminal
   invalidation.
-- Pending Master edge: isolated-control-turn proof for a suspended active user
-  turn remains pending. Until daemon/WebUI online evidence proves the full
-  suspend → decision → typed continuation path, busy-Master live preemption is
-  not product-closed.
+- Pending Master product proof: daemon/WebUI online evidence for the full
+  suspend → isolated decision → typed continuation path is still unclaimed, so
+  busy-Master live preemption is not product-closed.
 
 ## Integration Checklist
 

@@ -6283,3 +6283,39 @@ Current real root cause split:
   - no daemon/WebUI/Android online proof for full busy-Master preemption yet.
   - `master.edge.handle_attention` remains pending until an isolated control
     turn is bound to a suspended active user turn with positive/negative tests.
+
+# 2026-07-16 Master isolated attention control-turn binding
+
+- test design first:
+  - `master_work.resolve_attention` coverage now requires suspended-foreground
+    linkage, isolated lifecycle request identity, and raw-control-transcript
+    exclusion.
+- focused proof:
+  - `production_master_attention_uses_isolated_control_turn` observes the exact
+    foreground checkpoint in `SuspendedByAttention` while the decision runs and
+    proves the request uses a distinct task-scoped `master-lifecycle-*`
+    session plus event/attempt-isolated turn and trace ids.
+  - `production_master_attention_raw_transcript_never_enters_user_session`
+    returns raw control/provider sentinel text from the executor and proves it
+    is absent from foreground ReasonPersistence, `master_work`, and typed
+    resolution constraints.
+- binding result:
+  - `master.edge.handle_attention` moved from `pending` to focused-test
+    `bound`.
+  - no production owner-path change was required; the prior active-work and
+    lifecycle request implementation already satisfied the contract once the
+    missing explicit binding tests were added.
+- evidence:
+  - `production_master_attention`: 4 passed.
+  - `production_master_resume`: 3 passed.
+  - `live_master_attention`: 2 passed.
+  - `production_master_foreground`: 2 passed.
+  - `production_master_busy`: 4 passed.
+  - full `master_runner::tests::`: 44 passed.
+  - targeted runtime clippy, fmt, mainlines check, gates check, JSON parse, and
+    diff check passed.
+- remaining:
+  - full S-profile daemon/WebUI proof for suspend -> isolated decision -> typed
+    continuation is still required before product closure.
+  - production Worker safe-point pause/resume remains the next standalone
+    lifecycle implementation gap.

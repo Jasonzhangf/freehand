@@ -1148,6 +1148,194 @@ fn production_master_busy_high_priority_interrupts_at_safe_point() {
 }
 
 #[test]
+fn production_master_attention_uses_isolated_control_turn() {
+    let runtime_home = temp_path("attention-isolated-control-turn");
+    let selected = selected_master_with_workers(&["worker-alpha"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    let task_id = seed_attention_required_task(&runtime_home, "worker-alpha");
+    register_test_active_master_work(&runtime_home, "foreground-user-session", "runtime-turn-51");
+    update_master_active_work_safe_point(
+        &runtime_home,
+        &AgentId::new("master"),
+        MasterWorkSafePoint::BeforeToolExecution,
+    )
+    .expect("mark foreground safe point");
+    let original = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load active")
+        .expect("foreground active work");
+    let observed_request = Arc::new(Mutex::new(None::<LiveReasonTurnRequest>));
+    let request_out = Arc::clone(&observed_request);
+    let action_task_id = task_id.clone();
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        *request_out.lock().expect("request lock") = Some(request.clone());
+        let active = load_master_active_work(&request.runtime_home, &AgentId::new("master"))
+            .map_err(to_string)?
+            .expect("suspended foreground work");
+        assert_eq!(active.state, MasterActiveWorkState::SuspendedByAttention);
+        assert_eq!(active.work_id, original.work_id);
+        assert_eq!(active.session_id, original.session_id);
+        assert_eq!(active.logical_turn_id, original.logical_turn_id);
+        assert_eq!(active.trace_id, original.trace_id);
+        let attention = active
+            .suspend_requested_by
+            .as_ref()
+            .expect("suspended attention reference");
+        assert_eq!(attention.task_id, action_task_id);
+        assert_eq!(attention.kind, "execution_attention_required");
+        assert_ne!(request.session_id, active.session_id);
+        assert_ne!(request.turn_id, active.logical_turn_id);
+        assert_ne!(request.trace_id, active.trace_id);
+        assert!(request.session_id.as_str().starts_with("master-lifecycle-"));
+        assert!(
+            request
+                .turn_id
+                .as_str()
+                .contains(&sanitize_identifier(&attention.event_id))
+        );
+        assert!(request.turn_id.as_str().contains("-attempt-0-decision"));
+        assert!(
+            request
+                .trace_id
+                .as_str()
+                .contains(&sanitize_identifier(&attention.event_id))
+        );
+
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .append_task(TaskAppendRequest {
+                task_id: action_task_id.clone(),
+                note: "attention_resolution: isolated control turn handled".to_owned(),
+                actor: test_actor("master"),
+                watermark: test_watermark("isolated-control-append"),
+            })
+            .map_err(to_string)?;
+        runtime
+            .assign_task(freehand_task::TaskAssignRequest {
+                task_id: action_task_id.clone(),
+                agent_id: AgentId::new("worker-alpha"),
+                actor: test_actor("master"),
+                watermark: test_watermark("isolated-control-reassign"),
+            })
+            .map_err(to_string)?;
+        Ok("isolated control turn handled".to_owned())
+    }));
+    let runner = test_runner_with_selected(runtime_home.clone(), selected, executor);
+
+    assert!(matches!(
+        runner.run_once().expect("isolated control turn tick"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            from: TaskStatus::Interrupted,
+            to: TaskStatus::Assigned,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    let request = observed_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("captured isolated request");
+    assert!(request.session_id.as_str().starts_with("master-lifecycle-"));
+    assert_ne!(request.session_id.as_str(), "foreground-user-session");
+    assert_ne!(request.turn_id.as_str(), "runtime-turn-51");
+    let active = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load restored active")
+        .expect("restored foreground work");
+    assert_eq!(active.state, MasterActiveWorkState::Running);
+    let resolution = active.attention_resolution.expect("typed resolution");
+    assert_eq!(
+        resolution.resume_from.session_id.as_str(),
+        "foreground-user-session"
+    );
+    assert_eq!(
+        resolution.resume_from.logical_turn_id.as_str(),
+        "runtime-turn-51"
+    );
+    assert_eq!(resolution.changed_task_ids, vec![task_id]);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_attention_raw_transcript_never_enters_user_session() {
+    let runtime_home = temp_path("attention-raw-transcript-excluded");
+    let selected = selected_master_with_workers(&["worker-alpha"]);
+    bootstrap_runner_with_selected(&runtime_home, selected.clone());
+    let task_id = seed_attention_required_task(&runtime_home, "worker-alpha");
+    let foreground_session = SessionId::new("foreground-raw-session");
+    register_test_active_master_work(
+        &runtime_home,
+        foreground_session.as_str(),
+        "runtime-turn-52",
+    );
+    update_master_active_work_safe_point(
+        &runtime_home,
+        &AgentId::new("master"),
+        MasterWorkSafePoint::BeforeTerminalPersistence,
+    )
+    .expect("mark foreground safe point");
+    let raw_sentinel =
+        "raw_control_turn_transcript: worker private text provider_response_payload={secret}";
+    let action_task_id = task_id.clone();
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        assert_ne!(request.session_id, foreground_session);
+        assert!(request.session_id.as_str().starts_with("master-lifecycle-"));
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .append_task(TaskAppendRequest {
+                task_id: action_task_id.clone(),
+                note: "attention_resolution: raw control output stayed internal".to_owned(),
+                actor: test_actor("master"),
+                watermark: test_watermark("raw-control-excluded-append"),
+            })
+            .map_err(to_string)?;
+        runtime
+            .assign_task(freehand_task::TaskAssignRequest {
+                task_id: action_task_id.clone(),
+                agent_id: AgentId::new("worker-alpha"),
+                actor: test_actor("master"),
+                watermark: test_watermark("raw-control-excluded-reassign"),
+            })
+            .map_err(to_string)?;
+        Ok(raw_sentinel.to_owned())
+    }));
+    let runner = test_runner_with_selected(runtime_home.clone(), selected, executor);
+
+    assert!(matches!(
+        runner.run_once().expect("raw transcript exclusion tick"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    let active = load_master_active_work(&runtime_home, &AgentId::new("master"))
+        .expect("load restored active")
+        .expect("restored active work");
+    let rendered_active = serde_json::to_string(&active).expect("render active checkpoint");
+    assert!(
+        !rendered_active.contains(raw_sentinel),
+        "raw control/provider transcript must not be persisted in master_work"
+    );
+    let resolution = active.attention_resolution.expect("typed resolution");
+    assert!(
+        resolution.changed_constraints.is_empty(),
+        "executor prose must not be copied into typed resolution constraints"
+    );
+    let persistence = ReasonPersistence::new(runtime_home.clone(), AgentId::new("master"));
+    assert!(
+        matches!(
+            persistence.restore_turn_snapshots_for_ui(&SessionId::new("foreground-raw-session")),
+            Err(ReasonPersistenceError::MissingRecoveryTruth(_))
+        ),
+        "isolated control summary must not create or mutate the foreground user session"
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn production_master_attention_restores_exact_original_work_identity() {
     let runtime_home = temp_path("busy-restore-identity");
     let selected = selected_master_with_workers(&["worker-alpha"]);
