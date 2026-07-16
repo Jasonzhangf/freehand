@@ -206,8 +206,9 @@ Task Center truth before another execution starts.
   admitted sequence, and cursor; stale no-op events are removed and selection
   continues in the same runner tick.
 - Parent overall-goal evaluation reads the original persisted first user turn
-  from reason truth, not the UI coalesced transcript projection; repair rounds
-  and control text cannot replace the user objective.
+  from reason `TurnStarted` ledger truth, not the UI coalesced transcript
+  projection or latest repaired snapshot; repair rounds and control text cannot
+  replace the user objective.
 - review-ready decision boundary closes only after the target task reaches
   `Rejected` or `Closed`; `Approved` alone remains incomplete and retryable.
 - blocked decision boundary closes after the target task records a new

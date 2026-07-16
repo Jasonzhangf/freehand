@@ -18,6 +18,9 @@
   - terminal turn truth is materialized as immutable per-turn files
   - restart recovery restores from snapshot plus reason-ledger tail, or from reason-ledger-only rebuild when snapshots are missing or invalid
   - UI restore reads authoritative closed/active snapshots plus rollback-marker sidecar truth when available, coalesces repaired `-rN` rounds into one effective logical turn, and does not replay huge reason ledgers for normal transcript queries
+  - non-UI turn-start restore reads authoritative reason-ledger
+    `TurnStarted` rows, honors rollback markers, and preserves first-round user
+    intent even when effective UI snapshots only retain a repaired round
   - derived UI and index sidecars rebuild from authoritative truth and are never recovery truth
   - reason-owned session display metadata stores `title` and `archived` state for shared UI CRUD without entering provider-visible session history
   - append-only rollback markers filter effective transcript restore while preserving raw closed-turn files for audit
@@ -37,6 +40,9 @@
   - authoritative-snapshot-backed UI restore tests through runtime bootstrap
   - logical repair-round coalescing tests for `runtime-turn-N-rM` style turn ids
   - UI restore test that poisons the reason ledger after authoritative snapshots exist, proving transcript query does not depend on replaying the ledger
+  - turn-start restore test for an original `runtime-turn-1` start plus a closed
+    repaired `runtime-turn-1-r2` snapshot, proving first-round request truth
+    remains available and rollback does not resurrect it
   - atomic snapshot replace tests
   - provider-raw debug-ledger write tests
   - provider-raw-ledger exclusion tests
@@ -54,6 +60,7 @@
   - active-turn update then terminal materialization smoke
   - snapshot-missing recovery smoke
   - derived-sidecar rebuild smoke
+  - turn-start snapshot restore smoke through parent-goal evaluation
   - session metadata sidecar reload smoke
   - rollback marker sidecar reload smoke through `restore` and `restore_turn_snapshots_for_ui`
   - provider-raw debug-ledger append smoke
@@ -74,10 +81,15 @@
   - design is locked
   - session snapshot, active-turn snapshot, reason-ledger append, provider-raw debug-ledger append, terminal turn materialization, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
   - authoritative-snapshot-backed logical-turn UI restore is implemented through `ReasonPersistence::restore_turn_snapshots_for_ui`
+  - turn-start snapshot restore is implemented through
+    `ReasonPersistence::restore_turn_start_snapshots`
   - shared harness and CLI smoke are implemented
   - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
   - runtime white-box coverage now explicitly locks ledger sequence-gap rejection plus provider-raw-only and UI-sidecar-only missing-recovery rejection
   - runtime white-box coverage now explicitly locks invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate-sequence recovery rejection
   - session metadata CRUD is implemented with positive create/rename/archive/restore/delete-as-archive coverage and negative unknown-session rejection coverage
   - append-only latest-session-turn rollback is implemented with positive marker/effective-filter/raw-file-retention coverage
+  - runtime parent evaluation has a regression proving original user-objective
+    recovery when the authoritative closed snapshot contains only a repaired
+    round
   - migrated mainline-call source and generated wiki are kept in sync with this test design

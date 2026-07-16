@@ -370,6 +370,10 @@ Use this skill for any non-trivial work in this repo.
   from authoritative reason truth, not UI-coalesced transcript projection.
   Only the first user turn's first round is parent-goal truth; repair rounds,
   timer/control prompts, and UI projection coalescing must not replace the goal.
+- Parent objective recovery must go through the reason persistence owner via
+  `ReasonPersistence::restore_turn_start_snapshots`. Do not reconstruct parent
+  goals from effective UI snapshots, latest repaired rounds, worker transcripts,
+  metadata/debug ledgers, or ad hoc reason-ledger parsing in runtime.
 - Parent evaluation idempotency must consult terminal reason persistence
   carrying a deterministic evaluation marker, not only the Master event cursor
   or loop-state cache. Successful, waiting, and blocked evaluation turns are

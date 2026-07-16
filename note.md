@@ -6345,3 +6345,58 @@ Current real root cause split:
 - remaining:
   - full S-profile multi-Worker/WebUI convergence proof is still not run for this slice.
   - busy-Master live preemption online proof remains separate.
+
+# 2026-07-16 Parent objective recovery from turn-start ledger
+
+- objective slice:
+  - Fix the remaining parent-session evaluation gap where all children could
+    close but Master could not build the final quality-evaluation follow-up
+    because the original user objective had no effective closed snapshot.
+- root cause:
+  - Original operator text remained in authoritative reason ledger
+    `TurnStarted` truth for `runtime-turn-1`.
+  - Later repair/evaluation work left the effective closed snapshot at a
+    repaired round such as `runtime-turn-1-r2`.
+  - `parent_user_objectives()` read `ReasonPersistence::restore()` output,
+    which returns effective closed/active snapshots and therefore could miss
+    the original first-round objective.
+  - UI/effective snapshots are conversation projection truth, not parent-goal
+    truth.
+- implementation:
+  - Added `ReasonPersistence::restore_turn_start_snapshots`.
+  - It reads authoritative reason-ledger `TurnStarted` rows, returns
+    non-UI-coalesced request truth, and still filters rolled-back logical
+    turns through rollback markers.
+  - `parent_user_objectives()` now calls this owner API and admits only first
+    user turn / first round (`runtime-turn-1`) while excluding repair/control
+    prompts.
+  - Synced `reason.persistence` and `runtime.master-worker-loop` function maps,
+    mainline JSON, test designs, generated wiki, goal plan, CACHE, MEMORY, and
+    local Freehand skill.
+- local evidence:
+  - `restore_turn_start_snapshots_preserves_original_round_and_respects_rollback`
+    proves original `runtime-turn-1` plus repaired `runtime-turn-1-r2` starts
+    are both recoverable before rollback and absent after rollback.
+  - `production_master_runner_recovers_parent_goal_from_first_round_turn_start_ledger`
+    proves parent evaluation receives original objective when the only
+    restored closed snapshot is `runtime-turn-1-r2`, and repair prompt text is
+    excluded.
+- online evidence inherited from current source state:
+  - process-mode verifier session `online-master-three-worker-evaluation-1784187343`
+    reached alpha close, beta reject/rework close, gamma interrupted same-task
+    takeover, integration next-round task, final Success on `runtime-turn-3`,
+    and restart-idempotent `final_evaluation_count=1`.
+  - launchd-mode verifier session
+    `online-launchd-three-worker-evaluation-1784187532-2390` reached the same
+    lifecycle with gamma KeepAlive restart from PID `5442` to `26638` and no
+    cleanup residue for label prefix
+    `com.freehand.verify.three-worker.1784187532-2390`.
+- remaining:
+  - The verifier still records an initial foreground `SubmitUserInput` receipt
+    poll-budget failure before the background lifecycle finishes; audit whether
+    this is only verifier foreground waiting/status projection or a product
+    observability gap.
+  - Full goal still requires S-profile daemon/WebUI current-session proof,
+    busy-Master live preemption proof, real-provider non-fixture
+    crash/recovery/takeover proof, and Android true-device proof if native or
+    packaged assets change.

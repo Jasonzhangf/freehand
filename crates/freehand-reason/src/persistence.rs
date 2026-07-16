@@ -367,6 +367,39 @@ impl ReasonPersistence {
         }
     }
 
+    pub fn restore_turn_start_snapshots(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<TurnRecord>, ReasonPersistenceError> {
+        let rollback_markers = self.load_session_rollback_markers(session_id)?;
+        let is_rolled_back = |turn: &TurnRecord| {
+            let key = logical_turn_key(&turn.request.turn_id);
+            rollback_markers
+                .iter()
+                .any(|marker| marker.target_logical_turn_key == key)
+        };
+        let ledger_rows = self.load_reason_ledger(session_id)?;
+        if !ledger_rows.is_empty() {
+            return Ok(ledger_rows
+                .into_iter()
+                .filter_map(|row| match row.payload {
+                    ReasonLedgerPayload::TurnStarted { snapshot } => Some(snapshot.turn),
+                    _ => None,
+                })
+                .filter(|turn| !is_rolled_back(turn))
+                .collect());
+        }
+
+        let restored = self.restore(session_id)?;
+        let mut turns = restored.closed_turns;
+        if let Some(active) = restored.active_turn {
+            turns.push(active.turn);
+        }
+        turns.retain(|turn| !is_rolled_back(turn));
+        turns.sort_by(|left, right| left.request.turn_id.cmp(&right.request.turn_id));
+        Ok(turns)
+    }
+
     pub fn list_persisted_sessions(
         &self,
     ) -> Result<Vec<PersistedSessionIndexEntry>, ReasonPersistenceError> {
@@ -2387,6 +2420,73 @@ mod tests {
         assert_eq!(
             ui_turns[0].semantic_events[0].content,
             "latest repaired round"
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn restore_turn_start_snapshots_preserves_original_round_and_respects_rollback() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+
+        let mut original = started_turn_with_id(&mut history, "runtime-turn-1", "trace-1");
+        original.request.user_text = "original user objective".to_owned();
+        coordinator
+            .record_turn_started(&history, &original, 0)
+            .expect("persist original turn start");
+
+        let mut repaired = started_turn_with_id(&mut history, "runtime-turn-1-r2", "trace-1-r2");
+        repaired.request.user_text = "internal repair prompt".to_owned();
+        coordinator
+            .record_turn_started(&history, &repaired, 0)
+            .expect("persist repaired turn start");
+        repaired.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1-r2"),
+            trace_id: TraceId::new("trace-1-r2"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::Blocked,
+            summary: "repair round closed".to_owned(),
+        });
+        coordinator
+            .record_turn_closed(&history, &repaired, 0)
+            .expect("persist repaired turn close");
+
+        let restored = coordinator.restore(history.session_id()).expect("restore");
+        assert_eq!(restored.closed_turns.len(), 1);
+        assert_eq!(
+            restored.closed_turns[0].request.turn_id,
+            TurnId::new("runtime-turn-1-r2")
+        );
+        let starts = coordinator
+            .restore_turn_start_snapshots(history.session_id())
+            .expect("restore turn starts");
+        assert_eq!(
+            starts
+                .iter()
+                .map(|turn| (
+                    turn.request.turn_id.as_str(),
+                    turn.request.user_text.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("runtime-turn-1", "original user objective"),
+                ("runtime-turn-1-r2", "internal repair prompt"),
+            ]
+        );
+
+        coordinator
+            .rollback_latest_session_turn(history.session_id())
+            .expect("rollback logical turn");
+        assert!(
+            coordinator
+                .restore_turn_start_snapshots(history.session_id())
+                .expect("restore turn starts after rollback")
+                .is_empty(),
+            "turn-start recovery must not resurrect rolled-back logical turns"
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");

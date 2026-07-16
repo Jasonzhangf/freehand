@@ -10,7 +10,7 @@ use freehand_config::{
     SelectedAgentConfig, SelectedPeerAgentConfig, SelectedProviderConfig,
 };
 use freehand_contracts::{AgentId, FeatureId, SessionId, TerminalStatus, TraceId, TurnId};
-use freehand_reason::{ReasonTurnEngine, SessionHistory, TurnStartInput};
+use freehand_reason::{ReasonPersistence, ReasonTurnEngine, SessionHistory, TurnStartInput};
 use freehand_task::{
     AgentCreateRequest, ExecutionFact, ExecutionFactKind, TaskActor, TaskAppendRequest,
     TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskId, TaskMutationRequest,
@@ -2184,6 +2184,52 @@ fn production_master_runner_evaluates_closed_children_against_parent_goal() {
 }
 
 #[test]
+fn production_master_runner_recovers_parent_goal_from_first_round_turn_start_ledger() {
+    let runtime_home = temp_path("parent-evaluation-ledger-objective");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-ledger-objective");
+    let objective =
+        "Overall goal from the original operator turn must survive internal repair rounds.";
+    let repair = "Internal continuation prompt must never replace the parent objective.";
+    persist_parent_user_objective_start_only(&runtime_home, &parent_session_id, objective);
+    persist_parent_internal_repair_turn(&runtime_home, &parent_session_id, repair);
+    let persistence = ReasonPersistence::new(runtime_home.clone(), AgentId::new("master"));
+    let restored = persistence.restore(&parent_session_id).expect("restore");
+    assert_eq!(restored.closed_turns.len(), 1);
+    assert_eq!(
+        restored.closed_turns[0].request.turn_id,
+        TurnId::new("runtime-turn-1-r2")
+    );
+    seed_parent_children(
+        &runtime_home,
+        &parent_session_id,
+        &[("alpha", true), ("beta", true)],
+    );
+    let observed_request = Arc::new(Mutex::new(None::<LiveReasonTurnRequest>));
+    let request_out = Arc::clone(&observed_request);
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        *request_out.lock().expect("request lock") = Some(request.clone());
+        Ok("parent objective recovered from authoritative turn-start truth".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+
+    assert!(matches!(
+        runner.run_once().expect("parent evaluation tick"),
+        ProductionMasterTickOutcome::ParentEvaluated { .. }
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    let request = observed_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("evaluation request");
+    assert!(request.prompt.contains(objective));
+    assert!(!request.prompt.contains(repair));
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn production_master_runner_does_not_evaluate_while_sibling_open() {
     let runtime_home = temp_path("parent-evaluation-open-sibling");
     bootstrap_runner(&runtime_home);
@@ -2668,6 +2714,36 @@ fn persist_parent_user_objective(
     persistence
         .record_turn_closed(&history, &turn, 0)
         .expect("persist objective close");
+}
+
+fn persist_parent_user_objective_start_only(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    objective: &str,
+) {
+    let mut history =
+        SessionHistory::new(parent_session_id.clone(), Vec::new()).expect("session history");
+    let engine = ReasonTurnEngine::new();
+    let turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: parent_session_id.clone(),
+                turn_id: TurnId::new("runtime-turn-1"),
+                trace_id: TraceId::new("parent-objective-trace"),
+                feature_id: FeatureId::new("reason.turn"),
+                agent_id: AgentId::new("master"),
+                user_text: objective.to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "master-model".to_owned(),
+            },
+        )
+        .expect("start objective turn");
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), AgentId::new("master"));
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .expect("persist objective start");
 }
 
 fn persist_parent_internal_repair_turn(

@@ -27,6 +27,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - reason persistence appends a reason-ledger row together with current session-history truth, then refreshes authoritative snapshots and derived sidecars
 - reason persistence appends provider raw debug-ledger rows under `~/.freehand/ledgers/providers/<family>/<agent>/<session>/<turn>.jsonl` without mutating authoritative session truth
 - reason persistence returns deterministic restore state from snapshot plus reason-ledger tail replay, or from reason-ledger-only rebuild when snapshots are missing or invalid
+- reason persistence returns non-UI turn-start snapshots from authoritative reason-ledger TurnStarted rows, respecting rollback markers, so owner workflows can recover first-round user intent even when effective UI snapshots coalesce later repair rounds
 - reason persistence returns derived UI restore snapshots from authoritative closed/active turn files plus rollback-marker sidecar truth when those snapshots exist; transcript queries coalesce repaired -rN rounds by logical turn key and do not replay huge reason ledgers on the normal path
 - terminal turn persistence yields immutable per-turn truth plus updated session cursor truth
 - derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete
@@ -81,6 +82,12 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
   - allowed callers: runtime UI command dispatch owner, owner-crate tests
   - related tests: rollback_latest_session_turn_is_append_only_and_filters_effective_transcript, rollback_latest_session_turn_rejects_no_target_and_active_turn, repeated_rollback_steps_backward_through_effective_turns_then_fails
   - why shared: session rollback must be one durable reason-owned truth shared by WebUI, daemon, and CLI instead of a client-local transcript edit
+- `ReasonPersistence::restore_turn_start_snapshots`
+  - owner: `crates/freehand-reason/src/persistence.rs`
+  - purpose: expose authoritative turn-start request truth without UI/effective-round coalescing while honoring rollback markers
+  - allowed callers: runtime parent-goal evaluation, owner-crate tests
+  - related tests: restore_turn_start_snapshots_preserves_original_round_and_respects_rollback, production_master_runner_recovers_parent_goal_from_first_round_turn_start_ledger
+  - why shared: background lifecycle owners sometimes need first-round user intent, not the latest repaired UI row; parsing reason ledgers outside the persistence owner would duplicate recovery semantics
 
 ## Function Call Table
 
@@ -98,13 +105,14 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 | 10 | `ReasonPersistence::record_rewrite_state_updated` | `crates/freehand-reason/src/persistence.rs` | append rewrite-state ledger row and refresh session snapshots | updated session-history truth | durable rewrite-state persistence | rewrite runtime / recovery path | persistence owner |  |  |  | bound |
 | 11 | `ReasonPersistence::record_provider_raw_event` | `crates/freehand-reason/src/persistence.rs` | append debug-only provider raw ledger rows without mutating authoritative turn/session truth | provider family + session/turn/trace identity + raw wire body + scene provenance | durable provider raw debug evidence | runtime/live bridge | persistence owner |  |  |  | bound |
 | 12 | `ReasonPersistence::restore` | `crates/freehand-reason/src/persistence.rs` | rebuild authoritative state from snapshots plus reason-ledger tail, or from ledger alone | snapshot directory plus reason ledger | restored in-memory session and turn truth | runtime/bootstrap/testkit/CLI smoke | persistence owner |  |  |  | bound |
-| 13 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | restore derived UI snapshots from authoritative closed/active turn files plus rollback-marker sidecar truth, coalescing repaired -rN rounds by logical turn key without replaying the reason ledger when authoritative snapshots exist | authoritative turn snapshots plus rollback markers | latest effective snapshot per logical turn | runtime bootstrap / rollback refresh | persistence owner |  |  |  | bound |
-| 14 | `ReasonPersistence::create_session_metadata / ReasonPersistence::rename_session / ReasonPersistence::archive_session / ReasonPersistence::restore_session / ReasonPersistence::delete_session` | `crates/freehand-reason/src/persistence.rs` | persist shared session display metadata mutations without mutating turn transcript truth | session id plus metadata mutation intent | updated session metadata sidecar | runtime UI command dispatch | persistence owner |  |  |  | bound |
-| 15 | `ReasonPersistence::rollback_latest_session_turn` | `crates/freehand-reason/src/persistence.rs` | append latest-logical-turn rollback marker and advance effective cursor/projection state without deleting raw turn files | session id | rollback marker with target turn, previous effective head, and restored user text | runtime UI command dispatch | persistence owner |  |  |  | bound |
+| 13 | `ReasonPersistence::restore_turn_start_snapshots` | `crates/freehand-reason/src/persistence.rs` | restore authoritative turn-start snapshots from reason-ledger truth without UI coalescing and filter rolled-back logical turns | session id plus reason ledger and rollback markers | ordered turn-start request truth | runtime parent-goal evaluation | persistence owner |  |  |  | bound |
+| 14 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | restore derived UI snapshots from authoritative closed/active turn files plus rollback-marker sidecar truth, coalescing repaired -rN rounds by logical turn key without replaying the reason ledger when authoritative snapshots exist | authoritative turn snapshots plus rollback markers | latest effective snapshot per logical turn | runtime bootstrap / rollback refresh | persistence owner |  |  |  | bound |
+| 15 | `ReasonPersistence::create_session_metadata / ReasonPersistence::rename_session / ReasonPersistence::archive_session / ReasonPersistence::restore_session / ReasonPersistence::delete_session` | `crates/freehand-reason/src/persistence.rs` | persist shared session display metadata mutations without mutating turn transcript truth | session id plus metadata mutation intent | updated session metadata sidecar | runtime UI command dispatch | persistence owner |  |  |  | bound |
+| 16 | `ReasonPersistence::rollback_latest_session_turn` | `crates/freehand-reason/src/persistence.rs` | append latest-logical-turn rollback marker and advance effective cursor/projection state without deleting raw turn files | session id | rollback marker with target turn, previous effective head, and restored user text | runtime UI command dispatch | persistence owner |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 
-- current code baseline now binds session-history JSON/file round-trip, reason-ledger append, provider-raw debug-ledger append, active-turn refresh, terminal turn materialization, derived sidecar writes, and snapshot-plus-tail / ledger-only recovery
+- current code baseline now binds session-history JSON/file round-trip, reason-ledger append, provider-raw debug-ledger append, active-turn refresh, terminal turn materialization, derived sidecar writes, snapshot-plus-tail / ledger-only recovery, and turn-start snapshot recovery
 - CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer
 - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
 - generated wiki must be regenerated from `docs/mainline-calls/reason.persistence.json` when this function-map truth changes

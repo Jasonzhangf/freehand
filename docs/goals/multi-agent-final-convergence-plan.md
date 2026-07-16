@@ -90,6 +90,20 @@ rework or more tasks before user-visible completion.
   persisted pause control truth, wires it into the live cancel token, stops at
   existing live-bridge safe points without stale review/block publication, and
   re-enters the same task/execution after persisted resume.
+- Parent-goal recovery is code-bound and online-proven for the controlled
+  three-Worker convergence verifier. `ReasonPersistence::restore_turn_start_snapshots`
+  reads authoritative reason-ledger `TurnStarted` rows and honors rollback
+  markers, so parent evaluation recovers the original first-round operator
+  objective even when the effective/closed snapshot is a later repaired round.
+  Process-mode session `online-master-three-worker-evaluation-1784187343` and
+  launchd-mode session `online-launchd-three-worker-evaluation-1784187532-2390`
+  both reached beta reject/rework, gamma interrupted same-task takeover,
+  first evaluation next-round integration, second evaluation final Success,
+  and restart-idempotent `final_evaluation_count=1`.
+- The verifier still records an initial foreground `SubmitUserInput` receipt
+  poll-budget failure before background lifecycle completion. Current proof
+  treats that as a verifier/status-projection gap to audit, not hidden product
+  success evidence.
 - Full daemon/WebUI/Android online proof for busy-Master preemption remains
   unclaimed.
 
@@ -206,7 +220,8 @@ Target docs:
 Implementation direction:
 
 - Parent evaluation must always compare:
-  - original user objective from authoritative reason truth
+  - original user objective from authoritative reason `TurnStarted` ledger
+    truth via `ReasonPersistence::restore_turn_start_snapshots`
   - decomposed child task goal/deliverables/acceptance
   - accepted Worker review summary/deliverables/evidence
   - current TaskBoard/AgentBoard/EventInbox truth

@@ -1479,14 +1479,8 @@ fn parent_user_objectives(
     parent_session_id: &SessionId,
 ) -> Result<Vec<String>, ProductionMasterRunnerError> {
     let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
-    let turns = match persistence.restore(parent_session_id) {
-        Ok(restored) => {
-            let mut turns = restored.closed_turns;
-            if let Some(active) = restored.active_turn {
-                turns.push(active.turn);
-            }
-            turns
-        }
+    let turns = match persistence.restore_turn_start_snapshots(parent_session_id) {
+        Ok(turns) => turns,
         Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => Vec::new(),
         Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
     };

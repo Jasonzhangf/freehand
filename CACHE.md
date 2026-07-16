@@ -1,5 +1,13 @@
 # CACHE
 
+- Current parent-goal turn-start ledger closeout:
+  - Marker: `parent-goal-turn-start-ledger-online-closeout-20260716`.
+  - Parent evaluation now recovers the original first-round operator objective through `ReasonPersistence::restore_turn_start_snapshots`, which reads authoritative reason-ledger `TurnStarted` truth and honors rollback markers. UI/effective repaired-round snapshots are no longer parent-goal truth.
+  - Regression coverage proves an original `runtime-turn-1` with only a `TurnStarted` ledger row is still admitted to parent evaluation even when the authoritative closed snapshot is only `runtime-turn-1-r2`; internal repair/control prompt text is excluded.
+  - Online process-mode verifier passed for session `online-master-three-worker-evaluation-1784187343`: alpha normal close, beta reject/rework close, gamma interrupted same-task takeover, first parent evaluation created integration next-round work, integration close led to one final Success on `runtime-turn-3`, and restart idempotency kept `final_evaluation_count=1`.
+  - Online launchd-mode verifier passed for session `online-launchd-three-worker-evaluation-1784187532-2390`: three launchd Worker services, beta reject/rework, gamma same-task takeover plus KeepAlive restart from PID `5442` to `26638`, integration next-round work, final Success on `runtime-turn-3`, and restart idempotency. Cleanup check for `com.freehand.verify.three-worker.1784187532-2390` returned no launchctl matches.
+  - Remaining goal gaps: full S-profile daemon/WebUI busy-Master live preemption proof, WebUI current selected-session proof for this final convergence run, real-provider non-fixture crash/recovery/takeover, and Android true-device proof if native/package assets change.
+
 - Current Worker pause/resume safe-point closeout:
   - Marker: `worker-pause-resume-safe-point-focused-20260716`.
   - Production Worker runner now monitors persisted same-task/same-execution `WorkerControlOp::Pause` truth while execution is in flight and wires it to `LiveReasonCancelToken`; the live bridge can stop at existing provider/tool/terminal safe points.
